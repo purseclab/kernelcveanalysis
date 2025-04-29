@@ -41,8 +41,11 @@ Cuttlefish requires and android image and host package to run also. Follow instr
 # Building Badspin
 Install android studio cli tools, and use those to install ndk.
 
-Compile badspin with:
-`$env.ANDROID_NDK_HOME = "/home/jack/Documents/college/purdue/research/android_sdk/ndk/25.2.9519653/"; make all`
+Clone this repo, and compile badspin with:
+```sh
+cd src/
+ANDROID_NDK_HOME=/path/to/android_sdk/ndk/25.2.9519653/ make all
+```
 
 This will produce a `libbadspin.so` shared library.
 
