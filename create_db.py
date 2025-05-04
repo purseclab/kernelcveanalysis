@@ -111,7 +111,7 @@ def parse_markdown():
                     'code_execution_method': cols[6],
                     'privilege_escalation_technique': cols[7],
                     'kaslr_leak_method': cols[8],
-                    'data_address_leaks': cols[8],
+                    'data_address_leaks': cols[9],
                     'required_config': cols[10],
                     'link': exploit_link
                 }
