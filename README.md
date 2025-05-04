@@ -11,7 +11,8 @@ To run the script a few Python packages are required. You can install them by ru
 pip install sqlalchemy
 ```
 
-To include POCs' code in the database, it is require to clone Google's kernelctf repository, by running:
+To include POCs' code in the database, cloning Google's kernelctf repository is required.
+To clone it, run:
 ```bash
 cd ..
 git clone git@github.com:google/security-research.git
