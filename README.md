@@ -19,5 +19,5 @@ git clone git@github.com:google/security-research.git
 
 A pre-generated database with no POC code is avaialable in `vulnerabilities_nopocs.db`. 
 
-A pre-generated databse with POCs' code is avaialbe at (vulnerabilities.db)[https://www.cs.purdue.edu/homes/antoniob/shared/vulnerabilities.db].
+A pre-generated databse with POCs' code is avaialbe here: [vulnerabilities.db](https://www.cs.purdue.edu/homes/antoniob/shared/vulnerabilities.db).
 
