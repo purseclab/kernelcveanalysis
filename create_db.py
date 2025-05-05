@@ -24,6 +24,7 @@ def create_schema():
                  id INTEGER PRIMARY KEY,
                  exploit TEXT UNIQUE,
                  android_poc BOOL,
+                 pocs_link TEXT,
                  exploit_family TEXT,
                  tested_mitigations TEXT,
                  subsystem TEXT,
@@ -127,13 +128,13 @@ def populate_db(conn, vulns, add_pocs=True):
     c = conn.cursor()
 
     for vuln in vulns:
-        c.execute('''INSERT OR IGNORE INTO vulnerabilities (exploit, android_poc,
+        c.execute('''INSERT OR IGNORE INTO vulnerabilities (exploit, android_poc, pocs_link, 
                     exploit_family, tested_mitigations, subsystem, bug_type, bug_details,
                     exploit_techniques, code_execution_method, privilege_escalation_technique,
                     kaslr_leak_method, data_address_leaks, required_config, link)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (vuln['exploit'], vuln['android_poc'], vuln['exploit_family'], vuln['tested_mitigations'],
-                   vuln['subsystem'], vuln['bug_type'], vuln['bug_details'],
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (vuln['exploit'], vuln['android_poc'], ", ".join(vuln['pocs']), vuln['exploit_family'],
+                    vuln['tested_mitigations'], vuln['subsystem'], vuln['bug_type'], vuln['bug_details'],
                    vuln['exploit_techniques'], vuln['code_execution_method'], vuln['privilege_escalation_technique'],
                    vuln['kaslr_leak_method'], vuln['data_address_leaks'], vuln['required_config'], vuln['link']))
 
