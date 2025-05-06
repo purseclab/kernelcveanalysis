@@ -739,7 +739,8 @@ int get_stable_rw(struct rw_info *rw) {
      * For the Pixel 6, we find kernel base using kallsyms.
      * For Samsung-based devices we find kernel base by scanning backwards.
      */
-    rw->ki.kernel_base = find_kbase(rw);
+    // rw->ki.kernel_base = find_kbase(rw);
+    rw->ki.kernel_base = 0;
 
     LOG("[x] Kernel base initial: %016lx\n", rw->ki.kernel_base);
 
@@ -754,10 +755,6 @@ int get_stable_rw(struct rw_info *rw) {
 
     size_t _head_symbol = kallsyms_lookup_name(rw, "_head");
     LOGD("_head symbol: %p\n", _head_symbol);
-
-    if (_head_symbol != 0) {
-        rw->ki.kernel_base = _head_symbol;
-    }
 
     if (!rw->ki.kernel_base) {
         rw->ki.kernel_base = kallsyms_lookup_name(rw, "_head");
