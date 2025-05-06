@@ -22,7 +22,8 @@ def create_schema():
 
     c.execute('''CREATE TABLE IF NOT EXISTS vulnerabilities (
                  id INTEGER PRIMARY KEY,
-                 exploit TEXT UNIQUE,
+                 cve TEXT,
+                 full_name TEXT,
                  android_poc BOOL,
                  pocs_link TEXT,
                  exploit_family TEXT,
@@ -42,7 +43,8 @@ def create_schema():
     c.execute('''CREATE TABLE IF NOT EXISTS reports (
                  id INTEGER PRIMARY KEY,
                  vuln_id INTEGER,
-                 report_name TEXT,
+                 cve TEXT,
+                 full_name TEXT,
                  content TEXT,
                  FOREIGN KEY(vuln_id) REFERENCES vulnerability(id)
                  )''')
@@ -103,7 +105,8 @@ def parse_markdown():
                     mit = ",".join([m.strip() for m in mit.split(",")])
                 e = e.split("(")[0].strip()
                 vuln = {
-                    'exploit': e,
+                    'cve': e,
+                    'full_name': exploit_name,
                     'android_poc': "Android" in exploit_name,
                     'pocs' : re.findall(r'\[.*?\]\(([^)]+)\)', cols[1]),
                     'exploit_family': cols[2],
@@ -128,25 +131,27 @@ def populate_db(conn, vulns, add_pocs=True):
     c = conn.cursor()
 
     for vuln in vulns:
-        c.execute('''INSERT OR IGNORE INTO vulnerabilities (exploit, android_poc, pocs_link, 
+        c.execute('''INSERT OR IGNORE INTO vulnerabilities (cve, full_name, android_poc, pocs_link, 
                     exploit_family, tested_mitigations, subsystem, bug_type, bug_details,
                     exploit_techniques, code_execution_method, privilege_escalation_technique,
                     kaslr_leak_method, data_address_leaks, required_config, link)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (vuln['exploit'], vuln['android_poc'], ", ".join(vuln['pocs']), vuln['exploit_family'],
-                    vuln['tested_mitigations'], vuln['subsystem'], vuln['bug_type'], vuln['bug_details'],
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (vuln['cve'], vuln['full_name'], vuln['android_poc'],
+                   ", ".join(vuln['pocs']), vuln['exploit_family'],
+                   vuln['tested_mitigations'], vuln['subsystem'], vuln['bug_type'], vuln['bug_details'],
                    vuln['exploit_techniques'], vuln['code_execution_method'], vuln['privilege_escalation_technique'],
                    vuln['kaslr_leak_method'], vuln['data_address_leaks'], vuln['required_config'], vuln['link']))
 
         vuln_id = c.lastrowid
 
         # Insert report content if available
-        report_path = os.path.join(REPORTS_DIR, vuln['exploit'])
-        ldir = [f for f in os.listdir(REPORTS_DIR) if vuln['exploit'] in f]
+        report_path = os.path.join(REPORTS_DIR, vuln['cve'])
+        ldir = [f for f in os.listdir(REPORTS_DIR) if vuln['cve'] in f]
         for f in ldir:
             with open(os.path.join(REPORTS_DIR, f), 'r') as rf:
                 report_content = rf.read()
-                c.execute('INSERT INTO reports (vuln_id, report_name, content) VALUES (?, ?, ?)', (vuln_id, f, report_content))
+                c.execute('INSERT INTO reports (vuln_id, cve, full_name, content) VALUES (?, ?, ?, ?)',
+                          (vuln_id, vuln['cve'], f, report_content))
 
         if add_pocs:
             # Insert PoC content if available
