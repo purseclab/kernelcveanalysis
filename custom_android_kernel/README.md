@@ -48,7 +48,10 @@ CONFIG_KGDB=y
 ```
 
 ### Building kernel
-Build kernel using the legacy build system (`build_<device name>.sh`).
+Build kernel using the legacy build system: 
+```bash 
+build_<device name>.sh DEVICE_KERNEL_BUILD_CONFIG=build.config`
+```
 
 The output of building should be:
 ```vendor boot image created at /home/wboulton/research/kernel_build/out/mixed/dist/vendor_boot.img```
