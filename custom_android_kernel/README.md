@@ -15,10 +15,11 @@ PATH_TO_CUSTOM_KERNEL_ROOT/tools/mkbootimg/unpack_bootimg.py --boot_img vendor_b
 Then copy created `ramdisk_` file to the correct ramdisk path in your custom kernel (prebuilts/boot-artifacts/ramdisks/vendor_ramdisk-oriole.img for pixel 6).
 
 ## Compiling source
-Set the environment variable:
+Set the build options:
 
 ```sh
 export BUILD_AOSP_KERNEL=1
+export BUILD_KERNEL=1
 ```
 
 ### Edit configs to include KGDB
