@@ -5,8 +5,14 @@
 ## Download source 
 Initialize repo and sync with the version that you want using instructions from [building pixel kernels](https://source.android.com/docs/setup/build/building-pixel-kernels)
 
+I used the following:
+```bash
+repo init -u https://android.googlesource.com/kernel/manifest -b android-gs-raviole-5.10-android12-d1
+repo sync -c --no-tags
+```
+
 ### extract vendor ramdisk
-Download a [facotry image](https://developers.google.com/android/images) with compatible vendor ramdisk.
+Download a [facotry image](https://developers.google.com/android/images) with compatible vendor ramdisk. [SD1A.210817.015.A4](https://dl.google.com/dl/android/aosp/oriole-sd1a.210817.015.a4-factory-074b7f51.zip) for pixel 6 on Android 12.
 
 In downloaded repo root, run 
 ```bash
