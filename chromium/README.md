@@ -19,3 +19,6 @@ To test exploit 3, there were slight modifications made to chrome source to allo
 
 ## Plan
 When exploit 3 is chained with exploits 1 and 2, these exploits can escape the Chrome 86.0.4240.30 Beta sandbox on android and achieve RCE an android phone. If these were then chained with a third exploit to escalate privileges in the android kernel, then they can create a 1-click exploit on a Google Pixel 6. These exploits (specifically 1 and 3) were already used in [this writeup](https://github.blog/security/application-security/real-world-exploit-chains-explained/) along with CVE-2020-11239 to create a 1 click exploit on Samsung Galaxy A71. These are adjusted exploits along with alternative options for a Google Pixel 6.
+
+## Building Chrome
+Building old versions of Chrome is not trivial as a lot of files for older version of Chrome are no longer supported by Google. For more information on building Chrome 86.0.4240.30 Beta, see [Building_Chrome_Legacy.md](Building_Chrome_Legacy.md).

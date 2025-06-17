@@ -1,0 +1,44 @@
+diff --git a/DEPS b/DEPS
+index aab4ee4825119..723524713d6d7 100644
+--- a/DEPS
++++ b/DEPS
+@@ -4635,39 +4635,6 @@ hooks = [
+                 '-f',
+     ],
+   },
+-
+-  # This is used to ensure that all network operations are properly
+-  # annotated so we can document what they're for.
+-  {
+-    'name': 'tools_traffic_annotation_linux',
+-    'pattern': '.',
+-    'condition': 'host_os == "linux" and checkout_traffic_annotation_tools',
+-    'action': [ 'python',
+-                'src/third_party/depot_tools/download_from_google_storage.py',
+-                '--no_resume',
+-                '--no_auth',
+-                '--num_threads=4',
+-                '--bucket', 'chromium-tools-traffic_annotation',
+-                '-d', 'src/tools/traffic_annotation/bin/linux64',
+-    ],
+-  },
+-
+-# This is used to ensure that all network operations are properly
+-# annotated so we can document what they're for.
+-  {
+-    'name': 'tools_traffic_annotation_windows',
+-    'pattern': '.',
+-    'condition': 'host_os == "win" and checkout_traffic_annotation_tools',
+-    'action': [ 'python',
+-                'src/third_party/depot_tools/download_from_google_storage.py',
+-                '--no_resume',
+-                '--no_auth',
+-                '--num_threads=4',
+-                '--bucket', 'chromium-tools-traffic_annotation',
+-                '-d', 'src/tools/traffic_annotation/bin/win32',
+-    ],
+-  },
+-
+   # Pull down Zucchini test data.
+   {
+     'name': 'zucchini_testdata',
