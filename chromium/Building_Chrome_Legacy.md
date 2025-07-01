@@ -22,7 +22,7 @@ For my patch look at [deps_changes.patch](deps_changes.patch).
 
 It can be applied using
 ```bash
-git am < deps_changes.patch
+git apply deps_changes.patch
 ```
 
 ## Building
