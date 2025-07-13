@@ -62,14 +62,13 @@ CONFIG_KGDB=y
 ### Building kernel
 Build kernel using the legacy build system: 
 ```bash 
-build_<device name>.sh DEVICE_KERNEL_BUILD_CONFIG=build.config`
+./build/build.sh
 ```
+
+(You should also be able to build using `./build_<devicename>.sh` but that randomly fails sometimes)
 
 The output of building should be:
 ```vendor boot image created at /home/wboulton/research/kernel_build/out/mixed/dist/vendor_boot.img```
-<!--finish flash instructions-->
-
-You can then flash it with instructions from the above [link](https://source.android.com/docs/setup/build/building-pixel-kernels). 
 
 There is more information about building kernels for virtual devices [here](https://source.android.com/docs/setup/build/building-kernels)
 
