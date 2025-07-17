@@ -28,6 +28,6 @@ if (fileName == null) {
 ```
 
 ## Exploiting the vulnerability
-Due to the lack of verification that a file presided in the expected directory, We are able to overwrite files that belong innocent.apk. By default, innocent.apk contains two files `flag.txt` and `logging.sh`. This logging script is run anytime a file is selected to log the time of use and a string to logcat. Using CVE-2024-25466, we are able to overwrite `logging.sh` with a crafted script if it is selected by the user. This crafted shell script can then log the contents of `flag.txt` retrieving the flag. 
+Due to the lack of verification that a file presided in the expected directory, We are able to overwrite files that belong innocent.apk. By default, innocent.apk contains two files `flag.txt` and `logging.sh`. This logging script is run anytime a file is selected to log the time of use and a string to logcat. Using CVE-2024-25466, we are able to overwrite `logging.sh` with a carefully named crafted script if it is selected by the user. This crafted shell script can then log the contents of `flag.txt` retrieving the flag. 
 
 The source for our Proof of concept is [here](./app/src/main/) and a [compiled poc](poc.apk) is provided.
