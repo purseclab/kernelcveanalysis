@@ -1,0 +1,4 @@
+# https://syzkaller.appspot.com/bug?id=cd52c54e916eb62b2334ed614a06509cb3a3fbaa
+# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
+#{"repeat":true,"procs":1,"slowdown":1,"sandbox":"none","sandbox_arg":0,"close_fds":true,"vhci":true}
+syz_emit_vhci(&(0x7f00000001c0)=@HCI_ACLDATA_PKT={0x2, {0xc8, 0x0, 0x0, 0x4}, @l2cap_cid_signaling={{0x0, 0x2}}}, 0x9)
