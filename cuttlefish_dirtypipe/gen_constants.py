@@ -3,7 +3,8 @@ from pwn import *
 context.arch = 'aarch64'
 
 libcpp = ELF('android_libc++.so')
-streambuff_ctor = libcpp.symbols[b'_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEEC2Ev']
+# streambuff_ctor = libcpp.symbols[b'_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEEC2Ev']
+streambuff_ctor = libcpp.symbols[b'_ZNSt3__15mutex4lockEv']
 
 UNUSED_CODE_START = 0xa3bd0
 UNUSED_CODE_END = 0xa4000

