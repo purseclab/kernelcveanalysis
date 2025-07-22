@@ -1,0 +1,5 @@
+# https://syzkaller.appspot.com/bug?id=9d9c27adc674e3a7932b22b61c79a02da82cbdc1
+# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
+#{"threaded":true,"repeat":true,"procs":6,"slowdown":1,"sandbox":"","close_fds":false}
+setpriority(0x1, 0x0, 0x6) (async)
+wait4(0x0, 0x0, 0x80000000, 0x0)
