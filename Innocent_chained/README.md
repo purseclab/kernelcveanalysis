@@ -33,3 +33,25 @@ Due to the lack of verification that a file presided in the expected directory, 
 The source for our Proof of concept is [here](./app/src/main/) and a [compiled poc](poc.apk) is provided.
 
 This version of the proof of concept allows us to overwrite logging.sh with an ELF binary and execute it. We replace `logging.sh` with [dirtypipe](../cuttlefish_dirtypipe/) to show a privilege escalation. 
+
+## Running Instructions
+To test our proof of concept, start a cuttlefish environment and install [innocent.apk](innocent.apk) and [poc.apk](poc.apk) using adb
+```bash
+adb install innocent.apk
+adb install poc.apk
+```
+
+Then open open the innocent app and navagate to the "EvilRoot" folder (This should appear under "browse files in other apps" or in the "Open from" tab). Before selecting this file, open another terminal and listen for the reverse shell with 
+```bash
+nc -lvnp 4444
+```
+Then select the file that appears in EvilRoot.
+
+This proof of concept will likely not work on your machine as is, instead rebuild the poc to ensure properfunction
+
+## Rebuilding
+First, update the [dirtypipe.c](./cuttlefish_dirtypipe/dirtypipe.c) with the ip of the machine running the cuttlefish environment. Then, rebuild [dirtypipe](./cuttlefish_dirtypipe/) using the [compile script](./cuttlefish_dirtypipe/compile.sh) (this requires changing the path to the android ndk in compile.sh and possibly a python virtual environment). 
+
+Place dirtypipe in the apk's [assets](./app/src/main/assets/).
+
+Then, rebuild the apk using android studio. This apk should work as expected.
