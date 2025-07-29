@@ -14,6 +14,6 @@ echo $CC
 
 cd "$(dirname $0)"
 
-nix-shell -p pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc --run "python gen_constants.py"
+nix-shell -p pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc --run "python gen_constants.py $1 $2"
 $CC dirtypipe.c -o dirtypipe
 

@@ -1,0 +1,4 @@
+# https://syzkaller.appspot.com/bug?id=874bf0a9464205c21d77d8a3e7bc9dff824329a5
+# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
+#{"procs":1,"slowdown":1,"sandbox":"","sandbox_arg":0,"close_fds":false}
+open_by_handle_at(0xffffffffffffffff, &(0x7f00000019c0)=@reiserfs_4={0x10, 0x4, {0x7, 0x3f, 0x9, 0x10001}}, 0x2000)
