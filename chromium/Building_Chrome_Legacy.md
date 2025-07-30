@@ -15,7 +15,7 @@ First, when installing depot_tools, make sure to checkout the most recent prior 
 ```bash
 git checkout "$(git rev-list -n 1 --before="yyyy-mm-dd" origin/main)"
 ``` 
-You want to change your checkout of Depot Tools after fetching the code. Older versions of depot tools fail to fetch from git because they are still using old origin/master naming convetions. This is likely very easy to patch but can be ignore by downgrading depot_tools only after fetching chrome source. 
+You want to change your checkout of Depot Tools after fetching the code. Older versions of depot tools fail to fetch from git because they are still using old origin/master naming convetions. 
 
 ## Altering the DEPS
 Since a lot of files are no longer supported in Chrome, you may need to remove multiple dependencies from the DEPS file to build. For building Chrome 86.0.4240.30, I removed the following file(s)
