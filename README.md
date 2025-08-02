@@ -1,24 +1,9 @@
-# Content
-This repository contains the results of our research regarding Linux and Android Kernel exploitation.
+# Repository Contents
 
-### Generate the exploit database
-```bash
-python3 ./create_db.py vulnerabilities.db
-```
+This repository presents the results of our research on Linux and Android exploitation.
 
-To run the script a few Python packages are required. You can install them by runnning:
-```bash
-pip install sqlalchemy
-```
+As part of this work, we studied and/or developed multiple vulnerabilities, which were used to construct a **Vulnerability Knowledge Base (VKB)**.
 
-To include POCs' code in the database, cloning Google's kernelctf repository is required.
-To clone it, run:
-```bash
-cd ..
-git clone git@github.com:google/security-research.git
-```
+- A lightweight version of the VKB (excluding PoC source code) is available in: `vulnerabilities_nopocs.db`.
 
-A pre-generated database with no POC code is avaialable in `vulnerabilities_nopocs.db`. 
-
-A pre-generated databse with POCs' code is avaialbe here: [vulnerabilities.db](https://www.cs.purdue.edu/homes/antoniob/shared/vulnerabilities.db).
-
+- The full version of the VKB, including the source code for proof-of-concept exploits, can be downloaded here: [vulnerabilities.db](https://www.cs.purdue.edu/homes/antoniob/shared/vulnerabilities.db).
