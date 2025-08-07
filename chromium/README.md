@@ -25,3 +25,5 @@ When exploit 3 is chained with exploits 1 and 2, these exploits can escape the C
 
 ## Building Chrome
 Building old versions of Chrome is not trivial as a lot of files for older version of Chrome are no longer supported by Google. For more information on building Chrome 86.0.4240.30 Beta, see [Building_Chrome_Legacy.md](Building_Chrome_Legacy.md).
+
+See [here](./Building_Chrome_Legacy.md) for information on how to build chrome version 86.0.4240.30 vulnerable to all four of the provided exploits. It has been patched in the manner described [here](./CVE-2020-16045/README.md) to be vulnerable to [exploit 3](./CVE-2020-16045/) without needing to be chained with another poc. 
