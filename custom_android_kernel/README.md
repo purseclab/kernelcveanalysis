@@ -68,7 +68,7 @@ Build kernel using the legacy build system:
 (You should also be able to build using `./build_<devicename>.sh` but that randomly fails sometimes)
 
 The output of building should be:
-```vendor boot image created at /home/wboulton/research/kernel_build/out/mixed/dist/vendor_boot.img```
+```vendor boot image created at /home/<user>/research/kernel_build/out/mixed/dist/vendor_boot.img```
 
 There is more information about building kernels for virtual devices [here](https://source.android.com/docs/setup/build/building-kernels)
 
