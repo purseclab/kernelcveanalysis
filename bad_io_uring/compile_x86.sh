@@ -17,5 +17,5 @@ cd "$(dirname $0)"
 # CC=gcc
 # $CC exp_cuttlefish.c -o bad_io_uring
 
-nix-shell -p glibc.static --run "gcc -static exp_x86_64.c -o bad_io_uring"
+nix-shell -p glibc.static --run "gcc -static exp_cuttlefish.c -o bad_io_uring"
 
