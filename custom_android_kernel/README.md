@@ -33,30 +33,26 @@ export BUILD_AOSP_KERNEL=1
 export BUILD_KERNEL=1
 ```
 
-### Edit configs to include KGDB (not currently working)
+### Edit configs to include KGDB
+To build source with KGDB, you must set `export KMI_SYMBOL_LIST_STRICT_MODE=0` to prevent the build system from failing when trying to use different configs
 
-In `build.config`, add the following:
-
+In your build/build.config file look for the name of the build config used to generate your android kernel in the first line. It should look like this:
 ```sh
-POST_DEFCONFIG_CMDS="update_debug_config"
+. ${ROOT_DIR}/${KERNEL_DIR}/build.config.gs101
+```
+In your project root, use `find` to locate this build config file (likely in `private/gs-google/{FILENAME}`)
 
-function update_debug_config() {
-    ${KERNEL_DIR}/scripts/config --file ${OUT_DIR}/.config \
-        -e CONFIG_KGDB \
-        -e CONFIG_KGDB_SERIAL_CONSOLE \
-        -e CONFIG_DEBUG_INFO \
-        -e CONFIG_FRAME_POINTER \
-        -e CONFIG_MAGIC_SYSRQ \
-        -e CONFIG_CONSOLE_POLL
+In this file, edit the `PRE_DEFCONFIG_CMDS` by adding a new fragment with your kgdb config options. Your `PRE_DEFCONFIG_CMDS` may look like the following:
+```sh
+PRE_DEFCONFIG_CMDS="KCONFIG_CONFIG=${ROOT_DIR}/${KERNEL_DIR}/arch/arm64/configs/${DEFCONFIG} ${ROOT_DIR}/${KERNEL_DIR}/scripts/kconfig/merge_config.sh -m -r ${ROOT_DIR}/${KERNEL_DIR}/arch/arm64/configs/gki_defconfig ${ROOT_DIR}/${KERNEL_DIR}/arch/arm64/configs/slider_gki.fragment ${ROOT_DIR}/${KERNEL_DIR}/arch/arm64/configs/kgdb.fragment"
+```
 
-    (cd ${OUT_DIR} && \
-        make O=${OUT_DIR} $archsubarch CC=${CC} CROSS_COMPILE=${CROSS_COMPILE} olddefconfig)
-}
-``` 
-
-In `aosp/kernel/configs/android-base.config` and `aosp/kernel/configs/android-recommended.config` add
+To include kgdb with access to a serial console (as done in [this article](https://xairy.io/articles/pixel-kgdb)) the following configs are necessary:
 ```sh
 CONFIG_KGDB=y
+CONFIG_VT=y
+CONFIG_HW_CONSOLE=y
+CONFIG_KGDB_SERIAL_CONSOLE=y
 ```
 
 ### Building kernel
@@ -84,3 +80,8 @@ fastboot flash vendor_dlkm out/slider/dist/vendor_dlkm.img
 ```
 
 These can be found in `out/mixed/dist/`
+
+<!-- 
+turn off KMI_SYMBOL_LIST_STRICT_MODE
+patch build.config.gs101 to add another defconfig fragment with kgdb configs
+-->
