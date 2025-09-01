@@ -1,7 +1,0 @@
-test_kernels.txt
-tests_output/
-build/
-
-*.pyc
-__pycache__/
-.~lock.*
