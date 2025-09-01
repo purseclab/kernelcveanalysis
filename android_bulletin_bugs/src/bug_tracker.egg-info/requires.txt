@@ -1,0 +1,4 @@
+beautifulsoup4>=4.13.4
+mypy>=1.16.1
+requests>=2.32.3
+rich>=14.0.0

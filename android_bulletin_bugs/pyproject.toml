@@ -1,0 +1,21 @@
+[project]
+name = "bug-tracker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.13.4",
+    "mypy>=1.16.1",
+    "requests>=2.32.3",
+    "rich>=14.0.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.mypy]
+mypy_path = "src"
+
+[project.scripts]
+bug_tracker = "bug_tracker.main:main"

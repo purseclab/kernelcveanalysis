@@ -1,0 +1,2 @@
+[console_scripts]
+bug_tracker = bug_tracker.main:main

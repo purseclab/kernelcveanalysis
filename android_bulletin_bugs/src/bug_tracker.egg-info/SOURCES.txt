@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+src/bug_tracker/main.py
+src/bug_tracker.egg-info/PKG-INFO
+src/bug_tracker.egg-info/SOURCES.txt
+src/bug_tracker.egg-info/dependency_links.txt
+src/bug_tracker.egg-info/entry_points.txt
+src/bug_tracker.egg-info/requires.txt
+src/bug_tracker.egg-info/top_level.txt
