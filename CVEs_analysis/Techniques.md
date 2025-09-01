@@ -1,0 +1,31 @@
+### Common Objects to Spray
+
+- `msg_msg` and `msg_seg`
+	- message queue messages, variable size and lots of bytes controllable, except first few bytes
+- key using add_key syscall
+	- `user_key_payload`
+- `sendmsg` with socket
+	- minimum size 48 bytes
+	- https://invictussecurityblog.wordpress.com/2017/06/15/linux-kernel-heap-spraying-uaf/
+- signalfd
+	- first 8 byte are controllable unlike `msg_msg`
+- pip buffer
+- `simple_xattr`
+- `poll_list`
+- `tty_write_buffer`
+	- write data to opened fd from `/dev/ptmx`
+	- Controlled data in kmalloc-1k
+	- also has `tty_struct` which has pointer to buffer and vtable
+- technique with combo of userfaultfd and setxattr
+	- https://duasynt.com/blog/linux-kernel-heap-spray
+	- requires a bit more code to do, but it controls any object of any size entirely
+- io_vec (readv on a pipe allocates 16 bytes per vectored io vector, with a certain minimum threshhold below which it is on stack)
+
+### Notes About Caches
+Newer kernel put `msg_msg` in there own cache group
+If `GFP_KERNEL_ACCOUNT` is specified instead of `GFP_KERNEL`, object go into `kmalloc-cg-*` cache instead of `kmalloc-*` (maybe only sometimes, on older kernel this might not be the case?) cache. (`GFP_KERNEL_ACCOUNT` is used for tracking memory usage for cgroups)
+Some kernel don't have separate `kmalloc-cg-*` cache
+
+Notable caches
+- `filp_cache`: used for `struct file`
+- `cred_jar`: used for `struct cred`

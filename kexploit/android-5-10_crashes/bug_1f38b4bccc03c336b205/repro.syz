@@ -1,6 +1,0 @@
-# https://syzkaller.appspot.com/bug?id=4bf876f0e468865d365c7285550ba9af5d273b67
-# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
-#{"repeat":true,"procs":1,"slowdown":1,"sandbox":"none","sandbox_arg":0,"binfmt_misc":true,"close_fds":true,"tmpdir":true}
-mkdirat(0xffffffffffffff9c, &(0x7f0000000100)='./file0\x00', 0x0)
-mount$bind(&(0x7f00000002c0)='.\x00', &(0x7f0000000200)='./file0/../file0\x00', 0x0, 0x101091, 0x0)
-mount$incfs(&(0x7f0000000000)='./file0\x00', &(0x7f0000000080)='./file0\x00', &(0x7f0000000180), 0x0, 0x0)
