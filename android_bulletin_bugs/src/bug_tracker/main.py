@@ -20,7 +20,7 @@ class BugType(StrEnum):
 class BugSeverity(StrEnum):
     Critical = 'Critical'
     High = 'High'
-    Medium = 'Medium'
+    Moderate = 'Moderate'
     Low = 'Low'
 
 class BugCategory(StrEnum):
@@ -311,18 +311,26 @@ def reclassify_bugs(db: Db):
     db.add_bugs(bugs)
 
 class FilterSet:
+    negative: bool
     filter_set: Optional[set[str]]
 
     def __init__(self, arg_value: Optional[str]):
+        self.negative = False
         if arg_value is None:
             self.filter_set = None
             return
+
+        if arg_value.startswith('!'):
+            arg_value = arg_value[1:]
+            self.negative = True
         
         self.filter_set = set(arg.lower() for arg in arg_value.split(','))
     
     def contains(self, value: str) -> bool:
         if self.filter_set is None:
             return True
+        elif self.negative:
+            return value.lower() not in self.filter_set
         else:
             return value.lower() in self.filter_set
 
