@@ -1,36 +1,4 @@
-# Kexploit
-
-Tool for automatic exploit adaptation between linux kernels.
-
-## Setup
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) python package / project manager to run.
-
-Other tools are needed for certain functionality:
-- [vmlinux-to-elf](https://github.com/marin-m/vmlinux-to-elf) for loading kernel images for exploit adaptation
-- [android-ndk](https://github.com/purseclab/kernelcveanalysis/blob/main/exploit_breakdown_notes/Installing%20Android%20NDK.md) for compiling syzkall POCs to test on cuttlefish
-  - You will also need to update `./compile.sh` file to point to android-ndk installation folder
-- `syz-prog2c` binary from [syzkaller](https://github.com/google/syzkaller) to translate syz DSL pocs to C pocs for running on cuttlefish
-  - place `syz-prog2c` binary in same current working directory you run kexploit in
-- [ghidra](https://github.com/NationalSecurityAgency/ghidra) for analyzing kernels and adapting exploits between kernels
-  - Point `GHIDRA_INSTALL_DIR` env variable to folder containing ghidra release downloaded from github (can be done in .env file)
-- [gzip](https://www.gnu.org/software/gzip/) for decrompressing downloaded kernelCTF kernel images
-- [qemu](https://www.qemu.org/) for testing adapted exploits against kernels in a VM
-
-### .env file
-
-Certain environmant variables are needed fro certain functionallity, and they can be put in a .env file.
-
-Example .env:
-
-```
-# OpenAI api key for automatic exploit annotation
-OPENAI_API_KEY="REDACTED"
-# Folder to store all kexploit data (syzkall artifacts, kernel binaries, ghidra data, etc) in
-KEXPLOIT_DATA_DIR="/home/jack/Documents/college/purdue/research/kernelcveanalysis/kexploit/kexploit_data/"
-# Folder containing ghidra release for exploit adaptation
-GHIDRA_INSTALL_DIR="/home/jack/Documents/college/purdue/research/kernelcveanalysis/kexploit/ghidra_11.3.2_PUBLIC/"
-```
+# Syzbot Repro Analysis
 
 ### Docker
 
@@ -66,67 +34,7 @@ ssh -L localhost:5037:localhost:5037 cuttlefish-user@cuttlefish-host
 
 In the kexploit folder, run `uv run kexploit` to run kexploit. There are various commands and subcommands that can be run (see `uv run kexploit --help` or `src/kexploit/main.py` for details).
 
-### Kexploit Subcommands
-
-#### Exploit Adaptation
-- `uv run kexploit kernel list`: list imported kernels
-- `uv run kexploit kernel add --name imported_kernel_name path/to/kernel/image`: import kernel image for exploit adaptation (may take a long time, around 10-15 minutes)
-- `uv run kexploit annotate --kernel kernel_name exploit_file1.c exploit_file2.c`: automatically annotate exploit files
-- `uv run kexploit adapt --old-kernel kernel_name --new-kernel kernel_name exploit_file1.c exploit_file2.c`: adapt annotated exploit from 1 kernel version to another
-
-##### Adaptation Details
-Exploit adaptation currently can only adapt offsets in kernel.
-Exploit must first be annotated to identify offsets in the exploit source code.
-
-Exploits can then be adapted to change offsets from an old kernel to a new kernel.
-Offsets are adapted using symbols from kallsyms, and rop gadget instruciton sequences.
-The data section of kernel often doesn't have kallsyms entries, as this is not needed for kernel modules.
-In this case, headless ghidra is used to trace references back to basic blocks in the code section,
-and basic blocks are matched between kernel versions to identify new kernel offsets.
-
-##### Exploit Adaptation Example
-Example commands for adapting [badnode exploit](https://github.com/purseclab/kernelcveanalysis/tree/main/cve-2023-20938_reproduction).
-
-After setting up kexploit, first add the kernel for the original exploit, as well as the new kernel exploit should be adapted to:
-```sh
-uv run kexploit kernel add --name android_5.10.101 /path/to/kernel/Image_old
-uv run kexploit kernel add --name android_5.10.107 /path/to/kernel/Image_new
-```
-
-The badnode exploit is already annotated for kexploit, but if it wasn't you would run:
-```sh
-uv run kexploit annotate --no-llm --apply --kernel android_5.10.101 exploit.h
-```
-
-To annotate without llm assistance. If you want to use llm for annotation, put an OpenAI API key in .env file like so:
-```
-...
-OPENAI_API_KEY="REDACTED"
-...
-```
-and then run:
-```sh
-uv run kexploit annotate --kernel android_5.10.101 exploit.h
-```
-
-As another example, to annotate bad io uring, you could run:
-```sh
-uv run kexploit annotate --no-llm --apply --kernel android_5.10.66 exp_cuttlefish.c
-```
-
-To adapt the exploit for a new kernel, run:
-```sh
-uv run kexploit adapt --apply --new-kernel android_5.10.107 exploit.h
-```
-
-Then compile badnode with the command:
-```sh
-ANDROID_NDK_HOME="/path/to/android_sdk/ndk/25.2.9519653/" make all
-```
-
-The exploit binary is now adapted and can be run against new kernel.
-
-#### Syzkaller POC Reproduction
+### Syzkaller POC Reproduction
 - `uv run kexploit syzkall pull`: pull exploits from syzkaller website and save locally
   - database with syzkall exploits metadata already created and pushed in github so this shouldn't be needed
 - `uv run kexploit syzkall query`: query available POCs pulled from syzkaller website
@@ -143,7 +51,7 @@ uv run kexploit syzkall pull --syzkall-kernel upstream
 uv run kexploit syzkall testall --syzkall-kernel upstream
 ```
 
-##### Syzkaller Example
+#### Syzkaller Example
 On the host machine:
 ```sh
 ssh -L localhost:5037:localhost:5037 cuttlefish-user@cuttlefish-host
@@ -161,7 +69,3 @@ uv run kexploit syzkall testall
 ```
 Note: The docker container can only be run on x86 machines as of right now
 
-
-## Type Checking
-
-Run `uv run mypy src` to typecheck python.
