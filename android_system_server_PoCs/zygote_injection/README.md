@@ -6,6 +6,8 @@ The only restriction is zygote does not luanch processess as root.
 
 This exploit is tested on android 12 ingots2 image.
 
+Based on: https://rtx.meta.security/exploitation/2024/06/03/Android-Zygote-injection.html
+
 ## Using Exploit
 
 Adjust the arguments you want to send to zygote in `payload.py` in the `args` variable.
