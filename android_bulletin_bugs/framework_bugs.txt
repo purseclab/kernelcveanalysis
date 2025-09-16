@@ -1,0 +1,218 @@
+no:
+│ CVE-2023-20912 │ Framework │ MediaProvider      │ EoP  │ High     │ 13                │ 2023 January   │ https://android.googlesource.com/platform/packages/providers/MediaProvider/+/f43df6ae00abc070b459f861f40eca736f73d381    │
+│ CVE-2024-40658 │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13 14      │ 2024 September │ https://android.googlesource.com/platform/frameworks/av/+/6d23fa05a40e5462d4b9bad28afa932e6e12a4f3                       │
+│ CVE-2024-0049  │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13 14      │ 2024 March     │ https://android.googlesource.com/platform/frameworks/av/+/462689f06fd5e72ac63cd87b43ee52554ddf953e                       │
+│ CVE-2024-0050  │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13 14      │ 2024 March     │ https://android.googlesource.com/platform/frameworks/av/+/8f3bc8be16480367bac36effa25706133a0dc22d                       │
+│ CVE-2024-0051  │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13 14      │ 2024 March     │ https://android.googlesource.com/platform/frameworks/av/+/a52c14a5b49f26efafa581dea653b4179d66909e                       │
+│ CVE-2024-0018  │ Framework │ audio_video        │ EoP  │ High     │ 11 12 12L 13 14   │ 2024 January   │ https://android.googlesource.com/platform/frameworks/av/+/bf6406041919f67219fd1829438dda28845d4c23                       │
+│ CVE-2024-0023  │ Framework │ audio_video        │ EoP  │ High     │ 11 12 12L 13 14   │ 2024 January   │ https://android.googlesource.com/platform/frameworks/av/+/30b1b34cfd5abfcfee759e7d13167d368ac6c268                       │
+│ CVE-2022-20551 │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13         │ 2023 February  │ https://android.googlesource.com/platform/frameworks/av/+/23f552f22abd6bf336484c7085efd46bebd67d89                       │
+│ CVE-2023-20934 │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13         │ 2023 February  │ https://android.googlesource.com/platform/frameworks/av/+/078b6a44e4bcd8e91a9935d93e25166e27552c74                       │
+│ CVE-2023-21127 │ Framework │ audio_video        │ RCE  │ Critical │ 11 12 12L 13      │ 2023 June      │ https://android.googlesource.com/platform/frameworks/av/+/ff06107de18166f1d97baddabfe23a608ef35ceb                       │
+│ CVE-2023-20942 │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13         │ 2023 July      │ https://android.googlesource.com/platform/frameworks/av/+/bae3b00a5873d1562679a1289fd8490178cfe064                       │
+│ CVE-2023-21262 │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13         │ 2023 July      │ https://android.googlesource.com/platform/frameworks/av/+/2c8973c39478cd3c8cf11d9f27cc0556a106d006                       │
+│ CVE-2023-35687 │ Framework │ audio_video        │ EoP  │ High     │ 11 12 12L 13      │ 2023 September │ https://android.googlesource.com/platform/frameworks/av/+/ea6131efa76a0b2a12724ffd157909e2c6fb4036                       │
+│ CVE-2023-40107 │ Framework │ audio_video        │ EoP  │ High     │ 12 12L 13 14      │ 2023 November  │ https://android.googlesource.com/platform/frameworks/av/+/acb81624b4f50fed52cb1b3829809ee2f7377093                       │
+│ CVE-2023-40110 │ Framework │ audio_video        │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 November  │ https://android.googlesource.com/platform/frameworks/av/+/53243faf690a49e00952b3d3956d2fff0b8d4a3c                       │
+│ CVE-2023-40114 │ Framework │ audio_video        │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 November  │ https://android.googlesource.com/platform/frameworks/av/+/2fdf54b050f728fd965c9afdd03116e9b9dafbae                       │
+│ CVE-2023-40077 │ Framework │ audio_video        │ EoP  │ Critical │ 11 12 12L 13 14   │ 2023 December  │ https://android.googlesource.com/platform/frameworks/av/+/58fd993a89a3a22fa5a4a1a4548125c6783ec80c                       │
+│ CVE-2024-0032  │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2025 March     │ https://android.googlesource.com/platform/frameworks/base/+/a6321142ea43053ea8d0db516eede4c35c5dab18                     │
+│ CVE-2024-43093 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 March     │ https://android.googlesource.com/platform/frameworks/base/+/7f83c671626f9bf993581f4598c22482d87cba10                     │
+
+idk, something with intents?
+│ CVE-2024-49724 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 January   │ https://android.googlesource.com/platform/frameworks/base/+/985bdc676ac5ea4f35be4b56b74f723afe5b2af3                     │
+│ CVE-2024-49744 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 January   │ https://android.googlesource.com/platform/frameworks/base/+/985bdc676ac5ea4f35be4b56b74f723afe5b2af3                     │
+
+no:
+│ CVE-2025-0077  │ Framework │ base               │ EoP  │ High     │ 15                │ 2025 May       │ https://android.googlesource.com/platform/frameworks/base/+/a09b6451c99f8aa99c49a0e584e12be455c414f4                     │
+
+possibly, confuse app install service?
+│ CVE-2025-22425 │ Framework │ base               │ EoP  │ High     │ 13 14             │ 2025 May       │ https://android.googlesource.com/platform/frameworks/base/+/8575592802b9527fe0f7cf19e9cb7159c9aa5121                     │
+
+permissions check passes for something if app is called android?
+│ CVE-2025-26426 │ Framework │ base               │ EoP  │ High     │ 13 14 15          │ 2025 May       │ https://android.googlesource.com/platform/frameworks/base/+/475f9914f71641f0eedc4a8412cf48f49290a60c                     │
+
+something about frro path, I have no idea what that is:
+│ CVE-2025-26452 │ Framework │ base               │ EoP  │ High     │ 14 15             │ 2025 June      │ https://android.googlesource.com/platform/frameworks/base/+/37a272435a238d8ca312b3ffeacac7dc348905e7                     │
+
+package manager constructs contolled class, probably get code execution, I doubt normal scenario would have permission to install app
+│ CVE-2025-32312 │ Framework │ base               │ EoP  │ High     │ 13 14 15          │ 2025 June      │ https://android.googlesource.com/platform/frameworks/base/+/577cdba1048ce04816c962264a11efd02f1f5b73                     │
+
+parcel serialize mismatch, probably exploitable, would need to scan tons of code to find a way to use this bug though:
+│ CVE-2024-49721 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2025 February  │ https://android.googlesource.com/platform/frameworks/base/+/7714ccb85ed961083dcc97e230c71242c3422b5e                     │
+
+idk why this is even cve:
+│ CVE-2024-49743 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 February  │ https://android.googlesource.com/platform/frameworks/base/+/72a3d2d72c39fd48f0a960a1b3c1e16e307421df                     │
+
+commit mentions a poc exists somewhere?
+something about remote views
+│ CVE-2024-43762 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2024 December  │ https://android.googlesource.com/platform/frameworks/base/+/ae43ac7f3d3d5112b0f54b5315a15b08208acf9c                     │
+
+by description can reinstall apps, probably won't work cause presumable permission to install app needed in first place
+│ CVE-2024-43081 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2024 November  │ https://android.googlesource.com/platform/frameworks/base/+/31c098c4271ad4fdfb3809e05017ead8d9f6580f                     │
+
+no:
+usb thing:
+│ CVE-2024-43085 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2024 November  │ https://android.googlesource.com/platform/frameworks/base/+/2457d4e459ee6ffd099b9ff7cce9c83119c3ce66                     │
+
+issue validating package names when installing, not useful regular app can't install
+│ CVE-2024-0044  │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2024 October   │ https://android.googlesource.com/platform/frameworks/base/+/954b2874b85b6cd0d6bb12cd677cdf22e5dbd77b                     │
+
+account manager (manages user account credentials, like a password manager) bug with content intents, not useful in ingots context
+│ CVE-2024-40676 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14 15   │ 2024 October   │ https://android.googlesource.com/platform/frameworks/base/+/e8a53246607b52b15269f97aef9ba7e928ba2473                     │
+
+parsing bug where uri could contain :// in scheme, presumably confuse app to go to website or something it should not, maybe useful, but unlikely?
+│ CVE-2024-40662 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 September │ https://android.googlesource.com/platform/frameworks/base/+/e7af00cafb52a25933ec4edb80c5111d42af0237                     │
+
+bug where it is possible to remove non dynamic permissions. Only apps which have higher level permissions can interact with the permission server
+│ CVE-2023-20971 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 August    │ https://android.googlesource.com/platform/frameworks/base/+/6c22d6c1e69676c5c68d21928aa5486bfd1bd131                     │
+
+several random services can be started by a background service which is not supposed ot be allowed, not useful I think
+│ CVE-2023-21351 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2024 August    │ https://android.googlesource.com/platform/frameworks/base/+/26522c0e82fd3a9bcbd01409217291d97dcdabcf                     │
+│ CVE-2024-34735 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2024 August    │ https://android.googlesource.com/platform/frameworks/base/+/26522c0e82fd3a9bcbd01409217291d97dcdabcf                     │
+
+some thing with it is possible to kill the vpn app from the lockscreen, not useful
+│ CVE-2024-34734 │ Framework │ base               │ EoP  │ High     │ 13 14             │ 2024 August    │ https://android.googlesource.com/platform/frameworks/base/+/207584fb6f820eba14251251d7e9331bfd57adb8                     │
+
+dos bug, not eop, not useful
+│ CVE-2024-34737 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 August    │ https://android.googlesource.com/platform/frameworks/base/+/8b473b3f79642f42eeeffbfe572df6c6cbe9d79e                     │
+
+not useful, something about hiding windows
+│ CVE-2024-34741 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 August    │ https://android.googlesource.com/platform/frameworks/base/+/abfaf702ef833dc4d374492d45c615c6e6de7f01                     │
+
+confirmation window when associating devices may always be skipped, not useful
+│ CVE-2024-31320 │ Framework │ base               │ EoP  │ Critical │ 12 12L            │ 2024 July      │ https://android.googlesource.com/platform/frameworks/base/+/9722ce9d733edab76163fbcd21b231424e3d7061                     │
+
+send broadcast when mime groups related to app are changed, idk if useful
+│ CVE-2024-31331 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 July      │ https://android.googlesource.com/platform/frameworks/base/+/c8694bbccfb9c19aefed536ea710230107c935eb                     │
+
+it is possible for preloaded code in an app zygote to connect to the zygote process, this might be useful
+│ CVE-2024-34720 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 July      │ https://android.googlesource.com/platform/frameworks/base/+/293e9ac230851acbec73f5ab12928d113d6283e1                     │
+
+allow aps to start from background, not useful
+│ CVE-2024-34723 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 July      │ https://android.googlesource.com/platform/frameworks/base/+/c702bb71811993960debe0c18fcf8834cfa2454f                     │
+
+possible to kill apps you do not have permission to kill
+│ CVE-2023-21266 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/fa94ce5c7738e449cb6bd68c77af4858018e49e0                     │
+
+I don't fully understand this bug, but it is something related to autofill manager, which is gui that allows autofilling in other apps
+│ CVE-2024-31310 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/74afbb05ca08738f66d82df867bbee66de4884bc                     │
+
+with malicous password manager entry, possible to get arbitrary intent in some paths of code execution to be sent?
+Requires user interaction
+│ CVE-2024-31316 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/3457d82f8e265ad615b38f6a2aa3c33f1e100cb9                     │
+
+DONE: zygote injection
+│ CVE-2024-31317 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/e25a0e394bbfd6143a557e1019bb7ad992d11985                     │
+
+something with pairing devices, prob not useful
+│ CVE-2024-31318 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/b68b257d56a8600d53b4d2d06fb82aa44086a4a5                     │
+
+insufficent permission checks when accessing sound channel, not useful
+│ CVE-2024-31319 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/3cc021bf608fa813a9a40932028fdde2b12a2d5e                     │
+
+remove uninstalledd services from enabled service list in acessibility manager, prob not useful?
+│ CVE-2024-31322 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/c1bc907a649addd5b97d489fd39afb956164a46c                     │
+
+not useful something about windowsa not hiding under the right conditions, idk how this is cve
+│ CVE-2024-31324 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/f16cc1135b414906164eb8fc55a76971b0e36c21                     │
+
+│ CVE-2024-31325 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/9fcd2070f22c0c6b30ecdc914cef83b5891d5f68                     │
+│ CVE-2024-31326 │ Framework │ base               │ EoP  │ High     │ 14                │ 2024 June      │ https://android.googlesource.com/platform/frameworks/base/+/736462a777d0a0e1258bd7ab80d6e352ef797669                     │
+│ CVE-2024-0024  │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 May       │ https://android.googlesource.com/platform/frameworks/base/+/6a9250ec7fc9801a883cedd7860076f42fb518ac                     │
+│ CVE-2024-0025  │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 May       │ https://android.googlesource.com/platform/frameworks/base/+/d49662560e366dbf69bf7d59d00e73905d03e6d5                     │
+│ CVE-2024-23705 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 May       │ https://android.googlesource.com/platform/frameworks/base/+/032bee6dc118ce1cc3fde92463b2954c1450f2e8                     │
+│ CVE-2024-23708 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 May       │ https://android.googlesource.com/platform/frameworks/base/+/0c095c365ede36257e829769194f9596a598e560                     │
+│ CVE-2024-23713 │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 April     │ https://android.googlesource.com/platform/frameworks/base/+/ffd616dc3b919fe7705dbc7a25868483ae45466b                     │
+│ CVE-2024-0046  │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 March     │ https://android.googlesource.com/platform/frameworks/base/+/d68cab5ac1aa294ec4d0419bc0803a5577e4e43c                     │
+│ CVE-2024-0048  │ Framework │ base               │ EoP  │ High     │ 12 12L 13 14      │ 2024 March     │ https://android.googlesource.com/platform/frameworks/base/+/2c236cde5505ee0e88cf1e3d073e2f1a53f0eede                     │
+│ CVE-2024-0034  │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2024 February  │ https://android.googlesource.com/platform/frameworks/base/+/653f7b0d234693309dc86161af01831b64033fe6                     │
+│ CVE-2024-0036  │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2024 February  │ https://android.googlesource.com/platform/frameworks/base/+/3eaaa9687e90c65f51762deb343f18bef95d4e8e                     │
+│ CVE-2023-21245 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2024 January   │ https://android.googlesource.com/platform/frameworks/base/+/a33159e8cb297b9eee6fa5c63c0e343d05fad622                     │
+│ CVE-2024-0015  │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2024 January   │ https://android.googlesource.com/platform/frameworks/base/+/2ce1b7fd37273ea19fbbb6daeeaa6212357b9a70                     │
+│ CVE-2022-20456 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/de172ba0d434c940be9e2aad8685719731ab7da2                     │
+│ CVE-2022-20489 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/de172ba0d434c940be9e2aad8685719731ab7da2                     │
+│ CVE-2022-20490 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/de172ba0d434c940be9e2aad8685719731ab7da2                     │
+│ CVE-2022-20492 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/de172ba0d434c940be9e2aad8685719731ab7da2                     │
+│ CVE-2022-20493 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/81352c3775949c622441e10b468766441e35edc7                     │
+│ CVE-2023-20916 │ Framework │ base               │ EoP  │ High     │ 12 12L            │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/f4ed441e180d7113b5f6ebfe711e61a2dd3fd8b1                     │
+│ CVE-2023-20919 │ Framework │ base               │ EoP  │ High     │ 13                │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/c224467912010cce927d206366d772f511c98728                     │
+│ CVE-2023-20920 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/d8e918fc9d479388661e74638d950592af16c001                     │
+│ CVE-2023-20921 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 January   │ https://android.googlesource.com/platform/frameworks/base/+/7cad088a533f967d94c8d436b609e4ed2b184897                     │
+│ CVE-2020-27059 │ Framework │ base               │ EoP  │ High     │ 12 12L            │ 2023 February  │ https://android.googlesource.com/platform/frameworks/base/+/a419af5a4795ac654239335978c9f93d849dc93b                     │
+│ CVE-2023-20943 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 February  │ https://android.googlesource.com/platform/frameworks/base/+/2bcd5a5176d6a0f9514df21cec682ca51d798fe9                     │
+│ CVE-2023-20944 │ Framework │ base               │ EoP  │ High     │ 10 11 12 12L 13   │ 2023 February  │ https://android.googlesource.com/platform/frameworks/base/+/d0bc9026e2e62e09fa88c1bcbf1dc1c3fb001375                     │
+│ CVE-2023-20906 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 March     │ https://android.googlesource.com/platform/frameworks/base/+/5e80fcf8c423f288a87d727f48ae38112177d716                     │
+│ CVE-2023-20911 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 March     │ https://android.googlesource.com/platform/frameworks/base/+/1d86c8b29922525972559e00e26c1fcd6f496353                     │
+│ CVE-2023-20917 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 March     │ https://android.googlesource.com/platform/frameworks/base/+/a4fe4bd9a23bccbe29d72bebd6a028ce83383838                     │
+│ CVE-2023-20963 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 March     │ https://android.googlesource.com/platform/frameworks/base/+/266b3bddcf14d448c0972db64b42950f76c759e3                     │
+│ CVE-2023-21081 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 April     │ https://android.googlesource.com/platform/frameworks/base/+/6aba151873bfae198ef9eceb10f943e18b52d58c                     │
+│ CVE-2023-21088 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2023 April     │ https://android.googlesource.com/platform/frameworks/base/+/0924de4965f93f5a880754bcc2819a890fd45f0e                     │
+│ CVE-2023-21089 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 April     │ https://android.googlesource.com/platform/frameworks/base/+/2d20bee73d9ba1c56d49041991e141ba3fe68c5a                     │
+│ CVE-2023-21092 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 April     │ https://android.googlesource.com/platform/frameworks/base/+/cdd30b5c040ba7ebd0a1cc6009183ff602434fc0                     │
+│ CVE-2023-21097 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 April     │ https://android.googlesource.com/platform/frameworks/base/+/37e9ac249bc712eb240a7224ebe09d24de5fb190                     │
+│ CVE-2023-21098 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 April     │ https://android.googlesource.com/platform/frameworks/base/+/107e6377328486fca55131ea06ca9d6a3c1585e0                     │
+│ CVE-2023-20950 │ Framework │ base               │ EoP  │ Moderate │ 11 12 12L         │ 2023 April     │ https://android.googlesource.com/platform/frameworks/base/+/e9f458c52e9c2c1d7591e279b48d2136244b4c8b                     │
+│ CVE-2022-20338 │ Framework │ base               │ EoP  │ High     │ 11 12 12L         │ 2023 May       │ https://android.googlesource.com/platform/frameworks/base/+/e082ece64fc7d8631048fbe0ff7f3125a65e123f                     │
+│ CVE-2023-20993 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 May       │ https://android.googlesource.com/platform/frameworks/base/+/e0de4236a68cbfc4052cc034093209f943824ca0                     │
+│ CVE-2023-21109 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 May       │ https://android.googlesource.com/platform/frameworks/base/+/2c1f16db893680b0db29ffa222652fea3e5b87e0                     │
+│ CVE-2023-21116 │ Framework │ base               │ EoP  │ Moderate │ 11 12 12L 13      │ 2023 May       │ https://android.googlesource.com/platform/frameworks/base/+/08e20afd61c8a038503506e58bcf932360f19127                     │
+│ CVE-2023-21126 │ Framework │ base               │ EoP  │ High     │ 13                │ 2023 June      │ https://android.googlesource.com/platform/frameworks/base/+/b8e6044520761f537473d0a04a651118236d2c52                     │
+│ CVE-2023-21128 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 June      │ https://android.googlesource.com/platform/frameworks/base/+/0c2601bc810bdea31d27ec2ecece2d824b830da6                     │
+│ CVE-2023-21129 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 June      │ https://android.googlesource.com/platform/frameworks/base/+/57a53361fd92767ac24e0409f00199c0389475d2                     │
+│ CVE-2023-21131 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 June      │ https://android.googlesource.com/platform/frameworks/base/+/87cb895ccdbf478c01793cb60449a607f46faa71                     │
+│ CVE-2023-20918 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 July      │ https://android.googlesource.com/platform/frameworks/base/+/16c604aa7c253ce5cf075368a258c0b21386160d                     │
+│ CVE-2023-21145 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 July      │ https://android.googlesource.com/platform/frameworks/base/+/44aeef1b82ecf21187d4903c9e3666a118bdeaf3                     │
+│ CVE-2023-21251 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 July      │ https://android.googlesource.com/platform/frameworks/base/+/57946e2bb73850e817b3c01fa5350d705e178e39                     │
+│ CVE-2023-21254 │ Framework │ base               │ EoP  │ High     │ 13                │ 2023 July      │ https://android.googlesource.com/platform/frameworks/base/+/fa539c85503dc63bfb53c76b6f12b3549f14a709                     │
+│ CVE-2023-21257 │ Framework │ base               │ EoP  │ High     │ 13                │ 2023 July      │ https://android.googlesource.com/platform/frameworks/base/+/1aec7feaf07e6d4568ca75d18158445dbeac10f6                     │
+│ CVE-2023-21269 │ Framework │ base               │ EoP  │ High     │ 13                │ 2023 August    │ https://android.googlesource.com/platform/frameworks/base/+/70ec64dc5a2a816d6aa324190a726a85fd749b30                     │
+│ CVE-2023-21270 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2023 August    │ https://android.googlesource.com/platform/frameworks/base/+/e7ccba6da2c3febeb449c172c1d8091f7a35193d                     │
+│ CVE-2023-21272 │ Framework │ base               │ EoP  │ High     │ 11 12 12L         │ 2023 August    │ https://android.googlesource.com/platform/frameworks/base/+/dcc1fb8e8be12324e1a8277023955d9f92cd5626                     │
+│ CVE-2023-21278 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2023 August    │ https://android.googlesource.com/platform/frameworks/base/+/49773f9d871dd8975128fccf71513928a5a97345                     │
+│ CVE-2023-21281 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 August    │ https://android.googlesource.com/platform/frameworks/base/+/badb243574d7fca9aa89152d9d25eeb4f8615385                     │
+│ CVE-2023-21286 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 August    │ https://android.googlesource.com/platform/frameworks/base/+/a65429742caf05205ea7f1c2fdd1119ca652b810                     │
+│ CVE-2023-35669 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 September │ https://android.googlesource.com/platform/frameworks/base/+/f810d81839af38ee121c446105ca67cb12992fc6                     │
+│ CVE-2023-35674 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 September │ https://android.googlesource.com/platform/frameworks/base/+/7428962d3b064ce1122809d87af65099d1129c9e                     │
+│ CVE-2023-35676 │ Framework │ base               │ EoP  │ High     │ 12 12L 13         │ 2023 September │ https://android.googlesource.com/platform/frameworks/base/+/109e58b62dc9fedcee93983678ef9d4931e72afa                     │
+│ CVE-2023-40116 │ Framework │ base               │ EoP  │ High     │ 11 12 12L         │ 2023 October   │ https://android.googlesource.com/platform/frameworks/base/+/18c3b194642f3949d09e48c21da5658fa04994c8                     │
+│ CVE-2023-40120 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 October   │ https://android.googlesource.com/platform/frameworks/base/+/d26544e5a4fd554b790b4d0c5964d9e95d9e626b                     │
+│ CVE-2023-40140 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13      │ 2023 October   │ https://android.googlesource.com/platform/frameworks/base/+/2d88a5c481df8986dbba2e02c5bf82f105b36243                     │
+│ CVE-2023-40106 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 November  │ https://android.googlesource.com/platform/frameworks/base/+/442b4390c1f04b0e74ae4a7e349418dad4e7522e                     │
+│ CVE-2023-40109 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 November  │ https://android.googlesource.com/platform/frameworks/base/+/387d258cf10a30537fc48dc0e48d28071efa92e7                     │
+│ CVE-2023-40091 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 December  │ https://android.googlesource.com/platform/frameworks/base/+/0ec7b119d41adcbba23f9349e16de9e7e11683f6                     │
+│ CVE-2023-40094 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 December  │ https://android.googlesource.com/platform/frameworks/base/+/1120bc7e511710b1b774adf29ba47106292365e7                     │
+│ CVE-2023-40095 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 December  │ https://android.googlesource.com/platform/frameworks/base/+/d98abeef8f870b60510feafbadcea0c2f9cbae65                     │
+│ CVE-2023-40096 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 December  │ https://android.googlesource.com/platform/frameworks/base/+/b0f6558fb36eb76df35c516ec5a65030a34a8734                     │
+│ CVE-2023-45774 │ Framework │ base               │ EoP  │ High     │ 11 12 12L 13 14   │ 2023 December  │ https://android.googlesource.com/platform/frameworks/base/+/f229f0e55b07416badaca0e3493db5af0943c9eb                     │
+│ CVE-2023-45777 │ Framework │ base               │ EoP  │ High     │ 13 14             │ 2023 December  │ https://android.googlesource.com/platform/frameworks/base/+/f810d81839af38ee121c446105ca67cb12992fc6                     │
+│ CVE-2025-22437 │ Framework │ bluetooth          │ EoP  │ High     │ 13                │ 2025 April     │ https://android.googlesource.com/platform/packages/modules/Bluetooth/+/339d20053956ec0f92384f0b7cefda4fa7126290          │
+│ CVE-2023-21287 │ Framework │ freetype           │ RCE  │ High     │ 11 12 12L 13      │ 2023 August    │ https://android.googlesource.com/platform/external/freetype/+/a79e80a25874dacaa266906a9048f13d4bac41c6                   │
+│ CVE-2024-34731 │ Framework │ interfaces         │ EoP  │ High     │ 12 12L 13 14      │ 2024 August    │ https://android.googlesource.com/platform/hardware/interfaces/+/0ff19d1f89614fce9454fb415bcbfcbcf3caf76e                 │
+│ CVE-2024-34740 │ Framework │ modules-utils      │ EoP  │ High     │ 12 12L 13 14      │ 2024 August    │ https://android.googlesource.com/platform/frameworks/libs/modules-utils/+/700c28908051ceb55e1456d2d21229bc17c6895a       │
+
+all of these are possible memory safety?
+
+│ CVE-2025-0078  │ Framework │ native             │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 March     │ https://android.googlesource.com/platform/frameworks/native/+/c32d4defe0f4e5cad86437d6672de7a76caf1a79                   │
+
+memory corruption is parcel
+│ CVE-2024-49738 │ Framework │ native             │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 January   │ https://android.googlesource.com/platform/frameworks/native/+/f3c7aac0e3277f7ebabaab94f34b5c9156412cc9                   │
+
+more memory corruption in parcel
+│ CVE-2024-49745 │ Framework │ native             │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 January   │ https://android.googlesource.com/platform/frameworks/native/+/01a1e34929996a8fb9791dec6313627fee4ab1b3                   │
+
+potential oob access?
+additonal: https://android.googlesource.com/platform/frameworks/native/+/b3cdb06ab9137a67e4ee212ae6655de383fdaaaa
+│ CVE-2024-49746 │ Framework │ native             │ EoP  │ High     │ 12 12L 13 14 15   │ 2025 February  │ https://android.googlesource.com/platform/frameworks/native/+/9aaf913c6f0efc93e805a6baa02d2077108809e1                   │
+
+seems like mitagations rather than fixing issue?
+│ CVE-2023-21094 │ Framework │ native             │ EoP  │ High     │ 11 12 12L 13      │ 2023 April     │ https://android.googlesource.com/platform/frameworks/native/+/c710617ac6489a7f518c5138a78059a99f98e38d                   │
+
+some field is  sometimes randomly true, so an overlay is sometimes randomly trusted
+│ CVE-2021-39617 │ Framework │ native             │ EoP  │ High     │ 11 12 12L         │ 2023 May       │ https://android.googlesource.com/platform/frameworks/native/+/edb375df82f6b48688d85c11dbca91adef088bc8                   │
+
+uaf in gpu service
+│ CVE-2023-40131 │ Framework │ native             │ EoP  │ High     │ 12 12L 13         │ 2023 October   │ https://android.googlesource.com/platform/frameworks/native/+/0cda11569dd256ff3220b4fe44f861f8081d7116                   │
+
+│ CVE-2023-20947 │ Framework │ permissions        │ EoP  │ High     │ 12 12L 13         │ 2023 March     │ https://android.googlesource.com/platform/packages/modules/Permission/+/d72688263a1924f859689b789732b608ef1d35f8         │
+│ CVE-2024-32896 │ Framework │ sepolicy           │ EoP  │ High     │ 12 12L 13 14      │ 2024 September │ https://android.googlesource.com/platform/system/sepolicy/+/92cbf8d4f18ccb2c488f50b7300bd6bfc33023aa                     │

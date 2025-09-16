@@ -179,6 +179,8 @@ def classify_bug_component(patch_url: str) -> str:
         'platform/packages/modules/Connectivity': 'android_networking',
         # old android networking path
         'platform/frameworks/libs/net': 'android_networking',
+        # various audio and video code
+        'platform/frameworks/av': 'audio_video',
         # permission server and ui and managing app permissions
         'platform/packages/modules/Permission': 'permissions',
         # handles which apps should be used for which intents, and shows ui to pick if 2 things are available

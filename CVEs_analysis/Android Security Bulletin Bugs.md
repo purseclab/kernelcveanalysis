@@ -13,10 +13,23 @@
 Potentially useful
 CVE-2024-43089: https://android.googlesource.com/platform/packages/providers/MediaProvider/+/33ff6a663eea1fcdd2b422b98722c1dee48a7f6a: using media server rename files app shouldn't be able to
 CVE-2023-40100: https://android.googlesource.com/platform/packages/modules/DnsResolver/+/8e1561fb603fdaec15798372f865fb1750537f4f: uaf in dns
+- DNS UAF not viable ATM I think?
+	- Need to do more investigating
+	- It is in component which handles ipv4 <-> ipv6 dns translation stuff or something
+	- Comment mentions it is only started when there are only ipv6 nameservers detected
+		- Couldn't verify, since the code paths that cause it to be started are all aidl binder calls
+		- IDnsResolver which has the startPrefix64Discover which triggers buggy codepath, is not accessible on binder interface to unprivileged process
 CVE-2023-35682: https://android.googlesource.com/platform/packages/apps/Launcher3/+/09f8b0e52e45a0b39bab457534ba2e5ae91ffad0: trick actvity luancher to launch intent app doesn't have permission using wrapped legacy intent
 CVE-2023-35665: https://android.googlesource.com/platform/packages/services/Telephony/+/674039e70e1c5bf29b808899ac80c709acc82290: poetentially trick telephony to retreive other user data
 CVE-2023-21100: https://android.googlesource.com/platform/external/angle/+/6a020bf505f4eb6d860eccf72ae6d6b4c4b720e9: potential buffer overflow with gzip in angle library
 CVE-2022-43680: https://android.googlesource.com/platform/external/expat/+/2e02df8552fcfb0facd2d1e324b227190a73a7bb%5E%21/#F0: potential UAF in xml parser
 CVE-2023-40128: https://android.googlesource.com/platform/external/libxml2/+/1ccf89b87a3969edd56956e2d447f896037c8be7: OOB read in xml parser
 CVE-2023-40084: https://android.googlesource.com/platform/system/netd/+/1b8bddd96b2efd4074b6d4eee377b62077c031bd: mdns UAF in netd
+- TODO: look into more
+- I don't understand where the UAF occurs, because it looks like a memory leak, object never freed?
+	- Significant variation between versions
 CVE-2023-20966: https://android.googlesource.com/platform/external/zlib/+/1c4806afd7ae034aa9f86df35d4341a0b175a90a: potential buffer overflow in zlib
+
+Framework:
+CVE-2025-26455: https://android.googlesource.com/platform/frameworks/av/+/e28ca0c3d70c67cda2a09dc2d663a3395b13c779
+- buffer overflow, but not likely used in many places
