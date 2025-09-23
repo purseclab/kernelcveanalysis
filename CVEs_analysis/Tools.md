@@ -16,3 +16,10 @@ Random list of tools that are useful
 	- example: list permissions of app: `dumpsys package com.example.app`
 		- or get all app's permissions: `dumpsys package --permission`
 - `service list`: list binder services
+
+##### Important folders / files in Android ADB Shell
+
+- selinux stuff: `/system/etc/selinux`
+	- `/system/etc/selinux/plat_seapp_contexts`: contexts that can be loaded by zygote as selinux policy
+	- source code for selinux policies: https://cs.android.com/android/platform/superproject/main/+/main:system/sepolicy/private/
+- seccomp policies: `/system/etc/seccomp_policy/`
