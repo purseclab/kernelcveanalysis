@@ -32,7 +32,9 @@ RUN apt-get update && apt-get install -y \
     libprotobuf-dev \
     protobuf-compiler \
     xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+    clang-format \
+    qemu-system-x86 \
+    sudo
 
 # Install jdk 21
 RUN cd /opt && \
@@ -82,13 +84,13 @@ RUN wget https://dl.google.com/go/go1.23.6.linux-amd64.tar.gz && \
     make
 
 # Copy project (before switching user)
-COPY --chown=kuser:kuser ./ /workspace/kexploit
+COPY --chown=kuser:kuser ./ /workspace/syzbot-repro
 
 ENV PATH="/workspace/syzkaller/bin:$PATH"
-ENV KEXPLOIT_DATA_DIR="/workspace/kexploit/kexploit_data/"
+ENV SYZBOT_REPRO_DATA_DIR="/workspace/syzbot-repro/syzbot-repro_data/"
 
 # Switch to non-root user
 USER kuser
 
 # pull all python packages in the uv project
-RUN cd kexploit && uv sync
+RUN cd syzbot-repro && uv sync

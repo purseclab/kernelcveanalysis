@@ -5,13 +5,13 @@
 Alternatively, you can run kexploit in a docker container. The Dockerfile is provided in the repository. We also provide a script to run everything once the docker container is built.
 To build the docker image, run:
 ```sh
-docker build -t kexploit-env .
+docker build -t syzbot-repro-env .
 ```
 To run the docker container, you can use the provided script:
 ```sh
 ./set-env
 ```
-This will mount the current `kexploit` directory to `/workspace/kexploit` in the container, match the network to the host network, and then also run it in user mode so all of the data collected can be accessed from the host machine.
+This will mount the current `syzbot_repro_analysis` directory to `/workspace/syzbot-repro` in the container, match the network to the host network, and then also run it in user mode so all of the data collected can be accessed from the host machine.
 
 ### Setup for Running syzkaller POCs on Cuttlefish
 
