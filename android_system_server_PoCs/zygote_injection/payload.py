@@ -11,8 +11,8 @@ def main():
     # TODO
     args = [
         '--runtime-args',
-        '--setuid=1073',
-        '--setgid=1073',
+        '--setuid=1000',
+        '--setgid=1000',
         '--runtime-flags=2049',
         # this doesn't exist on android 12
         # '--mount-external-full',

