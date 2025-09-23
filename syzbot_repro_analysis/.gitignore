@@ -26,3 +26,7 @@ syz-prog2c
 **/untested/
 **/*.tar.gz
 **/cql/
+baseline*
+logs*
+android-*
+syzbot-repro_data*
