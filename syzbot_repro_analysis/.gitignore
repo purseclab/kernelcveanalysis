@@ -29,3 +29,4 @@ syz-prog2c
 baseline*
 logs*
 android-*
+syzbot-repro_data*
