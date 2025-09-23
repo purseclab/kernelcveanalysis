@@ -26,3 +26,6 @@ syz-prog2c
 **/untested/
 **/*.tar.gz
 **/cql/
+baseline*
+logs*
+android-*
