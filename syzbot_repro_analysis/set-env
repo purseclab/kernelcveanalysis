@@ -1,7 +1,9 @@
 #!/bin/bash
 
-docker run -it -d --name kexploit\
+docker run -it -d --name syzbot-repro\
   -u 1000:1000 \
   --network=host \
-  -v "$(pwd):/workspace/kexploit" \
-  kexploit-env 
+  --device=/dev/kvm \
+  --group-add $(getent group kvm | cut -d: -f3) \
+  -v "$(pwd):/workspace/syzbot-repro" \
+  syzbot-repro-env
