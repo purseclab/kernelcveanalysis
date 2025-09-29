@@ -1,0 +1,2 @@
+[console_scripts]
+seccomp = android_env.seccomp:dump_seccomp
