@@ -2,6 +2,8 @@ from typing import NewType, TypeVar, Callable, Self
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from dataclasses import dataclass
+from collections import defaultdict
+from itertools import chain
 import subprocess
 
 from .adb import read_file
@@ -36,6 +38,7 @@ class SeLabel:
         )
 
 class ServiceContexts:
+    # map from service name to SeLabel
     services: dict[str, SeLabel]
     fallback: SeLabel
 
@@ -53,6 +56,14 @@ class ServiceContexts:
         
         assert self.fallback
     
+    def label_to_service_name_map(self) -> dict[SeLabel, list[str]]:
+        out = defaultdict(list)
+        for service, label in self.services.items():
+            out[label].append(service)
+        
+        return dict(out)
+
+    
     def get_selabel(self, service_name: str) -> SeLabel:
         if service_name in self.services:
             return self.services[service_name]
@@ -69,7 +80,7 @@ class AllowRule:
     source_type: SeType
     dst_type: SeType
     seclass: SeClass
-    permission: str
+    permissions: list[str]
 
     @classmethod
     def parse_from_rule(cls, rule: str) -> Self:
@@ -79,13 +90,18 @@ class AllowRule:
         
         parts = rule.split()
         assert parts[0] == 'allow'
+
+        if '{' in rule:
+            permissions = rule.split('{')[1].split('}')[0].split()
+        else:
+            permissions = list(parts[3])
+
         
         return cls(
             source_type=SeType(parts[1]),
             dst_type=SeType(parts[2].split(':')[0]),
             seclass=SeClass(parts[2].split(':')[1]),
-            # FIXME: some permission are in brackets for some reason
-            permission=parts[3],
+            permissions=permissions,
         )
     
     # use for sesearch output for example
@@ -145,31 +161,48 @@ class SePolicy:
             '-p', 'find'
         ])
 
-        rules = AllowRule.parse_many_rules(sesearch_output)
-        # exclude { add find } rules
-        return [rule for rule in rules if rule.permission == 'find']
+        return AllowRule.parse_many_rules(sesearch_output)
 
     def accessible_services_for_domain(self, domain_type: SeType) -> list[SeType]:
         return self.accessible_service_map[domain_type]
     
 def accesible_services(domain_type: SeType, policy: SePolicy, services: ServiceContexts):
     can_access_fallback = False
-    service_names = []
 
-    for type in policy.accessible_services_for_domain(domain_type):
+    accesible_services = policy.accessible_services_for_domain(domain_type)
+    can_access_fallback = services.fallback.type in accesible_services
+
+    service_names = []
+    for type in accesible_services:
         service_names.extend(services.services_for_setype(type))
-        if services.fallback.type == type:
-            can_access_fallback = True
+
+    forbidden_services = None
+    if can_access_fallback:
+        all_services = services.label_to_service_name_map()
+        for type in accesible_services:
+            if type in all_services:
+                del all_services[type]
+        
+        forbidden_services = list(chain.from_iterable(all_services.values))
+        
     
     print('Can access')
     for service in service_names:
         print(service)
     
     print(f'Can access fallback: {can_access_fallback}')
+    if forbidden_services is not None:
+        for service in forbidden_services:
+            print(service)
 
 def dump_selinux():
     policy = SePolicy()
     service_contexts = ServiceContexts()
     print(policy.accessible_services_for_domain(SeType('untrusted_app')))
 
-    accesible_services(SeType('untrusted_app'), policy, service_contexts)
+    # accesible_services(SeType('untrusted_app'), policy, service_contexts)
+    # accesible_services(SeType('system_app'), policy, service_contexts)
+    accesible_services(SeType('su'), policy, service_contexts)
+    # accesible_services(SeType('shell'), policy, service_contexts)
+    # accesible_services(SeType('priv_app'), policy, service_contexts)
+    # accesible_services(SeType('vold'), policy, service_contexts)
