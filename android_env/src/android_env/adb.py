@@ -18,7 +18,7 @@ def run_adb_command(command: str, root: bool = False) -> Optional[str]:
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        print(f"Error executing ADB command: {e.stderr}")
+        print(f"Error executing ADB command `{command}`, root={root}: {e.stderr}")
         return None
     except FileNotFoundError:
         print("Error: 'adb' command not found. Is Android Debug Bridge installed and in your PATH?")
@@ -32,6 +32,12 @@ def upload_file(src_path: Path, dst_path: Path, executable: bool = False):
 
     if executable:
         run_adb_command(f'chmod +x {str(dst_path)}', root=True)
+
+def install_app(app: Path):
+    subprocess.run(
+        ['adb', 'install', str(app)],
+        check=True,
+    )
 
 class Tools(StrEnum):
     READ_FILE = '/data/local/tmp/tools/read_file'
@@ -103,9 +109,11 @@ class AdbProcess:
     command: str
     popen: subprocess.Popen
     process: Process
+    is_root: bool
     
     def __init__(self, command: str, root: bool = False):
         self.command = command
+        self.is_root = root
 
         launch_command = f'su root {command}' if root else command
         self.popen = subprocess.Popen(
@@ -137,7 +145,7 @@ class AdbProcess:
         try:
             stdout, stderr = self.popen.communicate()
             if self.popen.returncode != 0:
-                print(f"Error executing ADB command: {stderr.strip()}")
+                print(f"Error executing ADB command `{self.command}`, root={self.is_root}: {stderr.strip()}")
                 return None
             return stdout.strip()
         except FileNotFoundError:

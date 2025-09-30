@@ -1,12 +1,12 @@
 from time import sleep
 from tempfile import NamedTemporaryFile
-from typing import Optional
+from typing import Optional, Callable
 import subprocess
 import argparse
 from pathlib import Path
 import json
 
-from .adb import get_single_process_by_name, Strace, start_activity_action, run_adb_command, AdbProcess, Tools, Process
+from .adb import get_single_process_by_name, Strace, start_activity_action, start_activity_name, install_app, AdbProcess, Tools, Process
 from .syscalls import get_syscall_map
 
 class SeccompDumper:
@@ -89,34 +89,57 @@ def parse_args():
     )
     return parser.parse_args()
 
-def dump_seccomp():
-    args = parse_args()
-    save_file = args.json_file
-
+def get_allowed_syscalls_for_app(app_name: str, start_app: Callable[[], None]) -> Optional[dict[str, bool]]:
     zygote32 = get_single_process_by_name('zygote')
     zygote64 = get_single_process_by_name('zygote64')
 
     dumper32 = SeccompDumper(zygote32, 'arm32')
     dumper64 = SeccompDumper(zygote64, 'arm64')
 
-    # kill settings if it exists
-    settings = get_single_process_by_name('com.android.settings')
+    # kill app if it exists
+    settings = get_single_process_by_name(app_name)
     if settings is not None:
         settings.await_kill(force=True)
-    
-    # start settings to trigger zygote to spawn it
-    start_activity_action('android.settings.SETTINGS')
-    # wait for settings to start
-    while get_single_process_by_name('com.android.settings') is None:
-        sleep(0.5)
 
+    # start app to trigger zygote to spawn it
+    start_app()
+    # wait for it to start
+    while get_single_process_by_name(app_name) is None:
+        sleep(0.5)
+    
     allowed_syscalls32 = extract_seccomp_allowed_syscalls(dumper32)
     allowed_syscalls64 = extract_seccomp_allowed_syscalls(dumper64)
     
     allowed_syscalls = allowed_syscalls32 or allowed_syscalls64
-    if allowed_syscalls is None:
-        print('no secomp filter detected')
-    else:
-        with open(save_file, 'w') as f:
-            json.dump({'system_app': allowed_syscalls}, f, indent=4, sort_keys=True)
+    return allowed_syscalls
+
+
+def dump_seccomp():
+    args = parse_args()
+    save_file = args.json_file
+
+    system_app_allowed_syscalls = get_allowed_syscalls_for_app(
+        'com.android.settings',
+        lambda: start_activity_action('android.settings.SETTINGS')
+    )
+
+    install_app(Path('tools/test_app.apk'))
+    unprivileged_app_allowed_syscalls = get_allowed_syscalls_for_app(
+        'com.example.testapp',
+        lambda: start_activity_name('com.example.testapp/.MainActivity')
+    )
+
+    if system_app_allowed_syscalls is None:
+        print('no seccomp filter found for system app')
+    
+    if unprivileged_app_allowed_syscalls is None:
+        print('no seccomp filter found for regular app')
+
+    data = {
+        'system_app': system_app_allowed_syscalls,
+        'unprivileged_app': unprivileged_app_allowed_syscalls,
+    }
+
+    with open(save_file, 'w') as f:
+        json.dump(data, f, indent=4, sort_keys=True)
         

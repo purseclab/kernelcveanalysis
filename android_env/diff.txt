@@ -1,0 +1,23 @@
+On android 13, the following syscalls were allowed in system app (settings) but not test app:
+acct
+adjtimex
+chroot
+clock_adjtime
+clock_settime
+delete_module
+init_module
+mount
+reboot
+setdomainname
+setfsgid
+setfsuid
+setgid
+setgroups
+sethostname
+setregid
+setresgid
+setreuid
+settimeofday
+setuid
+syslog
+umount2
