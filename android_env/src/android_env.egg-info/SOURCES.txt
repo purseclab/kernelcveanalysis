@@ -3,6 +3,9 @@ pyproject.toml
 src/android_env/__init__.py
 src/android_env/adb.py
 src/android_env/seccomp.py
+src/android_env/selinux.py
+src/android_env/syscalls.py
+src/android_env/util.py
 src/android_env.egg-info/PKG-INFO
 src/android_env.egg-info/SOURCES.txt
 src/android_env.egg-info/dependency_links.txt

@@ -12,7 +12,6 @@ void print_hex(const u8 *bytes, usize count) {
   for (usize i = 0; i < count; i++) {
     printf("%02x", bytes[i]);
   }
-  printf("\n");
 }
 
 #endif

@@ -1,2 +1,3 @@
 [console_scripts]
 seccomp = android_env.seccomp:dump_seccomp
+selinux = android_env.selinux:dump_selinux

@@ -48,8 +48,7 @@ def upload_tools():
     upload_file(Path('./tools/read_file'), Path(Tools.READ_FILE), executable=True)
     upload_file(Path('./tools/dump_seccomp_filter'), Path(Tools.DUMP_SECCOMP_FILTER), executable=True)
 
-def read_file(file: str, offset: int, count: int) -> bytes:
-    print(f'{Tools.READ_FILE} {file} {offset} {count}')
+def read_file(file: str, offset: int = 0, count: int = -1) -> bytes:
     out = run_adb_command(f'{Tools.READ_FILE} {file} {offset} {count}', root=True)
     return bytes.fromhex(out)
 

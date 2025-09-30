@@ -5,6 +5,7 @@ pkgs.mkShell {
     pkgs.android-tools
     # pkgs.ruby
     pkgs.bundler
+    pkgs.setools
   ];
   shellHook = ''
     bundle config set path ruby_gems
