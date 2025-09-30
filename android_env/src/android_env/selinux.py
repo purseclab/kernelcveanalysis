@@ -186,7 +186,7 @@ def accesible_services(domain_type: SeType, policy: SePolicy, services: ServiceC
         forbidden_services = list(chain.from_iterable(all_services.values))
         
     
-    print('Can access')
+    print(f'{domain_type} can access:')
     for service in service_names:
         print(service)
     
@@ -194,15 +194,17 @@ def accesible_services(domain_type: SeType, policy: SePolicy, services: ServiceC
     if forbidden_services is not None:
         for service in forbidden_services:
             print(service)
+    
+    print()
 
 def dump_selinux():
     policy = SePolicy()
     service_contexts = ServiceContexts()
-    print(policy.accessible_services_for_domain(SeType('untrusted_app')))
 
-    # accesible_services(SeType('untrusted_app'), policy, service_contexts)
+    accesible_services(SeType('untrusted_app'), policy, service_contexts)
+    accesible_services(SeType('untrusted_app_all'), policy, service_contexts)
     # accesible_services(SeType('system_app'), policy, service_contexts)
-    accesible_services(SeType('su'), policy, service_contexts)
+    # accesible_services(SeType('su'), policy, service_contexts)
     # accesible_services(SeType('shell'), policy, service_contexts)
     # accesible_services(SeType('priv_app'), policy, service_contexts)
     # accesible_services(SeType('vold'), policy, service_contexts)
