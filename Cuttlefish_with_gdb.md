@@ -252,3 +252,6 @@ PSTATE=400003c5 -Z-- EL1h
 ```
 
 The easiest fix (untested) would probably be to patch the command sequence into qemu and rebuild. Some online research seems to indicate this is a raspbian problem though.
+
+## Tested hardware
+Regardless of the issue mentioned above, we can run Cuttlefish with QEMU succesfully using an `a1.metal` machine on `Amazon EC2`.
