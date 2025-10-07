@@ -42,15 +42,35 @@ def install_app(app: Path):
 class Tools(StrEnum):
     READ_FILE = '/data/local/tmp/tools/read_file'
     DUMP_SECCOMP_FILTER = '/data/local/tmp/tools/dump_seccomp_filter'
+    RUNAS = '/data/local/tmp/tools/runas'
 
 def upload_tools():
     run_adb_command('mkdir -p /data/local/tmp/tools')
     upload_file(Path('./tools/read_file'), Path(Tools.READ_FILE), executable=True)
     upload_file(Path('./tools/dump_seccomp_filter'), Path(Tools.DUMP_SECCOMP_FILTER), executable=True)
+    upload_file(Path('./tools/runas'), Path(Tools.RUNAS), executable=True)
 
 def read_file(file: str, offset: int = 0, count: int = -1) -> bytes:
     out = run_adb_command(f'{Tools.READ_FILE} {file} {offset} {count}', root=True)
     return bytes.fromhex(out)
+
+@dataclass
+class Permissions:
+    uid: int
+    gid: int
+    selabel: str
+
+    @classmethod
+    def root(cls):
+        return cls(
+            uid=0,
+            gid=0,
+            selabel='u:r:su:s0',
+        )
+
+
+def runas(command: str, permissions: Permissions) -> Optional[str]:
+    return run_adb_command(f'{Tools.RUNAS} {permissions.uid} {permissions.gid} \'{permissions.selabel}\' \'{command}\'')
 
 @dataclass
 class Process:

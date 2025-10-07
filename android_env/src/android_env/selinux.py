@@ -1,4 +1,4 @@
-from typing import NewType, TypeVar, Callable, Self
+from typing import NewType, TypeVar, Callable, Self, Optional
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from dataclasses import dataclass
@@ -6,7 +6,7 @@ from collections import defaultdict
 from itertools import chain
 import subprocess
 
-from .adb import read_file
+from .adb import read_file, run_adb_command, runas, Permissions
 from .util import config_lines
 
 T = TypeVar('T')
@@ -165,44 +165,118 @@ class SePolicy:
 
     def accessible_services_for_domain(self, domain_type: SeType) -> list[SeType]:
         return self.accessible_service_map[domain_type]
+
+@dataclass
+class ServiceInfo:
+    service_name: str
+    service_interface: str
+
+def get_services_for_permissions(permissions: Permissions) -> list[ServiceInfo]:
+    out = []
+
+    for line in runas('service list', permissions).splitlines():
+        parts = line.split()
+
+        # skip first line
+        if not parts[0].isdigit():
+            continue
+
+        # skip : at end
+        service_name = parts[1][:-1]
+        # skip []
+        service_interface = parts[2][1:-1]
+        if len(service_interface.split(',')) > 1:
+            print('Warning: unimplemented support for multiple interfaces')
+            print(line)
+        
+        # skip services we cannot access
+        if len(service_interface) == 0:
+            continue
+
+        out.append(ServiceInfo(
+            service_name=service_name,
+            service_interface=service_interface,
+        ))
     
-def accesible_services(domain_type: SeType, policy: SePolicy, services: ServiceContexts):
-    can_access_fallback = False
+    return out
 
-    accesible_services = policy.accessible_services_for_domain(domain_type)
-    can_access_fallback = services.fallback.type in accesible_services
 
-    service_names = []
-    for type in accesible_services:
-        service_names.extend(services.services_for_setype(type))
+@dataclass
+class AccessibleServices:
+    allowlist: list[ServiceInfo]
+    # if None, only allowed services are allowlist
+    # if not None, all other services other then these are allowed
+    blocklist: Optional[list[ServiceInfo]]
 
-    forbidden_services = None
-    if can_access_fallback:
-        all_services = services.label_to_service_name_map()
+class SelinuxContext:
+    policy: SePolicy
+    services: ServiceContexts
+    # mapping from service name to service info
+    service_interfaces: dict[str, ServiceInfo]
+
+    def __init__(self):
+        self.policy = SePolicy()
+        self.services = ServiceContexts()
+
+        self.service_interfaces = {}
+        for service in get_services_for_permissions(Permissions.root()):
+            self.service_interfaces[service.service_name] = service
+    
+    def service_names_to_service_info(self, service_names: list[str]) -> list[ServiceInfo]:
+        return [
+            self.service_interfaces[service] for service in service_names
+            if service in self.service_interfaces
+        ]
+    
+    def accesible_services_for_domain(self, domain_type: SeType) -> AccessibleServices:
+        can_access_fallback = False
+
+        accesible_services = self.policy.accessible_services_for_domain(domain_type)
+        can_access_fallback = self.services.fallback.type in accesible_services
+
+        service_names = []
         for type in accesible_services:
-            if type in all_services:
-                del all_services[type]
+            service_names.extend(self.services.services_for_setype(type))
         
-        forbidden_services = list(chain.from_iterable(all_services.values))
+        forbidden_services = None
+        if can_access_fallback:
+            all_services = self.services.label_to_service_name_map()
+            for type in accesible_services:
+                if type in all_services:
+                    del all_services[type]
+            
+            forbidden_services = list(chain.from_iterable(all_services.values))
         
+        return AccessibleServices(
+            allowlist=self.service_names_to_service_info(service_names),
+            blocklist=None if forbidden_services is None else self.service_names_to_service_info(forbidden_services),
+        )
     
-    print(f'{domain_type} can access:')
-    for service in service_names:
-        print(service)
-    
-    print(f'Can access fallback: {can_access_fallback}')
-    if forbidden_services is not None:
-        for service in forbidden_services:
+    def accesible_services(self, domain_type: SeType):
+        services = self.accesible_services_for_domain(domain_type)
+
+        print(f'{domain_type} can access:')
+        for service in services.allowlist:
             print(service)
-    
-    print()
+        
+        print(f'Can access fallback: {services.blocklist is not None}')
+        if services.blocklist is not None:
+            for service in services.blocklist:
+                print(service)
+        
+        print()
 
 def dump_selinux():
-    policy = SePolicy()
-    service_contexts = ServiceContexts()
+    print(runas('service list', Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))
+    context = SelinuxContext()
+    context.accesible_services(SeType('untrusted_app'))
+    context.accesible_services(SeType('untrusted_app_all'))
 
-    accesible_services(SeType('untrusted_app'), policy, service_contexts)
-    accesible_services(SeType('untrusted_app_all'), policy, service_contexts)
+    # policy = SePolicy()
+    # service_contexts = ServiceContexts()
+
+    # accesible_services(SeType('untrusted_app'), policy, service_contexts)
+    # accesible_services(SeType('untrusted_app_all'), policy, service_contexts)
     # accesible_services(SeType('system_app'), policy, service_contexts)
     # accesible_services(SeType('su'), policy, service_contexts)
     # accesible_services(SeType('shell'), policy, service_contexts)

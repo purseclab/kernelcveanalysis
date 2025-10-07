@@ -129,3 +129,12 @@ android.system.virtualizationservice
 vrmanager
 Can access fallback: False
 ```
+
+## Pulling Mathing Android Code
+https://source.android.com/docs/setup/reference/build-numbers has a list mapping build IDs to branch names.
+Build ID can be gotten in ADB shell from getprop ro.build.id.
+
+Then clone with ```sh
+repo init -u https://android.googlesource.com/platform/manifest -b <branch_name>
+repo sync -j8
+```
