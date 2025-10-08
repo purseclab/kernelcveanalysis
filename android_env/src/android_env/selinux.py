@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from itertools import chain
 import subprocess
+import itertools
 
 from .adb import read_file, run_adb_command, runas, Permissions
 from .util import config_lines
@@ -38,6 +39,11 @@ class SeLabel:
         )
 
 class ServiceContexts:
+    '''
+    This class represents all information from `/system/etc/selinux/plat_service_contexts` file.
+
+    So it handles mapping service names to selinux domains.
+    '''
     # map from service name to SeLabel
     services: dict[str, SeLabel]
     fallback: SeLabel
@@ -62,7 +68,6 @@ class ServiceContexts:
             out[label].append(service)
         
         return dict(out)
-
     
     def get_selabel(self, service_name: str) -> SeLabel:
         if service_name in self.services:
@@ -112,13 +117,18 @@ class AllowRule:
             for line in rules.split('\n') if line.strip() != ''
         ]
 
+@dataclass
+class SeAttribute:
+    name: str
+    types: set[str]
+
 class SePolicy:
     policy: bytes
-    accessible_service_map: dict[SeType, list[SeType]]
+    attributes: dict[str, SeAttribute]
 
     def __init__(self):
         self.policy = read_file('/sys/fs/selinux/policy')
-        self.compute_accessible_service_map()
+        self.attributes = self.collect_attributes()
 
     def with_policy_file(self, callback: Callable[[Path], T]) -> T:
         with NamedTemporaryFile() as f:
@@ -126,19 +136,9 @@ class SePolicy:
             f.flush()
             return callback(Path(f.name))
     
-    def compute_accessible_service_map(self) -> dict[SeType, list[SeType]]:
-        rules = self.search_service_rules()
-        self.accessible_service_map = {}
-
-        for rule in rules:
-            if rule.source_type not in self.accessible_service_map:
-                self.accessible_service_map[rule.source_type] = []
-            
-            self.accessible_service_map[rule.source_type].append(rule.dst_type)
-    
-    def sesearch(self, args: list[str]) -> str:
-        def run_sesearch(file: Path) -> str:
-            search_args = ['sesearch', str(file)]
+    def run_setools_command(self, command: str, args: list[str]) -> str:
+        def run_command(file: Path) -> str:
+            search_args = [command, str(file)]
             search_args.extend(args)
 
             return subprocess.run(
@@ -148,23 +148,71 @@ class SePolicy:
                 text=True,
             ).stdout.strip()
         
-        return self.with_policy_file(run_sesearch)
+        return self.with_policy_file(run_command)
+
+    def seinfo(self, args: list[str]) -> str:
+        return self.run_setools_command('seinfo', args)
+
+    def sesearch(self, args: list[str]) -> str:
+        return self.run_setools_command('sesearch', args)
     
-    # relevant code: https://cs.android.com/android/platform/superproject/main/+/main:system/hwservicemanager/AccessControl.cpp
-    def search_service_rules(self) -> list[AllowRule]:
+    def collect_attributes(self) -> dict[str, SeAttribute]:
+        out = {}
+
+        output = self.seinfo(['-a', '-x']).strip()
+        parts = output.split('attribute')[1:]
+
+        for part in parts:
+            lines = part.strip().splitlines()
+
+            attribute_name = lines[0].split(';')[0].strip()
+            types = set(type.strip() for type in lines[1:] if len(type.strip()) > 0)
+            if '<empty attribute>' in types:
+                types = set()
+            
+            out[attribute_name] = SeAttribute(
+                name=attribute_name,
+                types=types,
+            )
+        
+        return out
+    
+    def types_in_attribute(self, attribute: str) -> Optional[set[str]]:
+        if attribute in self.attributes:
+            return self.attributes[attribute].types
+        else:
+            return None
+    
+    def expand_rule_attributes(self, rules: list[AllowRule]) -> list[AllowRule]:
+        out = []
+        for rule in rules:
+            source_types = self.types_in_attribute(rule.source_type)
+            if source_types is None:
+                source_types = {rule.source_type}
+            
+            dst_types = self.types_in_attribute(rule.dst_type)
+            if dst_types is None:
+                dst_types = {rule.dst_type}
+            
+            out.extend(AllowRule(
+                source_type=source_type,
+                dst_type=dst_type,
+                seclass=rule.seclass,
+                permissions=rule.permissions,
+            ) for source_type, dst_type in itertools.product(source_types, dst_types))
+        
+        return out
+
+    def rules_for_permission(self, clazz: str, permission: str) -> list[AllowRule]:
         sesearch_output = self.sesearch([
             '--allow',
             # search for service manager class
-            '-c', 'service_manager',
+            '-c', clazz,
             # for rules with find permission
-            # TODO: figure out why this returns add find as well, and what that even means
-            '-p', 'find'
+            '-p', permission,
         ])
 
         return AllowRule.parse_many_rules(sesearch_output)
-
-    def accessible_services_for_domain(self, domain_type: SeType) -> list[SeType]:
-        return self.accessible_service_map[domain_type]
 
 @dataclass
 class ServiceInfo:
@@ -211,12 +259,21 @@ class AccessibleServices:
 class SelinuxContext:
     policy: SePolicy
     services: ServiceContexts
+    # mapping from type to service types it can access
+    accessible_service_map: dict[SeType, list[SeType]]
     # mapping from service name to service info
     service_interfaces: dict[str, ServiceInfo]
 
     def __init__(self):
         self.policy = SePolicy()
         self.services = ServiceContexts()
+
+        accessible_service_map = defaultdict(list)
+        # relevant code: https://cs.android.com/android/platform/superproject/main/+/main:system/hwservicemanager/AccessControl.cpp
+        rules = self.policy.rules_for_permission('service_manager', 'find')
+        for rule in self.policy.expand_rule_attributes(rules):
+            accessible_service_map[rule.source_type].append(rule.dst_type)
+        self.accessible_service_map = dict(accessible_service_map)
 
         self.service_interfaces = {}
         for service in get_services_for_permissions(Permissions.root()):
@@ -231,7 +288,14 @@ class SelinuxContext:
     def accesible_services_for_domain(self, domain_type: SeType) -> AccessibleServices:
         can_access_fallback = False
 
-        accesible_services = self.policy.accessible_services_for_domain(domain_type)
+        # check if no services are accessible
+        if domain_type not in self.accessible_service_map:
+            return AccessibleServices(
+                allowlist=[],
+                blocklist=None,
+            )
+
+        accesible_services = self.accessible_service_map[domain_type]
         can_access_fallback = self.services.fallback.type in accesible_services
 
         service_names = []
@@ -267,10 +331,10 @@ class SelinuxContext:
         print()
 
 def dump_selinux():
-    print(runas('service list', Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))
+    # print(get_services_for_permissions(Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))
     context = SelinuxContext()
     context.accesible_services(SeType('untrusted_app'))
-    context.accesible_services(SeType('untrusted_app_all'))
+    # context.accesible_services(SeType('untrusted_app_all'))
 
     # policy = SePolicy()
     # service_contexts = ServiceContexts()
