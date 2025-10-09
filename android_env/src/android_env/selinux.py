@@ -4,6 +4,7 @@ from tempfile import NamedTemporaryFile
 from dataclasses import dataclass
 from collections import defaultdict
 from itertools import chain
+from enum import StrEnum
 import subprocess
 import itertools
 
@@ -12,9 +13,38 @@ from .util import config_lines
 
 T = TypeVar('T')
 
-SELINUX_CONFIG_DIR = '/system/etc/selinux'
-SELINUX_APP_CONTEXTS = f'{SELINUX_CONFIG_DIR}/plat_seapp_contexts'
-SELINUX_SERVICE_CONTEXTS = f'{SELINUX_CONFIG_DIR}/plat_service_contexts'
+# possible locations of selinux policy
+# obtained from `strace restorecon /data/local/tmp &>&1 | grep open`
+#
+# openat(AT_FDCWD, "/system/etc/selinux/plat_file_contexts", O_RDONLY|O_CLOEXEC) = 3
+# openat(AT_FDCWD, "/system_ext/etc/selinux/system_ext_file_contexts", O_RDONLY|O_CLOEXEC) = 3
+# openat(AT_FDCWD, "/product/etc/selinux/product_file_contexts", O_RDONLY|O_CLOEXEC) = 3
+# openat(AT_FDCWD, "/vendor/etc/selinux/vendor_file_contexts", O_RDONLY|O_CLOEXEC) = 3
+#
+# Most of the policies are in the first one, but the others do have some
+
+SELINUX_APP_CONTEXTS = 'seapp_contexts'
+SELINUX_SERVICE_CONTEXTS = 'service_contexts'
+SELINUX_HWSERVICE_CONTEXTS = 'hwservice_contexts'
+SELINUX_FILE_CONTEXTS = 'file_contexts'
+
+SELINUX_CONFIG_PREFIXES = [
+    '/system/etc/selinux/plat_',
+    '/system_ext/etc/selinux/system_ext_',
+    '/product/etc/selinux/product_',
+    '/vendor/etc/selinux/vendor_',
+]
+
+def read_selinux_configs(config_name: str) -> str:
+    '''
+    Reads a certain type of selinux config from all the different places it can be defined on the system,
+    and concatenates the output together.
+    '''
+
+    return '\n'.join(
+        read_file(prefix + config_name).decode('utf-8')
+        for prefix in SELINUX_CONFIG_PREFIXES
+    )
 
 SeType = NewType('SeType', str)
 SeClass = NewType('SeClass', str)
@@ -38,7 +68,25 @@ class SeLabel:
             level=parts[3],
         )
 
-class ServiceContexts:
+def parse_selinux_map_file(config_name: str) -> dict[str, SeLabel]:
+    out = {}
+
+    config = read_selinux_configs(config_name)
+
+    for line in config_lines(config):
+        parts = line.split()
+        out[''.join(parts[:-1])] = SeLabel.parse(parts[-1])
+    
+    return out
+
+def inv_selinux_map(map: dict[str, SeLabel]) -> dict[SeType, list[str]]:
+    out = defaultdict(list)
+    for service, label in map.items():
+        out[label.type].append(service)
+    
+    return dict(out)
+
+class ServiceSelinuxMapping:
     '''
     This class represents all information from `/system/etc/selinux/plat_service_contexts` file.
 
@@ -48,26 +96,12 @@ class ServiceContexts:
     services: dict[str, SeLabel]
     fallback: SeLabel
 
-    def __init__(self):
-        self.services = {}
-
-        config = read_file(SELINUX_SERVICE_CONTEXTS).decode('utf-8')
-
-        for line in config_lines(config):
-            parts = line.split()
-            if parts[0] == '*':
-                self.fallback = SeLabel.parse(parts[1])
-            else:
-                self.services[parts[0]] = SeLabel.parse(parts[1])
-        
-        assert self.fallback
+    def __init__(self, file: str):
+        self.services = parse_selinux_map_file(file)
+        self.fallback = self.services['*']
     
-    def label_to_service_name_map(self) -> dict[SeLabel, list[str]]:
-        out = defaultdict(list)
-        for service, label in self.services.items():
-            out[label].append(service)
-        
-        return dict(out)
+    def label_to_service_name_map(self) -> dict[SeType, list[str]]:
+        return inv_selinux_map(self.services)
     
     def get_selabel(self, service_name: str) -> SeLabel:
         if service_name in self.services:
@@ -78,6 +112,15 @@ class ServiceContexts:
     # doesn't check fallback services
     def services_for_setype(self, setype: SeType) -> list[str]:
         return [service for service, label in self.services.items() if label.type == setype]
+
+class FileSelinuxMapping:
+    files: dict[str, SeLabel]
+
+    def __init__(self):
+        self.files = parse_selinux_map_file(SELINUX_FILE_CONTEXTS)
+    
+    def type_to_file_name_map(self) -> dict[SeType, list[str]]:
+        return inv_selinux_map(self.files)
 
 
 @dataclass
@@ -99,7 +142,7 @@ class AllowRule:
         if '{' in rule:
             permissions = rule.split('{')[1].split('}')[0].split()
         else:
-            permissions = list(parts[3])
+            permissions = [parts[3]]
 
         
         return cls(
@@ -156,6 +199,10 @@ class SePolicy:
     def sesearch(self, args: list[str]) -> str:
         return self.run_setools_command('sesearch', args)
     
+    def search_rules(self, args: list[str]) -> list[AllowRule]:
+        output = self.sesearch(args)
+        return AllowRule.parse_many_rules(output)
+    
     def collect_attributes(self) -> dict[str, SeAttribute]:
         out = {}
 
@@ -204,15 +251,13 @@ class SePolicy:
         return out
 
     def rules_for_permission(self, clazz: str, permission: str) -> list[AllowRule]:
-        sesearch_output = self.sesearch([
+        return self.search_rules([
             '--allow',
             # search for service manager class
             '-c', clazz,
             # for rules with find permission
             '-p', permission,
         ])
-
-        return AllowRule.parse_many_rules(sesearch_output)
 
 @dataclass
 class ServiceInfo:
@@ -256,55 +301,107 @@ class AccessibleServices:
     # if not None, all other services other then these are allowed
     blocklist: Optional[list[ServiceInfo]]
 
-class SelinuxContext:
-    policy: SePolicy
-    services: ServiceContexts
+class ServiceType(StrEnum):
+    SERVICE = 'service'
+    HW_SERVICE = 'hwservice'
+
+class ServiceContext:
+    '''
+    Represents info about particular services on a binder instance.
+
+    Either reguler services or hwservices.
+    '''
+
     # mapping from type to service types it can access
     accessible_service_map: dict[SeType, list[SeType]]
+
+    service_labels: ServiceSelinuxMapping
+
+    def __init__(self, service_type: ServiceType, policy: SePolicy):
+        match service_type:
+            case ServiceType.SERVICE:
+                self.accessible_service_map = self.compute_accessible_service_map(policy, 'service_manager', 'find')
+                self.service_labels = ServiceSelinuxMapping(SELINUX_SERVICE_CONTEXTS)
+            case ServiceType.HW_SERVICE:
+                self.accessible_service_map = self.compute_accessible_service_map(policy, 'hwservice_manager', 'find')
+                self.service_labels = ServiceSelinuxMapping(SELINUX_HWSERVICE_CONTEXTS)
+    
+    # compute mapping which indicates which objects a process with a given context can access
+    @classmethod
+    def compute_accessible_service_map(cls, policy: SePolicy, clazz: str, permision: str) -> dict[SeType, list[SeType]]:
+        accessible_service_map = defaultdict(list)
+
+        # relevant code: https://cs.android.com/android/platform/superproject/main/+/main:system/hwservicemanager/AccessControl.cpp
+        rules = policy.rules_for_permission(clazz, permision)
+        for rule in policy.expand_rule_attributes(rules):
+            accessible_service_map[rule.source_type].append(rule.dst_type)
+
+        return dict(accessible_service_map)
+
+class SelinuxContext:
+    policy: SePolicy
+    services: dict[ServiceType, ServiceContext]
     # mapping from service name to service info
     service_interfaces: dict[str, ServiceInfo]
 
+    # mapping from type to files with that selinux type
+    file_label_map: dict[SeType, list[str]]
+
     def __init__(self):
         self.policy = SePolicy()
-        self.services = ServiceContexts()
-
-        accessible_service_map = defaultdict(list)
-        # relevant code: https://cs.android.com/android/platform/superproject/main/+/main:system/hwservicemanager/AccessControl.cpp
-        rules = self.policy.rules_for_permission('service_manager', 'find')
-        for rule in self.policy.expand_rule_attributes(rules):
-            accessible_service_map[rule.source_type].append(rule.dst_type)
-        self.accessible_service_map = dict(accessible_service_map)
+        self.services = { service_type: ServiceContext(service_type, self.policy) for service_type in ServiceType }
 
         self.service_interfaces = {}
         for service in get_services_for_permissions(Permissions.root()):
             self.service_interfaces[service.service_name] = service
+        
+        self.file_label_map = FileSelinuxMapping().type_to_file_name_map()
+
+    def service_names_to_service_info(self, service_names: list[str], service_type: ServiceType = ServiceType.SERVICE) -> list[ServiceInfo]:
+        if service_type == ServiceType.SERVICE:
+            # regular services are listed in `plat_service_contexts` exactly as named on system
+            return [
+                self.service_interfaces[service] for service in service_names
+                if service in self.service_interfaces
+            ]
+        elif service_type == ServiceType.HW_SERVICE:
+            # hw services have a slightly weird syntax
+            # they are written in `plat_hwservice_contexts` as package.name::IInterfaceName
+            # and that will match things like `package.name.IInterfaceName/extra_info`
+
+            def to_hwservice_name(service_name: str) -> str:
+                parts = service_name.split('/')[0].split('.')
+                return '.'.join(parts[:-1]) + '::' + parts[-1]
+            
+            service_names_set = set(service_names)
+
+            return [
+                service_info for service_info in self.service_interfaces.values()
+                if to_hwservice_name(service_info.service_name) in service_names_set
+            ]
     
-    def service_names_to_service_info(self, service_names: list[str]) -> list[ServiceInfo]:
-        return [
-            self.service_interfaces[service] for service in service_names
-            if service in self.service_interfaces
-        ]
-    
-    def accesible_services_for_domain(self, domain_type: SeType) -> AccessibleServices:
+    def accesible_services_for_domain(self, domain_type: SeType, service_type: ServiceType = ServiceType.SERVICE) -> AccessibleServices:
+        service_context = self.services[service_type]
+
         can_access_fallback = False
 
         # check if no services are accessible
-        if domain_type not in self.accessible_service_map:
+        if domain_type not in service_context.accessible_service_map:
             return AccessibleServices(
                 allowlist=[],
                 blocklist=None,
             )
 
-        accesible_services = self.accessible_service_map[domain_type]
-        can_access_fallback = self.services.fallback.type in accesible_services
+        accesible_services = service_context.accessible_service_map[domain_type]
+        can_access_fallback = service_context.service_labels.fallback.type in accesible_services
 
         service_names = []
         for type in accesible_services:
-            service_names.extend(self.services.services_for_setype(type))
+            service_names.extend(service_context.service_labels.services_for_setype(type))
         
         forbidden_services = None
         if can_access_fallback:
-            all_services = self.services.label_to_service_name_map()
+            all_services = service_context.service_labels.label_to_service_name_map()
             for type in accesible_services:
                 if type in all_services:
                     del all_services[type]
@@ -312,28 +409,73 @@ class SelinuxContext:
             forbidden_services = list(chain.from_iterable(all_services.values))
         
         return AccessibleServices(
-            allowlist=self.service_names_to_service_info(service_names),
+            allowlist=self.service_names_to_service_info(service_names, service_type=service_type),
             blocklist=None if forbidden_services is None else self.service_names_to_service_info(forbidden_services),
         )
     
-    def accesible_services(self, domain_type: SeType):
-        services = self.accesible_services_for_domain(domain_type)
+    def print_accesible_files_for_domain(self, domain_type: SeType):
+        rules = self.policy.search_rules([
+            # TODO: use -A and parse allowxperm
+            '--allow',
+            '-s', str(domain_type),
+            '-c', 'file',
+        ])
 
-        print(f'{domain_type} can access:')
-        for service in services.allowlist:
-            print(service)
+        rules = self.policy.expand_rule_attributes(rules)
+
+        allowed_files = defaultdict(set)
+
+        print('accessible files')
+        for rule in rules:
+            if rule.dst_type in self.file_label_map:
+                for file in self.file_label_map[rule.dst_type]:
+                    allowed_files[file].update(rule.permissions)
         
-        print(f'Can access fallback: {services.blocklist is not None}')
-        if services.blocklist is not None:
-            for service in services.blocklist:
+        for file, permissions in allowed_files.items():
+            if len(permissions) == 0:
+                continue
+
+            # FIXME: doing it based on -- here is kind of hacky
+            if file.endswith('--'):
+                file = file[:-2]
+                print(f'{file} (exact): {permissions}')
+            else:
+                print(f'{file}: {permissions}')
+
+    def print_accesible_services(self, domain_type: SeType):
+        for service_type in ServiceType:
+            services = self.accesible_services_for_domain(domain_type, service_type=service_type)
+
+            print(f'{domain_type} can access {service_type}:')
+            for service in services.allowlist:
                 print(service)
-        
-        print()
+            
+            print(f'Can access fallback: {services.blocklist is not None}')
+            if services.blocklist is not None:
+                for service in services.blocklist:
+                    print(service)
+            
+            print()
+    
+    def print_info_for_domain(self, domain_type: SeType):
+        self.print_accesible_services(domain_type)
+        self.print_accesible_files_for_domain(domain_type)
 
 def dump_selinux():
-    # print(get_services_for_permissions(Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))
     context = SelinuxContext()
-    context.accesible_services(SeType('untrusted_app'))
+    context.print_info_for_domain(SeType('untrusted_app'))
+
+    # a = set(service.service_name for service in get_services_for_permissions(Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))
+    # b = set(service.service_name for service in context.accesible_services_for_domain(SeType('untrusted_app')).allowlist)
+    # c = set(service.service_name for service in context.accesible_services_for_domain(SeType('untrusted_app'), service_type=ServiceType.HW_SERVICE).allowlist)
+    # b = b.union(c)
+    # print(len(a))
+    # print(len(b))
+    # print(a == b)
+    # print('only in a')
+    # print(a - b)
+    # print('only in b')
+    # print(b - a)
     # context.accesible_services(SeType('untrusted_app_all'))
 
     # policy = SePolicy()
