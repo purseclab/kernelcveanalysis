@@ -1,6 +1,6 @@
 # Android Env
 
-Scripts to analyze things about the environbbment of an android device over adb.
+Scripts to analyze things about the environment of an Android device over adb.
 
 Setup ssh port forwarding for adb on local machine running kexploit:
 ```sh
