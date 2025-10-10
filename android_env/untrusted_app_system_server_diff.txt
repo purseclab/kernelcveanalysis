@@ -1,0 +1,420 @@
+tools/read_file: 1 file pushed, 0 skipped. 118.1 MB/s (3305512 bytes in 0.027s)
+tools/dump_seccomp_filter: 1 file pushed, 0 skipped. 100.0 MB/s (3311472 bytes in 0.032s)
+tools/runas: 1 file pushed, 0 skipped. 101.5 MB/s (3337192 bytes in 0.031s)
+printing policy differences between untrusted_app and system_server
+differing service permissions between untrusted_app and system_server
+only untrusted_app can access:
+ServiceInfo(service_name='android.security.identity', service_interface='android.security.identity.ICredentialStoreFactory')
+ServiceInfo(service_name='android.hardware.drm.IDrmFactory/clearkey', service_interface='android.hardware.drm.IDrmFactory')
+
+only system_server can access:
+ServiceInfo(service_name='android.security.authorization', service_interface='android.security.authorization.IKeystoreAuthorization')
+ServiceInfo(service_name='dataloader_manager', service_interface='android.content.pm.IDataLoaderManager')
+ServiceInfo(service_name='dnsresolver', service_interface='android.net.IDnsResolver')
+ServiceInfo(service_name='android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory/default', service_interface='android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory')
+ServiceInfo(service_name='android.hardware.authsecret.IAuthSecret/default', service_interface='android.hardware.authsecret.IAuthSecret')
+ServiceInfo(service_name='android.hardware.contexthub.IContextHub/default', service_interface='android.hardware.contexthub.IContextHub')
+ServiceInfo(service_name='android.hardware.biometrics.face.IFace/default', service_interface='android.hardware.biometrics.face.IFace')
+ServiceInfo(service_name='android.hardware.biometrics.fingerprint.IFingerprint/default', service_interface='android.hardware.biometrics.fingerprint.IFingerprint')
+ServiceInfo(service_name='android.hardware.gnss.IGnss/default', service_interface='android.hardware.gnss.IGnss')
+ServiceInfo(service_name='android.hardware.health.IHealth/default', service_interface='android.hardware.health.IHealth')
+ServiceInfo(service_name='android.hardware.input.processor.IInputProcessor/default', service_interface='android.hardware.input.processor.IInputProcessor')
+ServiceInfo(service_name='android.hardware.ir.IConsumerIr/default', service_interface='android.hardware.ir.IConsumerIr')
+ServiceInfo(service_name='android.hardware.light.ILights/default', service_interface='android.hardware.light.ILights')
+ServiceInfo(service_name='android.hardware.memtrack.IMemtrack/default', service_interface='android.hardware.memtrack.IMemtrack')
+ServiceInfo(service_name='android.hardware.oemlock.IOemLock/default', service_interface='android.hardware.oemlock.IOemLock')
+ServiceInfo(service_name='android.hardware.power.IPower/default', service_interface='android.hardware.power.IPower')
+ServiceInfo(service_name='android.hardware.power.stats.IPowerStats/default', service_interface='android.hardware.power.stats.IPowerStats')
+ServiceInfo(service_name='android.hardware.rebootescrow.IRebootEscrow/default', service_interface='android.hardware.rebootescrow.IRebootEscrow')
+ServiceInfo(service_name='android.hardware.sensors.ISensors/default', service_interface='android.hardware.sensors.ISensors')
+ServiceInfo(service_name='android.system.suspend.ISystemSuspend/default', service_interface='android.system.suspend.ISystemSuspend')
+ServiceInfo(service_name='android.hardware.usb.IUsb/default', service_interface='android.hardware.usb.IUsb')
+ServiceInfo(service_name='android.hardware.uwb.IUwb/default', service_interface='android.hardware.uwb.IUwb')
+ServiceInfo(service_name='android.hardware.vibrator.IVibrator/default', service_interface='android.hardware.vibrator.IVibrator')
+ServiceInfo(service_name='android.hardware.vibrator.IVibratorManager/default', service_interface='android.hardware.vibrator.IVibratorManager')
+ServiceInfo(service_name='incident', service_interface='android.os.IIncidentManager')
+ServiceInfo(service_name='incremental', service_interface='android.os.incremental.IIncrementalService')
+ServiceInfo(service_name='installd', service_interface='android.os.IInstalld')
+ServiceInfo(service_name='android.security.metrics', service_interface='android.security.metrics.IKeystoreMetrics')
+ServiceInfo(service_name='mdns', service_interface='android.net.mdns.aidl.IMDns')
+ServiceInfo(service_name='netd', service_interface='android.net.INetd')
+ServiceInfo(service_name='stats', service_interface='android.os.IStatsd')
+ServiceInfo(service_name='storaged', service_interface='android.os.IStoraged')
+ServiceInfo(service_name='storaged_pri', service_interface='android.os.storaged.IStoragedPrivate')
+ServiceInfo(service_name='logcat', service_interface='android.os.logcat.ILogcatManagerService')
+ServiceInfo(service_name='otadexopt', service_interface='android.content.pm.IOtaDexopt')
+ServiceInfo(service_name='transparency', service_interface='com.android.internal.os.IBinaryTransparencyService')
+ServiceInfo(service_name='network_watchlist', service_interface='com.android.internal.net.INetworkWatchlistManager')
+ServiceInfo(service_name='external_vibrator_service', service_interface='android.os.IExternalVibratorService')
+ServiceInfo(service_name='wifiscanner', service_interface='android.net.wifi.IWifiScanner')
+ServiceInfo(service_name='system_config', service_interface='android.os.ISystemConfig')
+ServiceInfo(service_name='color_display', service_interface='android.hardware.display.IColorDisplayManager')
+ServiceInfo(service_name='network_score', service_interface='android.net.INetworkScoreService')
+ServiceInfo(service_name='media.camera.proxy', service_interface='android.hardware.ICameraServiceProxy')
+ServiceInfo(service_name='network_stack', service_interface='android.net.INetworkStackConnector')
+ServiceInfo(service_name='system_update', service_interface='android.os.ISystemUpdateManager')
+ServiceInfo(service_name='statsbootstrap', service_interface='android.os.IStatsBootstrapAtomService')
+ServiceInfo(service_name='app_integrity', service_interface='android.content.integrity.IAppIntegrityManager')
+ServiceInfo(service_name='dynamic_system', service_interface='android.os.image.IDynamicSystemService')
+ServiceInfo(service_name='resources', service_interface='android.content.res.IResourcesManager')
+ServiceInfo(service_name='overlay', service_interface='android.content.om.IOverlayManager')
+ServiceInfo(service_name='processinfo', service_interface='android.os.IProcessInfoService')
+ServiceInfo(service_name='recovery', service_interface='android.os.IRecoverySystem')
+ServiceInfo(service_name='serial', service_interface='android.hardware.ISerialManager')
+ServiceInfo(service_name='scheduling_policy', service_interface='android.os.ISchedulingPolicyService')
+ServiceInfo(service_name='netd_listener', service_interface='android.net.metrics.INetdEventListener')
+ServiceInfo(service_name='statscompanion', service_interface='android.os.IStatsCompanionService')
+ServiceInfo(service_name='updatelock', service_interface='android.os.IUpdateLock')
+ServiceInfo(service_name='statsmanager', service_interface='android.os.IStatsManagerService')
+ServiceInfo(service_name='adb', service_interface='android.debug.IAdbManager')
+ServiceInfo(service_name='tracing.proxy', service_interface='android.tracing.ITracingServiceProxy')
+ServiceInfo(service_name='soundtrigger_middleware', service_interface='android.media.soundtrigger_middleware.ISoundTriggerMiddlewareService')
+ServiceInfo(service_name='inputflinger', service_interface='android.os.IInputFlinger')
+ServiceInfo(service_name='window', service_interface='android.view.IWindowManager')
+ServiceInfo(service_name='suspend_control_internal', service_interface='android.system.suspend.internal.ISuspendControlServiceInternal')
+ServiceInfo(service_name='suspend_control', service_interface='android.system.suspend.ISuspendControlService')
+ServiceInfo(service_name='android.os.UpdateEngineService', service_interface='android.os.IUpdateEngine')
+ServiceInfo(service_name='vold', service_interface='android.os.IVold')
+ServiceInfo(service_name='wifinl80211', service_interface='android.net.wifi.nl80211.IWificond')
+
+differing hwservice permissions between untrusted_app and system_server
+only untrusted_app can access:
+ServiceInfo(service_name='android.hardware.drm.IDrmFactory/clearkey', service_interface='android.hardware.drm.IDrmFactory')
+
+only system_server can access:
+ServiceInfo(service_name='android.frameworks.stats.IStats/default', service_interface='android.frameworks.stats.IStats')
+ServiceInfo(service_name='android.hardware.authsecret.IAuthSecret/default', service_interface='android.hardware.authsecret.IAuthSecret')
+ServiceInfo(service_name='android.hardware.gnss.IGnss/default', service_interface='android.hardware.gnss.IGnss')
+ServiceInfo(service_name='android.hardware.health.IHealth/default', service_interface='android.hardware.health.IHealth')
+ServiceInfo(service_name='android.hardware.ir.IConsumerIr/default', service_interface='android.hardware.ir.IConsumerIr')
+ServiceInfo(service_name='android.hardware.memtrack.IMemtrack/default', service_interface='android.hardware.memtrack.IMemtrack')
+ServiceInfo(service_name='android.hardware.oemlock.IOemLock/default', service_interface='android.hardware.oemlock.IOemLock')
+ServiceInfo(service_name='android.hardware.power.IPower/default', service_interface='android.hardware.power.IPower')
+ServiceInfo(service_name='android.hardware.power.stats.IPowerStats/default', service_interface='android.hardware.power.stats.IPowerStats')
+ServiceInfo(service_name='android.hardware.sensors.ISensors/default', service_interface='android.hardware.sensors.ISensors')
+ServiceInfo(service_name='android.hardware.usb.IUsb/default', service_interface='android.hardware.usb.IUsb')
+ServiceInfo(service_name='android.hardware.vibrator.IVibrator/default', service_interface='android.hardware.vibrator.IVibrator')
+ServiceInfo(service_name='android.system.suspend.ISystemSuspend/default', service_interface='android.system.suspend.ISystemSuspend')
+
+differing file permissions between untrusted_app and system_server
+only untrusted_app can access:
+/data/misc/user(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/system/bin/run-as (exact): {'getattr'}
+/data/misc/shared_relro(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/system/bin/sh (exact): {'read', 'open', 'map', 'lock', 'execute', 'ioctl', 'execute_no_trans', 'watch_reads', 'watch', 'getattr'}
+/system/bin/simpleperf: {'read', 'open', 'map', 'execute', 'getattr'}
+/system/bin/bcc: {'read', 'open', 'map', 'execute', 'getattr'}
+/system/bin/ld\.mc: {'read', 'open', 'map', 'execute', 'getattr'}
+/data/local/traces(/.*)?: {'read', 'getattr'}
+
+only system_server can access:
+/data/misc/a11ytrace(/.*)?: {'unlink', 'open', 'setattr', 'map', 'lock', 'write', 'create', 'append', 'getattr'}
+/data/misc/adb(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/adb_keys: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/apex(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/apex/(\.(bootstrap|default)-)?apex-info-list.xml: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc_de/[0-9]+/apexdata/com\.android\.uwb(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc_ce/[0-9]+/apexdata/com\.android\.uwb(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc_de/[0-9]+/apexdata/com\.android\.wifi(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc_ce/[0-9]+/apexdata/com\.android\.wifi(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc_ce/[0-9]+/apexdata/com\.android\.appsearch(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc_de/[0-9]+/apexdata/com\.android\.permission(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc_ce/[0-9]+/apexdata/com\.android\.permission(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/apexdata/com\.android\.uwb(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/apexdata/com\.android\.wifi(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/apexdata/com\.android\.tethering(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/apexdata/com\.android\.permission(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/apexdata/com\.android\.scheduling(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/app-private(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'relabelto', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/bluetooth(/.*)?: {'read', 'map', 'write', 'append', 'getattr'}
+/data/misc/bluedroid(/.*)?: {'read', 'map', 'write', 'append', 'getattr'}
+/data/misc/appcompat(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/cache(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/cache(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/cache/backup(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/cache/backup(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/cache/recovery(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/cache/recovery(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/acct: {'read', 'open', 'map', 'lock', 'ioctl', 'write', 'watch_reads', 'watch', 'append', 'getattr'}
+/data/misc/emergencynumberdb(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/(odm|vendor/odm)/etc/selinux/odm_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/(product|system/product)/etc/selinux/product_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/(system_ext|system/system_ext)/etc/selinux/system_ext_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/plat_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/vendor_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/product_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/dev/selinux/apex_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/system/etc/selinux/plat_file_contexts: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/system/users/[0-9]+/fpdata(/.*)?: {'unlink', 'getattr'}
+/dev/fscklogs(/.*)?: {'read', 'unlink', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/system/game_mode_intervention\.list: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/gsi_persistent_data: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/incidents(/.*)?: {'read'}
+/data/incremental/MT_[^/]+/mount/.log: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/incremental/MT_[^/]+/mount/.pending_reads: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/incremental/MT_[^/]+/mount/.blocks_written: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc_ce/[0-9]+/iorapd(/.*)?: {'getattr'}
+/data/misc/iorapd(/.*)?: {'getattr'}
+/(odm|vendor/odm)/etc/selinux/odm_mac_permissions\.xml: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/(product|system/product)/etc/selinux/product_mac_permissions\.xml: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/(system_ext|system/system_ext)/etc/selinux/system_ext_mac_permissions\.xml: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/dev/selinux/apex_mac_permissions\.xml: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/system/etc/selinux/plat_mac_permissions\.xml: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc/network_watchlist(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/odrefresh(/.*)?: {'read', 'unlink', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc/odsign/metrics(/.*)?: {'read', 'unlink', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/ota_package(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/system/packages\.list: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/metadata/password_slots(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/perfetto-traces(/.*)?: {'read', 'getattr'}
+/data/preloads(/.*)?: {'read', 'unlink', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc/prereboot(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/profcollectd(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc/profman(/.*)?: {'open', 'setattr', 'map', 'lock', 'write', 'create', 'append', 'getattr'}
+/res(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/lib(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/sbin(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/init\..*: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/fstab\..*: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/ueventd\..*: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/d: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/bin: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/etc: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/proc: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/config: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/sdcard: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/charger: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/build\.prop: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/verity_key: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/lost\+found: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/bugreports: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/default\.prop: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/selinux_version: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/dev/event-log-tags: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/server_configurable_flags(/.*)?: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/metadata/staged-install(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/rollback/\d+/[^/]+/.*\.apex: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'relabelto', 'write', 'create', 'watch_reads', 'rename', 'link', 'append', 'getattr'}
+/data/pkg_staging(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'relabelto', 'write', 'create', 'watch_reads', 'rename', 'link', 'append', 'getattr'}
+/data/app-staging(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'relabelto', 'write', 'create', 'watch_reads', 'rename', 'link', 'append', 'getattr'}
+/data/apex/active/(.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'relabelto', 'write', 'create', 'watch_reads', 'rename', 'link', 'append', 'getattr'}
+/data/apex/backup/(.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'relabelto', 'write', 'create', 'watch_reads', 'rename', 'link', 'append', 'getattr'}
+/data/apex/decompressed/(.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'relabelfrom', 'relabelto', 'write', 'create', 'watch_reads', 'rename', 'link', 'append', 'getattr'}
+/data/misc/stats-data(/.*)?: {'unlink'}
+/data/misc/train-info(/.*)?: {'unlink'}
+/data/misc/stats-service(/.*)?: {'unlink'}
+/data/misc/stats-metadata(/.*)?: {'unlink'}
+/data/misc/stats-active-metric(/.*)?: {'unlink'}
+/system/bin/surfaceflinger: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc/systemkeys(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/metadata/userspacereboot(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/(vendor|system/vendor)/apex(/[^/]+){0,2}: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/(odm|vendor/odm|vendor|system/vendor)/usr/idc(/.*)?\.idc: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/(odm|vendor/odm|vendor|system/vendor)/usr/keychars(/.*)?\.kcm: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/(odm|vendor/odm|vendor|system/vendor)/usr/keylayout(/.*)?\.kl: {'read', 'open', 'map', 'lock', 'ioctl', 'watch_reads', 'watch', 'getattr'}
+/data/misc/vpn(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/metadata/watchdog(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc_ce/[0-9]+/wifi(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/wifi(/.*)?: {'read', 'watch', 'unlink', 'open', 'setattr', 'map', 'lock', 'ioctl', 'write', 'create', 'watch_reads', 'rename', 'append', 'getattr'}
+/data/misc/wmtrace(/.*)?: {'unlink', 'open', 'setattr', 'map', 'lock', 'write', 'create', 'append', 'getattr'}
+
+different permissions between domains:
+file `/data/anr(/.*)?`:
+untrusted_app permissions: ['append', 'open']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/misc/apexdata/com\.android\.art(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/data/app(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelfrom', 'relabelto', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/mnt/expand/[^/]+/app(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelfrom', 'relabelto', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/rollback/\d+/[^/]+/.*\.apk`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelfrom', 'relabelto', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/incremental(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelfrom', 'relabelto', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/backup(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/system_ce/[0-9]+/backup(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/system_ce/[0-9]+/backup_stage(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/secure/backup(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/cache/backup_stage(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/cache/backup_stage(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/app/[^/]+/oat(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/data/app/[^/]+/[^/]+/oat(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/mnt/expand/[^/]+/app/[^/]+/oat(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/mnt/expand/[^/]+/app/[^/]+/[^/]+/oat(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/mnt/expand/[^/]+/app/vmdl[^/]+\.tmp/oat(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/data/app/vmdl[^/]+\.tmp/oat(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/data/dalvik-cache(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/data/system/dropbox(/.*)?`:
+untrusted_app permissions: ['getattr', 'read']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/fonts/files(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/system/heapdump(/.*)?`:
+untrusted_app permissions: ['append']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/system/users/[0-9]+/photo\.png`:
+untrusted_app permissions: ['getattr', 'map', 'read']
+system_server permissions: ['append', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'relabelto', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/misc/keychain(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/oem(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/data/system_de/[0-9]+/ringtones(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/mnt/expand/[^/]+/local/tmp(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads', 'write']
+system_server permissions: ['append', 'getattr', 'map', 'read', 'write']
+file `/data/local/tmp(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads', 'write']
+system_server permissions: ['append', 'getattr', 'map', 'read', 'write']
+file `/data/system_ce/[0-9]+/shortcut_service/bitmaps(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/(.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelfrom', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/mnt/expand/[^/]+(/.*)?`:
+untrusted_app permissions: ['getattr', 'map', 'read']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelfrom', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/(product|system/product)(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'lock', 'map', 'open', 'read']
+file `/(system_ext|system/system_ext)(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'lock', 'map', 'open', 'read']
+file `/(product|system/product)/overlay(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'lock', 'map', 'open', 'read']
+file `/system(/.*)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'lock', 'map', 'open', 'read']
+file `/cache/overlay/(system|product)/upper`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'lock', 'map', 'open', 'read']
+file `/mnt/scratch/overlay/(system|product)/upper`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'lock', 'map', 'open', 'read']
+file `/system/bin/logwrapper`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'lock', 'map', 'open', 'read']
+file `/data/tombstones(/.*)?`:
+untrusted_app permissions: ['getattr', 'read']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads', 'write']
+file `/data/system/users/[0-9]+/wallpaper`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelto', 'rename', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/system/users/[0-9]+/wallpaper_lock`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelto', 'rename', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/system/users/[0-9]+/wallpaper_orig`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelto', 'rename', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/system/users/[0-9]+/wallpaper_lock_orig`:
+untrusted_app permissions: ['getattr', 'map', 'read', 'write']
+system_server permissions: ['append', 'getattr', 'ioctl', 'link', 'lock', 'map', 'open', 'read', 'relabelto', 'rename', 'unlink', 'watch', 'watch_reads', 'write']
+file `/system/bin/app_process32`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/system/bin/app_process64`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/system/bin/linker(64)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'map', 'open', 'read']
+file `/system/bin/bootstrap/linker(64)?`:
+untrusted_app permissions: ['execute', 'execute_no_trans', 'getattr', 'map', 'open', 'read']
+system_server permissions: ['execute', 'getattr', 'map', 'open', 'read']
+file `/data/misc/zoneinfo(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/media(/.*)?`:
+untrusted_app permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+system_server permissions: ['append', 'getattr', 'read', 'write']
+file `/mnt/expand/[^/]+/media(/.*)?`:
+untrusted_app permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+system_server permissions: ['append', 'getattr', 'read', 'write']
+file `/data/misc/sms(/.*)?`:
+untrusted_app permissions: ['getattr', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/misc/apns(/.*)?`:
+untrusted_app permissions: ['getattr', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/misc/carrierid(/.*)?`:
+untrusted_app permissions: ['getattr', 'read', 'write']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/misc/textclassifier(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/(odm|vendor/odm)/app(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/(odm|vendor/odm)/priv-app(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/(vendor|system/vendor)/app(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/(vendor|system/vendor)/priv-app(/.*)?`:
+untrusted_app permissions: ['execute', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+file `/data/app-private/vmdl.*\.tmp(/.*)?`:
+untrusted_app permissions: ['getattr', 'read']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'relabelfrom', 'relabelto', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/mnt/expand/[^/]+/app/vmdl[^/]+\.tmp(/.*)?`:
+untrusted_app permissions: ['getattr', 'read']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'relabelfrom', 'relabelto', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/app/vmdl[^/]+\.tmp(/.*)?`:
+untrusted_app permissions: ['getattr', 'read']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'relabelfrom', 'relabelto', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/mnt/asec(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/mnt/asec/[^/]+/[^/]+\.zip`:
+untrusted_app permissions: ['execute']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/mnt/asec/[^/]+/lib(/.*)?`:
+untrusted_app permissions: ['execute']
+system_server permissions: ['append', 'create', 'getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'rename', 'setattr', 'unlink', 'watch', 'watch_reads', 'write']
+file `/data/preloads/demo(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'unlink', 'watch', 'watch_reads']
+file `/data/preloads/media(/.*)?`:
+untrusted_app permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'watch', 'watch_reads']
+system_server permissions: ['getattr', 'ioctl', 'lock', 'map', 'open', 'read', 'unlink', 'watch', 'watch_reads']
+

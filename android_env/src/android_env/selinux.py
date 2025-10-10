@@ -260,6 +260,18 @@ class SePolicy:
         ])
 
 @dataclass
+class FileInfo:
+    file_regex: str
+    exact_match: bool
+    permissions: set[str]
+
+    def __repr__(self) -> str:
+        if self.exact_match:
+            return f'{self.file_regex} (exact): {self.permissions}'
+        else:
+            return f'{self.file_regex}: {self.permissions}'
+
+@dataclass
 class ServiceInfo:
     service_name: str
     service_interface: str
@@ -413,7 +425,7 @@ class SelinuxContext:
             blocklist=None if forbidden_services is None else self.service_names_to_service_info(forbidden_services),
         )
     
-    def print_accesible_files_for_domain(self, domain_type: SeType):
+    def accesible_files_for_domain(self, domain_type: SeType) -> dict[str, FileInfo]:
         rules = self.policy.search_rules([
             # TODO: use -A and parse allowxperm
             '--allow',
@@ -423,24 +435,33 @@ class SelinuxContext:
 
         rules = self.policy.expand_rule_attributes(rules)
 
-        allowed_files = defaultdict(set)
+        allowed_files = {}
 
-        print('accessible files')
         for rule in rules:
             if rule.dst_type in self.file_label_map:
                 for file in self.file_label_map[rule.dst_type]:
-                    allowed_files[file].update(rule.permissions)
-        
-        for file, permissions in allowed_files.items():
-            if len(permissions) == 0:
-                continue
+                    if file not in allowed_files:
 
-            # FIXME: doing it based on -- here is kind of hacky
-            if file.endswith('--'):
-                file = file[:-2]
-                print(f'{file} (exact): {permissions}')
-            else:
-                print(f'{file}: {permissions}')
+                        exact = False
+                        # if file had -- in it, it is exact match
+                        if file.endswith('--'):
+                            file = file[:-2]
+                            exact = True
+                        
+                        allowed_files[file] = FileInfo(
+                            file_regex=file,
+                            exact_match=exact,
+                            permissions=set()
+                        )
+                    
+                    allowed_files[file].permissions.update(rule.permissions)
+        
+        return { file: file_info for file, file_info in allowed_files.items() if len(file_info.permissions) > 0}
+    
+    def print_accesible_files_for_domain(self, domain_type: SeType):
+        print('accessible files')
+        for file_info in self.accesible_files_for_domain(domain_type).values():
+            print(file_info)
 
     def print_accesible_services(self, domain_type: SeType):
         for service_type in ServiceType:
@@ -460,10 +481,70 @@ class SelinuxContext:
     def print_info_for_domain(self, domain_type: SeType):
         self.print_accesible_services(domain_type)
         self.print_accesible_files_for_domain(domain_type)
+    
+    def diff_accesible_files_for_domain(self, domain1: SeType, domain2: SeType):
+        files1 = self.accesible_files_for_domain(domain1)
+        files2 = self.accesible_files_for_domain(domain2)
+
+        print(f'differing file permissions between {domain1} and {domain2}')
+        print(f'only {domain1} can access:')
+        for file, file_info in dict(files1).items():
+            if file_info.file_regex not in files2:
+                print(file_info)
+                del files1[file]
+        print()
+        
+        print(f'only {domain2} can access:')
+        for file, file_info in dict(files2).items():
+            if file_info.file_regex not in files1:
+                print(file_info)
+                del files2[file]
+        print()
+        
+        print('different permissions between domains:')
+        for file, file_info1 in files1.items():
+            file_info2 = files2[file]
+            if file_info1.permissions != file_info2.permissions:
+                print(f'file `{file}`:')
+                print(f'{domain1} permissions: {sorted(file_info1.permissions)}')
+                print(f'{domain2} permissions: {sorted(file_info2.permissions)}')
+        print()
+    
+    def diff_accessible_services_for_domain(self, domain1: SeType, domain2: SeType):
+        for service_type in ServiceType:
+            service_info1 = self.accesible_services_for_domain(domain1, service_type)
+            service_info2 = self.accesible_services_for_domain(domain2, service_type)
+            # TODO: impement diffing with fallback service
+            assert service_info1.blocklist is None and service_info2.blocklist is None, 'unimplemented'
+
+            services1 = { service.service_name: service for service in service_info1.allowlist }
+            services2 = { service.service_name: service for service in service_info2.allowlist }
+
+            print(f'differing {service_type} permissions between {domain1} and {domain2}')
+            print(f'only {domain1} can access:')
+            for service in services1.values():
+                if service.service_name not in services2:
+                    print(service)
+            print()
+            
+            print(f'only {domain2} can access:')
+            for service in services2.values():
+                if service.service_name not in services1:
+                    print(service)
+            print()
+    
+    def diff_info_for_domain(self, domain1: SeType, domain2: SeType):
+        print(f'printing policy differences between {domain1} and {domain2}')
+        self.diff_accessible_services_for_domain(domain1, domain2)
+        self.diff_accesible_files_for_domain(domain1, domain2)
+        
+
 
 def dump_selinux():
     context = SelinuxContext()
-    context.print_info_for_domain(SeType('untrusted_app'))
+    # context.print_info_for_domain(SeType('untrusted_app'))
+    # context.print_info_for_domain(SeType('system_server'))
+    context.diff_info_for_domain(SeType('untrusted_app'), SeType('system_server'))
 
     # a = set(service.service_name for service in get_services_for_permissions(Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))
     # b = set(service.service_name for service in context.accesible_services_for_domain(SeType('untrusted_app')).allowlist)
