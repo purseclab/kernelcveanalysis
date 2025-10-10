@@ -543,8 +543,8 @@ class SelinuxContext:
 def dump_selinux():
     context = SelinuxContext()
     # context.print_info_for_domain(SeType('untrusted_app'))
-    # context.print_info_for_domain(SeType('system_server'))
-    context.diff_info_for_domain(SeType('untrusted_app'), SeType('system_server'))
+    context.print_info_for_domain(SeType('system_server'))
+    # context.diff_info_for_domain(SeType('untrusted_app'), SeType('system_server'))
 
     # a = set(service.service_name for service in get_services_for_permissions(Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))
     # b = set(service.service_name for service in context.accesible_services_for_domain(SeType('untrusted_app')).allowlist)
