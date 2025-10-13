@@ -38,4 +38,4 @@ export ALTERNATE_JAVAC="$ALT_JAVAC_PATH"
 mm clean
 # use x86_64 cause I wasn't sure if pizza would have arm compilers and such
 lunch aosp_cf_x86_64_only_phone-userdebug
-DISABLE_ARTIFACT_PATH_REQUIREMENTS=true m -j8 framework # set number of threads in -j accordingly
+DISABLE_ARTIFACT_PATH_REQUIREMENTS=true m -j8 framework services # set number of threads in -j accordingly

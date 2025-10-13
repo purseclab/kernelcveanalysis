@@ -548,12 +548,12 @@ def dump_selinux():
     )
 
     # ql.methods_in_interface('android.app.role.IRoleManager') # not in db
-    # ql.methods_in_interface('android.accounts.IAccountManager') # in db but stub impl is not?
+    ql.methods_in_interface('android.accounts.IAccountManager') # in db but stub impl is not?
     # ql.methods_in_interface('android.os.IThermalService')
-    # ql.get_types('AccountManagerService')
+    # ql.get_type('AccountManagerService')
 
-    ql.methods_in_interface('android.os.IPermissionController')
-    ql.get_types('IPermissionController')
+    # ql.methods_in_interface('android.os.IPermissionController') # methods are messed up, impl name does not match?
+    # ql.get_type('IPermissionController')
 
     # context = SelinuxContext()
     # context.print_info_for_domain(SeType('untrusted_app'))
