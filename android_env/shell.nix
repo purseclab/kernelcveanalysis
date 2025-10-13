@@ -11,7 +11,7 @@ pkgs.mkShell {
     pkgs.bundler
     pkgs.setools
     pkgs.git-repo
-    pkgs.codeql
+    # pkgs.codeql
   ];
   shellHook = ''
     bundle config set path ruby_gems

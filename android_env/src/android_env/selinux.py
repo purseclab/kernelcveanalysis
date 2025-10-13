@@ -10,6 +10,7 @@ import itertools
 
 from .adb import read_file, run_adb_command, runas, Permissions
 from .util import config_lines
+from .codeql import CodeqlQuery, CodeqlContext
 
 T = TypeVar('T')
 
@@ -541,9 +542,22 @@ class SelinuxContext:
 
 
 def dump_selinux():
-    context = SelinuxContext()
+    ql = CodeqlContext(
+        Path('/home/jack/Documents/college/purdue/research/kernelcveanalysis/android_env/codeql_database'),
+        Path('/home/jack/Documents/college/purdue/research/kernelcveanalysis/android_env/codeql'),
+    )
+
+    # ql.methods_in_interface('android.app.role.IRoleManager') # not in db
+    # ql.methods_in_interface('android.accounts.IAccountManager') # in db but stub impl is not?
+    # ql.methods_in_interface('android.os.IThermalService')
+    # ql.get_types('AccountManagerService')
+
+    ql.methods_in_interface('android.os.IPermissionController')
+    ql.get_types('IPermissionController')
+
+    # context = SelinuxContext()
     # context.print_info_for_domain(SeType('untrusted_app'))
-    context.print_info_for_domain(SeType('system_server'))
+    # context.print_info_for_domain(SeType('system_server'))
     # context.diff_info_for_domain(SeType('untrusted_app'), SeType('system_server'))
 
     # a = set(service.service_name for service in get_services_for_permissions(Permissions(uid=10094, gid=10094, selabel='u:r:untrusted_app:s0')))

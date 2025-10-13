@@ -1,0 +1,3 @@
+"interface","stub","impl"
+"IService","Stub","Service"
+"IService","Stub","new IService.Stub(...) { ... }"

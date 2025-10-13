@@ -1,0 +1,8 @@
+---
+library: false
+warnOnImplicitThis: false
+compileForOverlayEval: false
+name: cql-test
+version: 0.0.1
+dependencies:
+  codeql/java-all: "*"
