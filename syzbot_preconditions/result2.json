@@ -1,0 +1,1379 @@
+{
+  "parsed": {
+    "kind": "KASAN: slab-out-of-bounds in ext4_read_inline_data <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209'>fs/ext4/inline.c:209</a> [inline]",
+    "access": {
+      "op": "read",
+      "size": 68,
+      "addr": "ffff88810f5446d3"
+    },
+    "object_info": {
+      "obj_addr": "ffff88810f544600",
+      "cache": "kmalloc-192",
+      "obj_size": 192,
+      "region": {
+        "start": "ffff88810f544600",
+        "end": "ffff88810f5446c0"
+      }
+    },
+    "allocated_by": [
+      "Allocated by task 358:\n kasan_save_stack <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#38'>mm/kasan/common.c:38</a> [inline]\n kasan_set_track <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#45'>mm/kasan/common.c:45</a> [inline]\n set_alloc_info <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#430'>mm/kasan/common.c:430</a> [inline]\n ____kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#509'>mm/kasan/common.c:509</a> [inline]\n __kasan_kmalloc+0xda/0x110 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#518'>mm/kasan/common.c:518</a>\n kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/kasan.h#254'>include/linux/kasan.h:254</a> [inline]\n kmem_cache_alloc_trace+0x184/0x2e0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2974'>mm/slub.c:2974</a>\n kmalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552'>include/linux/slab.h:552</a> [inline]\n kzalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664'>include/linux/slab.h:664</a> [inline]\n mca_alloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#853'>net/ipv6/mcast.c:853</a> [inline]\n __ipv6_dev_mc_inc+0x39e/0x9b0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#911'>net/ipv6/mcast.c:911</a>\n ipv6_dev_mc_inc+0x1f/0x30 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#935'>net/ipv6/mcast.c:935</a>\n ipv6_add_dev+0xc84/0x10a0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#461'>net/ipv6/addrconf.c:461</a>\n addrconf_notify+0x582/0xe90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#3567'>net/ipv6/addrconf.c:3567</a>\n notifier_call_chain <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#83'>kernel/notifier.c:83</a> [inline]\n raw_notifier_call_chain+0x90/0x100 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#410'>kernel/notifier.c:410</a>\n call_netdevice_notifiers_info <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2054'>net/core/dev.c:2054</a> [inline]\n call_netdevice_notifiers_extack <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2066'>net/core/dev.c:2066</a> [inline]\n call_netdevice_notifiers+0x111/0x190 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2080'>net/core/dev.c:2080</a>\n register_netdevice+0x1043/0x13c0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#10087'>net/core/dev.c:10087</a>\n veth_newlink+0x853/0xbb0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/drivers/net/veth.c#1387'>drivers/net/veth.c:1387</a>\n __rtnl_newlink <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3482'>net/core/rtnetlink.c:3482</a> [inline]\n rtnl_newlink+0x11bd/0x1640 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3530'>net/core/rtnetlink.c:3530</a>\n rtnetlink_rcv_msg+0x9db/0xb90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5610'>net/core/rtnetlink.c:5610</a>\n netlink_rcv_skb+0x1e0/0x430 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#2485'>net/netlink/af_netlink.c:2485</a>\n rtnetlink_rcv+0x1c/0x20 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5628'>net/core/rtnetlink.c:5628</a>\n netlink_unicast_kernel <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1307'>net/netlink/af_netlink.c:1307</a> [inline]\n netlink_unicast+0x87c/0xa40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1333'>net/netlink/af_netlink.c:1333</a>\n netlink_sendmsg+0x88d/0xb30 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1901'>net/netlink/af_netlink.c:1901</a>\n sock_sendmsg_nosec <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#652'>net/socket.c:652</a> [inline]\n __sock_sendmsg <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#664'>net/socket.c:664</a> [inline]\n __sys_sendto+0x41d/0x580 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2006'>net/socket.c:2006</a>\n __do_sys_sendto <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2018'>net/socket.c:2018</a> [inline]\n __se_sys_sendto <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014'>net/socket.c:2014</a> [inline]\n __x64_sys_sendto+0xe5/0x100 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014'>net/socket.c:2014</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb"
+    ],
+    "freed_by": [],
+    "link_frames": [
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209",
+        "file": "fs/ext4/inline.c",
+        "line": 209
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#1515",
+        "file": "fs/ext4/inline.c",
+        "line": 1515
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#77",
+        "file": "lib/dump_stack.c",
+        "line": 77
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#118",
+        "file": "lib/dump_stack.c",
+        "line": 118
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#248",
+        "file": "mm/kasan/report.c",
+        "line": 248
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#435",
+        "file": "mm/kasan/report.c",
+        "line": 435
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#452",
+        "file": "mm/kasan/report.c",
+        "line": 452
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/generic.c#189",
+        "file": "mm/kasan/generic.c",
+        "line": 189
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/shadow.c#65",
+        "file": "mm/kasan/shadow.c",
+        "line": 65
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209",
+        "file": "fs/ext4/inline.c",
+        "line": 209
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#1515",
+        "file": "fs/ext4/inline.c",
+        "line": 1515
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/dir.c#161",
+        "file": "fs/ext4/dir.c",
+        "line": 161
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#369",
+        "file": "fs/readdir.c",
+        "line": 369
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#354",
+        "file": "fs/readdir.c",
+        "line": 354
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#354",
+        "file": "fs/readdir.c",
+        "line": 354
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#38",
+        "file": "mm/kasan/common.c",
+        "line": 38
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#45",
+        "file": "mm/kasan/common.c",
+        "line": 45
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#430",
+        "file": "mm/kasan/common.c",
+        "line": 430
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#509",
+        "file": "mm/kasan/common.c",
+        "line": 509
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#518",
+        "file": "mm/kasan/common.c",
+        "line": 518
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/kasan.h#254",
+        "file": "include/linux/kasan.h",
+        "line": 254
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2974",
+        "file": "mm/slub.c",
+        "line": 2974
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552",
+        "file": "include/linux/slab.h",
+        "line": 552
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664",
+        "file": "include/linux/slab.h",
+        "line": 664
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#853",
+        "file": "net/ipv6/mcast.c",
+        "line": 853
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#911",
+        "file": "net/ipv6/mcast.c",
+        "line": 911
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#935",
+        "file": "net/ipv6/mcast.c",
+        "line": 935
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#461",
+        "file": "net/ipv6/addrconf.c",
+        "line": 461
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#3567",
+        "file": "net/ipv6/addrconf.c",
+        "line": 3567
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#83",
+        "file": "kernel/notifier.c",
+        "line": 83
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#410",
+        "file": "kernel/notifier.c",
+        "line": 410
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2054",
+        "file": "net/core/dev.c",
+        "line": 2054
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2066",
+        "file": "net/core/dev.c",
+        "line": 2066
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2080",
+        "file": "net/core/dev.c",
+        "line": 2080
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#10087",
+        "file": "net/core/dev.c",
+        "line": 10087
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/drivers/net/veth.c#1387",
+        "file": "drivers/net/veth.c",
+        "line": 1387
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3482",
+        "file": "net/core/rtnetlink.c",
+        "line": 3482
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3530",
+        "file": "net/core/rtnetlink.c",
+        "line": 3530
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5610",
+        "file": "net/core/rtnetlink.c",
+        "line": 5610
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#2485",
+        "file": "net/netlink/af_netlink.c",
+        "line": 2485
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5628",
+        "file": "net/core/rtnetlink.c",
+        "line": 5628
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1307",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1307
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1333",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1333
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1901",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1901
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#652",
+        "file": "net/socket.c",
+        "line": 652
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#664",
+        "file": "net/socket.c",
+        "line": 664
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2006",
+        "file": "net/socket.c",
+        "line": 2006
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2018",
+        "file": "net/socket.c",
+        "line": 2018
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014",
+        "file": "net/socket.c",
+        "line": 2014
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014",
+        "file": "net/socket.c",
+        "line": 2014
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#35",
+        "file": "include/linux/page_owner.h",
+        "line": 35
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2456",
+        "file": "mm/page_alloc.c",
+        "line": 2456
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2462",
+        "file": "mm/page_alloc.c",
+        "line": 2462
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#4254",
+        "file": "mm/page_alloc.c",
+        "line": 4254
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5357",
+        "file": "mm/page_alloc.c",
+        "line": 5357
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1808",
+        "file": "mm/slub.c",
+        "line": 1808
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1869",
+        "file": "mm/slub.c",
+        "line": 1869
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2627",
+        "file": "mm/slub.c",
+        "line": 2627
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2791",
+        "file": "mm/slub.c",
+        "line": 2791
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2831",
+        "file": "mm/slub.c",
+        "line": 2831
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2913",
+        "file": "mm/slub.c",
+        "line": 2913
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2955",
+        "file": "mm/slub.c",
+        "line": 2955
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2972",
+        "file": "mm/slub.c",
+        "line": 2972
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552",
+        "file": "include/linux/slab.h",
+        "line": 552
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664",
+        "file": "include/linux/slab.h",
+        "line": 664
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/file.c#628",
+        "file": "fs/kernfs/file.c",
+        "line": 628
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#819",
+        "file": "fs/open.c",
+        "line": 819
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#942",
+        "file": "fs/open.c",
+        "line": 942
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3391",
+        "file": "fs/namei.c",
+        "line": 3391
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3509",
+        "file": "fs/namei.c",
+        "line": 3509
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3536",
+        "file": "fs/namei.c",
+        "line": 3536
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1217",
+        "file": "fs/open.c",
+        "line": 1217
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1233",
+        "file": "fs/open.c",
+        "line": 1233
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1249",
+        "file": "fs/open.c",
+        "line": 1249
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244",
+        "file": "fs/open.c",
+        "line": 1244
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244",
+        "file": "fs/open.c",
+        "line": 1244
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#28",
+        "file": "include/linux/page_owner.h",
+        "line": 28
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1349",
+        "file": "mm/page_alloc.c",
+        "line": 1349
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1421",
+        "file": "mm/page_alloc.c",
+        "line": 1421
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3336",
+        "file": "mm/page_alloc.c",
+        "line": 3336
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3391",
+        "file": "mm/page_alloc.c",
+        "line": 3391
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5416",
+        "file": "mm/page_alloc.c",
+        "line": 5416
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5427",
+        "file": "mm/page_alloc.c",
+        "line": 5427
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5438",
+        "file": "mm/page_alloc.c",
+        "line": 5438
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1326",
+        "file": "security/selinux/hooks.c",
+        "line": 1326
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1523",
+        "file": "security/selinux/hooks.c",
+        "line": 1523
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#6389",
+        "file": "security/selinux/hooks.c",
+        "line": 6389
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/security.c#1980",
+        "file": "security/security.c",
+        "line": 1980
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/dcache.c#3036",
+        "file": "fs/dcache.c",
+        "line": 3036
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/dir.c#1178",
+        "file": "fs/kernfs/dir.c",
+        "line": 1178
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3226",
+        "file": "fs/namei.c",
+        "line": 3226
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3317",
+        "file": "fs/namei.c",
+        "line": 3317
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3506",
+        "file": "fs/namei.c",
+        "line": 3506
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3536",
+        "file": "fs/namei.c",
+        "line": 3536
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1217",
+        "file": "fs/open.c",
+        "line": 1217
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1233",
+        "file": "fs/open.c",
+        "line": 1233
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1249",
+        "file": "fs/open.c",
+        "line": 1249
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244",
+        "file": "fs/open.c",
+        "line": 1244
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244",
+        "file": "fs/open.c",
+        "line": 1244
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46
+      }
+    ],
+    "frames": [],
+    "raw": "==================================================================\nBUG: KASAN: slab-out-of-bounds in ext4_read_inline_data <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209'>fs/ext4/inline.c:209</a> [inline]\nBUG: KASAN: slab-out-of-bounds in ext4_read_inline_dir+0x435/0xd90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#1515'>fs/ext4/inline.c:1515</a>\nRead of size 68 at addr ffff88810f5446d3 by task syz-executor/355\n\nCPU: 0 PID: 355 Comm: syz-executor Not tainted 5.10.239-syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 05/07/2025\nCall Trace:\n __dump_stack+0x21/0x24 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#77'>lib/dump_stack.c:77</a>\n dump_stack_lvl+0x169/0x1d8 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#118'>lib/dump_stack.c:118</a>\n print_address_description+0x7f/0x2c0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#248'>mm/kasan/report.c:248</a>\n __kasan_report <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#435'>mm/kasan/report.c:435</a> [inline]\n kasan_report+0xe2/0x130 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#452'>mm/kasan/report.c:452</a>\n check_region_inline mm/kasan/generic.c:-1 [inline]\n kasan_check_range+0x280/0x290 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/generic.c#189'>mm/kasan/generic.c:189</a>\n memcpy+0x2d/0x70 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/shadow.c#65'>mm/kasan/shadow.c:65</a>\n ext4_read_inline_data <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209'>fs/ext4/inline.c:209</a> [inline]\n ext4_read_inline_dir+0x435/0xd90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#1515'>fs/ext4/inline.c:1515</a>\n ext4_readdir+0x380/0x39b0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/dir.c#161'>fs/ext4/dir.c:161</a>\n iterate_dir+0x260/0x570 fs/readdir.c:-1\n __do_sys_getdents64 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#369'>fs/readdir.c:369</a> [inline]\n __se_sys_getdents64+0xe5/0x240 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#354'>fs/readdir.c:354</a>\n __x64_sys_getdents64+0x7b/0x90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#354'>fs/readdir.c:354</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7fdb6e094313\nCode: c1 66 0f 1f 44 00 00 48 83 c4 08 48 89 ef 5b 5d e9 62 3e f8 ff 66 90 b8 ff ff ff 7f 48 39 c2 48 0f 47 d0 b8 d9 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 05 c3 0f 1f 40 00 48 c7 c2 a8 ff ff ff f7 d8\nRSP: 002b:00007ffda33f75d8 EFLAGS: 00000293 ORIG_RAX: 00000000000000d9\nRAX: ffffffffffffffda RBX: 000055558bd4b520 RCX: 00007fdb6e094313\nRDX: 0000000000008000 RSI: 000055558bd4b520 RDI: 0000000000000006\nRBP: 000055558bd4b4f4 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000001000 R11: 0000000000000293 R12: ffffffffffffffa8\nR13: 0000000000000016 R14: 000055558bd4b4f0 R15: 00007ffda33fa980\n\nAllocated by task 358:\n kasan_save_stack <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#38'>mm/kasan/common.c:38</a> [inline]\n kasan_set_track <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#45'>mm/kasan/common.c:45</a> [inline]\n set_alloc_info <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#430'>mm/kasan/common.c:430</a> [inline]\n ____kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#509'>mm/kasan/common.c:509</a> [inline]\n __kasan_kmalloc+0xda/0x110 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#518'>mm/kasan/common.c:518</a>\n kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/kasan.h#254'>include/linux/kasan.h:254</a> [inline]\n kmem_cache_alloc_trace+0x184/0x2e0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2974'>mm/slub.c:2974</a>\n kmalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552'>include/linux/slab.h:552</a> [inline]\n kzalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664'>include/linux/slab.h:664</a> [inline]\n mca_alloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#853'>net/ipv6/mcast.c:853</a> [inline]\n __ipv6_dev_mc_inc+0x39e/0x9b0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#911'>net/ipv6/mcast.c:911</a>\n ipv6_dev_mc_inc+0x1f/0x30 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#935'>net/ipv6/mcast.c:935</a>\n ipv6_add_dev+0xc84/0x10a0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#461'>net/ipv6/addrconf.c:461</a>\n addrconf_notify+0x582/0xe90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#3567'>net/ipv6/addrconf.c:3567</a>\n notifier_call_chain <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#83'>kernel/notifier.c:83</a> [inline]\n raw_notifier_call_chain+0x90/0x100 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#410'>kernel/notifier.c:410</a>\n call_netdevice_notifiers_info <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2054'>net/core/dev.c:2054</a> [inline]\n call_netdevice_notifiers_extack <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2066'>net/core/dev.c:2066</a> [inline]\n call_netdevice_notifiers+0x111/0x190 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2080'>net/core/dev.c:2080</a>\n register_netdevice+0x1043/0x13c0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#10087'>net/core/dev.c:10087</a>\n veth_newlink+0x853/0xbb0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/drivers/net/veth.c#1387'>drivers/net/veth.c:1387</a>\n __rtnl_newlink <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3482'>net/core/rtnetlink.c:3482</a> [inline]\n rtnl_newlink+0x11bd/0x1640 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3530'>net/core/rtnetlink.c:3530</a>\n rtnetlink_rcv_msg+0x9db/0xb90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5610'>net/core/rtnetlink.c:5610</a>\n netlink_rcv_skb+0x1e0/0x430 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#2485'>net/netlink/af_netlink.c:2485</a>\n rtnetlink_rcv+0x1c/0x20 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5628'>net/core/rtnetlink.c:5628</a>\n netlink_unicast_kernel <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1307'>net/netlink/af_netlink.c:1307</a> [inline]\n netlink_unicast+0x87c/0xa40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1333'>net/netlink/af_netlink.c:1333</a>\n netlink_sendmsg+0x88d/0xb30 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1901'>net/netlink/af_netlink.c:1901</a>\n sock_sendmsg_nosec <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#652'>net/socket.c:652</a> [inline]\n __sock_sendmsg <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#664'>net/socket.c:664</a> [inline]\n __sys_sendto+0x41d/0x580 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2006'>net/socket.c:2006</a>\n __do_sys_sendto <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2018'>net/socket.c:2018</a> [inline]\n __se_sys_sendto <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014'>net/socket.c:2014</a> [inline]\n __x64_sys_sendto+0xe5/0x100 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014'>net/socket.c:2014</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\n\nThe buggy address belongs to the object at ffff88810f544600\n which belongs to the cache kmalloc-192 of size 192\nThe buggy address is located 19 bytes to the right of\n 192-byte region [ffff88810f544600, ffff88810f5446c0)\nThe buggy address belongs to the page:\npage:ffffea00043d5100 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x10f544\nflags: 0x4000000000000200(slab)\nraw: 4000000000000200 0000000000000000 0000000100000001 ffff888100043380\nraw: 0000000000000000 0000000000100010 00000001ffffffff 0000000000000000\npage dumped because: kasan: bad access detected\npage_owner tracks the page as allocated\npage last allocated via order 0, migratetype Unmovable, gfp_mask 0x12cc0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 96, ts 5065759646, free_ts 5065738755\n set_page_owner <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#35'>include/linux/page_owner.h:35</a> [inline]\n post_alloc_hook <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2456'>mm/page_alloc.c:2456</a> [inline]\n prep_new_page+0x179/0x180 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2462'>mm/page_alloc.c:2462</a>\n get_page_from_freelist+0x2235/0x23d0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#4254'>mm/page_alloc.c:4254</a>\n __alloc_pages_nodemask+0x268/0x5f0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5357'>mm/page_alloc.c:5357</a>\n alloc_slab_page mm/slub.c:-1 [inline]\n allocate_slab <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1808'>mm/slub.c:1808</a> [inline]\n new_slab+0x84/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1869'>mm/slub.c:1869</a>\n new_slab_objects <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2627'>mm/slub.c:2627</a> [inline]\n ___slab_alloc+0x2a6/0x450 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2791'>mm/slub.c:2791</a>\n __slab_alloc+0x63/0xa0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2831'>mm/slub.c:2831</a>\n slab_alloc_node <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2913'>mm/slub.c:2913</a> [inline]\n slab_alloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2955'>mm/slub.c:2955</a> [inline]\n kmem_cache_alloc_trace+0x1b3/0x2e0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2972'>mm/slub.c:2972</a>\n kmalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552'>include/linux/slab.h:552</a> [inline]\n kzalloc <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664'>include/linux/slab.h:664</a> [inline]\n kernfs_fop_open+0x343/0xb30 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/file.c#628'>fs/kernfs/file.c:628</a>\n do_dentry_open+0x793/0x1090 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#819'>fs/open.c:819</a>\n vfs_open+0x73/0x80 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#942'>fs/open.c:942</a>\n do_open <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3391'>fs/namei.c:3391</a> [inline]\n path_openat+0x27ad/0x3160 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3509'>fs/namei.c:3509</a>\n do_filp_open+0x1b3/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3536'>fs/namei.c:3536</a>\n do_sys_openat2+0x14c/0x6d0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1217'>fs/open.c:1217</a>\n do_sys_open <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1233'>fs/open.c:1233</a> [inline]\n __do_sys_openat <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1249'>fs/open.c:1249</a> [inline]\n __se_sys_openat <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244'>fs/open.c:1244</a> [inline]\n __x64_sys_openat+0x136/0x160 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244'>fs/open.c:1244</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\npage last free stack trace:\n reset_page_owner <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#28'>include/linux/page_owner.h:28</a> [inline]\n free_pages_prepare <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1349'>mm/page_alloc.c:1349</a> [inline]\n free_pcp_prepare <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1421'>mm/page_alloc.c:1421</a> [inline]\n free_unref_page_prepare+0x2b7/0x2d0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3336'>mm/page_alloc.c:3336</a>\n free_unref_page <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3391'>mm/page_alloc.c:3391</a> [inline]\n free_the_page <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5416'>mm/page_alloc.c:5416</a> [inline]\n __free_pages+0x14b/0x380 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5427'>mm/page_alloc.c:5427</a>\n free_pages+0x82/0x90 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5438'>mm/page_alloc.c:5438</a>\n selinux_genfs_get_sid+0x20b/0x250 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1326'>security/selinux/hooks.c:1326</a>\n inode_doinit_with_dentry+0x86d/0xd70 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1523'>security/selinux/hooks.c:1523</a>\n selinux_d_instantiate+0x27/0x40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#6389'>security/selinux/hooks.c:6389</a>\n security_d_instantiate+0x9e/0xf0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/security.c#1980'>security/security.c:1980</a>\n d_splice_alias+0x6d/0x390 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/dcache.c#3036'>fs/dcache.c:3036</a>\n kernfs_iop_lookup+0x2c5/0x310 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/dir.c#1178'>fs/kernfs/dir.c:1178</a>\n lookup_open <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3226'>fs/namei.c:3226</a> [inline]\n open_last_lookups <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3317'>fs/namei.c:3317</a> [inline]\n path_openat+0x1127/0x3160 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3506'>fs/namei.c:3506</a>\n do_filp_open+0x1b3/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3536'>fs/namei.c:3536</a>\n do_sys_openat2+0x14c/0x6d0 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1217'>fs/open.c:1217</a>\n do_sys_open <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1233'>fs/open.c:1233</a> [inline]\n __do_sys_openat <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1249'>fs/open.c:1249</a> [inline]\n __se_sys_openat <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244'>fs/open.c:1244</a> [inline]\n __x64_sys_openat+0x136/0x160 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244'>fs/open.c:1244</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\n\nMemory state around the buggy address:\n ffff88810f544580: 00 00 00 00 00 00 00 00 fc fc fc fc fc fc fc fc\n ffff88810f544600: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n>ffff88810f544680: 00 00 00 00 fc fc fc fc fc fc fc fc fc fc fc fc\n                                                 ^\n ffff88810f544700: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n ffff88810f544780: 00 00 00 00 fc fc fc fc fc fc fc fc fc fc fc fc\n==================================================================\nEXT4-fs error (device loop1): ext4_read_inline_dir:1596: inode #12: block 7: comm syz-executor: path /0/file1/file0: bad entry in directory: rec_len % 4 != 0 - offset=24, inode=2239623941, rec_len=29527, size=148 fake=0\nEXT4-fs error (device loop1): ext4_read_inline_dir:1596: inode #12: block 7: comm syz-executor: path /0/file1/file0: bad entry in directory: rec_len % 4 != 0 - offset=24, inode=2239623941, rec_len=29527, size=148 fake=0\nEXT4-fs error (device loop1): empty_inline_dir:1850: inode #12: block 7: comm syz-executor: bad entry in directory: rec_len % 4 != 0 - offset=4, inode=2239623941, rec_len=29527, size=60 fake=0\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs error (device loop1): ext4_read_inline_dir:1596: inode #12: block 7: comm syz-executor: path /0/file1/file0: bad entry in directory: rec_len % 4 != 0 - offset=24, inode=2239623941, rec_len=29527, size=148 fake=0\nEXT4-fs error (device loop1): ext4_read_inline_dir:1596: inode #12: block 7: comm syz-executor: path /0/file1/file0: bad entry in directory: rec_len % 4 != 0 - offset=24, inode=2239623941, rec_len=29527, size=148 fake=0\nEXT4-fs error (device loop1): empty_inline_dir:1850: inode #12: block 7: comm syz-executor: bad entry in directory: rec_len % 4 != 0 - offset=4, inode=2239623941, rec_len=29527, size=60 fake=0\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs error (device loop1): ext4_read_inline_dir:1596: inode #12: block 7: comm syz-executor: path /0/file1/file0: bad entry in directory: rec_len % 4 != 0 - offset=24, inode=2239623941, rec_len=29527, size=148 fake=0\nEXT4-fs error (device loop1): ext4_read_inline_dir:1596: inode #12: block 7: comm syz-executor: path /0/file1/file0: bad entry in directory: rec_len % 4 != 0 - offset=24, inode=2239623941, rec_len=29527, size=148 fake=0\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\nEXT4-fs warning (device loop1): empty_inline_dir:1857: bad inline directory (dir #12) - inode 2239623941, rec_len 29527, name_len 58inline size 60\n"
+  },
+  "snippets": {
+    "urls": {
+      "https://android.googlesource.com/kernel/common/": {
+        "error": "URL not in expected +/commit/path format"
+      }
+    },
+    "links": {
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209#209": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209",
+        "file": "fs/ext4/inline.c",
+        "line": 209,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#1515#1515": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#1515",
+        "file": "fs/ext4/inline.c",
+        "line": 1515,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#77#77": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#77",
+        "file": "lib/dump_stack.c",
+        "line": 77,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#118#118": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#118",
+        "file": "lib/dump_stack.c",
+        "line": 118,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#248#248": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#248",
+        "file": "mm/kasan/report.c",
+        "line": 248,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#435#435": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#435",
+        "file": "mm/kasan/report.c",
+        "line": 435,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#452#452": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#452",
+        "file": "mm/kasan/report.c",
+        "line": 452,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/generic.c#189#189": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/generic.c#189",
+        "file": "mm/kasan/generic.c",
+        "line": 189,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/shadow.c#65#65": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/shadow.c#65",
+        "file": "mm/kasan/shadow.c",
+        "line": 65,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/dir.c#161#161": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/dir.c#161",
+        "file": "fs/ext4/dir.c",
+        "line": 161,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#369#369": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#369",
+        "file": "fs/readdir.c",
+        "line": 369,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#354#354": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#354",
+        "file": "fs/readdir.c",
+        "line": 354,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46#46": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#38#38": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#38",
+        "file": "mm/kasan/common.c",
+        "line": 38,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#45#45": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#45",
+        "file": "mm/kasan/common.c",
+        "line": 45,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#430#430": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#430",
+        "file": "mm/kasan/common.c",
+        "line": 430,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#509#509": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#509",
+        "file": "mm/kasan/common.c",
+        "line": 509,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#518#518": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#518",
+        "file": "mm/kasan/common.c",
+        "line": 518,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/kasan.h#254#254": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/kasan.h#254",
+        "file": "include/linux/kasan.h",
+        "line": 254,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2974#2974": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2974",
+        "file": "mm/slub.c",
+        "line": 2974,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552#552": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552",
+        "file": "include/linux/slab.h",
+        "line": 552,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664#664": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664",
+        "file": "include/linux/slab.h",
+        "line": 664,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#853#853": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#853",
+        "file": "net/ipv6/mcast.c",
+        "line": 853,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#911#911": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#911",
+        "file": "net/ipv6/mcast.c",
+        "line": 911,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#935#935": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#935",
+        "file": "net/ipv6/mcast.c",
+        "line": 935,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#461#461": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#461",
+        "file": "net/ipv6/addrconf.c",
+        "line": 461,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#3567#3567": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#3567",
+        "file": "net/ipv6/addrconf.c",
+        "line": 3567,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#83#83": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#83",
+        "file": "kernel/notifier.c",
+        "line": 83,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#410#410": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#410",
+        "file": "kernel/notifier.c",
+        "line": 410,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2054#2054": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2054",
+        "file": "net/core/dev.c",
+        "line": 2054,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2066#2066": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2066",
+        "file": "net/core/dev.c",
+        "line": 2066,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2080#2080": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2080",
+        "file": "net/core/dev.c",
+        "line": 2080,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#10087#10087": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#10087",
+        "file": "net/core/dev.c",
+        "line": 10087,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/drivers/net/veth.c#1387#1387": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/drivers/net/veth.c#1387",
+        "file": "drivers/net/veth.c",
+        "line": 1387,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3482#3482": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3482",
+        "file": "net/core/rtnetlink.c",
+        "line": 3482,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3530#3530": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3530",
+        "file": "net/core/rtnetlink.c",
+        "line": 3530,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5610#5610": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5610",
+        "file": "net/core/rtnetlink.c",
+        "line": 5610,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#2485#2485": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#2485",
+        "file": "net/netlink/af_netlink.c",
+        "line": 2485,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5628#5628": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5628",
+        "file": "net/core/rtnetlink.c",
+        "line": 5628,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1307#1307": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1307",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1307,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1333#1333": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1333",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1333,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1901#1901": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1901",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1901,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#652#652": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#652",
+        "file": "net/socket.c",
+        "line": 652,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#664#664": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#664",
+        "file": "net/socket.c",
+        "line": 664,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2006#2006": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2006",
+        "file": "net/socket.c",
+        "line": 2006,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2018#2018": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2018",
+        "file": "net/socket.c",
+        "line": 2018,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014#2014": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014",
+        "file": "net/socket.c",
+        "line": 2014,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#35#35": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#35",
+        "file": "include/linux/page_owner.h",
+        "line": 35,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2456#2456": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2456",
+        "file": "mm/page_alloc.c",
+        "line": 2456,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2462#2462": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2462",
+        "file": "mm/page_alloc.c",
+        "line": 2462,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#4254#4254": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#4254",
+        "file": "mm/page_alloc.c",
+        "line": 4254,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5357#5357": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5357",
+        "file": "mm/page_alloc.c",
+        "line": 5357,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1808#1808": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1808",
+        "file": "mm/slub.c",
+        "line": 1808,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1869#1869": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1869",
+        "file": "mm/slub.c",
+        "line": 1869,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2627#2627": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2627",
+        "file": "mm/slub.c",
+        "line": 2627,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2791#2791": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2791",
+        "file": "mm/slub.c",
+        "line": 2791,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2831#2831": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2831",
+        "file": "mm/slub.c",
+        "line": 2831,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2913#2913": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2913",
+        "file": "mm/slub.c",
+        "line": 2913,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2955#2955": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2955",
+        "file": "mm/slub.c",
+        "line": 2955,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2972#2972": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2972",
+        "file": "mm/slub.c",
+        "line": 2972,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/file.c#628#628": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/file.c#628",
+        "file": "fs/kernfs/file.c",
+        "line": 628,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#819#819": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#819",
+        "file": "fs/open.c",
+        "line": 819,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#942#942": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#942",
+        "file": "fs/open.c",
+        "line": 942,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3391#3391": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3391",
+        "file": "fs/namei.c",
+        "line": 3391,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3509#3509": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3509",
+        "file": "fs/namei.c",
+        "line": 3509,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3536#3536": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3536",
+        "file": "fs/namei.c",
+        "line": 3536,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1217#1217": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1217",
+        "file": "fs/open.c",
+        "line": 1217,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1233#1233": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1233",
+        "file": "fs/open.c",
+        "line": 1233,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1249#1249": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1249",
+        "file": "fs/open.c",
+        "line": 1249,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244#1244": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244",
+        "file": "fs/open.c",
+        "line": 1244,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#28#28": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#28",
+        "file": "include/linux/page_owner.h",
+        "line": 28,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1349#1349": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1349",
+        "file": "mm/page_alloc.c",
+        "line": 1349,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1421#1421": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1421",
+        "file": "mm/page_alloc.c",
+        "line": 1421,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3336#3336": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3336",
+        "file": "mm/page_alloc.c",
+        "line": 3336,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3391#3391": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3391",
+        "file": "mm/page_alloc.c",
+        "line": 3391,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5416#5416": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5416",
+        "file": "mm/page_alloc.c",
+        "line": 5416,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5427#5427": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5427",
+        "file": "mm/page_alloc.c",
+        "line": 5427,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5438#5438": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5438",
+        "file": "mm/page_alloc.c",
+        "line": 5438,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1326#1326": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1326",
+        "file": "security/selinux/hooks.c",
+        "line": 1326,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1523#1523": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1523",
+        "file": "security/selinux/hooks.c",
+        "line": 1523,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#6389#6389": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#6389",
+        "file": "security/selinux/hooks.c",
+        "line": 6389,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/security.c#1980#1980": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/security.c#1980",
+        "file": "security/security.c",
+        "line": 1980,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/dcache.c#3036#3036": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/dcache.c#3036",
+        "file": "fs/dcache.c",
+        "line": 3036,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/dir.c#1178#1178": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/dir.c#1178",
+        "file": "fs/kernfs/dir.c",
+        "line": 1178,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3226#3226": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3226",
+        "file": "fs/namei.c",
+        "line": 3226,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3317#3317": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3317",
+        "file": "fs/namei.c",
+        "line": 3317,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3506#3506": {
+        "url": "https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3506",
+        "file": "fs/namei.c",
+        "line": 3506,
+        "snippet": ""
+      }
+    }
+  },
+  "evidence": {
+    "https://android.googlesource.com/kernel/common/": {
+      "error": "URL not in expected +/commit/path format"
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#209#209": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/inline.c#1515#1515": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#77#77": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/lib/dump_stack.c#118#118": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#248#248": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#435#435": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/report.c#452#452": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/generic.c#189#189": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/shadow.c#65#65": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/ext4/dir.c#161#161": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#369#369": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/readdir.c#354#354": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/arch/x86/entry/common.c#46#46": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#38#38": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#45#45": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#430#430": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#509#509": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/kasan/common.c#518#518": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/kasan.h#254#254": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2974#2974": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#552#552": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/slab.h#664#664": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#853#853": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#911#911": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/mcast.c#935#935": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#461#461": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/ipv6/addrconf.c#3567#3567": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#83#83": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/kernel/notifier.c#410#410": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2054#2054": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2066#2066": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#2080#2080": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/dev.c#10087#10087": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/drivers/net/veth.c#1387#1387": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3482#3482": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#3530#3530": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5610#5610": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#2485#2485": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/core/rtnetlink.c#5628#5628": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1307#1307": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1333#1333": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/netlink/af_netlink.c#1901#1901": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#652#652": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#664#664": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2006#2006": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2018#2018": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/net/socket.c#2014#2014": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#35#35": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2456#2456": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#2462#2462": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#4254#4254": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5357#5357": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1808#1808": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#1869#1869": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2627#2627": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2791#2791": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2831#2831": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2913#2913": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2955#2955": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/slub.c#2972#2972": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/file.c#628#628": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#819#819": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#942#942": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3391#3391": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3509#3509": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3536#3536": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1217#1217": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1233#1233": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1249#1249": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/open.c#1244#1244": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/include/linux/page_owner.h#28#28": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1349#1349": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#1421#1421": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3336#3336": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#3391#3391": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5416#5416": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5427#5427": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/mm/page_alloc.c#5438#5438": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1326#1326": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#1523#1523": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/selinux/hooks.c#6389#6389": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/security/security.c#1980#1980": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/dcache.c#3036#3036": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/kernfs/dir.c#1178#1178": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3226#3226": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3317#3317": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/6de38b5f6c2b4da6703115c17f7d8814b93b735c/fs/namei.c#3506#3506": {
+      "error": null
+    }
+  },
+  "classification": {
+    "classification": null,
+    "preconditions": [
+      "Object was previously allocated (see 'Allocated by task' stack)",
+      "Input state: attacker-controlled syscall parameters or fuzzer input must reach the syscall path"
+    ],
+    "postconditions": [
+      "KASAN reported invalid memory access (see crash report)"
+    ],
+    "notes": [
+      "Detected a read of size 68",
+      "Primitive: larger read (68 bytes)",
+      "Object comes from cache kmalloc-192",
+      "Triggering syscall likely came from syzkaller (fuzzer) \u2014 input may be controlled"
+    ],
+    "vulnerability": "read (68 bytes) \u2014 potential info-leak"
+  },
+  "strong_report": {
+    "primitive": "info-leak (bounded or unbounded read)",
+    "vulnerability": "out-of-bounds read",
+    "confidence": 0.54,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): error, warning, directory",
+      "Triggering syscall(s) from crash text: getdents64, sendto, openat",
+      "Object details: type 'kmalloc-192', address ffff88810f544600, size 192",
+      "Object: cache 'kmalloc-192', address ffff88810f544600, size 192",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'ext4_read_inline_data' (from crash context)"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "KASAN reported slab-out-of-bounds (log contains 'slab-out-of-bounds')",
+      "Syscall(s) detected in crash text: getdents64, sendto, openat",
+      "Syzkaller repro indicates syscalls: error, warning, directory"
+    ],
+    "exploitability": "high"
+  }
+}

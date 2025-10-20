@@ -1,0 +1,1643 @@
+{
+  "parsed": {
+    "kind": "KASAN: slab-out-of-bounds in mon_copy_to_buff <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249'>drivers/usb/mon/mon_bin.c:249</a> [inline]",
+    "access": {
+      "op": "read",
+      "size": 3904,
+      "addr": "ffff888105b815a1"
+    },
+    "object_info": {
+      "obj_addr": "ffff888105b815a0",
+      "cache": "kmalloc-8",
+      "obj_size": 8,
+      "offset": 1,
+      "region": {
+        "start": "ffff888105b815a0",
+        "end": "ffff888105b815a8"
+      }
+    },
+    "allocated_by": [
+      "Allocated by task 15:\n kasan_save_stack <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#38'>mm/kasan/common.c:38</a> [inline]\n kasan_set_track <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#45'>mm/kasan/common.c:45</a> [inline]\n set_alloc_info <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#430'>mm/kasan/common.c:430</a> [inline]\n ____kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#509'>mm/kasan/common.c:509</a> [inline]\n __kasan_kmalloc+0xda/0x110 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518'>mm/kasan/common.c:518</a>\n kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/kasan.h#254'>include/linux/kasan.h:254</a> [inline]\n __kmalloc+0x1a7/0x330 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4033'>mm/slub.c:4033</a>\n kmalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557'>include/linux/slab.h:557</a> [inline]\n kzalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664'>include/linux/slab.h:664</a> [inline]\n hid_alloc_report_buf <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1663'>drivers/hid/hid-core.c:1663</a> [inline]\n __hid_request+0x9a/0x390 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1728'>drivers/hid/hid-core.c:1728</a>\n hidinput_change_resolution_multipliers <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657'>drivers/hid/hid-input.c:1657</a> [inline]\n hidinput_connect+0x1d6d/0x2c30 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963'>drivers/hid/hid-input.c:1963</a>\n hid_connect+0x458/0xdf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968'>drivers/hid/hid-core.c:1968</a>\n hid_hw_start+0xaa/0x130 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075'>drivers/hid/hid-core.c:2075</a>\n ms_probe+0x190/0x460 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391'>drivers/hid/hid-microsoft.c:391</a>\n hid_device_probe+0x287/0x380 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303'>drivers/hid/hid-core.c:2303</a>\n really_probe+0x386/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558'>drivers/base/dd.c:558</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n hid_add_device+0x356/0x4b0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455'>drivers/hid/hid-core.c:2455</a>\n usbhid_probe+0xb2e/0xee0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421'>drivers/hid/usbhid/hid-core.c:1421</a>\n usb_probe_interface+0x5ff/0xae0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397'>drivers/usb/core/driver.c:397</a>\n really_probe+0x3d8/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562'>drivers/base/dd.c:562</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n usb_set_configuration+0x1a47/0x1f80 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160'>drivers/usb/core/message.c:2160</a>\n usb_generic_driver_probe+0x91/0x150 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238'>drivers/usb/core/generic.c:238</a>\n usb_probe_device+0x148/0x260 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294'>drivers/usb/core/driver.c:294</a>\n really_probe+0x3d8/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562'>drivers/base/dd.c:562</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n usb_new_device+0xcd1/0x1450 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626'>drivers/usb/core/hub.c:2626</a>\n hub_port_connect <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469'>drivers/usb/core/hub.c:5469</a> [inline]\n hub_port_connect_change <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609'>drivers/usb/core/hub.c:5609</a> [inline]\n port_event <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759'>drivers/usb/core/hub.c:5759</a> [inline]\n hub_event+0x2679/0x4120 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841'>drivers/usb/core/hub.c:5841</a>\n process_one_work+0x6e1/0xba0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301'>kernel/workqueue.c:2301</a>\n worker_thread+0xa6a/0x13b0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447'>kernel/workqueue.c:2447</a>\n kthread+0x346/0x3d0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313'>kernel/kthread.c:313</a>\n ret_from_fork+0x1f/0x30 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298'>arch/x86/entry/entry_64.S:298</a>"
+    ],
+    "freed_by": [],
+    "link_frames": [
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 249
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#417",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 417
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#603",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 603
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#77",
+        "file": "lib/dump_stack.c",
+        "line": 77
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#118",
+        "file": "lib/dump_stack.c",
+        "line": 118
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#248",
+        "file": "mm/kasan/report.c",
+        "line": 248
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#435",
+        "file": "mm/kasan/report.c",
+        "line": 435
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#452",
+        "file": "mm/kasan/report.c",
+        "line": 452
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/generic.c#189",
+        "file": "mm/kasan/generic.c",
+        "line": 189
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/shadow.c#65",
+        "file": "mm/kasan/shadow.c",
+        "line": 65
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 249
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#417",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 417
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#603",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 603
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#623",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 623
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#91",
+        "file": "drivers/usb/mon/mon_main.c",
+        "line": 91
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#103",
+        "file": "drivers/usb/mon/mon_main.c",
+        "line": 103
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/usb/hcd.h#723",
+        "file": "include/linux/usb/hcd.h",
+        "line": 723
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hcd.c#1543",
+        "file": "drivers/usb/core/hcd.c",
+        "line": 1543
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/urb.c#585",
+        "file": "drivers/usb/core/urb.c",
+        "line": 585
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#58",
+        "file": "drivers/usb/core/message.c",
+        "line": 58
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#102",
+        "file": "drivers/usb/core/message.c",
+        "line": 102
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#153",
+        "file": "drivers/usb/core/message.c",
+        "line": 153
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#928",
+        "file": "drivers/hid/usbhid/hid-core.c",
+        "line": 928
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1299",
+        "file": "drivers/hid/usbhid/hid-core.c",
+        "line": 1299
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1737",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1737
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657",
+        "file": "drivers/hid/hid-input.c",
+        "line": 1657
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963",
+        "file": "drivers/hid/hid-input.c",
+        "line": 1963
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1968
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2075
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391",
+        "file": "drivers/hid/hid-microsoft.c",
+        "line": 391
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2303
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558",
+        "file": "drivers/base/dd.c",
+        "line": 558
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752",
+        "file": "drivers/base/dd.c",
+        "line": 752
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863",
+        "file": "drivers/base/dd.c",
+        "line": 863
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433",
+        "file": "drivers/base/bus.c",
+        "line": 433
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932",
+        "file": "drivers/base/dd.c",
+        "line": 932
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981",
+        "file": "drivers/base/dd.c",
+        "line": 981
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493",
+        "file": "drivers/base/bus.c",
+        "line": 493
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273",
+        "file": "drivers/base/core.c",
+        "line": 3273
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2455
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421",
+        "file": "drivers/hid/usbhid/hid-core.c",
+        "line": 1421
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397",
+        "file": "drivers/usb/core/driver.c",
+        "line": 397
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562",
+        "file": "drivers/base/dd.c",
+        "line": 562
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752",
+        "file": "drivers/base/dd.c",
+        "line": 752
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863",
+        "file": "drivers/base/dd.c",
+        "line": 863
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433",
+        "file": "drivers/base/bus.c",
+        "line": 433
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932",
+        "file": "drivers/base/dd.c",
+        "line": 932
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981",
+        "file": "drivers/base/dd.c",
+        "line": 981
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493",
+        "file": "drivers/base/bus.c",
+        "line": 493
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273",
+        "file": "drivers/base/core.c",
+        "line": 3273
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160",
+        "file": "drivers/usb/core/message.c",
+        "line": 2160
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238",
+        "file": "drivers/usb/core/generic.c",
+        "line": 238
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294",
+        "file": "drivers/usb/core/driver.c",
+        "line": 294
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562",
+        "file": "drivers/base/dd.c",
+        "line": 562
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752",
+        "file": "drivers/base/dd.c",
+        "line": 752
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863",
+        "file": "drivers/base/dd.c",
+        "line": 863
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433",
+        "file": "drivers/base/bus.c",
+        "line": 433
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932",
+        "file": "drivers/base/dd.c",
+        "line": 932
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981",
+        "file": "drivers/base/dd.c",
+        "line": 981
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493",
+        "file": "drivers/base/bus.c",
+        "line": 493
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273",
+        "file": "drivers/base/core.c",
+        "line": 3273
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626",
+        "file": "drivers/usb/core/hub.c",
+        "line": 2626
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5469
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5609
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5759
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5841
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301",
+        "file": "kernel/workqueue.c",
+        "line": 2301
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447",
+        "file": "kernel/workqueue.c",
+        "line": 2447
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313",
+        "file": "kernel/kthread.c",
+        "line": 313
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298",
+        "file": "arch/x86/entry/entry_64.S",
+        "line": 298
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#38",
+        "file": "mm/kasan/common.c",
+        "line": 38
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#45",
+        "file": "mm/kasan/common.c",
+        "line": 45
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#430",
+        "file": "mm/kasan/common.c",
+        "line": 430
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#509",
+        "file": "mm/kasan/common.c",
+        "line": 509
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518",
+        "file": "mm/kasan/common.c",
+        "line": 518
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/kasan.h#254",
+        "file": "include/linux/kasan.h",
+        "line": 254
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4033",
+        "file": "mm/slub.c",
+        "line": 4033
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557",
+        "file": "include/linux/slab.h",
+        "line": 557
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664",
+        "file": "include/linux/slab.h",
+        "line": 664
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1663",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1663
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1728",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1728
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657",
+        "file": "drivers/hid/hid-input.c",
+        "line": 1657
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963",
+        "file": "drivers/hid/hid-input.c",
+        "line": 1963
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1968
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2075
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391",
+        "file": "drivers/hid/hid-microsoft.c",
+        "line": 391
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2303
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558",
+        "file": "drivers/base/dd.c",
+        "line": 558
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752",
+        "file": "drivers/base/dd.c",
+        "line": 752
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863",
+        "file": "drivers/base/dd.c",
+        "line": 863
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433",
+        "file": "drivers/base/bus.c",
+        "line": 433
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932",
+        "file": "drivers/base/dd.c",
+        "line": 932
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981",
+        "file": "drivers/base/dd.c",
+        "line": 981
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493",
+        "file": "drivers/base/bus.c",
+        "line": 493
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273",
+        "file": "drivers/base/core.c",
+        "line": 3273
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2455
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421",
+        "file": "drivers/hid/usbhid/hid-core.c",
+        "line": 1421
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397",
+        "file": "drivers/usb/core/driver.c",
+        "line": 397
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562",
+        "file": "drivers/base/dd.c",
+        "line": 562
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752",
+        "file": "drivers/base/dd.c",
+        "line": 752
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863",
+        "file": "drivers/base/dd.c",
+        "line": 863
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433",
+        "file": "drivers/base/bus.c",
+        "line": 433
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932",
+        "file": "drivers/base/dd.c",
+        "line": 932
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981",
+        "file": "drivers/base/dd.c",
+        "line": 981
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493",
+        "file": "drivers/base/bus.c",
+        "line": 493
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273",
+        "file": "drivers/base/core.c",
+        "line": 3273
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160",
+        "file": "drivers/usb/core/message.c",
+        "line": 2160
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238",
+        "file": "drivers/usb/core/generic.c",
+        "line": 238
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294",
+        "file": "drivers/usb/core/driver.c",
+        "line": 294
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562",
+        "file": "drivers/base/dd.c",
+        "line": 562
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752",
+        "file": "drivers/base/dd.c",
+        "line": 752
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863",
+        "file": "drivers/base/dd.c",
+        "line": 863
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433",
+        "file": "drivers/base/bus.c",
+        "line": 433
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932",
+        "file": "drivers/base/dd.c",
+        "line": 932
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981",
+        "file": "drivers/base/dd.c",
+        "line": 981
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493",
+        "file": "drivers/base/bus.c",
+        "line": 493
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273",
+        "file": "drivers/base/core.c",
+        "line": 3273
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626",
+        "file": "drivers/usb/core/hub.c",
+        "line": 2626
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5469
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5609
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5759
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5841
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301",
+        "file": "kernel/workqueue.c",
+        "line": 2301
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447",
+        "file": "kernel/workqueue.c",
+        "line": 2447
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313",
+        "file": "kernel/kthread.c",
+        "line": 313
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298",
+        "file": "arch/x86/entry/entry_64.S",
+        "line": 298
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/page_owner.h#35",
+        "file": "include/linux/page_owner.h",
+        "line": 35
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2456",
+        "file": "mm/page_alloc.c",
+        "line": 2456
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2462",
+        "file": "mm/page_alloc.c",
+        "line": 2462
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#4254",
+        "file": "mm/page_alloc.c",
+        "line": 4254
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#5357",
+        "file": "mm/page_alloc.c",
+        "line": 5357
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1808",
+        "file": "mm/slub.c",
+        "line": 1808
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1869",
+        "file": "mm/slub.c",
+        "line": 1869
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2627",
+        "file": "mm/slub.c",
+        "line": 2627
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2791",
+        "file": "mm/slub.c",
+        "line": 2791
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2831",
+        "file": "mm/slub.c",
+        "line": 2831
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2913",
+        "file": "mm/slub.c",
+        "line": 2913
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2955",
+        "file": "mm/slub.c",
+        "line": 2955
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4029",
+        "file": "mm/slub.c",
+        "line": 4029
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557",
+        "file": "include/linux/slab.h",
+        "line": 557
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664",
+        "file": "include/linux/slab.h",
+        "line": 664
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/acpi/platform/aclinuxex.h#57",
+        "file": "include/acpi/platform/aclinuxex.h",
+        "line": 57
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#331",
+        "file": "drivers/acpi/acpica/nsutils.c",
+        "line": 331
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#666",
+        "file": "drivers/acpi/acpica/nsutils.c",
+        "line": 666
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#726",
+        "file": "drivers/acpi/acpica/nsutils.c",
+        "line": 726
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nseval.c#62",
+        "file": "drivers/acpi/acpica/nseval.c",
+        "line": 62
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsxfeval.c#354",
+        "file": "drivers/acpi/acpica/nsxfeval.c",
+        "line": 354
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/utils.c#279",
+        "file": "drivers/acpi/utils.c",
+        "line": 279
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#83",
+        "file": "drivers/acpi/bus.c",
+        "line": 83
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#112",
+        "file": "drivers/acpi/bus.c",
+        "line": 112
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2010",
+        "file": "drivers/acpi/scan.c",
+        "line": 2010
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2053",
+        "file": "drivers/acpi/scan.c",
+        "line": 2053
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2053",
+        "file": "drivers/acpi/scan.c",
+        "line": 2053
+      }
+    ],
+    "frames": [
+      {
+        "func": "Read",
+        "file": "of size 3904 at addr ffff888105b815a1 by task kworker/0",
+        "line": 1,
+        "raw": "Read of size 3904 at addr ffff888105b815a1 by task kworker/0:1/15"
+      }
+    ],
+    "raw": "microsoft 0003:045E:07DA.0001: unknown main item tag 0x0\nmicrosoft 0003:045E:07DA.0001: ignoring exceeding usage max\n==================================================================\nBUG: KASAN: slab-out-of-bounds in mon_copy_to_buff <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249'>drivers/usb/mon/mon_bin.c:249</a> [inline]\nBUG: KASAN: slab-out-of-bounds in mon_bin_get_data <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#417'>drivers/usb/mon/mon_bin.c:417</a> [inline]\nBUG: KASAN: slab-out-of-bounds in mon_bin_event+0x1307/0x24e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#603'>drivers/usb/mon/mon_bin.c:603</a>\nRead of size 3904 at addr ffff888105b815a1 by task kworker/0:1/15\n\nCPU: 0 PID: 15 Comm: kworker/0:1 Not tainted 5.10.240-syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nWorkqueue: usb_hub_wq hub_event\nCall Trace:\n __dump_stack+0x21/0x24 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#77'>lib/dump_stack.c:77</a>\n dump_stack_lvl+0x169/0x1d8 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#118'>lib/dump_stack.c:118</a>\n print_address_description+0x7f/0x2c0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#248'>mm/kasan/report.c:248</a>\n __kasan_report <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#435'>mm/kasan/report.c:435</a> [inline]\n kasan_report+0xe2/0x130 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#452'>mm/kasan/report.c:452</a>\n check_region_inline mm/kasan/generic.c:-1 [inline]\n kasan_check_range+0x280/0x290 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/generic.c#189'>mm/kasan/generic.c:189</a>\n memcpy+0x2d/0x70 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/shadow.c#65'>mm/kasan/shadow.c:65</a>\n mon_copy_to_buff <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249'>drivers/usb/mon/mon_bin.c:249</a> [inline]\n mon_bin_get_data <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#417'>drivers/usb/mon/mon_bin.c:417</a> [inline]\n mon_bin_event+0x1307/0x24e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#603'>drivers/usb/mon/mon_bin.c:603</a>\n mon_bin_submit+0x27/0x30 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#623'>drivers/usb/mon/mon_bin.c:623</a>\n mon_bus_submit <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#91'>drivers/usb/mon/mon_main.c:91</a> [inline]\n mon_submit+0x185/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#103'>drivers/usb/mon/mon_main.c:103</a>\n usbmon_urb_submit <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/usb/hcd.h#723'>include/linux/usb/hcd.h:723</a> [inline]\n usb_hcd_submit_urb+0x117/0x1780 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hcd.c#1543'>drivers/usb/core/hcd.c:1543</a>\n usb_submit_urb+0x10eb/0x1620 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/urb.c#585'>drivers/usb/core/urb.c:585</a>\n usb_start_wait_urb+0x117/0x2f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#58'>drivers/usb/core/message.c:58</a>\n usb_internal_control_msg <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#102'>drivers/usb/core/message.c:102</a> [inline]\n usb_control_msg+0x241/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#153'>drivers/usb/core/message.c:153</a>\n usbhid_set_raw_report <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#928'>drivers/hid/usbhid/hid-core.c:928</a> [inline]\n usbhid_raw_request+0x453/0x580 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1299'>drivers/hid/usbhid/hid-core.c:1299</a>\n __hid_request+0x1d2/0x390 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1737'>drivers/hid/hid-core.c:1737</a>\n hidinput_change_resolution_multipliers <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657'>drivers/hid/hid-input.c:1657</a> [inline]\n hidinput_connect+0x1d6d/0x2c30 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963'>drivers/hid/hid-input.c:1963</a>\n hid_connect+0x458/0xdf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968'>drivers/hid/hid-core.c:1968</a>\n hid_hw_start+0xaa/0x130 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075'>drivers/hid/hid-core.c:2075</a>\n ms_probe+0x190/0x460 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391'>drivers/hid/hid-microsoft.c:391</a>\n hid_device_probe+0x287/0x380 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303'>drivers/hid/hid-core.c:2303</a>\n really_probe+0x386/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558'>drivers/base/dd.c:558</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n hid_add_device+0x356/0x4b0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455'>drivers/hid/hid-core.c:2455</a>\n usbhid_probe+0xb2e/0xee0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421'>drivers/hid/usbhid/hid-core.c:1421</a>\n usb_probe_interface+0x5ff/0xae0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397'>drivers/usb/core/driver.c:397</a>\n really_probe+0x3d8/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562'>drivers/base/dd.c:562</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n usb_set_configuration+0x1a47/0x1f80 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160'>drivers/usb/core/message.c:2160</a>\n usb_generic_driver_probe+0x91/0x150 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238'>drivers/usb/core/generic.c:238</a>\n usb_probe_device+0x148/0x260 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294'>drivers/usb/core/driver.c:294</a>\n really_probe+0x3d8/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562'>drivers/base/dd.c:562</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n usb_new_device+0xcd1/0x1450 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626'>drivers/usb/core/hub.c:2626</a>\n hub_port_connect <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469'>drivers/usb/core/hub.c:5469</a> [inline]\n hub_port_connect_change <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609'>drivers/usb/core/hub.c:5609</a> [inline]\n port_event <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759'>drivers/usb/core/hub.c:5759</a> [inline]\n hub_event+0x2679/0x4120 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841'>drivers/usb/core/hub.c:5841</a>\n process_one_work+0x6e1/0xba0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301'>kernel/workqueue.c:2301</a>\n worker_thread+0xa6a/0x13b0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447'>kernel/workqueue.c:2447</a>\n kthread+0x346/0x3d0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313'>kernel/kthread.c:313</a>\n ret_from_fork+0x1f/0x30 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298'>arch/x86/entry/entry_64.S:298</a>\n\nAllocated by task 15:\n kasan_save_stack <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#38'>mm/kasan/common.c:38</a> [inline]\n kasan_set_track <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#45'>mm/kasan/common.c:45</a> [inline]\n set_alloc_info <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#430'>mm/kasan/common.c:430</a> [inline]\n ____kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#509'>mm/kasan/common.c:509</a> [inline]\n __kasan_kmalloc+0xda/0x110 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518'>mm/kasan/common.c:518</a>\n kasan_kmalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/kasan.h#254'>include/linux/kasan.h:254</a> [inline]\n __kmalloc+0x1a7/0x330 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4033'>mm/slub.c:4033</a>\n kmalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557'>include/linux/slab.h:557</a> [inline]\n kzalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664'>include/linux/slab.h:664</a> [inline]\n hid_alloc_report_buf <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1663'>drivers/hid/hid-core.c:1663</a> [inline]\n __hid_request+0x9a/0x390 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1728'>drivers/hid/hid-core.c:1728</a>\n hidinput_change_resolution_multipliers <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657'>drivers/hid/hid-input.c:1657</a> [inline]\n hidinput_connect+0x1d6d/0x2c30 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963'>drivers/hid/hid-input.c:1963</a>\n hid_connect+0x458/0xdf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968'>drivers/hid/hid-core.c:1968</a>\n hid_hw_start+0xaa/0x130 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075'>drivers/hid/hid-core.c:2075</a>\n ms_probe+0x190/0x460 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391'>drivers/hid/hid-microsoft.c:391</a>\n hid_device_probe+0x287/0x380 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303'>drivers/hid/hid-core.c:2303</a>\n really_probe+0x386/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558'>drivers/base/dd.c:558</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n hid_add_device+0x356/0x4b0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455'>drivers/hid/hid-core.c:2455</a>\n usbhid_probe+0xb2e/0xee0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421'>drivers/hid/usbhid/hid-core.c:1421</a>\n usb_probe_interface+0x5ff/0xae0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397'>drivers/usb/core/driver.c:397</a>\n really_probe+0x3d8/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562'>drivers/base/dd.c:562</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n usb_set_configuration+0x1a47/0x1f80 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160'>drivers/usb/core/message.c:2160</a>\n usb_generic_driver_probe+0x91/0x150 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238'>drivers/usb/core/generic.c:238</a>\n usb_probe_device+0x148/0x260 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294'>drivers/usb/core/driver.c:294</a>\n really_probe+0x3d8/0xa90 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562'>drivers/base/dd.c:562</a>\n driver_probe_device+0xe7/0x190 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752'>drivers/base/dd.c:752</a>\n __device_attach_driver+0x282/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863'>drivers/base/dd.c:863</a>\n bus_for_each_drv+0x175/0x200 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433'>drivers/base/bus.c:433</a>\n __device_attach+0x29a/0x400 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932'>drivers/base/dd.c:932</a>\n device_initial_probe+0x1a/0x20 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981'>drivers/base/dd.c:981</a>\n bus_probe_device+0xc0/0x1e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493'>drivers/base/bus.c:493</a>\n device_add+0x8b4/0xbf0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273'>drivers/base/core.c:3273</a>\n usb_new_device+0xcd1/0x1450 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626'>drivers/usb/core/hub.c:2626</a>\n hub_port_connect <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469'>drivers/usb/core/hub.c:5469</a> [inline]\n hub_port_connect_change <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609'>drivers/usb/core/hub.c:5609</a> [inline]\n port_event <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759'>drivers/usb/core/hub.c:5759</a> [inline]\n hub_event+0x2679/0x4120 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841'>drivers/usb/core/hub.c:5841</a>\n process_one_work+0x6e1/0xba0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301'>kernel/workqueue.c:2301</a>\n worker_thread+0xa6a/0x13b0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447'>kernel/workqueue.c:2447</a>\n kthread+0x346/0x3d0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313'>kernel/kthread.c:313</a>\n ret_from_fork+0x1f/0x30 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298'>arch/x86/entry/entry_64.S:298</a>\n\nThe buggy address belongs to the object at ffff888105b815a0\n which belongs to the cache kmalloc-8 of size 8\nThe buggy address is located 1 bytes inside of\n 8-byte region [ffff888105b815a0, ffff888105b815a8)\nThe buggy address belongs to the page:\npage:ffffea000416e040 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x105b81\nflags: 0x4000000000000200(slab)\nraw: 4000000000000200 ffffea0004177b00 0000001400000014 ffff888100043c80\nraw: 0000000000000000 0000000080660066 00000001ffffffff 0000000000000000\npage dumped because: kasan: bad access detected\npage_owner tracks the page as allocated\npage last allocated via order 0, migratetype Unmovable, gfp_mask 0x12cc0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 1, ts 1822598967, free_ts 0\n set_page_owner <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/page_owner.h#35'>include/linux/page_owner.h:35</a> [inline]\n post_alloc_hook <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2456'>mm/page_alloc.c:2456</a> [inline]\n prep_new_page+0x179/0x180 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2462'>mm/page_alloc.c:2462</a>\n get_page_from_freelist+0x2235/0x23d0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#4254'>mm/page_alloc.c:4254</a>\n __alloc_pages_nodemask+0x268/0x5f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#5357'>mm/page_alloc.c:5357</a>\n alloc_slab_page mm/slub.c:-1 [inline]\n allocate_slab <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1808'>mm/slub.c:1808</a> [inline]\n new_slab+0x84/0x3f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1869'>mm/slub.c:1869</a>\n new_slab_objects <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2627'>mm/slub.c:2627</a> [inline]\n ___slab_alloc+0x2a6/0x450 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2791'>mm/slub.c:2791</a>\n __slab_alloc+0x63/0xa0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2831'>mm/slub.c:2831</a>\n slab_alloc_node <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2913'>mm/slub.c:2913</a> [inline]\n slab_alloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2955'>mm/slub.c:2955</a> [inline]\n __kmalloc+0x201/0x330 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4029'>mm/slub.c:4029</a>\n kmalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557'>include/linux/slab.h:557</a> [inline]\n kzalloc <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664'>include/linux/slab.h:664</a> [inline]\n acpi_os_allocate_zeroed <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/acpi/platform/aclinuxex.h#57'>include/acpi/platform/aclinuxex.h:57</a> [inline]\n acpi_ns_internalize_name+0x2bc/0x3a0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#331'>drivers/acpi/acpica/nsutils.c:331</a>\n acpi_ns_get_node_unlocked <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#666'>drivers/acpi/acpica/nsutils.c:666</a> [inline]\n acpi_ns_get_node+0x1a0/0x340 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#726'>drivers/acpi/acpica/nsutils.c:726</a>\n acpi_ns_evaluate+0x358/0xa00 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nseval.c#62'>drivers/acpi/acpica/nseval.c:62</a>\n acpi_evaluate_object+0x53c/0xa00 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsxfeval.c#354'>drivers/acpi/acpica/nsxfeval.c:354</a>\n acpi_evaluate_integer+0xf5/0x1c0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/utils.c#279'>drivers/acpi/utils.c:279</a>\n acpi_bus_get_status_handle <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#83'>drivers/acpi/bus.c:83</a> [inline]\n acpi_bus_get_status+0x165/0x1f0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#112'>drivers/acpi/bus.c:112</a>\n acpi_bus_attach+0x19c/0xb50 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2010'>drivers/acpi/scan.c:2010</a>\n acpi_bus_attach+0x238/0xb50 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2053'>drivers/acpi/scan.c:2053</a>\n acpi_bus_attach+0x238/0xb50 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2053'>drivers/acpi/scan.c:2053</a>\npage_owner free stack trace missing\n\nMemory state around the buggy address:\n ffff888105b81480: fc fb fc fc fc fc fb fc fc fc fc 00 fc fc fc fc\n ffff888105b81500: fa fc fc fc fc \n"
+  },
+  "snippets": {
+    "urls": {
+      "https://android.googlesource.com/kernel/common/": {
+        "error": "URL not in expected +/commit/path format"
+      }
+    },
+    "links": {
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249#249": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 249,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#417#417": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#417",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 417,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#603#603": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#603",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 603,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#77#77": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#77",
+        "file": "lib/dump_stack.c",
+        "line": 77,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#118#118": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#118",
+        "file": "lib/dump_stack.c",
+        "line": 118,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#248#248": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#248",
+        "file": "mm/kasan/report.c",
+        "line": 248,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#435#435": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#435",
+        "file": "mm/kasan/report.c",
+        "line": 435,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#452#452": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#452",
+        "file": "mm/kasan/report.c",
+        "line": 452,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/generic.c#189#189": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/generic.c#189",
+        "file": "mm/kasan/generic.c",
+        "line": 189,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/shadow.c#65#65": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/shadow.c#65",
+        "file": "mm/kasan/shadow.c",
+        "line": 65,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#623#623": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#623",
+        "file": "drivers/usb/mon/mon_bin.c",
+        "line": 623,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#91#91": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#91",
+        "file": "drivers/usb/mon/mon_main.c",
+        "line": 91,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#103#103": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#103",
+        "file": "drivers/usb/mon/mon_main.c",
+        "line": 103,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/usb/hcd.h#723#723": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/usb/hcd.h#723",
+        "file": "include/linux/usb/hcd.h",
+        "line": 723,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hcd.c#1543#1543": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hcd.c#1543",
+        "file": "drivers/usb/core/hcd.c",
+        "line": 1543,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/urb.c#585#585": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/urb.c#585",
+        "file": "drivers/usb/core/urb.c",
+        "line": 585,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#58#58": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#58",
+        "file": "drivers/usb/core/message.c",
+        "line": 58,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#102#102": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#102",
+        "file": "drivers/usb/core/message.c",
+        "line": 102,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#153#153": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#153",
+        "file": "drivers/usb/core/message.c",
+        "line": 153,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#928#928": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#928",
+        "file": "drivers/hid/usbhid/hid-core.c",
+        "line": 928,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1299#1299": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1299",
+        "file": "drivers/hid/usbhid/hid-core.c",
+        "line": 1299,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1737#1737": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1737",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1737,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657#1657": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657",
+        "file": "drivers/hid/hid-input.c",
+        "line": 1657,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963#1963": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963",
+        "file": "drivers/hid/hid-input.c",
+        "line": 1963,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968#1968": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1968,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075#2075": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2075,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391#391": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391",
+        "file": "drivers/hid/hid-microsoft.c",
+        "line": 391,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303#2303": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2303,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558#558": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558",
+        "file": "drivers/base/dd.c",
+        "line": 558,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752#752": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752",
+        "file": "drivers/base/dd.c",
+        "line": 752,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863#863": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863",
+        "file": "drivers/base/dd.c",
+        "line": 863,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433#433": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433",
+        "file": "drivers/base/bus.c",
+        "line": 433,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932#932": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932",
+        "file": "drivers/base/dd.c",
+        "line": 932,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981#981": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981",
+        "file": "drivers/base/dd.c",
+        "line": 981,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493#493": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493",
+        "file": "drivers/base/bus.c",
+        "line": 493,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273#3273": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273",
+        "file": "drivers/base/core.c",
+        "line": 3273,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455#2455": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455",
+        "file": "drivers/hid/hid-core.c",
+        "line": 2455,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421#1421": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421",
+        "file": "drivers/hid/usbhid/hid-core.c",
+        "line": 1421,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397#397": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397",
+        "file": "drivers/usb/core/driver.c",
+        "line": 397,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562#562": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562",
+        "file": "drivers/base/dd.c",
+        "line": 562,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160#2160": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160",
+        "file": "drivers/usb/core/message.c",
+        "line": 2160,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238#238": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238",
+        "file": "drivers/usb/core/generic.c",
+        "line": 238,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294#294": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294",
+        "file": "drivers/usb/core/driver.c",
+        "line": 294,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626#2626": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626",
+        "file": "drivers/usb/core/hub.c",
+        "line": 2626,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469#5469": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5469,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609#5609": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5609,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759#5759": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5759,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841#5841": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841",
+        "file": "drivers/usb/core/hub.c",
+        "line": 5841,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301#2301": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301",
+        "file": "kernel/workqueue.c",
+        "line": 2301,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447#2447": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447",
+        "file": "kernel/workqueue.c",
+        "line": 2447,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313#313": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313",
+        "file": "kernel/kthread.c",
+        "line": 313,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298#298": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298",
+        "file": "arch/x86/entry/entry_64.S",
+        "line": 298,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#38#38": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#38",
+        "file": "mm/kasan/common.c",
+        "line": 38,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#45#45": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#45",
+        "file": "mm/kasan/common.c",
+        "line": 45,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#430#430": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#430",
+        "file": "mm/kasan/common.c",
+        "line": 430,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#509#509": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#509",
+        "file": "mm/kasan/common.c",
+        "line": 509,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518#518": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518",
+        "file": "mm/kasan/common.c",
+        "line": 518,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/kasan.h#254#254": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/kasan.h#254",
+        "file": "include/linux/kasan.h",
+        "line": 254,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4033#4033": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4033",
+        "file": "mm/slub.c",
+        "line": 4033,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557#557": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557",
+        "file": "include/linux/slab.h",
+        "line": 557,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664#664": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664",
+        "file": "include/linux/slab.h",
+        "line": 664,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1663#1663": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1663",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1663,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1728#1728": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1728",
+        "file": "drivers/hid/hid-core.c",
+        "line": 1728,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/page_owner.h#35#35": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/page_owner.h#35",
+        "file": "include/linux/page_owner.h",
+        "line": 35,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2456#2456": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2456",
+        "file": "mm/page_alloc.c",
+        "line": 2456,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2462#2462": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2462",
+        "file": "mm/page_alloc.c",
+        "line": 2462,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#4254#4254": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#4254",
+        "file": "mm/page_alloc.c",
+        "line": 4254,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#5357#5357": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#5357",
+        "file": "mm/page_alloc.c",
+        "line": 5357,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1808#1808": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1808",
+        "file": "mm/slub.c",
+        "line": 1808,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1869#1869": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1869",
+        "file": "mm/slub.c",
+        "line": 1869,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2627#2627": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2627",
+        "file": "mm/slub.c",
+        "line": 2627,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2791#2791": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2791",
+        "file": "mm/slub.c",
+        "line": 2791,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2831#2831": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2831",
+        "file": "mm/slub.c",
+        "line": 2831,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2913#2913": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2913",
+        "file": "mm/slub.c",
+        "line": 2913,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2955#2955": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2955",
+        "file": "mm/slub.c",
+        "line": 2955,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4029#4029": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4029",
+        "file": "mm/slub.c",
+        "line": 4029,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/acpi/platform/aclinuxex.h#57#57": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/acpi/platform/aclinuxex.h#57",
+        "file": "include/acpi/platform/aclinuxex.h",
+        "line": 57,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#331#331": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#331",
+        "file": "drivers/acpi/acpica/nsutils.c",
+        "line": 331,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#666#666": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#666",
+        "file": "drivers/acpi/acpica/nsutils.c",
+        "line": 666,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#726#726": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#726",
+        "file": "drivers/acpi/acpica/nsutils.c",
+        "line": 726,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nseval.c#62#62": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nseval.c#62",
+        "file": "drivers/acpi/acpica/nseval.c",
+        "line": 62,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsxfeval.c#354#354": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsxfeval.c#354",
+        "file": "drivers/acpi/acpica/nsxfeval.c",
+        "line": 354,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/utils.c#279#279": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/utils.c#279",
+        "file": "drivers/acpi/utils.c",
+        "line": 279,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#83#83": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#83",
+        "file": "drivers/acpi/bus.c",
+        "line": 83,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#112#112": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#112",
+        "file": "drivers/acpi/bus.c",
+        "line": 112,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2010#2010": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2010",
+        "file": "drivers/acpi/scan.c",
+        "line": 2010,
+        "snippet": ""
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2053#2053": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2053",
+        "file": "drivers/acpi/scan.c",
+        "line": 2053,
+        "snippet": ""
+      }
+    }
+  },
+  "evidence": {
+    "https://android.googlesource.com/kernel/common/": {
+      "error": "URL not in expected +/commit/path format"
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#249#249": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#417#417": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#603#603": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#77#77": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/lib/dump_stack.c#118#118": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#248#248": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#435#435": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/report.c#452#452": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/generic.c#189#189": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/shadow.c#65#65": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_bin.c#623#623": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#91#91": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/mon/mon_main.c#103#103": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/usb/hcd.h#723#723": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hcd.c#1543#1543": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/urb.c#585#585": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#58#58": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#102#102": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#153#153": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#928#928": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1299#1299": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1737#1737": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1657#1657": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-input.c#1963#1963": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1968#1968": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2075#2075": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-microsoft.c#391#391": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2303#2303": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#558#558": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#752#752": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#863#863": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#433#433": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#932#932": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#981#981": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/bus.c#493#493": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/core.c#3273#3273": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#2455#2455": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/usbhid/hid-core.c#1421#1421": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#397#397": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/base/dd.c#562#562": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/message.c#2160#2160": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/generic.c#238#238": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/driver.c#294#294": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#2626#2626": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5469#5469": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5609#5609": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5759#5759": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/usb/core/hub.c#5841#5841": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2301#2301": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/workqueue.c#2447#2447": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/kernel/kthread.c#313#313": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/entry_64.S#298#298": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#38#38": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#45#45": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#430#430": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#509#509": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518#518": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/kasan.h#254#254": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4033#4033": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#557#557": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/slab.h#664#664": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1663#1663": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/hid/hid-core.c#1728#1728": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/page_owner.h#35#35": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2456#2456": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#2462#2462": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#4254#4254": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/page_alloc.c#5357#5357": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1808#1808": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#1869#1869": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2627#2627": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2791#2791": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2831#2831": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2913#2913": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#2955#2955": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/slub.c#4029#4029": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/acpi/platform/aclinuxex.h#57#57": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#331#331": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#666#666": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsutils.c#726#726": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nseval.c#62#62": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/acpica/nsxfeval.c#354#354": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/utils.c#279#279": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#83#83": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/bus.c#112#112": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2010#2010": {
+      "error": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/drivers/acpi/scan.c#2053#2053": {
+      "error": null
+    }
+  },
+  "classification": {
+    "classification": null,
+    "preconditions": [
+      "Object was previously allocated (see 'Allocated by task' stack)",
+      "Input state: attacker-controlled syscall parameters or fuzzer input must reach the syscall path"
+    ],
+    "postconditions": [
+      "KASAN reported invalid memory access (see crash report)"
+    ],
+    "notes": [
+      "Detected a read of size 3904",
+      "Primitive: larger read (3904 bytes)",
+      "Access is inside the object's bounds (but could be use-after-free)",
+      "Object comes from cache kmalloc-8",
+      "Triggering syscall likely came from syzkaller (fuzzer) \u2014 input may be controlled"
+    ],
+    "vulnerability": "read (3904 bytes) \u2014 potential info-leak"
+  },
+  "strong_report": {
+    "primitive": "info-leak (bounded or unbounded read)",
+    "vulnerability": "out-of-bounds read",
+    "confidence": 0.42,
+    "preconditions": [
+      "How to create: allocate the object via code path that calls: __kasan_kmalloc+0xda/0x110 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518'>mm/kasan/common.c:518</a>",
+      "How to create hint: Allocation from slab/kmalloc: create objects via normal kernel paths (file ops, network ops, or module-specific APIs)",
+      "Object details: type 'kmalloc-8', address ffff888105b815a0, size 8",
+      "Object: cache 'kmalloc-8', address ffff888105b815a0, size 8, offset 1",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Code path: execution reaches function 'item' (from crash context)"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "KASAN reported slab-out-of-bounds (log contains 'slab-out-of-bounds')",
+      "Access offset 1 inside object size 8",
+      "Allocation origin: __kasan_kmalloc+0xda/0x110 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518'>mm/kasan/common.c:518</a>"
+    ],
+    "how_to_create": {
+      "alloc_frame": "__kasan_kmalloc+0xda/0x110 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/mm/kasan/common.c#518'>mm/kasan/common.c:518</a>",
+      "guidance": [
+        "Allocation from slab/kmalloc: create objects via normal kernel paths (file ops, network ops, or module-specific APIs)"
+      ]
+    },
+    "exploitability": "high"
+  }
+}
