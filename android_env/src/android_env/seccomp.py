@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 import json
 
-from .adb import get_single_process_by_name, Strace, start_activity_action, start_activity_name, install_app, AdbProcess, Tools, Process
+from .adb import get_single_process_by_name, Strace, start_activity_action, start_activity_name, install_app, AdbProcess, Tools, Process, upload_tools
 from .syscalls import get_syscall_map
 
 class SeccompDumper:
@@ -78,17 +78,6 @@ def eval_filter(filter: bytes, syscall_number: int) -> bool:
             print(e.stderr.strip())
             return False
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Dump allowed syscalls by seccomp policy on android vm."
-    )
-    parser.add_argument(
-        "json_file",
-        type=Path,
-        help="Path information about allowed syscalls will be saved"
-    )
-    return parser.parse_args()
-
 def get_allowed_syscalls_for_app(app_name: str, start_app: Callable[[], None]) -> Optional[dict[str, bool]]:
     zygote32 = get_single_process_by_name('zygote')
     zygote64 = get_single_process_by_name('zygote64')
@@ -114,9 +103,8 @@ def get_allowed_syscalls_for_app(app_name: str, start_app: Callable[[], None]) -
     return allowed_syscalls
 
 
-def dump_seccomp():
-    args = parse_args()
-    save_file = args.json_file
+def dump_seccomp(save_file: Path):
+    upload_tools()
 
     system_app_allowed_syscalls = get_allowed_syscalls_for_app(
         'com.android.settings',

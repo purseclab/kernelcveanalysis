@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "typer>=0.20.0",
+]
 
 [tool.uv]
 package = true
@@ -13,5 +15,4 @@ package = true
 mypy_path = "src"
 
 [project.scripts]
-seccomp = "android_env.seccomp:dump_seccomp"
-selinux = "android_env.selinux:dump_selinux"
+aenv = "android_env.main:main"

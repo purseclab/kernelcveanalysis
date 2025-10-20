@@ -8,7 +8,7 @@ from enum import StrEnum
 import subprocess
 import itertools
 
-from .adb import read_file, run_adb_command, runas, Permissions
+from .adb import read_file, run_adb_command, runas, Permissions, upload_tools
 from .util import config_lines
 from .codeql import CodeqlQuery, CodeqlContext
 
@@ -539,16 +539,31 @@ class SelinuxContext:
         self.diff_accessible_services_for_domain(domain1, domain2)
         self.diff_accesible_files_for_domain(domain1, domain2)
         
+def dump_selinux_info(setype: str):
+    upload_tools()
 
+    context = SelinuxContext()
+    context.print_info_for_domain(SeType(setype))
+
+def diff_selinux_info(setype1: str, setype2: str):
+    upload_tools()
+
+    context = SelinuxContext()
+    context.diff_info_for_domain(SeType(setype1), SeType(setype2))
 
 def dump_selinux():
+    # upload_tools()
+
     ql = CodeqlContext(
         Path('/home/jack/Documents/college/purdue/research/kernelcveanalysis/android_env/codeql_database'),
         Path('/home/jack/Documents/college/purdue/research/kernelcveanalysis/android_env/codeql'),
     )
 
+    # ql.get_aidl_interfaces()
+
+    ql.aidl_flow_to_vuln('android.accounts.IAccountManager', 'android.accounts.IAccountManager.isAccountManagedByCaller') # works
+
     # ql.methods_in_interface('android.app.role.IRoleManager') # not in db
-    ql.methods_in_interface('android.accounts.IAccountManager') # in db but stub impl is not?
     # ql.methods_in_interface('android.os.IThermalService')
     # ql.get_type('AccountManagerService')
 

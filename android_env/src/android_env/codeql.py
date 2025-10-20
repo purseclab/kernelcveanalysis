@@ -3,6 +3,57 @@ from enum import StrEnum
 from tempfile import TemporaryDirectory
 import shutil
 import subprocess
+import json
+import textwrap
+
+QUERY_COMMON = textwrap.indent('''
+import java
+
+predicate isAidlStub(Interface interface, NestedType stub) {
+    stub.getEnclosingType() = interface and stub.getName() = "Stub" and stub.extendsOrImplements(interface)
+}
+
+predicate methodOverridesMember(RefType type, Method m) {
+    m.getAnOverride().getDeclaringType() = type
+}
+
+class AidlInterface extends Interface {
+    NestedType stub;
+
+    AidlInterface() {
+        isAidlStub(this, stub)
+    }
+
+    NestedType getStub() {
+        result = stub
+    }
+}
+
+class AidlImpl extends RefType {
+    AidlInterface interface;
+
+    AidlImpl() {
+        this.extendsOrImplements(interface.getStub())
+    }
+
+    AidlInterface getInterface() {
+        result = interface
+    }
+}
+
+class AidlMethodImpl extends Method {
+    AidlImpl impl;
+
+    AidlMethodImpl() {
+        this.getDeclaringType() = impl
+        and methodOverridesMember(impl.getInterface(), this)
+    }
+
+    AidlImpl getImpl() {
+        result = impl
+    }
+}
+''', '        ')
 
 class CodeqlQuery(StrEnum):
     TestQuery = 'test.ql'
@@ -16,11 +67,14 @@ class CodeqlContext:
         self.database_path = database_path
         self.query_folder = query_folder
 
-    def run_query_str(self, query: str) -> str:
+    def run_query_str(self, query: str) -> list[tuple]:
+        query = textwrap.dedent(query)
+        print(f'running query:\n{query}')
+
         with TemporaryDirectory() as dir:
             query_path = dir + '/query.ql'
             bqrs_path = dir + '/output.bqrs'
-            csv_path = dir + '/output.csv'
+            json_path = dir + '/output.json'
 
             with open(query_path, 'w') as f:
                 f.write(query)
@@ -34,13 +88,18 @@ class CodeqlContext:
             )
 
             subprocess.run(
-                ['codeql', 'bqrs', 'decode', bqrs_path, '--output', csv_path, '--format', 'csv']
+                ['codeql', 'bqrs', 'decode', bqrs_path, '--output', json_path, '--format', 'json']
             )
 
-            with open(csv_path, 'r') as f:
-                data = f.read()
-        
-        return data
+            with open(json_path, 'r') as f:
+                data = json.loads(f.read())
+            
+            rows = data['#select']['tuples']
+
+            def flatten_row(row: list[dict[str, str] | str]) -> tuple:
+                return tuple(item if type(item) == str else item['label'] for item in row)
+            
+            return [flatten_row(row) for row in rows]
     
     def run_query(self, query: CodeqlQuery, **kwargs: str) -> str:
         script_args = []
@@ -67,48 +126,159 @@ class CodeqlContext:
         
         return data
 
-    
-    # this one is mostly just for debugging to see if a type is actually in the database
-    def get_type(self, type_name: str):
-        query = f'''
-import java
+    def target_interface(self, codeql_name: str, interface_path: str) -> str:
+        '''
+        Returns a codeql class named `codeql_name` which is a specific interface
+        '''
 
-from RefType type
-where type.getName() = "{type_name}"
-select type.getName()
-'''
-        print(self.run_query_str(query))
-    
-    def methods_in_interface(self, interface_path: str):
         parts = interface_path.split('.')
         package = '.'.join(parts[:-1])
         interface = parts[-1]
 
+        return f'''
+        class {codeql_name} extends Interface {{
+            {codeql_name}() {{
+                this.hasQualifiedName("{package}", "{interface}")
+            }}
+        }}
+        '''
+    
+    def target_method(self, codeql_name: str, method_path: str) -> str:
+        '''
+        Returns a codeql class named `codeql_name` which is a specific method
+        '''
+
+        parts = method_path.split('.')
+        package = '.'.join(parts[:-2])
+        class_name = parts[-2]
+        method_name = parts[-1]
+
+        return f'''
+        class {codeql_name} extends Method {{
+            {codeql_name}() {{
+                this.hasQualifiedName("{package}", "{class_name}", "{method_name}")
+            }}
+        }}
+        '''
+    
+    # this one is mostly just for debugging to see if a type is actually in the database
+    def get_type(self, type_name: str):
         query = f'''
-import java
+        import java
 
-class TargetInterface extends Interface {{
-    TargetInterface() {{
-        this.hasQualifiedName("{package}", "{interface}")
-    }}
-}}
+        from RefType type
+        where type.getName() = "{type_name}"
+        select type.getName(), type.getPackage()
+        '''
+        print(self.run_query_str(query))
+    
+    def get_method(self, method_path: str):
+        parts = method_path.split('.')
+        package = '.'.join(parts[:-2])
+        class_name = parts[-2]
+        method_name = parts[-1]
 
-predicate isAidlStub(TargetInterface interface, NestedType stub) {{
-    stub.getEnclosingType() = interface and stub.getName() = "Stub"
-}}
+        query = f'''
+        import java
 
-predicate methodOverridesMember(RefType type, Method m) {{
-    m.getAnOverride().getDeclaringType() = type
-}}
-
-from TargetInterface interface, NestedType stub, RefType impl, Method m
-where isAidlStub(interface, stub)
-and impl.extendsOrImplements(stub)
-and m.getDeclaringType() = impl
-// the aidl methods are declared in the interface
-and methodOverridesMember(interface, m)
-select interface, stub, impl, m, m.getAnOverride().getDeclaringType()
-'''
-        print(query)
+        from Method m
+        where m.hasQualifiedName("{package}", "{class_name}", "{method_name}")
+        select m
+        '''
         
         print(self.run_query_str(query))
+    
+    def aidl_impl(self, interface_path: str):
+        # mostly for debugging
+
+        query = f'''
+        {QUERY_COMMON}
+
+        {self.target_interface('TargetInterface', interface_path)}
+
+        from TargetInterface interface, AidlImpl impl
+        where impl.getInterface() = interface
+        select interface, impl
+        '''
+
+        print(self.run_query_str(query))
+    
+    def aidl_flow_to_vuln(self, interface_path: str, vuln_method_path: str):
+        query = f'''
+        import semmle.code.java.dataflow.DataFlow
+
+        {QUERY_COMMON}
+
+        {self.target_interface('TargetInterface', interface_path)}
+        {self.target_method('VulnMethod', vuln_method_path)}
+
+        module FlowConfig implements DataFlow::ConfigSig {{
+            predicate isSource(DataFlow::Node source) {{
+                exists(TargetInterface interface, AidlMethodImpl m
+                    | m.getImpl().getInterface() = interface
+                    | source.asParameter().getCallable() = m
+                )
+            }}
+
+            predicate isSink(DataFlow::Node source) {{
+                exists(VulnMethod m | source.asParameter().getCallable() = m)
+            }}
+        }}
+
+        module Flow = DataFlow::Global<FlowConfig>;
+
+        from TargetInterface interface, AidlMethodImpl method, DataFlow::Node source, DataFlow::Node sink
+        where method.getImpl().getInterface() = interface
+        and source.asParameter().getCallable() = method
+        and Flow::flow(source, sink)
+        select interface, method, source, sink
+
+        /*from TargetInterface interface, AidlMethodImpl method
+        where method.getImpl().getInterface() = interface
+        select interface, method*/
+        '''
+        
+        print(self.run_query_str(query))
+
+    def get_aidl_interfaces(self):
+        query = f'''
+        {QUERY_COMMON}
+
+        from Interface interface, NestedType stub
+        where isAidlStub(interface, stub)
+        select interface
+        '''
+
+        print(self.run_query_str(query))
+
+def codeql_test():
+    # Real database
+    db = Path('/home/jack/Documents/college/purdue/research/kernelcveanalysis/android_env/codeql_database')
+
+    # Test database
+    # db = Path('/home/jack/Documents/college/purdue/research/kernelcveanalysis/android_env/codeql/test/test_db')
+
+
+    ql = CodeqlContext(
+        db,
+        Path('/home/jack/Documents/college/purdue/research/kernelcveanalysis/android_env/codeql'),
+    )
+
+    # ql.aidl_flow_to_vuln('com.example.IService', 'com.example.Service.target_method')
+    # ql.get_type('IService')
+    # ql.get_method('com.example.Service.target_method')
+
+
+    # ql.get_aidl_interfaces()
+
+    ql.aidl_flow_to_vuln('android.accounts.IAccountManager', 'com.android.server.accounts.AccountManagerService.isAccountManagedByCaller') # works
+    # ql.aidl_impl('android.accounts.IAccountManager') # works
+    # ql.get_method('com.android.server.accounts.AccountManagerService.isAccountManagedByCaller')
+    # ql.get_type('AccountManagerService')
+
+    # ql.aidl_flow_to_vuln('android.app.role.IRoleManager') # not in db
+    # ql.aidl_flow_to_vuln('android.os.IThermalService')
+    # ql.get_type('AccountManagerService')
+
+    # ql.aidl_flow_to_vuln('android.os.IPermissionController') # methods are messed up, impl name does not match?
+    # ql.get_type('IPermissionController')

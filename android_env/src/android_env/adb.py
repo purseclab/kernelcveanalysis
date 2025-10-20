@@ -224,5 +224,3 @@ def start_activity_name(activity_name: str):
 
 def start_activity_action(action: str):
     run_adb_command(f'am start -a {action}')
-
-upload_tools()
