@@ -176,6 +176,62 @@ def parse_fragment_for_range(url: str) -> Tuple[Optional[int], Optional[int]]:
     return None, None
 
 
+def _is_function_header(line: str, lookahead: List[str]) -> bool:
+    """Heuristic: return True if the given line looks like a C function header.
+
+    We try to avoid matching control statements like 'if', 'for', 'while', 'switch'.
+    """
+    s = line.strip()
+    if not s:
+        return False
+    # exclude common control keywords
+    if re.match(r'^(if|for|while|switch|else|case|do)\b', s):
+        return False
+    # exclude preprocessor or labels
+    if s.startswith('#') or s.endswith(':'):
+        return False
+    # quick check: must contain a '(' and end with ')' or '){' or similar
+    if '(' not in s:
+        return False
+    # avoid simple constructs like 'for (' caught above; now look for an identifier before the '('
+    m = re.match(r'^[\w\s\*\(\)]+?([A-Za-z_][A-Za-z0-9_]*)\s*\(', s)
+    if not m:
+        return False
+    # if the line already ends with ') {' it's very likely a function header
+    if re.search(r'\)\s*{\s*$', line):
+        return True
+    # otherwise look ahead a few lines for an opening brace
+    for l in lookahead[:6]:
+        if l.strip().startswith('{'):
+            return True
+    return False
+
+
+def _find_function_start(lines: List[str], ln: int) -> int:
+    """Find a reasonable function start line number (1-based) given lines and target line ln (1-based).
+
+    Returns a 1-based start line. Uses conservative heuristics to avoid stopping on control statements.
+    """
+    # scan backwards from ln-1 to 0
+    for i in range(max(0, ln - 1), -1, -1):
+        line = lines[i]
+        # prepare lookahead slice for checking for opening brace following a prototype
+        lookahead = lines[i + 1: i + 7] if i + 1 < len(lines) else []
+        try:
+            if _is_function_header(line, lookahead):
+                return i + 1
+        except Exception:
+            pass
+    # fallback: search for any line that looks like 'identifier ... )' (less strict)
+    # for i in range(max(0, ln - 1), max(0, ln - 200) - 1, -1):
+    #     if i < 0:
+    #         break
+    #     if re.match(r"^\s*[A-Za-z_][A-Za-z0-9_].*\)$", lines[i].strip()):
+    #         return i + 1
+    # final fallback: reasonable context
+    return max(1, ln - 100)
+
+
 def fetch_raw_from_android_googlesource(url: str) -> Tuple[Optional[str], Optional[str]]:
     """Convert a android.googlesource.com commit link (with +/commit/path#L) into a raw file URL
     and fetch the snippet. Returns (snippet_text, error_message)
@@ -190,10 +246,16 @@ def fetch_raw_from_android_googlesource(url: str) -> Tuple[Optional[str], Option
     # cache key is the URL requested (with format param)
     try:
         parsed = urllib.parse.urlparse(url)
+        # Expect a path containing '+/' per googlesource commit blob URLs
         if "+/" not in parsed.path:
             return None, "URL not in expected +/commit/path format"
-        q = urllib.parse.urlencode({"format": "TEXT"})
-        fetch_url = url + ("&" if "?" in url else "?") + q
+
+        # Build fetch URL: ensure we add format=TEXT to the query portion (not fragment)
+        # Strip fragment before adding query
+        base = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, ""))
+        qdict = dict(urllib.parse.parse_qsl(parsed.query))
+        qdict.setdefault("format", "TEXT")
+        fetch_url = base + ("?" + urllib.parse.urlencode(qdict) if qdict else "")
 
         # simple module-level cache
         if not hasattr(fetch_raw_from_android_googlesource, "_cache"):
@@ -202,12 +264,16 @@ def fetch_raw_from_android_googlesource(url: str) -> Tuple[Optional[str], Option
         if fetch_url in cache:
             return cache[fetch_url], None
 
+        # prepare a Request with a sensible User-Agent header to avoid blocking
+        headers = {"User-Agent": "crash-analyzer/1.0 (+https://example.invalid)"}
+
         # retry with exponential backoff (short attempts)
         backoff = 1.0
         last_err = None
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(fetch_url, timeout=10) as r:
+                req = urllib.request.Request(fetch_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as r:
                     data = r.read()
                     try:
                         import base64
@@ -220,7 +286,6 @@ def fetch_raw_from_android_googlesource(url: str) -> Tuple[Optional[str], Option
                     return txt, None
             except Exception as e:
                 last_err = e
-                # simple backoff
                 import time
 
                 time.sleep(backoff)
@@ -260,9 +325,11 @@ def fetch_source_from_url(url: str) -> Dict[str, Any]:
         try:
             backoff = 1.0
             last_err = None
+            headers = {"User-Agent": "crash-analyzer/1.0 (+https://example.invalid)"}
             for attempt in range(3):
                 try:
-                    with urllib.request.urlopen(raw_url, timeout=10) as r:
+                    req = urllib.request.Request(raw_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=10) as r:
                         data = r.read().decode(errors="ignore")
                         cache[raw_url] = data
                         return {"text": data}
@@ -284,6 +351,12 @@ def fetch_source_from_url(url: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": str(e)}
 
+    # DEBUG: report fetched size/lines for link frame urls
+    try:
+        print(f"[DEBUG] fetched link {u}: {len(text)} bytes, {len(text.splitlines())} lines", file=sys.stderr)
+        print(f"[DEBUG] fetched link preview: {text[:200]!r}", file=sys.stderr)
+    except Exception:
+        pass
 
 def convert_to_raw(url: str) -> Optional[str]:
     """Convert common source viewer URLs to raw file URLs when possible.
@@ -988,6 +1061,157 @@ def parse_syz_repro(text: str) -> List[str]:
     return norm
 
 
+def _call_llm(prompt: str, model_path: Optional[str] = None, max_tokens: int = 512) -> Dict[str, Any]:
+    """Try to call a local LLM (llama_cpp) if available.
+
+    Returns a dict: {"ok": True, "answer": str} or {"ok": False, "error": str, "prompt": prompt}
+    This avoids adding a hard requirement on llama_cpp: if it's not importable we return the prompt
+    and an informative error so callers can run it manually.
+    """
+    # First try local Llama (llama_cpp) if available
+    llama_err = None
+    try:
+        # lazy import to avoid hard dependency
+        from llama_cpp import Llama  # type: ignore
+        try:
+            kwargs = {"max_tokens": max_tokens, "temperature": 0.0}
+            if model_path:
+                llm = Llama(model_path=model_path)
+            else:
+                llm = Llama()
+            resp = llm.create(prompt=prompt, **kwargs)
+            # llama_cpp returns choices with text; try a few fallbacks
+            ans = None
+            if isinstance(resp, dict):
+                ch = resp.get('choices') or []
+                if ch and isinstance(ch, list):
+                    ans = ch[0].get('text')
+            if ans is None:
+                ans = getattr(resp, 'text', None) or str(resp)
+            return {"ok": True, "answer": ans}
+        except Exception as e:
+            # Record the llama-specific error and fall back to other providers
+            llama_err = f"llama_cpp invocation failed: {e}"
+    except Exception as e:
+        llama_err = f"llama_cpp not available: {e}"
+
+    # Fallback: try OpenAI if configured via environment (OPENAI_API_KEY)
+    openai_err = None
+    try:
+        import openai  # type: ignore
+        # require an API key in environment or openai package configuration
+        api_key = os.environ.get('OPENAI_API_KEY')
+        if not api_key and not getattr(openai, 'api_key', None):
+            openai_err = "OPENAI_API_KEY not set and openai.api_key not configured"
+        else:
+            if api_key:
+                openai.api_key = api_key
+            # Use ChatCompletion where available
+            try:
+                # prefer chat completion
+                msgs = [{"role": "system", "content": "You are a helpful assistant for analyzing kernel crashes."},
+                        {"role": "user", "content": prompt}]
+                resp = openai.ChatCompletion.create(model=os.environ.get('OPENAI_MODEL', 'gpt-3.5-turbo'), messages=msgs, max_tokens=max_tokens, temperature=0.0)
+                # extract text
+                ans = None
+                if resp and hasattr(resp, 'choices'):
+                    ch = resp.choices
+                    if isinstance(ch, (list, tuple)) and len(ch) > 0:
+                        delta = ch[0]
+                        # for chat-style, content may be in delta.message or delta['message'] depending on lib
+                        if isinstance(delta, dict):
+                            msg = delta.get('message') or delta.get('text')
+                            if isinstance(msg, dict):
+                                ans = msg.get('content')
+                            else:
+                                ans = msg
+                        else:
+                            # fallback to string conversion
+                            ans = getattr(delta, 'message', None) or getattr(delta, 'text', None) or str(delta)
+                if ans is None:
+                    # try alternative structure
+                    ans = getattr(resp, 'text', None) or str(resp)
+                return {"ok": True, "answer": ans}
+            except Exception as e:
+                openai_err = f"openai.ChatCompletion failed: {e}"
+    except Exception as e:
+        openai_err = f"openai not available: {e}"
+
+    # If we reach here, neither llama_cpp nor OpenAI produced a usable result
+    errs = []
+    if llama_err:
+        errs.append(llama_err)
+    if openai_err:
+        errs.append(openai_err)
+    return {"ok": False, "error": " | ".join(errs) or "No LLM available", "prompt": prompt}
+
+
+def llm_analyze_traces(frames: List[Dict[str, Any]], snippet_map: Dict[str, str], model_path: Optional[str] = None) -> Dict[str, Any]:
+    """Use an LLM to analyze a function trace chain and suggest concrete preconditions.
+
+    Inputs:
+      - frames: list of frame dicts (as parsed by parse_crash_log)
+      - snippet_map: mapping from a frame key or url to the source snippet string
+      - model_path: optional local Llama model path for llama_cpp
+
+    Output: dict with keys: prompt, llm_response (if any), summary (heuristic fallback)
+
+    This function constructs a concise prompt that includes the call chain (top->bottom),
+    relevant source snippets, and asks the model to return:
+      - a short precondition (concrete input ranges or states)
+      - the reasoning/evidence lines
+      - suggested reproduction steps
+
+    If no LLM is available the function returns the assembled prompt under 'prompt' so
+    it can be used manually.
+    """
+    # Build call chain summary
+    chain = []
+    for f in frames:
+        func = f.get('func') or '<anon>'
+        file = f.get('file') or ''
+        line = f.get('line') or ''
+        chain.append(f"{func} @ {file}:{line}")
+
+    prompt_lines = []
+    prompt_lines.append("You are given a kernel crash stack trace and surrounding source snippets. Your task is to produce a concise, developer-friendly description of the PRECONDITION(s) that must hold to reach the crash. Provide concrete input ranges, variable constraints, and reproduction hints.")
+    prompt_lines.append("")
+    prompt_lines.append("Call chain (top -> bottom):")
+    for c in chain:
+        prompt_lines.append(" - " + c)
+    prompt_lines.append("")
+    prompt_lines.append("Available source snippets (filename:line -> snippet):")
+    # limit snippet size
+    for k, s in snippet_map.items():
+        snippet_preview = '\n'.join(s.splitlines()[:20])
+        prompt_lines.append(f"-- {k}:\n{snippet_preview}\n---")
+
+    prompt_lines.append("")
+    prompt_lines.append("Please output JSON with fields: preconditions (list of short statements), input_constraints (list of variable name -> allowed ranges), reproduction (steps), evidence (lines in the snippets that support each precondition). Keep answers concise and concrete.")
+    prompt = "\n".join(prompt_lines)
+
+    llm_out = _call_llm(prompt, model_path=model_path, max_tokens=512)
+    out = {"prompt": prompt}
+    out.update(llm_out)
+    # Heuristic fallback summary in case LLM not available or failed
+    if not llm_out.get('ok'):
+        # produce a tiny heuristic summary using simple rules
+        summary = {"preconditions": [], "input_constraints": [], "reproduction": [], "evidence": []}
+        # if any snippet mentions copy_from_user or user pointers, mark user-controlled
+        combined = "\n".join(snippet_map.values())
+        if re.search(r"copy_from_user|get_user|put_user|ioctl|syscall|fuse|netlink", combined, re.I):
+            summary['preconditions'].append("Attacker-controlled user data must reach this code path (copy_from_user or ioctl-like path detected)")
+            summary['reproduction'].append("Call the syscall or ioctl which reaches the call chain above with crafted user-controlled buffers")
+        # look for alloc/free patterns
+        if re.search(r"kmalloc|kzalloc|kmem_cache_alloc|alloc_pages", combined):
+            summary['preconditions'].append("A kernel allocation of the relevant object must occur prior to the access")
+        # array/deref
+        if re.search(r"->|\[|\*", combined):
+            summary['input_constraints'].append({"note": "Pointer or index dereference observed near crash; consider off-by-one or size fields controlling ranges"})
+        out['summary'] = summary
+    return out
+
+
 
 
 def load_source_snippets(frames: List[Dict[str, Any]], source_root: str, context: int = 6) -> Dict[str, Any]:
@@ -1126,18 +1350,28 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
         if "text" in fetched:
             # Use fragment parsing to extract a focused snippet when the URL contains a fragment
             text = fetched["text"]
+            try:
+                print(f"[DEBUG] fetched URL {u}: {len(text)} bytes, {len(text.splitlines())} lines", file=sys.stderr)
+                print(f"[DEBUG] fetched URL preview: {text[:200]!r}", file=sys.stderr)
+            except Exception:
+                pass
             sl, el = parse_fragment_for_range(u)
+            print(f"[DEBUG] parsed fragment for {u}: start_line={sl}, end_line={el}", file=sys.stderr)
             if sl is not None:
                 lines = text.splitlines()
-                # single-line fragment -> provide +/- 6 lines of context
+                # single-line fragment -> try to return from function start -> that line
                 if el == sl:
-                    start = max(1, sl - 6)
-                    end = min(len(lines), sl + 6)
+                    ln = sl
+                    # use helper to find function start conservatively
+                    start_fn = _find_function_start(lines, ln)
+                    fn_start = start_fn
+                    fn_end = min(len(lines), ln)
+                    snippet = "\n".join(lines[fn_start - 1:fn_end])
                 else:
                     # explicit range -> use exact range bounds
                     start = max(1, sl)
                     end = min(len(lines), el)
-                snippet = "\n".join(lines[start - 1:end])
+                    snippet = "\n".join(lines[start - 1:end])
             else:
                 snippet = text
             url_snippets[u] = snippet
@@ -1155,7 +1389,13 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
         fetched = fetch_source_from_url(u)
         if "text" in fetched:
             text = fetched["text"]
+            try:
+                print(f"[DEBUG] fetched link {u}: {len(text)} bytes, {len(text.splitlines())} lines", file=sys.stderr)
+                print(f"[DEBUG] fetched link preview: {text[:200]!r}", file=sys.stderr)
+            except Exception:
+                pass
             sl, el = parse_fragment_for_range(u)
+            print(f"[DEBUG] parsed fragment for {u}: start_line={sl}, end_line={el}", file=sys.stderr)
             if sl is not None:
                 lines = text.splitlines()
                 if el == sl:
@@ -1165,6 +1405,37 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
                     start = max(1, sl)
                     end = min(len(lines), el)
                 snippet = "\n".join(lines[start - 1:end])
+                # When fragment provides a specific line, also try to extract function start -> linked line
+                func_snippet = None
+                func_snippet_file = None
+                try:
+                    ln = sl
+                    # search backwards for probable function start (same heuristic as below)
+                    start_fn = _find_function_start(lines, ln)
+                    fn_start = start_fn
+                    fn_end = min(len(lines), ln)
+                    func_snippet = "\n".join(lines[fn_start - 1:fn_end])
+                    try:
+                        crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
+                        os.makedirs(crash_dir, exist_ok=True)
+                        default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
+                        bugid = determine_bug_id(parsed, default_name)
+                        bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
+                        safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
+                        out_name = f"{bugid}__{safe_bn}__L{ln}.txt"
+                        out_path = os.path.join(crash_dir, out_name)
+                        try:
+                            print(f"[DEBUG] writing function snippet {out_path}: {len(func_snippet) if func_snippet is not None else 0} chars", file=sys.stderr)
+                        except Exception:
+                            pass
+                        with open(out_path, 'w', encoding='utf-8') as ofh:
+                            ofh.write(func_snippet or "")
+                        func_snippet_file = out_path
+                    except Exception:
+                        func_snippet_file = None
+                except Exception:
+                    func_snippet = None
+                    func_snippet_file = None
             else:
                 # try to extract around the reported line number in the anchor if present
                 if lf.get("line"):
@@ -1173,10 +1444,111 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
                     start = max(1, ln - 6)
                     end = min(len(lines), ln + 6)
                     snippet = "\n".join(lines[start - 1:end])
+                    # attempt function-snippet extraction (already implemented below)
+                    func_snippet = None
+                    func_snippet_file = None
+                    try:
+                        lines = text.splitlines()
+                        ln = int(lf.get("line"))
+                        # search backwards for a likely function definition start
+                        start_fn = _find_function_start(lines, ln)
+                        fn_start = start_fn
+                        fn_end = min(len(lines), ln)
+                        func_snippet = "\n".join(lines[fn_start - 1:fn_end])
+                        try:
+                            crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
+                            os.makedirs(crash_dir, exist_ok=True)
+                            default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
+                            bugid = determine_bug_id(parsed, default_name)
+                            bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
+                            safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
+                            out_name = f"{bugid}__{safe_bn}__L{ln}.txt"
+                            out_path = os.path.join(crash_dir, out_name)
+                            try:
+                                print(f"[DEBUG] writing function snippet {out_path}: {len(func_snippet) if func_snippet is not None else 0} chars", file=sys.stderr)
+                            except Exception:
+                                pass
+                            with open(out_path, 'w', encoding='utf-8') as ofh:
+                                ofh.write(func_snippet or "")
+                            func_snippet_file = out_path
+                        except Exception:
+                            func_snippet_file = None
+                    except Exception:
+                        func_snippet = None
+                        func_snippet_file = None
                 else:
                     snippet = text
+            # additional: attempt to capture from function start to the linked line
+            func_snippet = None
+            func_snippet_file = None
+            try:
+                if lf.get("line"):
+                    lines = text.splitlines()
+                    ln = int(lf.get("line"))
+                    # search backwards for a likely function definition start
+                    start_fn = _find_function_start(lines, ln)
+                    # build snippet from function start to the linked line (inclusive)
+                    fn_start = start_fn
+                    fn_end = min(len(lines), ln)
+                    func_snippet = "\n".join(lines[fn_start - 1:fn_end])
+                    # save to crash_analysis/<bugid>__<basename>__L<ln>.txt
+                    try:
+                        crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
+                        os.makedirs(crash_dir, exist_ok=True)
+                        # determine bug id from parsed (fallback to file basename without extension)
+                        default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
+                        bugid = determine_bug_id(parsed, default_name)
+                        bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
+                        safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
+                        out_name = f"{bugid}__{safe_bn}__L{ln}.txt"
+                        out_path = os.path.join(crash_dir, out_name)
+                        try:
+                            print(f"[DEBUG] writing function snippet {out_path}: {len(func_snippet) if func_snippet is not None else 0} chars", file=sys.stderr)
+                        except Exception:
+                            pass
+                        with open(out_path, 'w', encoding='utf-8') as ofh:
+                            ofh.write(func_snippet or "")
+                        func_snippet_file = out_path
+                    except Exception:
+                        func_snippet_file = None
+            except Exception:
+                func_snippet = None
+                func_snippet_file = None
+
+            # always try to save the context snippet to a file so we have a local copy
+            snippet_file = None
+            try:
+                crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
+                os.makedirs(crash_dir, exist_ok=True)
+                default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
+                # prefer bugid when available, but don't fail on it
+                try:
+                    bugid = determine_bug_id(parsed, default_name)
+                except Exception:
+                    bugid = default_name
+                bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
+                safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
+                ln_for_name = str(lf.get('line','?'))
+                snippet_name = f"{bugid}__{safe_bn}__L{ln_for_name}__ctx.txt"
+                snippet_path = os.path.join(crash_dir, snippet_name)
+                try:
+                    print(f"[DEBUG] writing context snippet {snippet_path}: {len(snippet) if snippet is not None else 0} chars", file=sys.stderr)
+                except Exception:
+                    pass
+                with open(snippet_path, 'w', encoding='utf-8') as sfh:
+                    sfh.write(snippet or "")
+                snippet_file = snippet_path
+            except Exception:
+                snippet_file = None
+
             key = f"link:{u}#{lf.get('line','?')}"
             link_snippets[key] = {"url": u, "file": lf.get("file"), "line": lf.get("line"), "snippet": snippet}
+            if snippet_file:
+                link_snippets[key]["snippet_file"] = snippet_file
+            if func_snippet is not None:
+                link_snippets[key]["function_snippet"] = func_snippet
+            if func_snippet_file:
+                link_snippets[key]["function_snippet_file"] = func_snippet_file
         else:
             key = f"link:{u}#{lf.get('line','?')}"
             link_snippets[key] = {"url": u, "error": fetched.get("error")}
@@ -1217,6 +1589,45 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
 
     classification = classify(parsed)
     return {"parsed": parsed, "snippets": snippets, "evidence": evidence, "classification": classification}
+
+
+def determine_bug_id(parsed: Dict[str, Any], default_name: str = "unknown") -> str:
+    """Determine a stable bug id/name to use for output filenames.
+
+    Heuristics:
+      - If parsed['link_frames'] contains a URL with an obvious id, use its basename
+      - If parsed['raw'] contains 'BUG: ' or 'syz' annotations with an id-like token, try to extract
+      - Otherwise fall back to default_name (often the input basename or hash)
+    Returns a filesystem-safe string.
+    """
+    try:
+        raw = parsed.get('raw', '') or ''
+        # try to find patterns like 'syzbot.org/bug?id=12345' or '/bugs/12345' or 'bug 12345'
+        m = re.search(r"[bB]ug(?:[: ]|=)(\s*#?)([0-9]{3,})", raw)
+        if m:
+            return f"bug{m.group(2)}"
+        # look for common syz bug anchors
+        for lf in (parsed.get('link_frames') or []):
+            u = lf.get('url') or ''
+            if not u:
+                continue
+            # try to extract trailing numeric id or filename
+            bn = os.path.basename(urllib.parse.urlparse(u).path)
+            if bn:
+                # sanitize
+                bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
+                return bn
+        # fallback: try to extract first word after 'BUG:' in raw
+        m2 = re.search(r"BUG:\s*([^\n]+)", raw)
+        if m2:
+            s = m2.group(1).split()[0]
+            s = re.sub(r"[^A-Za-z0-9._-]", "_", s)
+            return s
+    except Exception:
+        pass
+    # final fallback
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", default_name)
+    return safe
 
 
 def build_evidence_summary(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -1375,11 +1786,54 @@ def download_syz_bug_assets(url: str, out_dir: str) -> bool:
                 continue
     return True
 
+def save_to_json(result: Dict[str, Any], url: str) -> None:
+    """Save the analysis result to a JSON file."""
+    # write JSON to crash_analysis/<bugid>.json
+    out_dir = os.path.join(os.getcwd(), 'crash_analysis')
+    os.makedirs(out_dir, exist_ok=True)
+    # attempt to determine a bug id from parsed data; fallback to input basename
+    default_name = url.split('=')[-1]
+    # bugid = determine_bug_id(result.get('parsed', {}), default_name)
+    # Attempt to enrich result with LLM analysis when possible
+    try:
+        snippets = result.get('snippets', {}) or {}
+        def _build_snippet_map(snips: Dict[str, Any]) -> Dict[str, str]:
+            out = {}
+            # urls
+            for k, v in (snips.get('urls') or {}).items():
+                if isinstance(v, str):
+                    out[k] = v
+                elif isinstance(v, dict) and v.get('snippet'):
+                    out[k] = v.get('snippet')
+            # links
+            for k, v in (snips.get('links') or {}).items():
+                if isinstance(v, dict) and v.get('snippet'):
+                    out[k] = v.get('snippet')
+            # local
+            for k, v in (snips.get('local') or {}).items():
+                if isinstance(v, dict) and v.get('snippet'):
+                    out[k] = v.get('snippet')
+            return out
+
+        frames = result.get('parsed', {}).get('frames', [])
+        snippet_map = _build_snippet_map(snippets)
+        try:
+            llm_res = llm_analyze_traces(frames, snippet_map)
+            result['llm_analysis'] = llm_res
+        except Exception as e:
+            result['llm_analysis'] = {"ok": False, "error": str(e)}
+    except Exception:
+        # non-fatal, continue without LLM
+        pass
+
+    out_path = os.path.join(out_dir, f"{default_name}.json")
+    with open(out_path, 'w', encoding='utf-8') as fh:
+        json.dump(result, fh, indent=2)
+    print(out_path)
 
 
 def main():
     p = argparse.ArgumentParser(description="Analyze kernel crash logs and classify primitives")
-    p.add_argument("logfile", help="Path to crash log file (or - for stdin)")
     p.add_argument("--source-root", help="Path to source root to find referenced files (optional)")
     p.add_argument("--json", action="store_true", help="Emit JSON result")
     p.add_argument("--json-report", action="store_true", help="Emit compact JSON report for triage")
@@ -1407,7 +1861,7 @@ def main():
         strong = stronger_heuristics(result["parsed"], result.get("snippets", {}), result.get("evidence", {}))
         result["strong_report"] = strong
         if args.json:
-            print(json.dumps(result, indent=2))
+            save_to_json(result, args.syz_bug)
             return
         if args.json_report:
             compact = {
@@ -1420,7 +1874,7 @@ def main():
                 "evidence_summary": {k: {"dereference": v.get("dereference"), "array_access": v.get("array_access")}
                                       for k, v in result.get("evidence", {}).items() if isinstance(v, dict)},
             }
-            print(json.dumps(compact, indent=2))
+            save_to_json(compact, args.syz_bug)
             return
         # default human summary
         print("Primitive:", strong["primitive"])
@@ -1440,19 +1894,13 @@ def main():
         analyze_directory(args.out_dir, args.out_dir, args.source_root)
         return
 
-    if args.logfile == "-":
-        txt = sys.stdin.read()
-    else:
-        with open(args.logfile, "r", errors="ignore") as fh:
-            txt = fh.read()
-
     result = analyze(txt, args.source_root)
     # run stronger heuristics and include in output
     strong = stronger_heuristics(result["parsed"], result.get("snippets", {}), result.get("evidence", {}))
     result["strong_report"] = strong
 
     if args.json:
-        print(json.dumps(result, indent=2))
+        save_to_json(result, "input")
         return
 
     if args.json_report:
@@ -1467,7 +1915,7 @@ def main():
             "evidence_summary": {k: {"dereference": v.get("dereference"), "array_access": v.get("array_access")}
                                   for k, v in result.get("evidence", {}).items() if isinstance(v, dict)},
         }
-        print(json.dumps(compact, indent=2))
+        save_to_json(compact, "input")
         return
     else:
         # human friendly concise summary (show vulnerability prominently)
@@ -1501,6 +1949,9 @@ def analyze_directory(input_dir: str, out_dir: str, source_root: Optional[str] =
     `{basename}.json` and `{basename}.html` (HTML only if html generation is possible).
     """
     os.makedirs(out_dir, exist_ok=True)
+    # central crash_analysis directory for JSON outputs
+    crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
+    os.makedirs(crash_dir, exist_ok=True)
     for fn in os.listdir(input_dir):
         if not (fn.endswith('.txt') or fn.endswith('.log') or fn.endswith('.crash')):
             continue
@@ -1512,9 +1963,9 @@ def analyze_directory(input_dir: str, out_dir: str, source_root: Optional[str] =
             continue
         result = analyze(txt, source_root)
         base = os.path.splitext(fn)[0]
-        json_path = os.path.join(out_dir, base + '.json')
-        with open(json_path, 'w', encoding='utf-8') as jh:
-            json.dump(result, jh, indent=2)
+        # determine bug id and write JSON into crash_analysis (includes LLM enrichment)
+        bugid = determine_bug_id(result.get('parsed', {}), base)
+        save_to_json(result, bugid)
         # generate HTML report
         html_path = os.path.join(out_dir, base + '.html')
         try:
@@ -1533,6 +1984,9 @@ def fetch_and_analyze_urls(url_list_file: str, out_dir: str, source_root: Option
     Results are stored under out_dir, named by a sanitized hash of the URL.
     """
     os.makedirs(out_dir, exist_ok=True)
+    # central crash_analysis directory for JSON outputs
+    crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
+    os.makedirs(crash_dir, exist_ok=True)
     with open(url_list_file, 'r') as fh:
         urls = [l.strip() for l in fh if l.strip()]
     for u in urls:
@@ -1542,12 +1996,16 @@ def fetch_and_analyze_urls(url_list_file: str, out_dir: str, source_root: Option
         except Exception:
             continue
         result = analyze(txt, source_root)
-        import hashlib
-        h = hashlib.sha1(u.encode()).hexdigest()[:12]
-        json_path = os.path.join(out_dir, f'{h}.json')
-        with open(json_path, 'w', encoding='utf-8') as jh:
-            json.dump(result, jh, indent=2)
-        html_path = os.path.join(out_dir, f'{h}.html')
+        # try naming by bug id or url basename; fallback to hash
+        default_name = os.path.splitext(os.path.basename(urllib.parse.urlparse(u).path))[0] or 'url'
+        bugid = determine_bug_id(result.get('parsed', {}), default_name)
+        try:
+            save_to_json(result, bugid)
+        except Exception:
+            import hashlib
+            h = hashlib.sha1(u.encode()).hexdigest()[:12]
+            save_to_json(result, h)
+        html_path = os.path.join(out_dir, f'{os.path.splitext(os.path.basename(urllib.parse.urlparse(u).path))[0] or h}.html')
         try:
             strong = stronger_heuristics(result['parsed'], result.get('snippets', {}), result.get('evidence', {}))
             result['strong_report'] = strong
