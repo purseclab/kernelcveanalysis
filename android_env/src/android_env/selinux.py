@@ -7,6 +7,9 @@ from itertools import chain
 from enum import StrEnum
 import subprocess
 import itertools
+import re
+import exrex
+import rich
 
 from .adb import read_file, run_adb_command, runas, Permissions, upload_tools
 from .util import config_lines
@@ -69,14 +72,14 @@ class SeLabel:
             level=parts[3],
         )
 
-def parse_selinux_map_file(config_name: str) -> dict[str, SeLabel]:
-    out = {}
+def parse_selinux_map_file(config_name: str) -> list[tuple[str, SeLabel]]:
+    out = []
 
     config = read_selinux_configs(config_name)
 
     for line in config_lines(config):
         parts = line.split()
-        out[''.join(parts[:-1])] = SeLabel.parse(parts[-1])
+        out.append((''.join(parts[:-1]), SeLabel.parse(parts[-1])))
     
     return out
 
@@ -98,7 +101,7 @@ class ServiceSelinuxMapping:
     fallback: SeLabel
 
     def __init__(self, file: str):
-        self.services = parse_selinux_map_file(file)
+        self.services = dict(parse_selinux_map_file(file))
         self.fallback = self.services['*']
     
     def label_to_service_name_map(self) -> dict[SeType, list[str]]:
@@ -114,18 +117,133 @@ class ServiceSelinuxMapping:
     def services_for_setype(self, setype: SeType) -> list[str]:
         return [service for service, label in self.services.items() if label.type == setype]
 
+class FileSelinuxInfo:
+    label: SeLabel
+    name: str
+    # some files specify that they are not a regex, just an exact match
+    regex: Optional[re.Pattern]
+
+    def __init__(self, name: str, label: SeLabel):
+        self.label = label
+
+        # if line ends with -- it is a literal match
+        if name.endswith('--'):
+            self.name = name[:-2]
+            self.regex = None
+        else:
+            self.name = name
+            self.regex = re.compile(name)
+    
+    def is_exact(self) -> bool:
+        return self.regex is None
+
+    def get_matching_file(self) -> str:
+        if self.is_exact():
+            return self.name
+        else:
+            match = exrex.getone(self.name)
+            # remove extra random parts, to get shortest match
+            while len(match) > 0 and self.regex.fullmatch(match[:-1]):
+                match = match[:-1]
+            return match
+    
+    def matches(self, path: str) -> bool:
+        # try with / stripped off of end
+        if path.endswith('/') and self.matches(path[:-1]):
+            return True
+        
+        if self.is_exact():
+            return self.name == path
+        else:
+            return self.regex.fullmatch(path) is not None
+
+@dataclass
+class PathComponents:
+    '''
+    Selinux types for all the components of a path
+    '''
+
+    # the original path itself
+    path: str
+    # components of path
+    component_types: list[SeType]
+    # if the rule matches a path with another directory component, it is probable a dir rule
+    could_be_dir: bool
+
+    def dir_components(self) -> list[SeType]:
+        '''
+        Returns setypes corresponding to directories of this path
+        '''
+
+        if self.could_be_dir:
+            return self.component_types
+        else:
+            # ignore file component
+            return self.component_types[:-1]
+
 class FileSelinuxMapping:
-    files: dict[str, SeLabel]
+    file_info: list[FileSelinuxInfo]
+    type_to_file_map: dict[SeType, list[FileSelinuxInfo]]
 
     def __init__(self):
-        self.files = parse_selinux_map_file(SELINUX_FILE_CONTEXTS)
-    
-    def type_to_file_name_map(self) -> dict[SeType, list[str]]:
-        return inv_selinux_map(self.files)
+        file_lines = parse_selinux_map_file(SELINUX_FILE_CONTEXTS)
 
+        self.file_info = [FileSelinuxInfo(name, label) for name, label in file_lines]
+        self.type_to_file_map = {}
+
+        for info in self.file_info:
+            type = info.label.type
+            if type not in self.type_to_file_map:
+                self.type_to_file_map[type] = []
+            
+            self.type_to_file_map[type].append(info)
+    
+    def get_info_for_type(self, type: SeType) -> Optional[list[FileSelinuxInfo]]:
+        return self.type_to_file_map.get(type)
+    
+    def file_info_for_path(self, path: str) -> Optional[FileSelinuxInfo]:
+        for file in reversed(self.file_info):
+            if file.matches(path):
+                return file
+        
+        return None
+
+    # gets the type for every component of the path in the file
+    def types_for_path_components(self, path: str) -> Optional[PathComponents]:
+        parts = path.split('/')
+
+        out = []
+        could_be_dir = False
+        for i in range(len(parts)):
+            path_part = '/'.join(parts[:i+1])
+            is_end_of_path = i == len(parts) - 1
+
+            if not is_end_of_path:
+                path_part += '/'
+            
+            file = self.file_info_for_path(path_part)
+            if file is None:
+                return None
+            
+            out.append(file.label.type)
+
+            # test if last rule matches another component
+            if is_end_of_path and file.matches(path + '/a'):
+                could_be_dir = True
+        
+        return PathComponents(
+            path=path,
+            component_types=out,
+            could_be_dir=could_be_dir,
+        )
 
 @dataclass
 class AllowRule:
+    '''
+    Represents an selinux allow rule.
+    '''
+    # TODO: when we are interested, add ioctl support by parsing allowxperm
+
     source_type: SeType
     dst_type: SeType
     seclass: SeClass
@@ -265,12 +383,40 @@ class FileInfo:
     file_regex: str
     exact_match: bool
     permissions: set[str]
+    sample_path: str
+    nonsearch_index: list[str]
+
+    def print_details(self):
+        print(self)
+
+        if len(self.nonsearch_index) > 0:
+            parts = self.sample_path.split('/')
+
+            styled_parts = '/'.join(
+                f'[red]{part}[/red]' if i in self.nonsearch_index else part
+                for i, part in enumerate(parts)
+            )
+            rich.print(f'[grey53]nonsearch example: {styled_parts}[/grey53]')
 
     def __repr__(self) -> str:
         if self.exact_match:
             return f'{self.file_regex} (exact): {self.permissions}'
         else:
             return f'{self.file_regex}: {self.permissions}'
+
+
+@dataclass
+class AccessibleFiles:
+    '''
+    Results about what files are accessible for a given selinux type.
+    '''
+
+    # files that are accessible
+    allowed_files: dict[str, FileInfo]
+
+    # files that have permissions, but which have parent directories which don't have the search permisssion,
+    # meaning they cannot be opened in the filesystem
+    search_blocked_files: dict[str, FileInfo]
 
 @dataclass
 class ServiceInfo:
@@ -357,8 +503,7 @@ class SelinuxContext:
     # mapping from service name to service info
     service_interfaces: dict[str, ServiceInfo]
 
-    # mapping from type to files with that selinux type
-    file_label_map: dict[SeType, list[str]]
+    file_info: FileSelinuxMapping
 
     def __init__(self):
         self.policy = SePolicy()
@@ -368,7 +513,7 @@ class SelinuxContext:
         for service in get_services_for_permissions(Permissions.root()):
             self.service_interfaces[service.service_name] = service
         
-        self.file_label_map = FileSelinuxMapping().type_to_file_name_map()
+        self.file_info = FileSelinuxMapping()
 
     def service_names_to_service_info(self, service_names: list[str], service_type: ServiceType = ServiceType.SERVICE) -> list[ServiceInfo]:
         if service_type == ServiceType.SERVICE:
@@ -426,7 +571,20 @@ class SelinuxContext:
             blocklist=None if forbidden_services is None else self.service_names_to_service_info(forbidden_services),
         )
     
-    def accesible_files_for_domain(self, domain_type: SeType) -> dict[str, FileInfo]:
+    # returns set of dirs that the given domain hes search permission on
+    def searchable_dirs(self, domain_type: SeType) -> set[SeType]:
+        rules = self.policy.search_rules([
+            '--allow',
+            '-s', str(domain_type),
+            '-c', 'dir',
+            '-p', 'search'
+        ])
+
+        rules = self.policy.expand_rule_attributes(rules)
+
+        return set(rule.dst_type for rule in rules)
+
+    def accesible_files_for_domain(self, domain_type: SeType) -> AccessibleFiles:
         rules = self.policy.search_rules([
             # TODO: use -A and parse allowxperm
             '--allow',
@@ -435,36 +593,69 @@ class SelinuxContext:
         ])
 
         rules = self.policy.expand_rule_attributes(rules)
+        searchable_dirs = self.searchable_dirs(domain_type)
 
         allowed_files = {}
+        search_blocked_files = {}
 
         for rule in rules:
-            if rule.dst_type in self.file_label_map:
-                for file in self.file_label_map[rule.dst_type]:
-                    if file not in allowed_files:
+            files = self.file_info.get_info_for_type(rule.dst_type)
+            if files is not None:
+                for file in files:
+                    # if file already in allowed files, search permission on parent dirs
+                    # does not need to be determined
+                    if file.name in allowed_files:
+                        allowed_files[file.name].permissions.update(rule.permissions)
+                        continue
 
-                        exact = False
-                        # if file had -- in it, it is exact match
-                        if file.endswith('--'):
-                            file = file[:-2]
-                            exact = True
-                        
-                        allowed_files[file] = FileInfo(
-                            file_regex=file,
-                            exact_match=exact,
-                            permissions=set()
-                        )
+                    if file.name in search_blocked_files:
+                        search_blocked_files[file.name].permissions.update(rule.permissions)
+                        continue
+
+                    component_types = self.file_info.types_for_path_components(file.get_matching_file())
+                    if component_types is None:
+                        print(f'warning: parent folder with no selinux types for {file.name}')
+                        continue
+
+                    nonsearch_index = [i for i, type in enumerate(component_types.dir_components()) if type not in searchable_dirs]
                     
-                    allowed_files[file].permissions.update(rule.permissions)
+                    file_info = FileInfo(
+                        file_regex=file.name,
+                        exact_match=file.is_exact(),
+                        permissions=set(rule.permissions),
+                        sample_path=component_types.path,
+                        nonsearch_index=nonsearch_index,
+                    )
+                    
+                    if len(file_info.nonsearch_index) > 0:
+                        # do not have permissions to access path
+                        search_blocked_files[file.name] = file_info
+                    else:
+                        allowed_files[file.name] = file_info
         
-        return { file: file_info for file, file_info in allowed_files.items() if len(file_info.permissions) > 0}
+        def filter_no_perms(files: dict[str, FileInfo]) -> dict[str, FileInfo]:
+            return { file: file_info for file, file_info in files.items() if len(file_info.permissions) > 0 }
+
+        return AccessibleFiles(
+            allowed_files=filter_no_perms(allowed_files),
+            search_blocked_files=filter_no_perms(search_blocked_files),
+        )
     
     def print_accesible_files_for_domain(self, domain_type: SeType):
+        accessible_files = self.accesible_files_for_domain(domain_type)
+
         print('accessible files')
-        for file_info in self.accesible_files_for_domain(domain_type).values():
-            print(file_info)
+        for file_info in accessible_files.allowed_files.values():
+            file_info.print_details()
+        print()
+
+        print('search blocked files')
+        for file_info in accessible_files.search_blocked_files.values():
+            # TODO: print out which dir caused the issue?
+            file_info.print_details()
 
     def print_accesible_services(self, domain_type: SeType):
+        # TODO: handle call permission on binder class
         for service_type in ServiceType:
             services = self.accesible_services_for_domain(domain_type, service_type=service_type)
 
@@ -484,6 +675,7 @@ class SelinuxContext:
         self.print_accesible_files_for_domain(domain_type)
     
     def diff_accesible_files_for_domain(self, domain1: SeType, domain2: SeType):
+        # TODO: search blocked files diff
         files1 = self.accesible_files_for_domain(domain1)
         files2 = self.accesible_files_for_domain(domain2)
 
