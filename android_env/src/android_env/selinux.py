@@ -381,6 +381,7 @@ class SePolicy:
 @dataclass
 class FileInfo:
     file_regex: str
+    is_dir: bool
     exact_match: bool
     permissions: set[str]
     sample_path: str
@@ -399,8 +400,16 @@ class FileInfo:
             rich.print(f'[grey53]nonsearch example: {styled_parts}[/grey53]')
 
     def __repr__(self) -> str:
+        info_strs = []
+        if self.is_dir:
+            info_strs.append('dir')
         if self.exact_match:
-            return f'{self.file_regex} (exact): {self.permissions}'
+            info_strs.append('exact')
+        
+        info_str = ', '.join(info_strs)
+
+        if len(info_str) > 0:
+            return f'{self.file_regex} ({info_str}): {self.permissions}'
         else:
             return f'{self.file_regex}: {self.permissions}'
 
@@ -413,10 +422,12 @@ class AccessibleFiles:
 
     # files that are accessible
     allowed_files: dict[str, FileInfo]
+    allowed_dirs: dict[str, FileInfo]
 
     # files that have permissions, but which have parent directories which don't have the search permisssion,
     # meaning they cannot be opened in the filesystem
     search_blocked_files: dict[str, FileInfo]
+    search_blocked_dirs: dict[str, FileInfo]
 
 @dataclass
 class ServiceInfo:
@@ -590,26 +601,41 @@ class SelinuxContext:
             '--allow',
             '-s', str(domain_type),
             '-c', 'file',
+        ]) + self.policy.search_rules([
+            '--allow',
+            '-s', str(domain_type),
+            '-c', 'dir',
         ])
 
         rules = self.policy.expand_rule_attributes(rules)
         searchable_dirs = self.searchable_dirs(domain_type)
 
         allowed_files = {}
+        allowed_dirs = {}
         search_blocked_files = {}
+        search_blocked_dirs = {}
 
         for rule in rules:
+            rule_is_dir = rule.seclass == SeClass('dir')
             files = self.file_info.get_info_for_type(rule.dst_type)
+
             if files is not None:
                 for file in files:
                     # if file already in allowed files, search permission on parent dirs
                     # does not need to be determined
-                    if file.name in allowed_files:
-                        allowed_files[file.name].permissions.update(rule.permissions)
+                    if rule_is_dir:
+                        current_allowed = allowed_dirs
+                        current_search_blocked = search_blocked_dirs
+                    else:
+                        current_allowed = allowed_files
+                        current_search_blocked = search_blocked_files
+
+                    if file.name in current_allowed:
+                        current_allowed[file.name].permissions.update(rule.permissions)
                         continue
 
-                    if file.name in search_blocked_files:
-                        search_blocked_files[file.name].permissions.update(rule.permissions)
+                    if file.name in current_search_blocked:
+                        current_search_blocked[file.name].permissions.update(rule.permissions)
                         continue
 
                     component_types = self.file_info.types_for_path_components(file.get_matching_file())
@@ -621,6 +647,7 @@ class SelinuxContext:
                     
                     file_info = FileInfo(
                         file_regex=file.name,
+                        is_dir=rule.seclass == SeType('dir'),
                         exact_match=file.is_exact(),
                         permissions=set(rule.permissions),
                         sample_path=component_types.path,
@@ -629,28 +656,30 @@ class SelinuxContext:
                     
                     if len(file_info.nonsearch_index) > 0:
                         # do not have permissions to access path
-                        search_blocked_files[file.name] = file_info
+                        current_search_blocked[file.name] = file_info
                     else:
-                        allowed_files[file.name] = file_info
+                        current_allowed[file.name] = file_info
         
         def filter_no_perms(files: dict[str, FileInfo]) -> dict[str, FileInfo]:
             return { file: file_info for file, file_info in files.items() if len(file_info.permissions) > 0 }
 
         return AccessibleFiles(
             allowed_files=filter_no_perms(allowed_files),
+            allowed_dirs=filter_no_perms(allowed_dirs),
             search_blocked_files=filter_no_perms(search_blocked_files),
+            search_blocked_dirs=filter_no_perms(search_blocked_dirs),
         )
     
     def print_accesible_files_for_domain(self, domain_type: SeType):
         accessible_files = self.accesible_files_for_domain(domain_type)
 
         print('accessible files')
-        for file_info in accessible_files.allowed_files.values():
+        for file_info in chain(accessible_files.allowed_files.values(), accessible_files.allowed_dirs.values()):
             file_info.print_details()
         print()
 
         print('search blocked files')
-        for file_info in accessible_files.search_blocked_files.values():
+        for file_info in chain(accessible_files.search_blocked_files.values(), accessible_files.search_blocked_dirs.values()):
             # TODO: print out which dir caused the issue?
             file_info.print_details()
 
@@ -676,8 +705,8 @@ class SelinuxContext:
     
     def diff_accesible_files_for_domain(self, domain1: SeType, domain2: SeType):
         # TODO: search blocked files diff
-        files1 = self.accesible_files_for_domain(domain1)
-        files2 = self.accesible_files_for_domain(domain2)
+        files1 = self.accesible_files_for_domain(domain1).allowed_files
+        files2 = self.accesible_files_for_domain(domain2).allowed_files
 
         print(f'differing file permissions between {domain1} and {domain2}')
         print(f'only {domain1} can access:')

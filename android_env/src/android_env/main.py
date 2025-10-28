@@ -5,6 +5,7 @@ import typer
 
 from .seccomp import dump_seccomp
 from .selinux import dump_selinux_info, diff_selinux_info
+from .expand_binary import expand_binary as do_expand_binary
 
 app = typer.Typer()
 
@@ -17,6 +18,13 @@ def seccomp(
     json_file: Annotated[Path, typer.Argument(help='Path to json file where information about allowed syscalls will be saved.')],
 ):
     dump_seccomp(json_file)
+
+@app.command(help='Expand a non pie statically linked binary into its loaded memory representation.')
+def expand_binary(
+    binary_path: Annotated[Path, typer.Argument(help='Path to static elf binary to expand.')],
+    o: Annotated[Path, typer.Option(help='Output file for expanded binary data.')]
+):
+    do_expand_binary(binary_path, o)
 
 @selinux_commands.command('dump', help='Dump information about reachable services based on selinux policy.')
 def selinux_dump(

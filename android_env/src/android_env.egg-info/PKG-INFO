@@ -5,6 +5,7 @@ Summary: Add your description here
 Requires-Python: >=3.13
 Description-Content-Type: text/markdown
 Requires-Dist: exrex>=0.12.0
+Requires-Dist: pyelftools>=0.32
 Requires-Dist: rich>=14.2.0
 Requires-Dist: typer>=0.20.0
 

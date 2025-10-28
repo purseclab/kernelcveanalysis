@@ -43,12 +43,14 @@ class Tools(StrEnum):
     READ_FILE = '/data/local/tmp/tools/read_file'
     DUMP_SECCOMP_FILTER = '/data/local/tmp/tools/dump_seccomp_filter'
     RUNAS = '/data/local/tmp/tools/runas'
+    EXPAND_BINARY = '/data/local/tmp/tools/expand_binary'
 
 def upload_tools():
     run_adb_command('mkdir -p /data/local/tmp/tools')
     upload_file(Path('./tools/read_file'), Path(Tools.READ_FILE), executable=True)
     upload_file(Path('./tools/dump_seccomp_filter'), Path(Tools.DUMP_SECCOMP_FILTER), executable=True)
     upload_file(Path('./tools/runas'), Path(Tools.RUNAS), executable=True)
+    upload_file(Path('./tools/expand_binary'), Path(Tools.EXPAND_BINARY), executable=True)
 
 def read_file(file: str, offset: int = 0, count: int = -1) -> bytes:
     out = run_adb_command(f'{Tools.READ_FILE} {file} {offset} {count}', root=True)
@@ -71,6 +73,24 @@ class Permissions:
 
 def runas(command: str, permissions: Permissions) -> Optional[str]:
     return run_adb_command(f'{Tools.RUNAS} {permissions.uid} {permissions.gid} \'{permissions.selabel}\' \'{command}\'')
+
+@dataclass
+class ExpandBinaryResult:
+    load_addr: int
+    expanded_binary: bytes
+
+def expand_binary(binary: str) -> ExpandBinaryResult:
+    output = run_adb_command(f'{Tools.EXPAND_BINARY} {binary}', root=True)
+    lines = output.splitlines()
+    assert len(lines) == 2
+
+    load_addr = int(lines[0].strip(), 16)
+    data = bytes.fromhex(lines[1].strip())
+
+    return ExpandBinaryResult(
+        load_addr=load_addr,
+        expanded_binary=data,
+    )
 
 @dataclass
 class Process:

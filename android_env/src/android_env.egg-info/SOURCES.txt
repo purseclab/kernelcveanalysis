@@ -3,6 +3,7 @@ pyproject.toml
 src/android_env/__init__.py
 src/android_env/adb.py
 src/android_env/codeql.py
+src/android_env/expand_binary.py
 src/android_env/main.py
 src/android_env/seccomp.py
 src/android_env/selinux.py
