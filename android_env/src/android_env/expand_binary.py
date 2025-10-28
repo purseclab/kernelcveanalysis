@@ -45,9 +45,6 @@ def expand_binary(binary_path: Path, expand_path: Path):
     expand_result = adb_expand_binary(binary_dst)
     changed_offset = entry - expand_result.load_addr
     expand_binary = expand_result.expanded_binary[:changed_offset] + original_instr + expand_result.expanded_binary[changed_offset+len(original_instr):]
-    print(hex(changed_offset))
-    print(expand_binary[changed_offset-4:changed_offset+8].hex())
-    print(expand_binary.find(b'\0\0\0\x14'))
     
     with open(expand_path, 'wb') as f:
         f.write(expand_binary)
