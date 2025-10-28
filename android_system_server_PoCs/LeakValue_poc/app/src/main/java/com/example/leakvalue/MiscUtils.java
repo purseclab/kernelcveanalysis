@@ -245,4 +245,25 @@ public class MiscUtils {
         }
         sAllowHiddenApisDone = true;
     }
+
+    public static byte[] readAsset(Context context, String fileName) {
+        try {
+            InputStream inputStream = context.getAssets().open(fileName);
+            ByteArrayOutputStream byteBuffer = new ByteArrayOutputStream();
+
+            int bufferSize = 1024;
+            byte[] buffer = new byte[bufferSize];
+            int len;
+
+            while ((len = inputStream.read(buffer)) != -1) {
+                byteBuffer.write(buffer, 0, len);
+            }
+
+            inputStream.close();
+            return byteBuffer.toByteArray();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
 }
