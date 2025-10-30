@@ -115,13 +115,8 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-            byte[] jarData = MiscUtils.readAsset(getContext(), "runner.jar");
-            byte[] exploitData = MiscUtils.readAsset(getContext(), "exploit");
-
             String dataDir = getApplicationInfo().dataDir;
             bundle.putString("data", dataDir);
-            bundle.putByteArray("jar", jarData);
-            bundle.putByteArray("exploit", exploitData);
             intent.putExtras(bundle);
             // MiscUtils.putBinderExtra(intent, "a", new IShellcodeReporter.Stub() {
             //     @Override
