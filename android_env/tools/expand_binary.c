@@ -184,11 +184,15 @@ int main(int argc, char **argv) {
             if (n == -1 && errno == EINTR) continue;
             // If reading fails because some pages are unreadable, fill with 0 and continue
             // but break to avoid infinite loop
-            fprintf(stderr, "pread failed at offset %zu: %s\n", offset, strerror(errno));
-            break;
+            // fprintf(stderr, "pread failed at offset %zu: %s\n", offset, strerror(errno));
+            // skip page, pretend to read 0
+            memset(buf + offset, 0, 4096);
+            offset += 4096;
+            to_read -= 4096;
+        } else {
+            offset += (size_t)n;
+            to_read -= (size_t)n;
         }
-        offset += (size_t)n;
-        to_read -= (size_t)n;
     }
     size_t read_bytes = offset;
 

