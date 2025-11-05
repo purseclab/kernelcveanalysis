@@ -1,0 +1,2192 @@
+{
+  "parsed": {
+    "kind": "KASAN: null-ptr-deref in atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]",
+    "access": {
+      "op": "write",
+      "size": 4,
+      "addr": "0000000000000160"
+    },
+    "object_info": null,
+    "allocated_by": [],
+    "freed_by": [],
+    "link_frames": [
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71",
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 71
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284",
+        "file": "include/linux/atomic-fallback.h",
+        "line": 284
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421",
+        "file": "fs/inode.c",
+        "line": 421
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77",
+        "file": "lib/dump_stack.c",
+        "line": 77
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118",
+        "file": "lib/dump_stack.c",
+        "line": 118
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71",
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 71
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284",
+        "file": "include/linux/atomic-fallback.h",
+        "line": 284
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421",
+        "file": "fs/inode.c",
+        "line": 421
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227",
+        "file": "include/linux/fsnotify.h",
+        "line": 227
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040",
+        "file": "fs/namei.c",
+        "line": 4040
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944",
+        "file": "fs/incfs/vfs.c",
+        "line": 1944
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335",
+        "file": "fs/super.c",
+        "line": 335
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366",
+        "file": "fs/super.c",
+        "line": 366
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102",
+        "file": "fs/namespace.c",
+        "line": 1102
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109",
+        "file": "fs/namespace.c",
+        "line": 1109
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113",
+        "file": "kernel/task_work.c",
+        "line": 113
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274",
+        "file": "kernel/signal.c",
+        "line": 2274
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66",
+        "file": "include/linux/tracehook.h",
+        "line": 66
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129",
+        "file": "include/linux/tracehook.h",
+        "line": 129
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246",
+        "file": "arch/x86/entry/common.c",
+        "line": 246
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271",
+        "file": "arch/x86/entry/common.c",
+        "line": 271
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300",
+        "file": "arch/x86/entry/common.c",
+        "line": 300
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167",
+        "file": "arch/x86/include/asm/atomic.h",
+        "line": 167
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72",
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 72
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284",
+        "file": "include/linux/atomic-fallback.h",
+        "line": 284
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421",
+        "file": "fs/inode.c",
+        "line": 421
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227",
+        "file": "include/linux/fsnotify.h",
+        "line": 227
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040",
+        "file": "fs/namei.c",
+        "line": 4040
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944",
+        "file": "fs/incfs/vfs.c",
+        "line": 1944
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335",
+        "file": "fs/super.c",
+        "line": 335
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366",
+        "file": "fs/super.c",
+        "line": 366
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102",
+        "file": "fs/namespace.c",
+        "line": 1102
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109",
+        "file": "fs/namespace.c",
+        "line": 1109
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113",
+        "file": "kernel/task_work.c",
+        "line": 113
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274",
+        "file": "kernel/signal.c",
+        "line": 2274
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66",
+        "file": "include/linux/tracehook.h",
+        "line": 66
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129",
+        "file": "include/linux/tracehook.h",
+        "line": 129
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246",
+        "file": "arch/x86/entry/common.c",
+        "line": 246
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271",
+        "file": "arch/x86/entry/common.c",
+        "line": 271
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300",
+        "file": "arch/x86/entry/common.c",
+        "line": 300
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167",
+        "file": "arch/x86/include/asm/atomic.h",
+        "line": 167
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72",
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 72
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284",
+        "file": "include/linux/atomic-fallback.h",
+        "line": 284
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421",
+        "file": "fs/inode.c",
+        "line": 421
+      }
+    ],
+    "frames": [],
+    "raw": "RAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\n---[ end trace a41a975ef7435e85 ]---\n==================================================================\nBUG: KASAN: null-ptr-deref in atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]\nBUG: KASAN: null-ptr-deref in atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nBUG: KASAN: null-ptr-deref in ihold+0x20/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nWrite of size 4 at addr 0000000000000160 by task syz-executor260/343\n\nCPU: 1 PID: 343 Comm: syz-executor260 Tainted: G        W         5.4.292-syzkaller-00021-gcd8e74fa0fa3 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/12/2025\nCall Trace:\n __dump_stack+0x1e/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77'>lib/dump_stack.c:77</a>\n dump_stack+0x15b/0x1b8 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118'>lib/dump_stack.c:118</a>\n __kasan_report+0xe4/0x120 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/report.c#520'>mm/kasan/report.c:520</a>\n kasan_report+0x30/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/common.c#653'>mm/kasan/common.c:653</a>\n check_memory_region_inline <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/generic.c#141'>mm/kasan/generic.c:141</a> [inline]\n check_memory_region+0x274/0x280 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/generic.c#191'>mm/kasan/generic.c:191</a>\n __kasan_check_write+0x14/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/common.c#99'>mm/kasan/common.c:99</a>\n atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]\n atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\n ihold+0x20/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\n d_delete_notify <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227'>include/linux/fsnotify.h:227</a> [inline]\n vfs_rmdir+0x247/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040'>fs/namei.c:4040</a>\n incfs_kill_sb+0xfe/0x210 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944'>fs/incfs/vfs.c:1944</a>\n deactivate_locked_super+0xa0/0x100 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335'>fs/super.c:335</a>\n deactivate_super+0x14f/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366'>fs/super.c:366</a>\n cleanup_mnt+0x446/0x500 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102'>fs/namespace.c:1102</a>\n __cleanup_mnt+0x19/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109'>fs/namespace.c:1109</a>\n task_work_run+0x146/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113'>kernel/task_work.c:113</a>\n ptrace_notify+0x212/0x250 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274'>kernel/signal.c:2274</a>\n ptrace_report_syscall <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66'>include/linux/tracehook.h:66</a> [inline]\n tracehook_report_syscall_exit <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129'>include/linux/tracehook.h:129</a> [inline]\n syscall_slow_exit_work+0x17e/0x440 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246'>arch/x86/entry/common.c:246</a>\n syscall_return_slowpath <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271'>arch/x86/entry/common.c:271</a> [inline]\n do_syscall_64+0x160/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300'>arch/x86/entry/common.c:300</a>\n entry_SYSCALL_64_after_hwframe+0x5c/0xc1\nRIP: 0033:0x7fb9166c0ac7\nCode: 07 00 48 83 c4 08 5b 5d c3 66 2e 0f 1f 84 00 00 00 00 00 c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 b8 a6 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 01 c3 48 c7 c2 b8 ff ff ff f7 d8 64 89 02 b8\nRSP: 002b:00007ffff5a6cc88 EFLAGS: 00000206 ORIG_RAX: 00000000000000a6\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\n==================================================================\nBUG: kernel NULL pointer dereference, address: 0000000000000160\n#PF: supervisor write access in kernel mode\n#PF: error_code(0x0002) - not-present page\nPGD 0 P4D 0 \nOops: 0002 [#1] PREEMPT SMP KASAN\nCPU: 1 PID: 343 Comm: syz-executor260 Tainted: G    B   W         5.4.292-syzkaller-00021-gcd8e74fa0fa3 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/12/2025\nRIP: 0010:arch_atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167'>arch/x86/include/asm/atomic.h:167</a> [inline]\nRIP: 0010:atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72'>include/asm-generic/atomic-instrumented.h:72</a> [inline]\nRIP: 0010:atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nRIP: 0010:ihold+0x26/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nCode: 00 00 00 00 55 48 89 e5 41 56 53 48 89 fb e8 61 c8 c5 ff 48 8d bb 60 01 00 00 be 04 00 00 00 e8 a0 9c f3 ff 41 be 01 00 00 00 <f0> 44 0f c1 b3 60 01 00 00 41 ff c6 bf 02 00 00 00 44 89 f6 e8 81\nRSP: 0018:ffff8881f3fc7b80 EFLAGS: 00010246\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: ffff8881f30c8000\nRDX: 0000000000000000 RSI: 0000000000000002 RDI: 00000000ffffffff\nRBP: ffff8881f3fc7b90 R08: 0000000000000004 R09: 0000000000000003\nR10: fffffbfff0ca7a5c R11: 1ffffffff0ca7a5c R12: 1ffff1103b95a77c\nR13: 0000000000000000 R14: 0000000000000001 R15: 0000000000000000\nFS:  0000555556d10380(0000) GS:ffff8881f6f00000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000000000160 CR3: 00000001dfce0000 CR4: 00000000003406a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n d_delete_notify <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227'>include/linux/fsnotify.h:227</a> [inline]\n vfs_rmdir+0x247/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040'>fs/namei.c:4040</a>\n incfs_kill_sb+0xfe/0x210 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944'>fs/incfs/vfs.c:1944</a>\n deactivate_locked_super+0xa0/0x100 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335'>fs/super.c:335</a>\n deactivate_super+0x14f/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366'>fs/super.c:366</a>\n cleanup_mnt+0x446/0x500 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102'>fs/namespace.c:1102</a>\n __cleanup_mnt+0x19/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109'>fs/namespace.c:1109</a>\n task_work_run+0x146/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113'>kernel/task_work.c:113</a>\n ptrace_notify+0x212/0x250 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274'>kernel/signal.c:2274</a>\n ptrace_report_syscall <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66'>include/linux/tracehook.h:66</a> [inline]\n tracehook_report_syscall_exit <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129'>include/linux/tracehook.h:129</a> [inline]\n syscall_slow_exit_work+0x17e/0x440 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246'>arch/x86/entry/common.c:246</a>\n syscall_return_slowpath <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271'>arch/x86/entry/common.c:271</a> [inline]\n do_syscall_64+0x160/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300'>arch/x86/entry/common.c:300</a>\n entry_SYSCALL_64_after_hwframe+0x5c/0xc1\nRIP: 0033:0x7fb9166c0ac7\nCode: 07 00 48 83 c4 08 5b 5d c3 66 2e 0f 1f 84 00 00 00 00 00 c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 b8 a6 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 01 c3 48 c7 c2 b8 ff ff ff f7 d8 64 89 02 b8\nRSP: 002b:00007ffff5a6cc88 EFLAGS: 00000206 ORIG_RAX: 00000000000000a6\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\nModules linked in:\nCR2: 0000000000000160\n---[ end trace a41a975ef7435e86 ]---\nRIP: 0010:arch_atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167'>arch/x86/include/asm/atomic.h:167</a> [inline]\nRIP: 0010:atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72'>include/asm-generic/atomic-instrumented.h:72</a> [inline]\nRIP: 0010:atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nRIP: 0010:ihold+0x26/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nCode: 00 00 00 00 55 48 89 e5 41 56 53 48 89 fb e8 61 c8 c5 ff 48 8d bb 60 01 00 00 be 04 00 00 00 e8 a0 9c f3 ff 41 be 01 00 00 00 <f0> 44 0f c1 b3 60 01 00 00 41 ff c6 bf 02 00 00 00 44 89 f6 e8 81\nRSP: 0018:ffff8881f3fc7b80 EFLAGS: 00010246\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: ffff8881f30c8000\nRDX: 0000000000000000 RSI: 0000000000000002 RDI: 00000000ffffffff\nRBP: ffff8881f3fc7b90 R08: 0000000000000004 R09: 0000000000000003\nR10: fffffbfff0ca7a5c R11: 1ffffffff0ca7a5c R12: 1ffff1103b95a77c\nR13: 0000000000000000 R14: 0000000000000001 R15: 0000000000000000\nFS:  0000555556d10380(0000) GS:ffff8881f6f00000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000000000160 CR3: 00000001dfce0000 CR4: 00000000003406a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t00 00                \tadd    %al,(%rax)\n   2:\t00 00                \tadd    %al,(%rax)\n   4:\t55                   \tpush   %rbp\n   5:\t48 89 e5             \tmov    %rsp,%rbp\n   8:\t41 56                \tpush   %r14\n   a:\t53                   \tpush   %rbx\n   b:\t48 89 fb             \tmov    %rdi,%rbx\n   e:\te8 61 c8 c5 ff       \tcall   0xffc5c874\n  13:\t48 8d bb 60 01 00 00 \tlea    0x160(%rbx),%rdi\n  1a:\tbe 04 00 00 00       \tmov    $0x4,%esi\n  1f:\te8 a0 9c f3 ff       \tcall   0xfff39cc4\n  24:\t41 be 01 00 00 00    \tmov    $0x1,%r14d\n* 2a:\tf0 44 0f c1 b3 60 01 \tlock xadd %r14d,0x160(%rbx) <-- trapping instruction\n  31:\t00 00\n  33:\t41 ff c6             \tinc    %r14d\n  36:\tbf 02 00 00 00       \tmov    $0x2,%edi\n  3b:\t44 89 f6             \tmov    %r14d,%esi\n  3e:\te8                   \t.byte 0xe8\n  3f:\t81                   \t.byte 0x81\n"
+  },
+  "snippets": {
+    "urls": {
+      "https://android.googlesource.com/kernel/common/": {
+        "error": "URL not in expected +/commit/path format"
+      }
+    },
+    "links": {
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71#71": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71",
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 71,
+        "function_snippet": "atomic_add_return(int i, atomic_t *v)\n{\n\tkasan_check_write(v, sizeof(*v));"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284#284": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284",
+        "file": "include/linux/atomic-fallback.h",
+        "line": 284,
+        "function_snippet": "atomic_inc_return(atomic_t *v)\n{\n\treturn atomic_add_return(1, v);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421#421": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421",
+        "file": "fs/inode.c",
+        "line": 421,
+        "function_snippet": "\tWARN_ON(atomic_inc_return(&inode->i_count) < 2);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77#77": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77",
+        "file": "lib/dump_stack.c",
+        "line": 77,
+        "function_snippet": "static void __dump_stack(void)\n{\n\tdump_stack_print_info(KERN_DEFAULT);\n\tshow_stack(NULL, NULL);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118#118": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118",
+        "file": "lib/dump_stack.c",
+        "line": 118,
+        "function_snippet": "asmlinkage __visible void dump_stack(void)\n{\n\tunsigned long flags;\n\tint was_locked;\n\tint old;\n\tint cpu;\n\n\t/*\n\t * Permit this cpu to perform nested stack dumps while serialising\n\t * against other CPUs\n\t */\nretry:\n\tlocal_irq_save(flags);\n\tcpu = smp_processor_id();\n\told = atomic_cmpxchg(&dump_lock, -1, cpu);\n\tif (old == -1) {\n\t\twas_locked = 0;\n\t} else if (old == cpu) {\n\t\twas_locked = 1;\n\t} else {\n\t\tlocal_irq_restore(flags);\n\t\t/*\n\t\t * Wait for the lock to release before jumping to\n\t\t * atomic_cmpxchg() in order to mitigate the thundering herd\n\t\t * problem.\n\t\t */\n\t\tdo { cpu_relax(); } while (atomic_read(&dump_lock) != -1);\n\t\tgoto retry;\n\t}\n\n\t__dump_stack();"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227#227": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227",
+        "file": "include/linux/fsnotify.h",
+        "line": 227,
+        "function_snippet": "static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)\n{\n\tstruct inode *inode = d_inode(dentry);\n\n\tihold(inode);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040#4040": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040",
+        "file": "fs/namei.c",
+        "line": 4040,
+        "function_snippet": "\t\td_delete_notify(dir, dentry);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944#1944": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944",
+        "file": "fs/incfs/vfs.c",
+        "line": 1944,
+        "function_snippet": "void incfs_kill_sb(struct super_block *sb)\n{\n\tstruct mount_info *mi = sb->s_fs_info;\n\tstruct inode *dinode = NULL;\n\n\tpr_debug(\"incfs: unmount\\n\");\n\n\t/*\n\t * We must kill the super before freeing mi, since killing the super\n\t * triggers inode eviction, which triggers the final update of the\n\t * backing file, which uses certain information for mi\n\t */\n\tkill_anon_super(sb);\n\n\tif (mi) {\n\t\tif (mi->mi_backing_dir_path.dentry)\n\t\t\tdinode = d_inode(mi->mi_backing_dir_path.dentry);\n\n\t\tif (dinode) {\n\t\t\tif (mi->mi_index_dir && mi->mi_index_free)\n\t\t\t\tvfs_rmdir(dinode, mi->mi_index_dir);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335#335": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335",
+        "file": "fs/super.c",
+        "line": 335,
+        "function_snippet": "void deactivate_locked_super(struct super_block *s)\n{\n\tstruct file_system_type *fs = s->s_type;\n\tif (atomic_dec_and_test(&s->s_active)) {\n\t\tcleancache_invalidate_fs(s);\n\t\tunregister_shrinker(&s->s_shrink);\n\t\tfs->kill_sb(s);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366#366": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366",
+        "file": "fs/super.c",
+        "line": 366,
+        "function_snippet": "void deactivate_super(struct super_block *s)\n{\n        if (!atomic_add_unless(&s->s_active, -1, 1)) {\n\t\tdown_write(&s->s_umount);\n\t\tdeactivate_locked_super(s);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102#1102": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102",
+        "file": "fs/namespace.c",
+        "line": 1102,
+        "function_snippet": "\tdeactivate_super(mnt->mnt.mnt_sb);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109#1109": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109",
+        "file": "fs/namespace.c",
+        "line": 1109,
+        "function_snippet": "\tcleanup_mnt(container_of(head, struct mount, mnt_rcu));"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113#113": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113",
+        "file": "kernel/task_work.c",
+        "line": 113,
+        "function_snippet": "void task_work_run(void)\n{\n\tstruct task_struct *task = current;\n\tstruct callback_head *work, *head, *next;\n\n\tfor (;;) {\n\t\t/*\n\t\t * work->func() can do task_work_add(), do not set\n\t\t * work_exited unless the list is empty.\n\t\t */\n\t\traw_spin_lock_irq(&task->pi_lock);\n\t\tdo {\n\t\t\twork = READ_ONCE(task->task_works);\n\t\t\thead = !work && (task->flags & PF_EXITING) ?\n\t\t\t\t&work_exited : NULL;\n\t\t} while (cmpxchg(&task->task_works, work, head) != work);\n\t\traw_spin_unlock_irq(&task->pi_lock);\n\n\t\tif (!work)\n\t\t\tbreak;\n\n\t\tdo {\n\t\t\tnext = work->next;\n\t\t\twork->func(work);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274#2274": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274",
+        "file": "kernel/signal.c",
+        "line": 2274,
+        "function_snippet": "void ptrace_notify(int exit_code)\n{\n\tBUG_ON((exit_code & (0x7f | ~0xffff)) != SIGTRAP);\n\tif (unlikely(current->task_works))\n\t\ttask_work_run();"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66#66": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66",
+        "file": "include/linux/tracehook.h",
+        "line": 66,
+        "function_snippet": "static inline int ptrace_report_syscall(struct pt_regs *regs,\n\t\t\t\t\tunsigned long message)\n{\n\tint ptrace = current->ptrace;\n\n\tif (!(ptrace & PT_PTRACED))\n\t\treturn 0;\n\n\tcurrent->ptrace_message = message;\n\tptrace_notify(SIGTRAP | ((ptrace & PT_TRACESYSGOOD) ? 0x80 : 0));"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129#129": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129",
+        "file": "include/linux/tracehook.h",
+        "line": 129,
+        "function_snippet": "static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)\n{\n\tif (step)\n\t\tuser_single_step_report(regs);\n\telse\n\t\tptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246#246": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246",
+        "file": "arch/x86/entry/common.c",
+        "line": 246,
+        "function_snippet": "static void syscall_slow_exit_work(struct pt_regs *regs, u32 cached_flags)\n{\n\tbool step;\n\n\taudit_syscall_exit(regs);\n\n\tif (cached_flags & _TIF_SYSCALL_TRACEPOINT)\n\t\ttrace_sys_exit(regs, regs->ax);\n\n\t/*\n\t * If TIF_SYSCALL_EMU is set, we only get here because of\n\t * TIF_SINGLESTEP (i.e. this is PTRACE_SYSEMU_SINGLESTEP).\n\t * We already reported this syscall instruction in\n\t * syscall_trace_enter().\n\t */\n\tstep = unlikely(\n\t\t(cached_flags & (_TIF_SINGLESTEP | _TIF_SYSCALL_EMU))\n\t\t== _TIF_SINGLESTEP);\n\tif (step || cached_flags & _TIF_SYSCALL_TRACE)\n\t\ttracehook_report_syscall_exit(regs, step);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271#271": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271",
+        "file": "arch/x86/entry/common.c",
+        "line": 271,
+        "function_snippet": "__visible inline void syscall_return_slowpath(struct pt_regs *regs)\n{\n\tstruct thread_info *ti = current_thread_info();\n\tu32 cached_flags = READ_ONCE(ti->flags);\n\n\tCT_WARN_ON(ct_state() != CONTEXT_KERNEL);\n\n\tif (IS_ENABLED(CONFIG_PROVE_LOCKING) &&\n\t    WARN(irqs_disabled(), \"syscall %ld left IRQs disabled\", regs->orig_ax))\n\t\tlocal_irq_enable();\n\n\trseq_syscall(regs);\n\n\t/*\n\t * First do one-time work.  If these work items are enabled, we\n\t * want to run them exactly once per syscall exit with IRQs on.\n\t */\n\tif (unlikely(cached_flags & SYSCALL_EXIT_WORK_FLAGS))\n\t\tsyscall_slow_exit_work(regs, cached_flags);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300#300": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300",
+        "file": "arch/x86/entry/common.c",
+        "line": 300,
+        "function_snippet": "__visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)\n{\n\tstruct thread_info *ti;\n\n\tenter_from_user_mode();\n\tlocal_irq_enable();\n\tti = current_thread_info();\n\tif (READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY)\n\t\tnr = syscall_trace_enter(regs);\n\n\tif (likely(nr < NR_syscalls)) {\n\t\tnr = array_index_nospec(nr, NR_syscalls);\n\t\tregs->ax = sys_call_table[nr](regs);\n#ifdef CONFIG_X86_X32_ABI\n\t} else if (likely((nr & __X32_SYSCALL_BIT) &&\n\t\t\t  (nr & ~__X32_SYSCALL_BIT) < X32_NR_syscalls)) {\n\t\tnr = array_index_nospec(nr & ~__X32_SYSCALL_BIT,\n\t\t\t\t\tX32_NR_syscalls);\n\t\tregs->ax = x32_sys_call_table[nr](regs);\n#endif\n\t}\n\n\tsyscall_return_slowpath(regs);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167#167": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167",
+        "file": "arch/x86/include/asm/atomic.h",
+        "line": 167,
+        "function_snippet": "static __always_inline int arch_atomic_add_return(int i, atomic_t *v)\n{\n\treturn i + xadd(&v->counter, i);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72#72": {
+        "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72",
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 72,
+        "function_snippet": "atomic_add_return(int i, atomic_t *v)\n{\n\tkasan_check_write(v, sizeof(*v));\n\treturn arch_atomic_add_return(i, v);"
+      }
+    }
+  },
+  "evidence": {
+    "https://android.googlesource.com/kernel/common/": {
+      "error": "URL not in expected +/commit/path format"
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71#71": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "atomic_add_return(int i, atomic_t *v)"
+        ],
+        [
+          3,
+          "kasan_check_write(v, sizeof(*v));"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71",
+      "source_file": "include/asm-generic/atomic-instrumented.h",
+      "source_line": 71
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284#284": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "atomic_inc_return(atomic_t *v)"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284",
+      "source_file": "include/linux/atomic-fallback.h",
+      "source_line": 284
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421#421": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "WARN_ON(atomic_inc_return(&inode->i_count) < 2);"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "inode->i_count"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421",
+      "source_file": "fs/inode.c",
+      "source_line": 421
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77#77": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77",
+      "source_file": "lib/dump_stack.c",
+      "source_line": 77
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118#118": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          8,
+          "/*"
+        ],
+        [
+          9,
+          "* Permit this cpu to perform nested stack dumps while serialising"
+        ],
+        [
+          10,
+          "* against other CPUs"
+        ],
+        [
+          11,
+          "*/"
+        ],
+        [
+          22,
+          "/*"
+        ],
+        [
+          23,
+          "* Wait for the lock to release before jumping to"
+        ],
+        [
+          24,
+          "* atomic_cmpxchg() in order to mitigate the thundering herd"
+        ],
+        [
+          26,
+          "*/"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118",
+      "source_file": "lib/dump_stack.c",
+      "source_line": 118
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227#227": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)"
+        ],
+        [
+          3,
+          "struct inode *inode = d_inode(dentry);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227",
+      "source_file": "include/linux/fsnotify.h",
+      "source_line": 227
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040#4040": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040",
+      "source_file": "fs/namei.c",
+      "source_line": 4040
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944#1944": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "void incfs_kill_sb(struct super_block *sb)"
+        ],
+        [
+          3,
+          "struct mount_info *mi = sb->s_fs_info;"
+        ],
+        [
+          4,
+          "struct inode *dinode = NULL;"
+        ],
+        [
+          8,
+          "/*"
+        ],
+        [
+          9,
+          "* We must kill the super before freeing mi, since killing the super"
+        ],
+        [
+          10,
+          "* triggers inode eviction, which triggers the final update of the"
+        ],
+        [
+          11,
+          "* backing file, which uses certain information for mi"
+        ],
+        [
+          12,
+          "*/"
+        ],
+        [
+          16,
+          "if (mi->mi_backing_dir_path.dentry)"
+        ],
+        [
+          17,
+          "dinode = d_inode(mi->mi_backing_dir_path.dentry);"
+        ],
+        [
+          20,
+          "if (mi->mi_index_dir && mi->mi_index_free)"
+        ],
+        [
+          21,
+          "vfs_rmdir(dinode, mi->mi_index_dir);"
+        ]
+      ],
+      "deref_writes": 2,
+      "deref_reads": 5,
+      "deref_exprs": [
+        "sb->s_fs_info",
+        "mi->mi_backing_dir_path",
+        "mi->mi_index_dir",
+        "mi->mi_index_free"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944",
+      "source_file": "fs/incfs/vfs.c",
+      "source_line": 1944
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335#335": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "void deactivate_locked_super(struct super_block *s)"
+        ],
+        [
+          3,
+          "struct file_system_type *fs = s->s_type;"
+        ],
+        [
+          4,
+          "if (atomic_dec_and_test(&s->s_active)) {"
+        ],
+        [
+          6,
+          "unregister_shrinker(&s->s_shrink);"
+        ],
+        [
+          7,
+          "fs->kill_sb(s);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 4,
+      "deref_exprs": [
+        "s->s_type",
+        "s->s_active",
+        "s->s_shrink",
+        "fs->kill_sb"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335",
+      "source_file": "fs/super.c",
+      "source_line": 335
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366#366": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "void deactivate_super(struct super_block *s)"
+        ],
+        [
+          3,
+          "if (!atomic_add_unless(&s->s_active, -1, 1)) {"
+        ],
+        [
+          4,
+          "down_write(&s->s_umount);"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "s->s_active",
+        "s->s_umount"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366",
+      "source_file": "fs/super.c",
+      "source_line": 366
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102#1102": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "deactivate_super(mnt->mnt.mnt_sb);"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "mnt->mnt"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102",
+      "source_file": "fs/namespace.c",
+      "source_line": 1102
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109#1109": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109",
+      "source_file": "fs/namespace.c",
+      "source_line": 1109
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113#113": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          3,
+          "struct task_struct *task = current;"
+        ],
+        [
+          4,
+          "struct callback_head *work, *head, *next;"
+        ],
+        [
+          7,
+          "/*"
+        ],
+        [
+          8,
+          "* work->func() can do task_work_add(), do not set"
+        ],
+        [
+          10,
+          "*/"
+        ],
+        [
+          11,
+          "raw_spin_lock_irq(&task->pi_lock);"
+        ],
+        [
+          13,
+          "work = READ_ONCE(task->task_works);"
+        ],
+        [
+          14,
+          "head = !work && (task->flags & PF_EXITING) ?"
+        ],
+        [
+          16,
+          "} while (cmpxchg(&task->task_works, work, head) != work);"
+        ],
+        [
+          17,
+          "raw_spin_unlock_irq(&task->pi_lock);"
+        ],
+        [
+          23,
+          "next = work->next;"
+        ],
+        [
+          24,
+          "work->func(work);"
+        ]
+      ],
+      "deref_writes": 2,
+      "deref_reads": 7,
+      "deref_exprs": [
+        "work->func",
+        "task->pi_lock",
+        "task->task_works",
+        "task->flags",
+        "work->next"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113",
+      "source_file": "kernel/task_work.c",
+      "source_line": 113
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274#2274": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          4,
+          "if (unlikely(current->task_works))"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "current->task_works"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274",
+      "source_file": "kernel/signal.c",
+      "source_line": 2274
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66#66": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static inline int ptrace_report_syscall(struct pt_regs *regs,"
+        ],
+        [
+          4,
+          "int ptrace = current->ptrace;"
+        ],
+        [
+          9,
+          "current->ptrace_message = message;"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "current->ptrace",
+        "current->ptrace_message"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66",
+      "source_file": "include/linux/tracehook.h",
+      "source_line": 66
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129#129": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static inline void tracehook_report_syscall_exit(struct pt_regs *regs, int step)"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129",
+      "source_file": "include/linux/tracehook.h",
+      "source_line": 129
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246#246": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static void syscall_slow_exit_work(struct pt_regs *regs, u32 cached_flags)"
+        ],
+        [
+          8,
+          "trace_sys_exit(regs, regs->ax);"
+        ],
+        [
+          10,
+          "/*"
+        ],
+        [
+          11,
+          "* If TIF_SYSCALL_EMU is set, we only get here because of"
+        ],
+        [
+          13,
+          "* We already reported this syscall instruction in"
+        ],
+        [
+          15,
+          "*/"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "regs->ax"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 246
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271#271": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "__visible inline void syscall_return_slowpath(struct pt_regs *regs)"
+        ],
+        [
+          3,
+          "struct thread_info *ti = current_thread_info();"
+        ],
+        [
+          4,
+          "u32 cached_flags = READ_ONCE(ti->flags);"
+        ],
+        [
+          9,
+          "WARN(irqs_disabled(), \"syscall %ld left IRQs disabled\", regs->orig_ax))"
+        ],
+        [
+          14,
+          "/*"
+        ],
+        [
+          17,
+          "*/"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "ti->flags",
+        "regs->orig_ax"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 271
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300#300": {
+      "dereference": true,
+      "array_access": true,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "__visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)"
+        ],
+        [
+          3,
+          "struct thread_info *ti;"
+        ],
+        [
+          8,
+          "if (READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY)"
+        ],
+        [
+          13,
+          "regs->ax = sys_call_table[nr](regs);"
+        ],
+        [
+          13,
+          "regs->ax = sys_call_table[nr](regs);"
+        ],
+        [
+          19,
+          "regs->ax = x32_sys_call_table[nr](regs);"
+        ],
+        [
+          19,
+          "regs->ax = x32_sys_call_table[nr](regs);"
+        ]
+      ],
+      "deref_writes": 2,
+      "deref_reads": 3,
+      "deref_exprs": [
+        "ti->flags",
+        "regs->ax"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 300
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167#167": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static __always_inline int arch_atomic_add_return(int i, atomic_t *v)"
+        ],
+        [
+          3,
+          "return i + xadd(&v->counter, i);"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "v->counter"
+      ],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167",
+      "source_file": "arch/x86/include/asm/atomic.h",
+      "source_line": 167
+    },
+    "link:https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72#72": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "atomic_add_return(int i, atomic_t *v)"
+        ],
+        [
+          3,
+          "kasan_check_write(v, sizeof(*v));"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "access_op": "write",
+      "access_size": 4,
+      "source_url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72",
+      "source_file": "include/asm-generic/atomic-instrumented.h",
+      "source_line": 72
+    }
+  },
+  "classification": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): error_code, ffff8881f6f00000, disassembly",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'atomic_add_return' (from crash context)",
+      "State: variable(s) like inode, Permit, against may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): step -- at include/linux/tracehook.h:132",
+      "path constraint (input): cached_flags & _TIF_SYSCALL_TRACEPOINT -- at arch/x86/entry/common.c:253",
+      "path constraint (input): step || cached_flags & _TIF_SYSCALL_TRACE -- at arch/x86/entry/common.c:265",
+      "path constraint (input): unlikely(cached_flags & SYSCALL_EXIT_WORK_FLAGS) -- at arch/x86/entry/common.c:289",
+      "path constraint (input): READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY -- at arch/x86/entry/common.c:308",
+      "path constraint (kernel state): return atomic_add_return(1, v); -- at include/linux/atomic-fallback.h:287",
+      "path constraint (kernel state): old == -1 -- at lib/dump_stack.c:134",
+      "path constraint (kernel state): old == cpu -- at lib/dump_stack.c:136",
+      "path constraint (kernel state): atomic_read(&dump_lock) != -1 -- at lib/dump_stack.c:145",
+      "path constraint (kernel state): goto retry; -- at lib/dump_stack.c:146",
+      "path constraint (kernel state): mi -- at fs/incfs/vfs.c:1959",
+      "path constraint (kernel state): mi->mi_backing_dir_path.dentry -- at fs/incfs/vfs.c:1960",
+      "path constraint (kernel state): dinode -- at fs/incfs/vfs.c:1963"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: include/linux/fsnotify.h:227 'static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)'",
+      "evidence: include/linux/fsnotify.h:229 'struct inode *inode = d_inode(dentry);'",
+      "deref_exprs: inode->i_count, sb->s_fs_info, mi->mi_backing_dir_path",
+      "faulting address: 0000000000000160",
+      "BUG: KASAN: null-ptr-deref in atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]; fsnotify.h:227 -> static inline void d_delete_notify(struct inode *dir, struct dentry *dentry); fsnotify.h:229 -> struct inode *inode = d_inode(dentry);; dereference expressions: inode->i_count, sb->s_fs_info, mi->mi_backing_dir_path; faulting address: 0000000000000160; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syzkaller repro indicates syscalls: error_code, ffff8881f6f00000, disassembly"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/tracehook.h",
+          "line": 132,
+          "code": "if (step)",
+          "condition": "step",
+          "variables": [
+            "step"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'step' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 253,
+          "code": "if (cached_flags & _TIF_SYSCALL_TRACEPOINT)",
+          "condition": "cached_flags & _TIF_SYSCALL_TRACEPOINT",
+          "variables": [
+            "cached_flags",
+            "_TIF_SYSCALL_TRACEPOINT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'cached_flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 265,
+          "code": "if (step || cached_flags & _TIF_SYSCALL_TRACE)",
+          "condition": "step || cached_flags & _TIF_SYSCALL_TRACE",
+          "variables": [
+            "step",
+            "cached_flags",
+            "_TIF_SYSCALL_TRACE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'step' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 289,
+          "code": "if (unlikely(cached_flags & SYSCALL_EXIT_WORK_FLAGS))",
+          "condition": "unlikely(cached_flags & SYSCALL_EXIT_WORK_FLAGS)",
+          "variables": [
+            "unlikely",
+            "cached_flags",
+            "SYSCALL_EXIT_WORK_FLAGS"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'cached_flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 308,
+          "code": "if (READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY)",
+          "condition": "READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY",
+          "variables": [
+            "READ_ONCE",
+            "ti",
+            "flags",
+            "_TIF_WORK_SYSCALL_ENTRY"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 311,
+          "code": "if (likely(nr < NR_syscalls)) {",
+          "condition": "likely(nr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "nr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 315,
+          "code": "} else if (likely((nr & __X32_SYSCALL_BIT) &&",
+          "condition": "likely((nr & __X32_SYSCALL_BIT",
+          "variables": [
+            "likely",
+            "nr",
+            "__X32_SYSCALL_BIT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/include/asm/atomic.h",
+          "line": 170,
+          "code": "return i + xadd(&v->counter, i);",
+          "condition": "return i + xadd(&v->counter, i);",
+          "variables": [
+            "return",
+            "i",
+            "xadd",
+            "v",
+            "counter",
+            "i"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/fsnotify.h",
+          "line": 227,
+          "code": "static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "include/linux/fsnotify.h",
+              "line": 227,
+              "code": "static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/atomic-fallback.h",
+          "line": 287,
+          "code": "return atomic_add_return(1, v);",
+          "condition": "return atomic_add_return(1, v);",
+          "variables": [
+            "return",
+            "atomic_add_return",
+            "v"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 134,
+          "code": "if (old == -1) {",
+          "condition": "old == -1",
+          "variables": [
+            "old"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 136,
+          "code": "} else if (old == cpu) {",
+          "condition": "old == cpu",
+          "variables": [
+            "old",
+            "cpu"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 145,
+          "code": "do { cpu_relax(); } while (atomic_read(&dump_lock) != -1);",
+          "condition": "atomic_read(&dump_lock) != -1",
+          "variables": [
+            "atomic_read",
+            "dump_lock"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 146,
+          "code": "goto retry;",
+          "condition": "goto retry;",
+          "variables": [
+            "goto",
+            "retry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1959,
+          "code": "if (mi) {",
+          "condition": "mi",
+          "variables": [
+            "mi"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1960,
+          "code": "if (mi->mi_backing_dir_path.dentry)",
+          "condition": "mi->mi_backing_dir_path.dentry",
+          "variables": [
+            "mi",
+            "mi_backing_dir_path",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1963,
+          "code": "if (dinode) {",
+          "condition": "dinode",
+          "variables": [
+            "dinode"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1964,
+          "code": "if (mi->mi_index_dir && mi->mi_index_free)",
+          "condition": "mi->mi_index_dir && mi->mi_index_free",
+          "variables": [
+            "mi",
+            "mi_index_dir",
+            "mi",
+            "mi_index_free"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 339,
+          "code": "if (atomic_dec_and_test(&s->s_active)) {",
+          "condition": "atomic_dec_and_test(&s->s_active)",
+          "variables": [
+            "atomic_dec_and_test",
+            "s",
+            "s_active"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 369,
+          "code": "if (!atomic_add_unless(&s->s_active, -1, 1)) {",
+          "condition": "!atomic_add_unless(&s->s_active, -1, 1)",
+          "variables": [
+            "atomic_add_unless",
+            "s",
+            "s_active"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/task_work.c",
+          "line": 119,
+          "code": "for (;;) {",
+          "condition": ";;",
+          "variables": [],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/task_work.c",
+          "line": 129,
+          "code": "} while (cmpxchg(&task->task_works, work, head) != work);",
+          "condition": "cmpxchg(&task->task_works, work, head) != work",
+          "variables": [
+            "cmpxchg",
+            "task",
+            "task_works",
+            "work",
+            "head",
+            "work"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/task_work.c",
+          "line": 132,
+          "code": "if (!work)",
+          "condition": "!work",
+          "variables": [
+            "work"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/signal.c",
+          "line": 2278,
+          "code": "if (unlikely(current->task_works))",
+          "condition": "unlikely(current->task_works)",
+          "variables": [
+            "unlikely",
+            "current",
+            "task_works"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/tracehook.h",
+          "line": 72,
+          "code": "if (!(ptrace & PT_PTRACED))",
+          "condition": "!(ptrace & PT_PTRACED)",
+          "variables": [
+            "ptrace",
+            "PT_PTRACED"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/tracehook.h",
+          "line": 73,
+          "code": "return 0;",
+          "condition": "return 0;",
+          "variables": [
+            "return"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 279,
+          "code": "if (IS_ENABLED(CONFIG_PROVE_LOCKING) &&",
+          "condition": "IS_ENABLED(CONFIG_PROVE_LOCKING",
+          "variables": [
+            "IS_ENABLED",
+            "CONFIG_PROVE_LOCKING"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/asm-generic/atomic-instrumented.h",
+          "line": 76,
+          "code": "return arch_atomic_add_return(i, v);",
+          "condition": "return arch_atomic_add_return(i, v);",
+          "variables": [
+            "return",
+            "arch_atomic_add_return",
+            "i",
+            "v"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0000000000000160",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=29, writes=10)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "exploitability": {
+    "free_site": null,
+    "trigger_site": {
+      "file": "include/asm-generic/atomic-instrumented.h",
+      "line": 71,
+      "url": "https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71",
+      "func": "atomic_add_return"
+    },
+    "allocation_site": null,
+    "object": null,
+    "struct_info": {
+      "struct_name": null,
+      "fields_used": [
+        "If",
+        "ax",
+        "counter",
+        "dentry",
+        "e",
+        "flags",
+        "func",
+        "i_count",
+        "kill_sb",
+        "mi_backing_dir_path",
+        "mi_index_dir",
+        "mi_index_free",
+        "mnt",
+        "mnt_sb",
+        "next",
+        "orig_ax",
+        "pi_lock",
+        "ptrace",
+        "ptrace_message",
+        "s_active",
+        "s_fs_info",
+        "s_shrink",
+        "s_type",
+        "s_umount",
+        "task_works",
+        "this"
+      ],
+      "struct_def_snippet": null
+    },
+    "usage_examples": [
+      {
+        "line_no": 1,
+        "text": "atomic_add_return(int i, atomic_t *v)"
+      },
+      {
+        "line_no": 3,
+        "text": "kasan_check_write(v, sizeof(*v));"
+      }
+    ],
+    "notes": [],
+    "concrete_preconditions": [
+      {
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 71,
+        "code": "atomic_add_return(int i, atomic_t *v)",
+        "variables": [
+          "v"
+        ],
+        "indices": [],
+        "constraint": "variable(s) v may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "atomic_add_return(int i, atomic_t *v)"
+          },
+          {
+            "line_no": 3,
+            "text": "kasan_check_write(v, sizeof(*v));"
+          }
+        ]
+      },
+      {
+        "file": "include/asm-generic/atomic-instrumented.h",
+        "line": 71,
+        "code": "kasan_check_write(v, sizeof(*v));",
+        "variables": [
+          "v"
+        ],
+        "indices": [],
+        "constraint": "variable(s) v may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "atomic_add_return(int i, atomic_t *v)"
+          },
+          {
+            "line_no": 3,
+            "text": "kasan_check_write(v, sizeof(*v));"
+          }
+        ]
+      }
+    ]
+  },
+  "strong_report": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): error_code, ffff8881f6f00000, disassembly",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'atomic_add_return' (from crash context)",
+      "State: variable(s) like inode, Permit, against may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): step -- at include/linux/tracehook.h:132",
+      "path constraint (input): cached_flags & _TIF_SYSCALL_TRACEPOINT -- at arch/x86/entry/common.c:253",
+      "path constraint (input): step || cached_flags & _TIF_SYSCALL_TRACE -- at arch/x86/entry/common.c:265",
+      "path constraint (input): unlikely(cached_flags & SYSCALL_EXIT_WORK_FLAGS) -- at arch/x86/entry/common.c:289",
+      "path constraint (input): READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY -- at arch/x86/entry/common.c:308",
+      "path constraint (kernel state): return atomic_add_return(1, v); -- at include/linux/atomic-fallback.h:287",
+      "path constraint (kernel state): old == -1 -- at lib/dump_stack.c:134",
+      "path constraint (kernel state): old == cpu -- at lib/dump_stack.c:136",
+      "path constraint (kernel state): atomic_read(&dump_lock) != -1 -- at lib/dump_stack.c:145",
+      "path constraint (kernel state): goto retry; -- at lib/dump_stack.c:146",
+      "path constraint (kernel state): mi -- at fs/incfs/vfs.c:1959",
+      "path constraint (kernel state): mi->mi_backing_dir_path.dentry -- at fs/incfs/vfs.c:1960",
+      "path constraint (kernel state): dinode -- at fs/incfs/vfs.c:1963"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: include/linux/fsnotify.h:227 'static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)'",
+      "evidence: include/linux/fsnotify.h:229 'struct inode *inode = d_inode(dentry);'",
+      "deref_exprs: inode->i_count, sb->s_fs_info, mi->mi_backing_dir_path",
+      "faulting address: 0000000000000160",
+      "BUG: KASAN: null-ptr-deref in atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]; fsnotify.h:227 -> static inline void d_delete_notify(struct inode *dir, struct dentry *dentry); fsnotify.h:229 -> struct inode *inode = d_inode(dentry);; dereference expressions: inode->i_count, sb->s_fs_info, mi->mi_backing_dir_path; faulting address: 0000000000000160; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syzkaller repro indicates syscalls: error_code, ffff8881f6f00000, disassembly"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/tracehook.h",
+          "line": 132,
+          "code": "if (step)",
+          "condition": "step",
+          "variables": [
+            "step"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'step' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 253,
+          "code": "if (cached_flags & _TIF_SYSCALL_TRACEPOINT)",
+          "condition": "cached_flags & _TIF_SYSCALL_TRACEPOINT",
+          "variables": [
+            "cached_flags",
+            "_TIF_SYSCALL_TRACEPOINT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'cached_flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 265,
+          "code": "if (step || cached_flags & _TIF_SYSCALL_TRACE)",
+          "condition": "step || cached_flags & _TIF_SYSCALL_TRACE",
+          "variables": [
+            "step",
+            "cached_flags",
+            "_TIF_SYSCALL_TRACE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'step' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 289,
+          "code": "if (unlikely(cached_flags & SYSCALL_EXIT_WORK_FLAGS))",
+          "condition": "unlikely(cached_flags & SYSCALL_EXIT_WORK_FLAGS)",
+          "variables": [
+            "unlikely",
+            "cached_flags",
+            "SYSCALL_EXIT_WORK_FLAGS"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'cached_flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 308,
+          "code": "if (READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY)",
+          "condition": "READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY",
+          "variables": [
+            "READ_ONCE",
+            "ti",
+            "flags",
+            "_TIF_WORK_SYSCALL_ENTRY"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 311,
+          "code": "if (likely(nr < NR_syscalls)) {",
+          "condition": "likely(nr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "nr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 315,
+          "code": "} else if (likely((nr & __X32_SYSCALL_BIT) &&",
+          "condition": "likely((nr & __X32_SYSCALL_BIT",
+          "variables": [
+            "likely",
+            "nr",
+            "__X32_SYSCALL_BIT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/include/asm/atomic.h",
+          "line": 170,
+          "code": "return i + xadd(&v->counter, i);",
+          "condition": "return i + xadd(&v->counter, i);",
+          "variables": [
+            "return",
+            "i",
+            "xadd",
+            "v",
+            "counter",
+            "i"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/fsnotify.h",
+          "line": 227,
+          "code": "static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "include/linux/fsnotify.h",
+              "line": 227,
+              "code": "static inline void d_delete_notify(struct inode *dir, struct dentry *dentry)",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/atomic-fallback.h",
+          "line": 287,
+          "code": "return atomic_add_return(1, v);",
+          "condition": "return atomic_add_return(1, v);",
+          "variables": [
+            "return",
+            "atomic_add_return",
+            "v"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 134,
+          "code": "if (old == -1) {",
+          "condition": "old == -1",
+          "variables": [
+            "old"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 136,
+          "code": "} else if (old == cpu) {",
+          "condition": "old == cpu",
+          "variables": [
+            "old",
+            "cpu"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 145,
+          "code": "do { cpu_relax(); } while (atomic_read(&dump_lock) != -1);",
+          "condition": "atomic_read(&dump_lock) != -1",
+          "variables": [
+            "atomic_read",
+            "dump_lock"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "lib/dump_stack.c",
+          "line": 146,
+          "code": "goto retry;",
+          "condition": "goto retry;",
+          "variables": [
+            "goto",
+            "retry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1959,
+          "code": "if (mi) {",
+          "condition": "mi",
+          "variables": [
+            "mi"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1960,
+          "code": "if (mi->mi_backing_dir_path.dentry)",
+          "condition": "mi->mi_backing_dir_path.dentry",
+          "variables": [
+            "mi",
+            "mi_backing_dir_path",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1963,
+          "code": "if (dinode) {",
+          "condition": "dinode",
+          "variables": [
+            "dinode"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1964,
+          "code": "if (mi->mi_index_dir && mi->mi_index_free)",
+          "condition": "mi->mi_index_dir && mi->mi_index_free",
+          "variables": [
+            "mi",
+            "mi_index_dir",
+            "mi",
+            "mi_index_free"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 339,
+          "code": "if (atomic_dec_and_test(&s->s_active)) {",
+          "condition": "atomic_dec_and_test(&s->s_active)",
+          "variables": [
+            "atomic_dec_and_test",
+            "s",
+            "s_active"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 369,
+          "code": "if (!atomic_add_unless(&s->s_active, -1, 1)) {",
+          "condition": "!atomic_add_unless(&s->s_active, -1, 1)",
+          "variables": [
+            "atomic_add_unless",
+            "s",
+            "s_active"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/task_work.c",
+          "line": 119,
+          "code": "for (;;) {",
+          "condition": ";;",
+          "variables": [],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/task_work.c",
+          "line": 129,
+          "code": "} while (cmpxchg(&task->task_works, work, head) != work);",
+          "condition": "cmpxchg(&task->task_works, work, head) != work",
+          "variables": [
+            "cmpxchg",
+            "task",
+            "task_works",
+            "work",
+            "head",
+            "work"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/task_work.c",
+          "line": 132,
+          "code": "if (!work)",
+          "condition": "!work",
+          "variables": [
+            "work"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/signal.c",
+          "line": 2278,
+          "code": "if (unlikely(current->task_works))",
+          "condition": "unlikely(current->task_works)",
+          "variables": [
+            "unlikely",
+            "current",
+            "task_works"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/tracehook.h",
+          "line": 72,
+          "code": "if (!(ptrace & PT_PTRACED))",
+          "condition": "!(ptrace & PT_PTRACED)",
+          "variables": [
+            "ptrace",
+            "PT_PTRACED"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/tracehook.h",
+          "line": 73,
+          "code": "return 0;",
+          "condition": "return 0;",
+          "variables": [
+            "return"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 279,
+          "code": "if (IS_ENABLED(CONFIG_PROVE_LOCKING) &&",
+          "condition": "IS_ENABLED(CONFIG_PROVE_LOCKING",
+          "variables": [
+            "IS_ENABLED",
+            "CONFIG_PROVE_LOCKING"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/asm-generic/atomic-instrumented.h",
+          "line": 76,
+          "code": "return arch_atomic_add_return(i, v);",
+          "condition": "return arch_atomic_add_return(i, v);",
+          "variables": [
+            "return",
+            "arch_atomic_add_return",
+            "i",
+            "v"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0000000000000160",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=29, writes=10)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "llm_analysis": {
+    "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\n---[ end trace a41a975ef7435e85 ]---\n==================================================================\nBUG: KASAN: null-ptr-deref in atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]\nBUG: KASAN: null-ptr-deref in atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nBUG: KASAN: null-ptr-deref in ihold+0x20/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nWrite of size 4 at addr 0000000000000160 by task syz-executor260/343\n\nCPU: 1 PID: 343 Comm: syz-executor260 Tainted: G        W         5.4.292-syzkaller-00021-gcd8e74fa0fa3 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/12/2025\nCall Trace:\n __dump_stack+0x1e/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77'>lib/dump_stack.c:77</a>\n dump_stack+0x15b/0x1b8 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118'>lib/dump_stack.c:118</a>\n __kasan_report+0xe4/0x120 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/report.c#520'>mm/kasan/report.c:520</a>\n kasan_report+0x30/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/common.c#653'>mm/kasan/common.c:653</a>\n check_memory_region_inline <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/generic.c#141'>mm/kasan/generic.c:141</a> [inline]\n check_memory_region+0x274/0x280 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/generic.c#191'>mm/kasan/generic.c:191</a>\n __kasan_check_write+0x14/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/common.c#99'>mm/kasan/common.c:99</a>\n atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]\n atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\n ihold+0x20/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\n d_delete_notify <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227'>include/linux/fsnotify.h:227</a> [inline]\n vfs_rmdir+0x247/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040'>fs/namei.c:4040</a>\n incfs_kill_sb+0xfe/0x210 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944'>fs/incfs/vfs.c:1944</a>\n deactivate_locked_super+0xa0/0x100 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335'>fs/super.c:335</a>\n deactivate_super+0x14f/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366'>fs/super.c:366</a>\n cleanup_mnt+0x446/0x500 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102'>fs/namespace.c:1102</a>\n __cleanup_mnt+0x19/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109'>fs/namespace.c:1109</a>\n task_work_run+0x146/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113'>kernel/task_work.c:113</a>\n ptrace_notify+0x212/0x250 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274'>kernel/signal.c:2274</a>\n ptrace_report_syscall <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66'>include/linux/tracehook.h:66</a> [inline]\n tracehook_report_syscall_exit <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129'>include/linux/tracehook.h:129</a> [inline]\n syscall_slow_exit_work+0x17e/0x440 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246'>arch/x86/entry/common.c:246</a>\n syscall_return_slowpath <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271'>arch/x86/entry/common.c:271</a> [inline]\n do_syscall_64+0x160/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300'>arch/x86/entry/common.c:300</a>\n entry_SYSCALL_64_after_hwframe+0x5c/0xc1\nRIP: 0033:0x7fb9166c0ac7\nCode: 07 00 48 83 c4 08 5b 5d c3 66 2e 0f 1f 84 00 00 00 00 00 c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 b8 a6 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 01 c3 48 c7 c2 b8 ff ff ff f7 d8 64 89 02 b8\nRSP: 002b:00007ffff5a6cc88 EFLAGS: 00000206 ORIG_RAX: 00000000000000a6\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\n==================================================================\nBUG: kernel NULL pointer dereference, address: 0000000000000160\n#PF: supervisor write access in kernel mode\n#PF: error_code(0x0002) - not-present page\nPGD 0 P4D 0 \nOops: 0002 [#1] PREEMPT SMP KASAN\nCPU: 1 PID: 343 Comm: syz-executor260 Tainted: G    B   W         5.4.292-syzkaller-00021-gcd8e74fa0fa3 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/12/2025\nRIP: 0010:arch_atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167'>arch/x86/include/asm/atomic.h:167</a> [inline]\nRIP: 0010:atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72'>include/asm-generic/atomic-instrumented.h:72</a> [inline]\nRIP: 0010:atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nRIP: 0010:ihold+0x26/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nCode: 00 00 00 00 55 48 89 e5 41 56 53 48 89 fb e8 61 c8 c5 ff 48 8d bb 60 01 00 00 be 04 00 00 00 e8 a0 9c f3 ff 41 be 01 00 00 00 <f0> 44 0f c1 b3 60 01 00 00 41 ff c6 bf 02 00 00 00 44 89 f6 e8 81\nRSP: 0018:ffff8881f3fc7b80 EFLAGS: 00010246\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: ffff8881f30c8000\nRDX: 0000000000000000 RSI: 0000000000000002 RDI: 00000000ffffffff\nRBP: ffff8881f3fc7b90 R08: 0000000000000004 R09: 0000000000000003\nR10: fffffbfff0ca7a5c R11: 1ffffffff0ca7a5c R12: 1ffff1103b95a77c\nR13: 0000000000000000 R14: 0000000000000001 R15: 0000000000000000\nFS:  0000555556d10380(0000) GS:ffff8881f6f00000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000000000160 CR3: 00000001dfce0000 CR4: 00000000003406a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n d_delete_notify <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227'>include/linux/fsnotify.h:227</a> [inline]\n vfs_rmdir+0x247/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040'>fs/namei.c:4040</a>\n incfs_kill_sb+0xfe/0x210 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944'>fs/incfs/vfs.c:1944</a>\n deactivate_locked_super+0xa0/0x100 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335'>fs/super.c:335</a>\n deactivate_super+0x14f/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366'>fs/super.c:366</a>\n cleanup_mnt+0x446/0x500 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102'>fs/namespace.c:1102</a>\n __cleanup_mnt+0x19/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109'>fs/namespace.c:1109</a>\n task_work_run+0x146/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113'>kernel/task_work.c:113</a>\n ptrace_notify+0x212/0x250 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274'>kernel/signal.c:2274</a>\n ptrace_report_syscall <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66'>include/linux/tracehook.h:66</a> [inline]\n tracehook_report_syscall_exit <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129'>include/linux/tracehook.h:129</a> [inline]\n syscall_slow_exit_work+0x17e/0x440 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246'>arch/x86/entry/common.c:246</a>\n syscall_return_slowpath <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271'>arch/x86/entry/common.c:271</a> [inline]\n do_syscall_64+0x160/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300'>arch/x86/entry/common.c:300</a>\n entry_SYSCALL_64_after_hwframe+0x5c/0xc1\nRIP: 0033:0x7fb9166c0ac7\nCode: 07 00 48 83 c4 08 5b 5d c3 66 2e 0f 1f 84 00 00 00 00 00 c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 b8 a6 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 01 c3 48 c7 c2 b8 ff ff ff f7 d8 64 89 02 b8\nRSP: 002b:00007ffff5a6cc88 EFLAGS: 00000206 ORIG_RAX: 00000000000000a6\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\nModules linked in:\nCR2: 0000000000000160\n---[ end trace a41a975ef7435e86 ]---\nRIP: 0010:arch_atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167'>arch/x86/include/asm/atomic.h:167</a> [inline]\nRIP: 0010:atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72'>include/asm-generic/atomic-instrumented.h:72</a> [inline]\nRIP: 0010:atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nRIP: 0010:ihold+0x26/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nCode: 00 00 00 00 55 48 89 e5 41 56 53 48 89 fb e8 61 c8 c5 ff 48 8d bb 60 01 00 00 be 04 00 00 00 e8 a0 9c f3 ff 41 be 01 00 00 00 <f0> 44 0f c1 b3 60 01 00 00 41 ff c6 bf 02 00 00 00 44 89 f6 e8 81\nRSP: 0018:ffff8881f3fc7b80 EFLAGS: 00010246\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: ffff8881f30c8000\nRDX: 0000000000000000 RSI: 0000000000000002 RDI: 00000000ffffffff\nRBP: ffff8881f3fc7b90 R08: 0000000000000004 R09: 0000000000000003\nR10: fffffbfff0ca7a5c R11: 1ffffffff0ca7a5c R12: 1ffff1103b95a77c\nR13: 0000000000000000 R14: 0000000000000001 R15: 0000000000000000\nFS:  0000555556d10380(0000) GS:ffff8881f6f00000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000000000160 CR3: 00000001dfce0000 CR4: 00000000003406a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t00 00                \tadd    %al,(%rax)\n   2:\t00 00                \tadd    %al,(%rax)\n   4:\t55                   \tpush   %rbp\n   5:\t48 89 e5             \tmov    %rsp,%rbp\n   8:\t41 56                \tpush   %r14\n   a:\t53                   \tpush   %rbx\n   b:\t48 89 fb             \tmov    %rdi,%rbx\n   e:\te8 61 c8 c5 ff       \tcall   0xffc5c874\n  13:\t48 8d bb 60 01 00 00 \tlea    0x160(%rbx),%rdi\n  1a:\tbe 04 00 00 00       \tmov    $0x4,%esi\n  1f:\te8 a0 9c f3 ff       \tcall   0xfff39cc4\n  24:\t41 be 01 00 00 00    \tmov    $0x1,%r14d\n* 2a:\tf0 44 0f c1 b3 60 01 \tlock xadd %r14d,0x160(%rbx) <-- trapping instruction\n  31:\t00 00\n  33:\t41 ff c6             \tinc    %r14d\n  36:\tbf 02 00 00 00       \tmov    $0x2,%edi\n  3b:\t44 89 f6             \tmov    %r14d,%esi\n  3e:\te8                   \t.byte 0xe8\n  3f:\t81                   \t.byte 0x81\n\n-- include/asm-generic/atomic-instrumented.h:71 -> atomic_add_return(int i, atomic_t *v)\n{\n\tkasan_check_write(v, sizeof(*v));\n---\n-- include/linux/atomic-fallback.h:284 -> atomic_inc_return(atomic_t *v)\n{\n\treturn atomic_add_return(1, v);\n---\n-- fs/inode.c:421 -> \tWARN_ON(atomic_inc_return(&inode->i_count) < 2);\n---",
+    "local_llm": {
+      "ok": false,
+      "error": "Local LLM calls disabled in this version",
+      "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\n---[ end trace a41a975ef7435e85 ]---\n==================================================================\nBUG: KASAN: null-ptr-deref in atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]\nBUG: KASAN: null-ptr-deref in atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nBUG: KASAN: null-ptr-deref in ihold+0x20/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nWrite of size 4 at addr 0000000000000160 by task syz-executor260/343\n\nCPU: 1 PID: 343 Comm: syz-executor260 Tainted: G        W         5.4.292-syzkaller-00021-gcd8e74fa0fa3 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/12/2025\nCall Trace:\n __dump_stack+0x1e/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#77'>lib/dump_stack.c:77</a>\n dump_stack+0x15b/0x1b8 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/lib/dump_stack.c#118'>lib/dump_stack.c:118</a>\n __kasan_report+0xe4/0x120 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/report.c#520'>mm/kasan/report.c:520</a>\n kasan_report+0x30/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/common.c#653'>mm/kasan/common.c:653</a>\n check_memory_region_inline <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/generic.c#141'>mm/kasan/generic.c:141</a> [inline]\n check_memory_region+0x274/0x280 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/generic.c#191'>mm/kasan/generic.c:191</a>\n __kasan_check_write+0x14/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/mm/kasan/common.c#99'>mm/kasan/common.c:99</a>\n atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#71'>include/asm-generic/atomic-instrumented.h:71</a> [inline]\n atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\n ihold+0x20/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\n d_delete_notify <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227'>include/linux/fsnotify.h:227</a> [inline]\n vfs_rmdir+0x247/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040'>fs/namei.c:4040</a>\n incfs_kill_sb+0xfe/0x210 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944'>fs/incfs/vfs.c:1944</a>\n deactivate_locked_super+0xa0/0x100 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335'>fs/super.c:335</a>\n deactivate_super+0x14f/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366'>fs/super.c:366</a>\n cleanup_mnt+0x446/0x500 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102'>fs/namespace.c:1102</a>\n __cleanup_mnt+0x19/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109'>fs/namespace.c:1109</a>\n task_work_run+0x146/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113'>kernel/task_work.c:113</a>\n ptrace_notify+0x212/0x250 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274'>kernel/signal.c:2274</a>\n ptrace_report_syscall <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66'>include/linux/tracehook.h:66</a> [inline]\n tracehook_report_syscall_exit <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129'>include/linux/tracehook.h:129</a> [inline]\n syscall_slow_exit_work+0x17e/0x440 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246'>arch/x86/entry/common.c:246</a>\n syscall_return_slowpath <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271'>arch/x86/entry/common.c:271</a> [inline]\n do_syscall_64+0x160/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300'>arch/x86/entry/common.c:300</a>\n entry_SYSCALL_64_after_hwframe+0x5c/0xc1\nRIP: 0033:0x7fb9166c0ac7\nCode: 07 00 48 83 c4 08 5b 5d c3 66 2e 0f 1f 84 00 00 00 00 00 c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 b8 a6 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 01 c3 48 c7 c2 b8 ff ff ff f7 d8 64 89 02 b8\nRSP: 002b:00007ffff5a6cc88 EFLAGS: 00000206 ORIG_RAX: 00000000000000a6\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\n==================================================================\nBUG: kernel NULL pointer dereference, address: 0000000000000160\n#PF: supervisor write access in kernel mode\n#PF: error_code(0x0002) - not-present page\nPGD 0 P4D 0 \nOops: 0002 [#1] PREEMPT SMP KASAN\nCPU: 1 PID: 343 Comm: syz-executor260 Tainted: G    B   W         5.4.292-syzkaller-00021-gcd8e74fa0fa3 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/12/2025\nRIP: 0010:arch_atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167'>arch/x86/include/asm/atomic.h:167</a> [inline]\nRIP: 0010:atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72'>include/asm-generic/atomic-instrumented.h:72</a> [inline]\nRIP: 0010:atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nRIP: 0010:ihold+0x26/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nCode: 00 00 00 00 55 48 89 e5 41 56 53 48 89 fb e8 61 c8 c5 ff 48 8d bb 60 01 00 00 be 04 00 00 00 e8 a0 9c f3 ff 41 be 01 00 00 00 <f0> 44 0f c1 b3 60 01 00 00 41 ff c6 bf 02 00 00 00 44 89 f6 e8 81\nRSP: 0018:ffff8881f3fc7b80 EFLAGS: 00010246\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: ffff8881f30c8000\nRDX: 0000000000000000 RSI: 0000000000000002 RDI: 00000000ffffffff\nRBP: ffff8881f3fc7b90 R08: 0000000000000004 R09: 0000000000000003\nR10: fffffbfff0ca7a5c R11: 1ffffffff0ca7a5c R12: 1ffff1103b95a77c\nR13: 0000000000000000 R14: 0000000000000001 R15: 0000000000000000\nFS:  0000555556d10380(0000) GS:ffff8881f6f00000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000000000160 CR3: 00000001dfce0000 CR4: 00000000003406a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n d_delete_notify <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/fsnotify.h#227'>include/linux/fsnotify.h:227</a> [inline]\n vfs_rmdir+0x247/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namei.c#4040'>fs/namei.c:4040</a>\n incfs_kill_sb+0xfe/0x210 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/incfs/vfs.c#1944'>fs/incfs/vfs.c:1944</a>\n deactivate_locked_super+0xa0/0x100 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#335'>fs/super.c:335</a>\n deactivate_super+0x14f/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/super.c#366'>fs/super.c:366</a>\n cleanup_mnt+0x446/0x500 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1102'>fs/namespace.c:1102</a>\n __cleanup_mnt+0x19/0x20 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/namespace.c#1109'>fs/namespace.c:1109</a>\n task_work_run+0x146/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/task_work.c#113'>kernel/task_work.c:113</a>\n ptrace_notify+0x212/0x250 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/kernel/signal.c#2274'>kernel/signal.c:2274</a>\n ptrace_report_syscall <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#66'>include/linux/tracehook.h:66</a> [inline]\n tracehook_report_syscall_exit <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/tracehook.h#129'>include/linux/tracehook.h:129</a> [inline]\n syscall_slow_exit_work+0x17e/0x440 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#246'>arch/x86/entry/common.c:246</a>\n syscall_return_slowpath <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#271'>arch/x86/entry/common.c:271</a> [inline]\n do_syscall_64+0x160/0x170 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/entry/common.c#300'>arch/x86/entry/common.c:300</a>\n entry_SYSCALL_64_after_hwframe+0x5c/0xc1\nRIP: 0033:0x7fb9166c0ac7\nCode: 07 00 48 83 c4 08 5b 5d c3 66 2e 0f 1f 84 00 00 00 00 00 c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 b8 a6 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 01 c3 48 c7 c2 b8 ff ff ff f7 d8 64 89 02 b8\nRSP: 002b:00007ffff5a6cc88 EFLAGS: 00000206 ORIG_RAX: 00000000000000a6\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: 00007fb9166c0ac7\nRDX: 0000000000000000 RSI: 0000000000000009 RDI: 00007ffff5a6cd40\nRBP: 00007ffff5a6cd40 R08: 0000000000000000 R09: 0000000000000000\nR10: 00000000ffffffff R11: 0000000000000206 R12: 00007ffff5a6ddb0\nR13: 0000555556d116c0 R14: 00007ffff5a6ddb0 R15: 0000000000000001\nModules linked in:\nCR2: 0000000000000160\n---[ end trace a41a975ef7435e86 ]---\nRIP: 0010:arch_atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/arch/x86/include/asm/atomic.h#167'>arch/x86/include/asm/atomic.h:167</a> [inline]\nRIP: 0010:atomic_add_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/asm-generic/atomic-instrumented.h#72'>include/asm-generic/atomic-instrumented.h:72</a> [inline]\nRIP: 0010:atomic_inc_return <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/include/linux/atomic-fallback.h#284'>include/linux/atomic-fallback.h:284</a> [inline]\nRIP: 0010:ihold+0x26/0x60 <a href='https://android.googlesource.com/kernel/common/+/cd8e74fa0fa3de9f66c12c5c2c2868442d2f6728/fs/inode.c#421'>fs/inode.c:421</a>\nCode: 00 00 00 00 55 48 89 e5 41 56 53 48 89 fb e8 61 c8 c5 ff 48 8d bb 60 01 00 00 be 04 00 00 00 e8 a0 9c f3 ff 41 be 01 00 00 00 <f0> 44 0f c1 b3 60 01 00 00 41 ff c6 bf 02 00 00 00 44 89 f6 e8 81\nRSP: 0018:ffff8881f3fc7b80 EFLAGS: 00010246\nRAX: 0000000000000000 RBX: 0000000000000000 RCX: ffff8881f30c8000\nRDX: 0000000000000000 RSI: 0000000000000002 RDI: 00000000ffffffff\nRBP: ffff8881f3fc7b90 R08: 0000000000000004 R09: 0000000000000003\nR10: fffffbfff0ca7a5c R11: 1ffffffff0ca7a5c R12: 1ffff1103b95a77c\nR13: 0000000000000000 R14: 0000000000000001 R15: 0000000000000000\nFS:  0000555556d10380(0000) GS:ffff8881f6f00000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000000000160 CR3: 00000001dfce0000 CR4: 00000000003406a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t00 00                \tadd    %al,(%rax)\n   2:\t00 00                \tadd    %al,(%rax)\n   4:\t55                   \tpush   %rbp\n   5:\t48 89 e5             \tmov    %rsp,%rbp\n   8:\t41 56                \tpush   %r14\n   a:\t53                   \tpush   %rbx\n   b:\t48 89 fb             \tmov    %rdi,%rbx\n   e:\te8 61 c8 c5 ff       \tcall   0xffc5c874\n  13:\t48 8d bb 60 01 00 00 \tlea    0x160(%rbx),%rdi\n  1a:\tbe 04 00 00 00       \tmov    $0x4,%esi\n  1f:\te8 a0 9c f3 ff       \tcall   0xfff39cc4\n  24:\t41 be 01 00 00 00    \tmov    $0x1,%r14d\n* 2a:\tf0 44 0f c1 b3 60 01 \tlock xadd %r14d,0x160(%rbx) <-- trapping instruction\n  31:\t00 00\n  33:\t41 ff c6             \tinc    %r14d\n  36:\tbf 02 00 00 00       \tmov    $0x2,%edi\n  3b:\t44 89 f6             \tmov    %r14d,%esi\n  3e:\te8                   \t.byte 0xe8\n  3f:\t81                   \t.byte 0x81\n\n-- include/asm-generic/atomic-instrumented.h:71 -> atomic_add_return(int i, atomic_t *v)\n{\n\tkasan_check_write(v, sizeof(*v));\n---\n-- include/linux/atomic-fallback.h:284 -> atomic_inc_return(atomic_t *v)\n{\n\treturn atomic_add_return(1, v);\n---\n-- fs/inode.c:421 -> \tWARN_ON(atomic_inc_return(&inode->i_count) < 2);\n---"
+    },
+    "openai_llm": {
+      "raw_output": "{\n  \"overview\": {\n    \"exploitability\": \"LOW\",\n    \"rationale\": \"The crash is a NULL pointer dereference in ihold() (atomic_inc_return(&inode->i_count)) caused by a NULL inode passed from d_delete_notify() during vfs_rmdir() while unmounting incfs; this yields a local DoS only and requires mount/unmount capability.\",\n    \"primitive_capabilities\": \"A privileged local user can trigger a reliable kernel crash (panic/oops) during umount of an incfs mount. No memory overwrite beyond NULL is indicated; no direct privilege escalation primitive is evident.\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"ihold() is invoked with inode == NULL via d_delete_notify() during vfs_rmdir() in incfs_kill_sb() when unmounting an incfs superblock.\",\n      \"concrete_constraints\": [\n        \"syscall => umount2(path=incfs mountpoint, flags=9) [ORIG_RAX=0xa6, RSI=9]\",\n        \"filesystem => superblock belongs to incfs (incfs_kill_sb is executed)\",\n        \"dentry->d_inode (or d_backing_inode(dentry)) => NULL at the point d_delete_notify() calls ihold()\",\n        \"inode argument to ihold() => NULL (observed RBX=0, write to 0x160(%rbx))\"\n      ],\n      \"why_reaches_crash\": \"ihold() unconditionally does atomic_inc_return(&inode->i_count); with inode==NULL it writes to address 0x160, causing a NULL-ptr-deref.\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"arch/x86/entry/common.c\",\n        \"line\": 300,\n        \"code\": \"do_syscall_64+0x160/0x170\",\n        \"condition\": \"User executes umount2 (ORIG_RAX=0xa6) on a path\",\n        \"why_it_blocks\": \"Reaching the path requires invoking the umount2 syscall on a mountpoint; user controlled path and flags. note: caller's argument validation not present in snippets\"\n      }\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"fs/inode.c\",\n        \"line\": 421,\n        \"code\": \"WARN_ON(atomic_inc_return(&inode->i_count) < 2);\",\n        \"condition\": \"ihold() assumes inode is a valid object with i_count field\",\n        \"why_it_blocks\": \"No guard here; reaching the crash requires violating the implicit kernel invariant 'inode != NULL' before ihold().\"\n      },\n      {\n        \"file\": \"fs/namei.c\",\n        \"line\": 4040,\n        \"code\": \"vfs_rmdir+0x247/0x3e0\",\n        \"condition\": \"vfs_rmdir() proceeds to d_delete_notify() after successful rmdir\",\n        \"why_it_blocks\": \"Only reached if filesystem rmdir path succeeds; then d_delete_notify() is invoked. note: specific guards in vfs_rmdir() not present in snippets\"\n      },\n      {\n        \"file\": \"include/linux/fsnotify.h\",\n        \"line\": 227,\n        \"code\": \"d_delete_notify ... ihold(...)\",\n        \"condition\": \"d_delete_notify() calls ihold() on the inode derived from the dentry\",\n        \"why_it_blocks\": \"If dentry->d_inode were validated as non-NULL, ihold() would be safe; crash indicates inode was NULL here. note: caller's guard not present in snippets\"\n      },\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 1944,\n        \"code\": \"incfs_kill_sb+0xfe/0x210\",\n        \"condition\": \"incfs_kill_sb() tears down incfs and invokes vfs_rmdir() on internal dentries\",\n        \"why_it_blocks\": \"Only occurs when unmounting an incfs superblock; internal state must provide the dentry passed to vfs_rmdir(). note: exact teardown logic not present in snippets\"\n      }\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"fs/inode.c\", \"line\": 421, \"code\": \"WARN_ON(atomic_inc_return(&inode->i_count) < 2);\", \"note\": \"ihold() increments inode->i_count unconditionally; with inode==NULL this writes to NULL+0x160.\" },\n    { \"file\": \"disassembly\", \"line\": 0, \"code\": \"lock xadd %r14d,0x160(%rbx)\", \"note\": \"Trapping instruction shows write to offset 0x160 of struct inode; RBX=0 confirms NULL inode.\" },\n    { \"file\": \"include/asm-generic/atomic-instrumented.h\", \"line\": 71, \"code\": \"kasan_check_write(v, sizeof(*v));\", \"note\": \"KASAN reports the invalid write target for atomic_inc_return on NULL.\" },\n    { \"file\": \"include/linux/atomic-fallback.h\", \"line\": 284, \"code\": \"return atomic_add_return(1, v);\", \"note\": \"atomic_inc_return path into the failing write.\" },\n    { \"file\": \"include/linux/fsnotify.h\", \"line\": 227, \"code\": \"d_delete_notify ... ihold(...)\", \"note\": \"ihold() is invoked from d_delete_notify() within vfs_rmdir(). (Exact guard line not included in provided snippets.)\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4040, \"code\": \"vfs_rmdir+0x247/0x3e0\", \"note\": \"Call site where d_delete_notify() is inlined within vfs_rmdir().\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 1944, \"code\": \"incfs_kill_sb+0xfe/0x210\", \"note\": \"Crash occurs during unmount of incfs (kill_sb path).\" },\n    { \"file\": \"arch/x86/entry/common.c\", \"line\": 300, \"code\": \"do_syscall_64+0x160/0x170\", \"note\": \"User invoked umount2 (ORIG_RAX=0xa6, RSI=9) leading to superblock deactivation.\" }\n  ]\n}",
+      "parsed": {
+        "overview": {
+          "exploitability": "LOW",
+          "rationale": "The crash is a NULL pointer dereference in ihold() (atomic_inc_return(&inode->i_count)) caused by a NULL inode passed from d_delete_notify() during vfs_rmdir() while unmounting incfs; this yields a local DoS only and requires mount/unmount capability.",
+          "primitive_capabilities": "A privileged local user can trigger a reliable kernel crash (panic/oops) during umount of an incfs mount. No memory overwrite beyond NULL is indicated; no direct privilege escalation primitive is evident."
+        },
+        "preconditions": [
+          {
+            "summary": "ihold() is invoked with inode == NULL via d_delete_notify() during vfs_rmdir() in incfs_kill_sb() when unmounting an incfs superblock.",
+            "concrete_constraints": [
+              "syscall => umount2(path=incfs mountpoint, flags=9) [ORIG_RAX=0xa6, RSI=9]",
+              "filesystem => superblock belongs to incfs (incfs_kill_sb is executed)",
+              "dentry->d_inode (or d_backing_inode(dentry)) => NULL at the point d_delete_notify() calls ihold()",
+              "inode argument to ihold() => NULL (observed RBX=0, write to 0x160(%rbx))"
+            ],
+            "why_reaches_crash": "ihold() unconditionally does atomic_inc_return(&inode->i_count); with inode==NULL it writes to address 0x160, causing a NULL-ptr-deref."
+          }
+        ],
+        "path_constraints": {
+          "input": [
+            {
+              "file": "arch/x86/entry/common.c",
+              "line": 300,
+              "code": "do_syscall_64+0x160/0x170",
+              "condition": "User executes umount2 (ORIG_RAX=0xa6) on a path",
+              "why_it_blocks": "Reaching the path requires invoking the umount2 syscall on a mountpoint; user controlled path and flags. note: caller's argument validation not present in snippets"
+            }
+          ],
+          "kernel_state": [
+            {
+              "file": "fs/inode.c",
+              "line": 421,
+              "code": "WARN_ON(atomic_inc_return(&inode->i_count) < 2);",
+              "condition": "ihold() assumes inode is a valid object with i_count field",
+              "why_it_blocks": "No guard here; reaching the crash requires violating the implicit kernel invariant 'inode != NULL' before ihold()."
+            },
+            {
+              "file": "fs/namei.c",
+              "line": 4040,
+              "code": "vfs_rmdir+0x247/0x3e0",
+              "condition": "vfs_rmdir() proceeds to d_delete_notify() after successful rmdir",
+              "why_it_blocks": "Only reached if filesystem rmdir path succeeds; then d_delete_notify() is invoked. note: specific guards in vfs_rmdir() not present in snippets"
+            },
+            {
+              "file": "include/linux/fsnotify.h",
+              "line": 227,
+              "code": "d_delete_notify ... ihold(...)",
+              "condition": "d_delete_notify() calls ihold() on the inode derived from the dentry",
+              "why_it_blocks": "If dentry->d_inode were validated as non-NULL, ihold() would be safe; crash indicates inode was NULL here. note: caller's guard not present in snippets"
+            },
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 1944,
+              "code": "incfs_kill_sb+0xfe/0x210",
+              "condition": "incfs_kill_sb() tears down incfs and invokes vfs_rmdir() on internal dentries",
+              "why_it_blocks": "Only occurs when unmounting an incfs superblock; internal state must provide the dentry passed to vfs_rmdir(). note: exact teardown logic not present in snippets"
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "file": "fs/inode.c",
+            "line": 421,
+            "code": "WARN_ON(atomic_inc_return(&inode->i_count) < 2);",
+            "note": "ihold() increments inode->i_count unconditionally; with inode==NULL this writes to NULL+0x160."
+          },
+          {
+            "file": "disassembly",
+            "line": 0,
+            "code": "lock xadd %r14d,0x160(%rbx)",
+            "note": "Trapping instruction shows write to offset 0x160 of struct inode; RBX=0 confirms NULL inode."
+          },
+          {
+            "file": "include/asm-generic/atomic-instrumented.h",
+            "line": 71,
+            "code": "kasan_check_write(v, sizeof(*v));",
+            "note": "KASAN reports the invalid write target for atomic_inc_return on NULL."
+          },
+          {
+            "file": "include/linux/atomic-fallback.h",
+            "line": 284,
+            "code": "return atomic_add_return(1, v);",
+            "note": "atomic_inc_return path into the failing write."
+          },
+          {
+            "file": "include/linux/fsnotify.h",
+            "line": 227,
+            "code": "d_delete_notify ... ihold(...)",
+            "note": "ihold() is invoked from d_delete_notify() within vfs_rmdir(). (Exact guard line not included in provided snippets.)"
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4040,
+            "code": "vfs_rmdir+0x247/0x3e0",
+            "note": "Call site where d_delete_notify() is inlined within vfs_rmdir()."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 1944,
+            "code": "incfs_kill_sb+0xfe/0x210",
+            "note": "Crash occurs during unmount of incfs (kill_sb path)."
+          },
+          {
+            "file": "arch/x86/entry/common.c",
+            "line": 300,
+            "code": "do_syscall_64+0x160/0x170",
+            "note": "User invoked umount2 (ORIG_RAX=0xa6, RSI=9) leading to superblock deactivation."
+          }
+        ]
+      }
+    },
+    "summary": null
+  }
+}

@@ -1,0 +1,1085 @@
+{
+  "parsed": {
+    "kind": null,
+    "access": null,
+    "object_info": null,
+    "allocated_by": [],
+    "freed_by": [],
+    "link_frames": [
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095",
+        "file": "kernel/sched/fair.c",
+        "line": 3095
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114",
+        "file": "kernel/sched/fair.c",
+        "line": 3114
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139",
+        "file": "kernel/sched/fair.c",
+        "line": 3139
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902",
+        "file": "kernel/sched/core.c",
+        "line": 902
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255",
+        "file": "kernel/sched/core.c",
+        "line": 5255
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202",
+        "file": "kernel/sys.c",
+        "line": 202
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243",
+        "file": "kernel/sys.c",
+        "line": 243
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207",
+        "file": "kernel/sys.c",
+        "line": 207
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207",
+        "file": "kernel/sys.c",
+        "line": 207
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095",
+        "file": "kernel/sched/fair.c",
+        "line": 3095
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114",
+        "file": "kernel/sched/fair.c",
+        "line": 3114
+      }
+    ],
+    "frames": [],
+    "raw": "general protection fault, probably for non-canonical address 0xdffffc0000000014: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x00000000000000a0-0x00000000000000a7]\nCPU: 1 PID: 25258 Comm: syz-executor167 Not tainted 5.10.100-syzkaller-00843-g86e6176a4240 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 01/01/2011\nRIP: 0010:dequeue_load_avg <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095'>kernel/sched/fair.c:3095</a> [inline]\nRIP: 0010:reweight_entity+0x110/0x510 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114'>kernel/sched/fair.c:3114</a>\nCode: 80 3c 08 00 74 08 48 89 df e8 0c 3c 5a 00 48 89 5d 88 4c 8b 3b 4c 89 e8 48 c1 e8 03 48 89 45 b0 48 b9 00 00 00 00 00 fc ff df <80> 3c 08 00 74 08 4c 89 ef e8 e2 3b 5a 00 49 8b 45 00 31 db 4c 29\nRSP: 0018:ffffc90000c17c10 EFLAGS: 00010006\nRAX: 0000000000000014 RBX: ffff888112bae4e0 RCX: dffffc0000000000\nRDX: 0000000000044000 RSI: ffff888112bae340 RDI: 0000000000000000\nRBP: ffffc90000c17ca8 R08: ffffffff86e40048 R09: ffffffff86e40058\nR10: ffffffff86e40050 R11: ffffffff86e40043 R12: 0000000000000000\nR13: 00000000000000a0 R14: ffff888112bae340 R15: 0000000000000400\nFS:  00007f87d6fda700(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f87d707daa8 CR3: 00000001161a9000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n reweight_task+0x8c/0x1a0 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139'>kernel/sched/fair.c:3139</a>\n set_load_weight <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902'>kernel/sched/core.c:902</a> [inline]\n set_user_nice+0x516/0xed0 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255'>kernel/sched/core.c:5255</a>\n set_one_prio+0x1cb/0x270 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202'>kernel/sys.c:202</a>\n __do_sys_setpriority <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243'>kernel/sys.c:243</a> [inline]\n __se_sys_setpriority+0x2ee/0x750 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207'>kernel/sys.c:207</a>\n __x64_sys_setpriority+0x7b/0x90 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207'>kernel/sys.c:207</a>\n do_syscall_64+0x31/0x70 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x44/0xa9\nRIP: 0033:0x7f87d70288c9\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 11 15 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007f87d6fda318 EFLAGS: 00000246 ORIG_RAX: 000000000000008d\nRAX: ffffffffffffffda RBX: 00007f87d70b03e8 RCX: 00007f87d70288c9\nRDX: 0000000000000006 RSI: 0000000000000000 RDI: 0000000000000001\nRBP: 00007f87d70b03e0 R08: 00007f87d6fda700 R09: 0000000000000000\nR10: 00007f87d6fda700 R11: 0000000000000246 R12: 00007f87d70b03ec\nR13: 00007ffe0f7848ef R14: 00007f87d6fda400 R15: 0000000000022000\nModules linked in:\n---[ end trace 72d1249a48ac3502 ]---\nRIP: 0010:dequeue_load_avg <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095'>kernel/sched/fair.c:3095</a> [inline]\nRIP: 0010:reweight_entity+0x110/0x510 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114'>kernel/sched/fair.c:3114</a>\nCode: 80 3c 08 00 74 08 48 89 df e8 0c 3c 5a 00 48 89 5d 88 4c 8b 3b 4c 89 e8 48 c1 e8 03 48 89 45 b0 48 b9 00 00 00 00 00 fc ff df <80> 3c 08 00 74 08 4c 89 ef e8 e2 3b 5a 00 49 8b 45 00 31 db 4c 29\nRSP: 0018:ffffc90000c17c10 EFLAGS: 00010006\nRAX: 0000000000000014 RBX: ffff888112bae4e0 RCX: dffffc0000000000\nRDX: 0000000000044000 RSI: ffff888112bae340 RDI: 0000000000000000\nRBP: ffffc90000c17ca8 R08: ffffffff86e40048 R09: ffffffff86e40058\nR10: ffffffff86e40050 R11: ffffffff86e40043 R12: 0000000000000000\nR13: 00000000000000a0 R14: ffff888112bae340 R15: 0000000000000400\nFS:  00007f87d6fda700(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f87d707daa8 CR3: 00000001161a9000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t80 3c 08 00          \tcmpb   $0x0,(%rax,%rcx,1)\n   4:\t74 08                \tje     0xe\n   6:\t48 89 df             \tmov    %rbx,%rdi\n   9:\te8 0c 3c 5a 00       \tcallq  0x5a3c1a\n   e:\t48 89 5d 88          \tmov    %rbx,-0x78(%rbp)\n  12:\t4c 8b 3b             \tmov    (%rbx),%r15\n  15:\t4c 89 e8             \tmov    %r13,%rax\n  18:\t48 c1 e8 03          \tshr    $0x3,%rax\n  1c:\t48 89 45 b0          \tmov    %rax,-0x50(%rbp)\n  20:\t48 b9 00 00 00 00 00 \tmovabs $0xdffffc0000000000,%rcx\n  27:\tfc ff df\n* 2a:\t80 3c 08 00          \tcmpb   $0x0,(%rax,%rcx,1) <-- trapping instruction\n  2e:\t74 08                \tje     0x38\n  30:\t4c 89 ef             \tmov    %r13,%rdi\n  33:\te8 e2 3b 5a 00       \tcallq  0x5a3c1a\n  38:\t49 8b 45 00          \tmov    0x0(%r13),%rax\n  3c:\t31 db                \txor    %ebx,%ebx\n  3e:\t4c                   \trex.WR\n  3f:\t29                   \t.byte 0x29\n"
+  },
+  "snippets": {
+    "urls": {
+      "https://android.googlesource.com/kernel/common/": {
+        "error": "URL not in expected +/commit/path format"
+      }
+    },
+    "links": {
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095#3095": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095",
+        "file": "kernel/sched/fair.c",
+        "line": 3095,
+        "function_snippet": "dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)\n{\n\tsub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114#3114": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114",
+        "file": "kernel/sched/fair.c",
+        "line": 3114,
+        "function_snippet": "static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,\n\t\t\t    unsigned long weight)\n{\n\tif (se->on_rq) {\n\t\t/* commit outstanding execution time */\n\t\tif (cfs_rq->curr == se)\n\t\t\tupdate_curr(cfs_rq);\n\t\tupdate_load_sub(&cfs_rq->load, se->load.weight);\n\t}\n\tdequeue_load_avg(cfs_rq, se);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139#3139": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139",
+        "file": "kernel/sched/fair.c",
+        "line": 3139,
+        "function_snippet": "void reweight_task(struct task_struct *p, int prio)\n{\n\tstruct sched_entity *se = &p->se;\n\tstruct cfs_rq *cfs_rq = cfs_rq_of(se);\n\tstruct load_weight *load = &se->load;\n\tunsigned long weight = scale_load(sched_prio_to_weight[prio]);\n\n\treweight_entity(cfs_rq, se, weight);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902#902": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902",
+        "file": "kernel/sched/core.c",
+        "line": 902,
+        "function_snippet": "static void set_load_weight(struct task_struct *p, bool update_load)\n{\n\tint prio = p->static_prio - MAX_RT_PRIO;\n\tstruct load_weight *load = &p->se.load;\n\n\t/*\n\t * SCHED_IDLE tasks get minimal weight:\n\t */\n\tif (task_has_idle_policy(p)) {\n\t\tload->weight = scale_load(WEIGHT_IDLEPRIO);\n\t\tload->inv_weight = WMULT_IDLEPRIO;\n\t\treturn;\n\t}\n\n\t/*\n\t * SCHED_OTHER tasks have to update their load when changing their\n\t * weight\n\t */\n\tif (update_load && p->sched_class == &fair_sched_class) {\n\t\treweight_task(p, prio);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255#5255": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255",
+        "file": "kernel/sched/core.c",
+        "line": 5255,
+        "function_snippet": "void set_user_nice(struct task_struct *p, long nice)\n{\n\tbool queued, running, allowed = false;\n\tint old_prio;\n\tstruct rq_flags rf;\n\tstruct rq *rq;\n\n\ttrace_android_rvh_set_user_nice(p, &nice, &allowed);\n\tif ((task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) && !allowed)\n\t\treturn;\n\t/*\n\t * We have to be careful, if called from sys_setpriority(),\n\t * the task might be in the middle of scheduling on another CPU.\n\t */\n\trq = task_rq_lock(p, &rf);\n\tupdate_rq_clock(rq);\n\n\t/*\n\t * The RT priorities are set via sched_setscheduler(), but we still\n\t * allow the 'normal' nice value to be set - but as expected\n\t * it wont have any effect on scheduling until the task is\n\t * SCHED_DEADLINE, SCHED_FIFO or SCHED_RR:\n\t */\n\tif (task_has_dl_policy(p) || task_has_rt_policy(p)) {\n\t\tp->static_prio = NICE_TO_PRIO(nice);\n\t\tgoto out_unlock;\n\t}\n\tqueued = task_on_rq_queued(p);\n\trunning = task_current(rq, p);\n\tif (queued)\n\t\tdequeue_task(rq, p, DEQUEUE_SAVE | DEQUEUE_NOCLOCK);\n\tif (running)\n\t\tput_prev_task(rq, p);\n\n\tp->static_prio = NICE_TO_PRIO(nice);\n\tset_load_weight(p, true);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202#202": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202",
+        "file": "kernel/sys.c",
+        "line": 202,
+        "function_snippet": "\tset_user_nice(p, niceval);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243#243": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243",
+        "file": "kernel/sys.c",
+        "line": 243,
+        "function_snippet": "\t\tdo_each_pid_thread(pgrp, PIDTYPE_PGID, p) {\n\t\t\terror = set_one_prio(p, niceval, error);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207#207": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207",
+        "file": "kernel/sys.c",
+        "line": 207,
+        "function_snippet": "SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46#46": {
+        "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46,
+        "function_snippet": "__visible noinstr void do_syscall_64(unsigned long nr, struct pt_regs *regs)\n{\n\tnr = syscall_enter_from_user_mode(regs, nr);\n\n\tinstrumentation_begin();\n\tif (likely(nr < NR_syscalls)) {\n\t\tnr = array_index_nospec(nr, NR_syscalls);\n\t\tregs->ax = sys_call_table[nr](regs);"
+      }
+    }
+  },
+  "evidence": {
+    "https://android.googlesource.com/kernel/common/": {
+      "error": "URL not in expected +/commit/path format"
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095#3095": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)"
+        ],
+        [
+          3,
+          "sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "cfs_rq->avg",
+        "se->avg"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095",
+      "source_file": "kernel/sched/fair.c",
+      "source_line": 3095
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114#3114": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,"
+        ],
+        [
+          4,
+          "if (se->on_rq) {"
+        ],
+        [
+          5,
+          "/* commit outstanding execution time */"
+        ],
+        [
+          6,
+          "if (cfs_rq->curr == se)"
+        ],
+        [
+          8,
+          "update_load_sub(&cfs_rq->load, se->load.weight);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "se->on_rq",
+        "cfs_rq->curr",
+        "cfs_rq->load",
+        "se->load"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114",
+      "source_file": "kernel/sched/fair.c",
+      "source_line": 3114
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139#3139": {
+      "dereference": true,
+      "array_access": true,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "void reweight_task(struct task_struct *p, int prio)"
+        ],
+        [
+          3,
+          "struct sched_entity *se = &p->se;"
+        ],
+        [
+          4,
+          "struct cfs_rq *cfs_rq = cfs_rq_of(se);"
+        ],
+        [
+          5,
+          "struct load_weight *load = &se->load;"
+        ],
+        [
+          6,
+          "unsigned long weight = scale_load(sched_prio_to_weight[prio]);"
+        ]
+      ],
+      "deref_writes": 3,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "p->se",
+        "se->load"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139",
+      "source_file": "kernel/sched/fair.c",
+      "source_line": 3139
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902#902": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static void set_load_weight(struct task_struct *p, bool update_load)"
+        ],
+        [
+          3,
+          "int prio = p->static_prio - MAX_RT_PRIO;"
+        ],
+        [
+          4,
+          "struct load_weight *load = &p->se.load;"
+        ],
+        [
+          6,
+          "/*"
+        ],
+        [
+          7,
+          "* SCHED_IDLE tasks get minimal weight:"
+        ],
+        [
+          8,
+          "*/"
+        ],
+        [
+          10,
+          "load->weight = scale_load(WEIGHT_IDLEPRIO);"
+        ],
+        [
+          11,
+          "load->inv_weight = WMULT_IDLEPRIO;"
+        ],
+        [
+          15,
+          "/*"
+        ],
+        [
+          16,
+          "* SCHED_OTHER tasks have to update their load when changing their"
+        ],
+        [
+          17,
+          "* weight"
+        ],
+        [
+          18,
+          "*/"
+        ],
+        [
+          19,
+          "if (update_load && p->sched_class == &fair_sched_class) {"
+        ]
+      ],
+      "deref_writes": 4,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "p->static_prio",
+        "p->se",
+        "load->weight",
+        "load->inv_weight",
+        "p->sched_class"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902",
+      "source_file": "kernel/sched/core.c",
+      "source_line": 902
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255#5255": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "void set_user_nice(struct task_struct *p, long nice)"
+        ],
+        [
+          6,
+          "struct rq *rq;"
+        ],
+        [
+          11,
+          "/*"
+        ],
+        [
+          12,
+          "* We have to be careful, if called from sys_setpriority(),"
+        ],
+        [
+          14,
+          "*/"
+        ],
+        [
+          18,
+          "/*"
+        ],
+        [
+          19,
+          "* The RT priorities are set via sched_setscheduler(), but we still"
+        ],
+        [
+          20,
+          "* allow the 'normal' nice value to be set - but as expected"
+        ],
+        [
+          21,
+          "* it wont have any effect on scheduling until the task is"
+        ],
+        [
+          22,
+          "* SCHED_DEADLINE, SCHED_FIFO or SCHED_RR:"
+        ],
+        [
+          23,
+          "*/"
+        ],
+        [
+          25,
+          "p->static_prio = NICE_TO_PRIO(nice);"
+        ],
+        [
+          35,
+          "p->static_prio = NICE_TO_PRIO(nice);"
+        ]
+      ],
+      "deref_writes": 2,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "p->static_prio"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255",
+      "source_file": "kernel/sched/core.c",
+      "source_line": 5255
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202#202": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202",
+      "source_file": "kernel/sys.c",
+      "source_line": 202
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243#243": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243",
+      "source_file": "kernel/sys.c",
+      "source_line": 243
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207#207": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207",
+      "source_file": "kernel/sys.c",
+      "source_line": 207
+    },
+    "link:https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46#46": {
+      "dereference": true,
+      "array_access": true,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "__visible noinstr void do_syscall_64(unsigned long nr, struct pt_regs *regs)"
+        ],
+        [
+          8,
+          "regs->ax = sys_call_table[nr](regs);"
+        ],
+        [
+          8,
+          "regs->ax = sys_call_table[nr](regs);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "regs->ax"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 46
+    }
+  },
+  "classification": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7100000, disassembly, mov",
+      "Triggering syscall(s) from crash text: setpriority",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like cfs_rq, se, avg may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): task_has_idle_policy(p) -- at kernel/sched/core.c:911",
+      "path constraint (input): update_load && p->sched_class == &fair_sched_class -- at kernel/sched/core.c:921",
+      "path constraint (input): (task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) && !allowed -- at kernel/sched/core.c:5264",
+      "path constraint (input): task_has_dl_policy(p) || task_has_rt_policy(p) -- at kernel/sched/core.c:5279",
+      "path constraint (input): queued -- at kernel/sched/core.c:5285",
+      "path constraint (kernel state): se->on_rq -- at kernel/sched/fair.c:3118",
+      "path constraint (kernel state): cfs_rq->curr == se -- at kernel/sched/fair.c:3120",
+      "path constraint (kernel state): return; -- at kernel/sched/core.c:914",
+      "path constraint (kernel state): return; -- at kernel/sched/core.c:5265",
+      "path constraint (kernel state): goto out_unlock; -- at kernel/sched/core.c:5281"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "deref_exprs: cfs_rq->avg, se->avg, se->on_rq",
+      "faulting address: 0xdffffc0000000014",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000014: 0000 [#1] PREEMPT SMP KASAN; dereference expressions: cfs_rq->avg, se->avg, se->on_rq; faulting address: 0xdffffc0000000014; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: setpriority",
+      "Syzkaller repro indicates syscalls: ffff8881f7100000, disassembly, mov"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 911,
+          "code": "if (task_has_idle_policy(p)) {",
+          "condition": "task_has_idle_policy(p)",
+          "variables": [
+            "task_has_idle_policy",
+            "p"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 921,
+          "code": "if (update_load && p->sched_class == &fair_sched_class) {",
+          "condition": "update_load && p->sched_class == &fair_sched_class",
+          "variables": [
+            "update_load",
+            "p",
+            "sched_class",
+            "fair_sched_class"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5264,
+          "code": "if ((task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) && !allowed)",
+          "condition": "(task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) && !allowed",
+          "variables": [
+            "task_nice",
+            "p",
+            "nice",
+            "nice",
+            "MIN_NICE",
+            "nice",
+            "MAX_NICE",
+            "allowed"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5279,
+          "code": "if (task_has_dl_policy(p) || task_has_rt_policy(p)) {",
+          "condition": "task_has_dl_policy(p) || task_has_rt_policy(p)",
+          "variables": [
+            "task_has_dl_policy",
+            "p",
+            "task_has_rt_policy",
+            "p"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5285,
+          "code": "if (queued)",
+          "condition": "queued",
+          "variables": [
+            "queued"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'queued' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5287,
+          "code": "if (running)",
+          "condition": "running",
+          "variables": [
+            "running"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'running' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 52,
+          "code": "if (likely(nr < NR_syscalls)) {",
+          "condition": "likely(nr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "nr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "kernel/sched/fair.c",
+          "line": 3118,
+          "code": "if (se->on_rq) {",
+          "condition": "se->on_rq",
+          "variables": [
+            "se",
+            "on_rq"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/fair.c",
+          "line": 3120,
+          "code": "if (cfs_rq->curr == se)",
+          "condition": "cfs_rq->curr == se",
+          "variables": [
+            "cfs_rq",
+            "curr",
+            "se"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 914,
+          "code": "return;",
+          "condition": "return;",
+          "variables": [
+            "return"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5265,
+          "code": "return;",
+          "condition": "return;",
+          "variables": [
+            "return"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5281,
+          "code": "goto out_unlock;",
+          "condition": "goto out_unlock;",
+          "variables": [
+            "goto",
+            "out_unlock"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000014",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=9, writes=11)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "exploitability": {
+    "free_site": null,
+    "trigger_site": {
+      "file": "kernel/sched/fair.c",
+      "line": 3095,
+      "url": "https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095",
+      "func": "dequeue_load_avg"
+    },
+    "allocation_site": null,
+    "object": null,
+    "struct_info": {
+      "struct_name": null,
+      "fields_used": [
+        "avg",
+        "ax",
+        "curr",
+        "inv_weight",
+        "load",
+        "load_avg",
+        "on_rq",
+        "sched_class",
+        "se",
+        "static_prio",
+        "weight"
+      ],
+      "struct_def_snippet": null
+    },
+    "usage_examples": [
+      {
+        "line_no": 1,
+        "text": "dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)"
+      },
+      {
+        "line_no": 3,
+        "text": "sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);"
+      }
+    ],
+    "notes": [],
+    "concrete_preconditions": [
+      {
+        "file": "kernel/sched/fair.c",
+        "line": 3095,
+        "code": "dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)",
+        "variables": [
+          "cfs_rq",
+          "se"
+        ],
+        "indices": [],
+        "constraint": "variable(s) cfs_rq, se may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)"
+          },
+          {
+            "line_no": 3,
+            "text": "sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);"
+          }
+        ]
+      },
+      {
+        "file": "kernel/sched/fair.c",
+        "line": 3095,
+        "code": "sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);",
+        "variables": [
+          "cfs_rq",
+          "se"
+        ],
+        "indices": [],
+        "constraint": "field(s) avg, avg may contain malformed/large values leading to OOB access",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)"
+          },
+          {
+            "line_no": 3,
+            "text": "sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);"
+          }
+        ]
+      }
+    ]
+  },
+  "strong_report": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7100000, disassembly, mov",
+      "Triggering syscall(s) from crash text: setpriority",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like cfs_rq, se, avg may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): task_has_idle_policy(p) -- at kernel/sched/core.c:911",
+      "path constraint (input): update_load && p->sched_class == &fair_sched_class -- at kernel/sched/core.c:921",
+      "path constraint (input): (task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) && !allowed -- at kernel/sched/core.c:5264",
+      "path constraint (input): task_has_dl_policy(p) || task_has_rt_policy(p) -- at kernel/sched/core.c:5279",
+      "path constraint (input): queued -- at kernel/sched/core.c:5285",
+      "path constraint (kernel state): se->on_rq -- at kernel/sched/fair.c:3118",
+      "path constraint (kernel state): cfs_rq->curr == se -- at kernel/sched/fair.c:3120",
+      "path constraint (kernel state): return; -- at kernel/sched/core.c:914",
+      "path constraint (kernel state): return; -- at kernel/sched/core.c:5265",
+      "path constraint (kernel state): goto out_unlock; -- at kernel/sched/core.c:5281"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "deref_exprs: cfs_rq->avg, se->avg, se->on_rq",
+      "faulting address: 0xdffffc0000000014",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000014: 0000 [#1] PREEMPT SMP KASAN; dereference expressions: cfs_rq->avg, se->avg, se->on_rq; faulting address: 0xdffffc0000000014; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: setpriority",
+      "Syzkaller repro indicates syscalls: ffff8881f7100000, disassembly, mov"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 911,
+          "code": "if (task_has_idle_policy(p)) {",
+          "condition": "task_has_idle_policy(p)",
+          "variables": [
+            "task_has_idle_policy",
+            "p"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 921,
+          "code": "if (update_load && p->sched_class == &fair_sched_class) {",
+          "condition": "update_load && p->sched_class == &fair_sched_class",
+          "variables": [
+            "update_load",
+            "p",
+            "sched_class",
+            "fair_sched_class"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5264,
+          "code": "if ((task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) && !allowed)",
+          "condition": "(task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) && !allowed",
+          "variables": [
+            "task_nice",
+            "p",
+            "nice",
+            "nice",
+            "MIN_NICE",
+            "nice",
+            "MAX_NICE",
+            "allowed"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5279,
+          "code": "if (task_has_dl_policy(p) || task_has_rt_policy(p)) {",
+          "condition": "task_has_dl_policy(p) || task_has_rt_policy(p)",
+          "variables": [
+            "task_has_dl_policy",
+            "p",
+            "task_has_rt_policy",
+            "p"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'p' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5285,
+          "code": "if (queued)",
+          "condition": "queued",
+          "variables": [
+            "queued"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'queued' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5287,
+          "code": "if (running)",
+          "condition": "running",
+          "variables": [
+            "running"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'running' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 52,
+          "code": "if (likely(nr < NR_syscalls)) {",
+          "condition": "likely(nr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "nr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "kernel/sched/fair.c",
+          "line": 3118,
+          "code": "if (se->on_rq) {",
+          "condition": "se->on_rq",
+          "variables": [
+            "se",
+            "on_rq"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/fair.c",
+          "line": 3120,
+          "code": "if (cfs_rq->curr == se)",
+          "condition": "cfs_rq->curr == se",
+          "variables": [
+            "cfs_rq",
+            "curr",
+            "se"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 914,
+          "code": "return;",
+          "condition": "return;",
+          "variables": [
+            "return"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5265,
+          "code": "return;",
+          "condition": "return;",
+          "variables": [
+            "return"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "kernel/sched/core.c",
+          "line": 5281,
+          "code": "goto out_unlock;",
+          "condition": "goto out_unlock;",
+          "variables": [
+            "goto",
+            "out_unlock"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000014",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=9, writes=11)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "llm_analysis": {
+    "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000014: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x00000000000000a0-0x00000000000000a7]\nCPU: 1 PID: 25258 Comm: syz-executor167 Not tainted 5.10.100-syzkaller-00843-g86e6176a4240 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 01/01/2011\nRIP: 0010:dequeue_load_avg <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095'>kernel/sched/fair.c:3095</a> [inline]\nRIP: 0010:reweight_entity+0x110/0x510 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114'>kernel/sched/fair.c:3114</a>\nCode: 80 3c 08 00 74 08 48 89 df e8 0c 3c 5a 00 48 89 5d 88 4c 8b 3b 4c 89 e8 48 c1 e8 03 48 89 45 b0 48 b9 00 00 00 00 00 fc ff df <80> 3c 08 00 74 08 4c 89 ef e8 e2 3b 5a 00 49 8b 45 00 31 db 4c 29\nRSP: 0018:ffffc90000c17c10 EFLAGS: 00010006\nRAX: 0000000000000014 RBX: ffff888112bae4e0 RCX: dffffc0000000000\nRDX: 0000000000044000 RSI: ffff888112bae340 RDI: 0000000000000000\nRBP: ffffc90000c17ca8 R08: ffffffff86e40048 R09: ffffffff86e40058\nR10: ffffffff86e40050 R11: ffffffff86e40043 R12: 0000000000000000\nR13: 00000000000000a0 R14: ffff888112bae340 R15: 0000000000000400\nFS:  00007f87d6fda700(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f87d707daa8 CR3: 00000001161a9000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n reweight_task+0x8c/0x1a0 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139'>kernel/sched/fair.c:3139</a>\n set_load_weight <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902'>kernel/sched/core.c:902</a> [inline]\n set_user_nice+0x516/0xed0 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255'>kernel/sched/core.c:5255</a>\n set_one_prio+0x1cb/0x270 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202'>kernel/sys.c:202</a>\n __do_sys_setpriority <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243'>kernel/sys.c:243</a> [inline]\n __se_sys_setpriority+0x2ee/0x750 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207'>kernel/sys.c:207</a>\n __x64_sys_setpriority+0x7b/0x90 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207'>kernel/sys.c:207</a>\n do_syscall_64+0x31/0x70 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x44/0xa9\nRIP: 0033:0x7f87d70288c9\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 11 15 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007f87d6fda318 EFLAGS: 00000246 ORIG_RAX: 000000000000008d\nRAX: ffffffffffffffda RBX: 00007f87d70b03e8 RCX: 00007f87d70288c9\nRDX: 0000000000000006 RSI: 0000000000000000 RDI: 0000000000000001\nRBP: 00007f87d70b03e0 R08: 00007f87d6fda700 R09: 0000000000000000\nR10: 00007f87d6fda700 R11: 0000000000000246 R12: 00007f87d70b03ec\nR13: 00007ffe0f7848ef R14: 00007f87d6fda400 R15: 0000000000022000\nModules linked in:\n---[ end trace 72d1249a48ac3502 ]---\nRIP: 0010:dequeue_load_avg <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095'>kernel/sched/fair.c:3095</a> [inline]\nRIP: 0010:reweight_entity+0x110/0x510 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114'>kernel/sched/fair.c:3114</a>\nCode: 80 3c 08 00 74 08 48 89 df e8 0c 3c 5a 00 48 89 5d 88 4c 8b 3b 4c 89 e8 48 c1 e8 03 48 89 45 b0 48 b9 00 00 00 00 00 fc ff df <80> 3c 08 00 74 08 4c 89 ef e8 e2 3b 5a 00 49 8b 45 00 31 db 4c 29\nRSP: 0018:ffffc90000c17c10 EFLAGS: 00010006\nRAX: 0000000000000014 RBX: ffff888112bae4e0 RCX: dffffc0000000000\nRDX: 0000000000044000 RSI: ffff888112bae340 RDI: 0000000000000000\nRBP: ffffc90000c17ca8 R08: ffffffff86e40048 R09: ffffffff86e40058\nR10: ffffffff86e40050 R11: ffffffff86e40043 R12: 0000000000000000\nR13: 00000000000000a0 R14: ffff888112bae340 R15: 0000000000000400\nFS:  00007f87d6fda700(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f87d707daa8 CR3: 00000001161a9000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t80 3c 08 00          \tcmpb   $0x0,(%rax,%rcx,1)\n   4:\t74 08                \tje     0xe\n   6:\t48 89 df             \tmov    %rbx,%rdi\n   9:\te8 0c 3c 5a 00       \tcallq  0x5a3c1a\n   e:\t48 89 5d 88          \tmov    %rbx,-0x78(%rbp)\n  12:\t4c 8b 3b             \tmov    (%rbx),%r15\n  15:\t4c 89 e8             \tmov    %r13,%rax\n  18:\t48 c1 e8 03          \tshr    $0x3,%rax\n  1c:\t48 89 45 b0          \tmov    %rax,-0x50(%rbp)\n  20:\t48 b9 00 00 00 00 00 \tmovabs $0xdffffc0000000000,%rcx\n  27:\tfc ff df\n* 2a:\t80 3c 08 00          \tcmpb   $0x0,(%rax,%rcx,1) <-- trapping instruction\n  2e:\t74 08                \tje     0x38\n  30:\t4c 89 ef             \tmov    %r13,%rdi\n  33:\te8 e2 3b 5a 00       \tcallq  0x5a3c1a\n  38:\t49 8b 45 00          \tmov    0x0(%r13),%rax\n  3c:\t31 db                \txor    %ebx,%ebx\n  3e:\t4c                   \trex.WR\n  3f:\t29                   \t.byte 0x29\n\n-- kernel/sched/fair.c:3095 -> dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)\n{\n\tsub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);\n---\n-- kernel/sched/fair.c:3114 -> static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,\n\t\t\t    unsigned long weight)\n{\n\tif (se->on_rq) {\n\t\t/* commit outstanding execution time */\n\t\tif (cfs_rq->curr == se)\n\t\t\tupdate_curr(cfs_rq);\n\t\tupdate_load_sub(&cfs_rq->load, se->load.weight);\n\t}\n\tdequeue_load_avg(cfs_rq, se);\n---\n-- kernel/sched/fair.c:3139 -> void reweight_task(struct task_struct *p, int prio)\n{\n\tstruct sched_entity *se = &p->se;\n\tstruct cfs_rq *cfs_rq = cfs_rq_of(se);\n\tstruct load_weight *load = &se->load;\n\tunsigned long weight = scale_load(sched_prio_to_weight[prio]);\n\n\treweight_entity(cfs_rq, se, weight);\n---",
+    "local_llm": {
+      "ok": false,
+      "error": "Local LLM calls disabled in this version",
+      "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000014: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x00000000000000a0-0x00000000000000a7]\nCPU: 1 PID: 25258 Comm: syz-executor167 Not tainted 5.10.100-syzkaller-00843-g86e6176a4240 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 01/01/2011\nRIP: 0010:dequeue_load_avg <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095'>kernel/sched/fair.c:3095</a> [inline]\nRIP: 0010:reweight_entity+0x110/0x510 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114'>kernel/sched/fair.c:3114</a>\nCode: 80 3c 08 00 74 08 48 89 df e8 0c 3c 5a 00 48 89 5d 88 4c 8b 3b 4c 89 e8 48 c1 e8 03 48 89 45 b0 48 b9 00 00 00 00 00 fc ff df <80> 3c 08 00 74 08 4c 89 ef e8 e2 3b 5a 00 49 8b 45 00 31 db 4c 29\nRSP: 0018:ffffc90000c17c10 EFLAGS: 00010006\nRAX: 0000000000000014 RBX: ffff888112bae4e0 RCX: dffffc0000000000\nRDX: 0000000000044000 RSI: ffff888112bae340 RDI: 0000000000000000\nRBP: ffffc90000c17ca8 R08: ffffffff86e40048 R09: ffffffff86e40058\nR10: ffffffff86e40050 R11: ffffffff86e40043 R12: 0000000000000000\nR13: 00000000000000a0 R14: ffff888112bae340 R15: 0000000000000400\nFS:  00007f87d6fda700(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f87d707daa8 CR3: 00000001161a9000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n reweight_task+0x8c/0x1a0 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3139'>kernel/sched/fair.c:3139</a>\n set_load_weight <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#902'>kernel/sched/core.c:902</a> [inline]\n set_user_nice+0x516/0xed0 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/core.c#5255'>kernel/sched/core.c:5255</a>\n set_one_prio+0x1cb/0x270 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#202'>kernel/sys.c:202</a>\n __do_sys_setpriority <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#243'>kernel/sys.c:243</a> [inline]\n __se_sys_setpriority+0x2ee/0x750 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207'>kernel/sys.c:207</a>\n __x64_sys_setpriority+0x7b/0x90 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sys.c#207'>kernel/sys.c:207</a>\n do_syscall_64+0x31/0x70 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x44/0xa9\nRIP: 0033:0x7f87d70288c9\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 11 15 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007f87d6fda318 EFLAGS: 00000246 ORIG_RAX: 000000000000008d\nRAX: ffffffffffffffda RBX: 00007f87d70b03e8 RCX: 00007f87d70288c9\nRDX: 0000000000000006 RSI: 0000000000000000 RDI: 0000000000000001\nRBP: 00007f87d70b03e0 R08: 00007f87d6fda700 R09: 0000000000000000\nR10: 00007f87d6fda700 R11: 0000000000000246 R12: 00007f87d70b03ec\nR13: 00007ffe0f7848ef R14: 00007f87d6fda400 R15: 0000000000022000\nModules linked in:\n---[ end trace 72d1249a48ac3502 ]---\nRIP: 0010:dequeue_load_avg <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3095'>kernel/sched/fair.c:3095</a> [inline]\nRIP: 0010:reweight_entity+0x110/0x510 <a href='https://android.googlesource.com/kernel/common/+/86e6176a42401c8014ac34e305b8e3c55eba9351/kernel/sched/fair.c#3114'>kernel/sched/fair.c:3114</a>\nCode: 80 3c 08 00 74 08 48 89 df e8 0c 3c 5a 00 48 89 5d 88 4c 8b 3b 4c 89 e8 48 c1 e8 03 48 89 45 b0 48 b9 00 00 00 00 00 fc ff df <80> 3c 08 00 74 08 4c 89 ef e8 e2 3b 5a 00 49 8b 45 00 31 db 4c 29\nRSP: 0018:ffffc90000c17c10 EFLAGS: 00010006\nRAX: 0000000000000014 RBX: ffff888112bae4e0 RCX: dffffc0000000000\nRDX: 0000000000044000 RSI: ffff888112bae340 RDI: 0000000000000000\nRBP: ffffc90000c17ca8 R08: ffffffff86e40048 R09: ffffffff86e40058\nR10: ffffffff86e40050 R11: ffffffff86e40043 R12: 0000000000000000\nR13: 00000000000000a0 R14: ffff888112bae340 R15: 0000000000000400\nFS:  00007f87d6fda700(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f87d707daa8 CR3: 00000001161a9000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t80 3c 08 00          \tcmpb   $0x0,(%rax,%rcx,1)\n   4:\t74 08                \tje     0xe\n   6:\t48 89 df             \tmov    %rbx,%rdi\n   9:\te8 0c 3c 5a 00       \tcallq  0x5a3c1a\n   e:\t48 89 5d 88          \tmov    %rbx,-0x78(%rbp)\n  12:\t4c 8b 3b             \tmov    (%rbx),%r15\n  15:\t4c 89 e8             \tmov    %r13,%rax\n  18:\t48 c1 e8 03          \tshr    $0x3,%rax\n  1c:\t48 89 45 b0          \tmov    %rax,-0x50(%rbp)\n  20:\t48 b9 00 00 00 00 00 \tmovabs $0xdffffc0000000000,%rcx\n  27:\tfc ff df\n* 2a:\t80 3c 08 00          \tcmpb   $0x0,(%rax,%rcx,1) <-- trapping instruction\n  2e:\t74 08                \tje     0x38\n  30:\t4c 89 ef             \tmov    %r13,%rdi\n  33:\te8 e2 3b 5a 00       \tcallq  0x5a3c1a\n  38:\t49 8b 45 00          \tmov    0x0(%r13),%rax\n  3c:\t31 db                \txor    %ebx,%ebx\n  3e:\t4c                   \trex.WR\n  3f:\t29                   \t.byte 0x29\n\n-- kernel/sched/fair.c:3095 -> dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se)\n{\n\tsub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);\n---\n-- kernel/sched/fair.c:3114 -> static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,\n\t\t\t    unsigned long weight)\n{\n\tif (se->on_rq) {\n\t\t/* commit outstanding execution time */\n\t\tif (cfs_rq->curr == se)\n\t\t\tupdate_curr(cfs_rq);\n\t\tupdate_load_sub(&cfs_rq->load, se->load.weight);\n\t}\n\tdequeue_load_avg(cfs_rq, se);\n---\n-- kernel/sched/fair.c:3139 -> void reweight_task(struct task_struct *p, int prio)\n{\n\tstruct sched_entity *se = &p->se;\n\tstruct cfs_rq *cfs_rq = cfs_rq_of(se);\n\tstruct load_weight *load = &se->load;\n\tunsigned long weight = scale_load(sched_prio_to_weight[prio]);\n\n\treweight_entity(cfs_rq, se, weight);\n---"
+    },
+    "openai_llm": {
+      "raw_output": "{\n  \"overview\": {\n    \"exploitability\": \"LOW\",\n    \"rationale\": \"User-triggered setpriority drives reweight_entity() which unconditionally dereferences cfs_rq->avg in dequeue_load_avg(); if se->cfs_rq is NULL (RDI=0), this becomes a NULL+0xa0 dereference as shown by KASAN.\",\n    \"primitive_capabilities\": \"Unprivileged local user can trigger a kernel NULL dereference and crash the system (DoS) by invoking setpriority under a kernel state where p->se.cfs_rq == NULL.\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"Invoke setpriority(PRIO_PROCESS, who, prio) on a FAIR-class task at a moment when se->cfs_rq == NULL, with prio changing the task\u2019s load weight.\",\n      \"concrete_constraints\": [\n        \"which (sys_setpriority arg0) => 1 (PRIO_PROCESS)\",\n        \"who (sys_setpriority arg1) => 0 (self) or a valid PID of the target task\",\n        \"prio (sys_setpriority arg2) => integer in [-20, 19]\",\n        \"task->policy => SCHED_NORMAL | SCHED_BATCH | SCHED_IDLE (FAIR class)\",\n        \"task->se.cfs_rq => NULL at the time reweight_task() is called\",\n        \"new weight != old weight (e.g., prio != current nice) so set_load_weight() calls reweight_task()\"\n      ],\n      \"why_reaches_crash\": \"reweight_task() passes cfs_rq_of(se) to reweight_entity(); with se->cfs_rq == NULL, dequeue_load_avg(cfs_rq, se) dereferences cfs_rq->avg (NULL+offset), causing the NULL deref at offset ~0xa0.\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"kernel/sys.c\",\n        \"line\": 207,\n        \"code\": \"SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)\",\n        \"condition\": \"syscall entry with which, who, prio provided by user\",\n        \"why_it_blocks\": \"Only reachable if user calls setpriority; prio must be within allowed range for the call to proceed.\",\n        \"note\": \"caller's guard not present in snippets; range/permission checks in kernel/sys.c not included\"\n      },\n      {\n        \"file\": \"kernel/sched/core.c\",\n        \"line\": 902,\n        \"code\": \"static inline void set_load_weight(struct task_struct *p, bool update_load)\",\n        \"condition\": \"Reweight path is taken only if new weight differs\",\n        \"why_it_blocks\": \"If the effective weight doesn\u2019t change, reweight_task() may be skipped and the crash path avoided.\",\n        \"note\": \"exact condition not present in snippets; inferred from typical set_load_weight() behavior\"\n      }\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"kernel/sched/fair.c\",\n        \"line\": 3139,\n        \"code\": \"struct cfs_rq *cfs_rq = cfs_rq_of(se);\",\n        \"condition\": \"se->cfs_rq != NULL\",\n        \"why_it_blocks\": \"If se->cfs_rq is NULL, subsequent unconditional use in dequeue_load_avg() dereferences NULL and crashes.\",\n        \"note\": \"Not a guard; shows provenance of cfs_rq from se\"\n      },\n      {\n        \"file\": \"kernel/sched/fair.c\",\n        \"line\": 3114,\n        \"code\": \"dequeue_load_avg(cfs_rq, se);\",\n        \"condition\": \"Assumes cfs_rq and se are valid\",\n        \"why_it_blocks\": \"No preceding check; requires valid cfs_rq or it will fault when touching cfs_rq->avg.\",\n        \"note\": \"Unconditional call immediately after optional on_rq handling\"\n      }\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"kernel/sched/fair.c\", \"line\": 3095, \"code\": \"sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);\", \"note\": \"This line dereferences cfs_rq->avg; with cfs_rq == NULL this becomes a NULL+offset access (KASAN reports [0xa0-0xa7]).\" },\n    { \"file\": \"kernel/sched/fair.c\", \"line\": 3114, \"code\": \"dequeue_load_avg(cfs_rq, se);\", \"note\": \"Called unconditionally from reweight_entity(), so a NULL cfs_rq leads directly to the dereference above.\" },\n    { \"file\": \"kernel/sched/fair.c\", \"line\": 3139, \"code\": \"struct cfs_rq *cfs_rq = cfs_rq_of(se);\", \"note\": \"Shows cfs_rq originates from se->cfs_rq; crash trace shows RDI=0 at dequeue_load_avg(), consistent with NULL cfs_rq.\" },\n    { \"file\": \"kernel/sched/core.c\", \"line\": 5255, \"code\": \"set_user_nice\", \"note\": \"Caller that updates task nice and triggers set_load_weight()->reweight_task(); present in trace but guard code not included in snippets.\" }\n  ]\n}",
+      "parsed": {
+        "overview": {
+          "exploitability": "LOW",
+          "rationale": "User-triggered setpriority drives reweight_entity() which unconditionally dereferences cfs_rq->avg in dequeue_load_avg(); if se->cfs_rq is NULL (RDI=0), this becomes a NULL+0xa0 dereference as shown by KASAN.",
+          "primitive_capabilities": "Unprivileged local user can trigger a kernel NULL dereference and crash the system (DoS) by invoking setpriority under a kernel state where p->se.cfs_rq == NULL."
+        },
+        "preconditions": [
+          {
+            "summary": "Invoke setpriority(PRIO_PROCESS, who, prio) on a FAIR-class task at a moment when se->cfs_rq == NULL, with prio changing the task\u2019s load weight.",
+            "concrete_constraints": [
+              "which (sys_setpriority arg0) => 1 (PRIO_PROCESS)",
+              "who (sys_setpriority arg1) => 0 (self) or a valid PID of the target task",
+              "prio (sys_setpriority arg2) => integer in [-20, 19]",
+              "task->policy => SCHED_NORMAL | SCHED_BATCH | SCHED_IDLE (FAIR class)",
+              "task->se.cfs_rq => NULL at the time reweight_task() is called",
+              "new weight != old weight (e.g., prio != current nice) so set_load_weight() calls reweight_task()"
+            ],
+            "why_reaches_crash": "reweight_task() passes cfs_rq_of(se) to reweight_entity(); with se->cfs_rq == NULL, dequeue_load_avg(cfs_rq, se) dereferences cfs_rq->avg (NULL+offset), causing the NULL deref at offset ~0xa0."
+          }
+        ],
+        "path_constraints": {
+          "input": [
+            {
+              "file": "kernel/sys.c",
+              "line": 207,
+              "code": "SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)",
+              "condition": "syscall entry with which, who, prio provided by user",
+              "why_it_blocks": "Only reachable if user calls setpriority; prio must be within allowed range for the call to proceed.",
+              "note": "caller's guard not present in snippets; range/permission checks in kernel/sys.c not included"
+            },
+            {
+              "file": "kernel/sched/core.c",
+              "line": 902,
+              "code": "static inline void set_load_weight(struct task_struct *p, bool update_load)",
+              "condition": "Reweight path is taken only if new weight differs",
+              "why_it_blocks": "If the effective weight doesn\u2019t change, reweight_task() may be skipped and the crash path avoided.",
+              "note": "exact condition not present in snippets; inferred from typical set_load_weight() behavior"
+            }
+          ],
+          "kernel_state": [
+            {
+              "file": "kernel/sched/fair.c",
+              "line": 3139,
+              "code": "struct cfs_rq *cfs_rq = cfs_rq_of(se);",
+              "condition": "se->cfs_rq != NULL",
+              "why_it_blocks": "If se->cfs_rq is NULL, subsequent unconditional use in dequeue_load_avg() dereferences NULL and crashes.",
+              "note": "Not a guard; shows provenance of cfs_rq from se"
+            },
+            {
+              "file": "kernel/sched/fair.c",
+              "line": 3114,
+              "code": "dequeue_load_avg(cfs_rq, se);",
+              "condition": "Assumes cfs_rq and se are valid",
+              "why_it_blocks": "No preceding check; requires valid cfs_rq or it will fault when touching cfs_rq->avg.",
+              "note": "Unconditional call immediately after optional on_rq handling"
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "file": "kernel/sched/fair.c",
+            "line": 3095,
+            "code": "sub_positive(&cfs_rq->avg.load_avg, se->avg.load_avg);",
+            "note": "This line dereferences cfs_rq->avg; with cfs_rq == NULL this becomes a NULL+offset access (KASAN reports [0xa0-0xa7])."
+          },
+          {
+            "file": "kernel/sched/fair.c",
+            "line": 3114,
+            "code": "dequeue_load_avg(cfs_rq, se);",
+            "note": "Called unconditionally from reweight_entity(), so a NULL cfs_rq leads directly to the dereference above."
+          },
+          {
+            "file": "kernel/sched/fair.c",
+            "line": 3139,
+            "code": "struct cfs_rq *cfs_rq = cfs_rq_of(se);",
+            "note": "Shows cfs_rq originates from se->cfs_rq; crash trace shows RDI=0 at dequeue_load_avg(), consistent with NULL cfs_rq."
+          },
+          {
+            "file": "kernel/sched/core.c",
+            "line": 5255,
+            "code": "set_user_nice",
+            "note": "Caller that updates task nice and triggers set_load_weight()->reweight_task(); present in trace but guard code not included in snippets."
+          }
+        ]
+      }
+    },
+    "summary": null
+  }
+}

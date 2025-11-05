@@ -1,0 +1,2362 @@
+{
+  "parsed": {
+    "kind": null,
+    "access": null,
+    "object_info": null,
+    "allocated_by": [],
+    "freed_by": [],
+    "link_frames": [
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503",
+        "file": "include/linux/dcache.h",
+        "line": 503
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459",
+        "file": "fs/incfs/vfs.c",
+        "line": 459
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856",
+        "file": "fs/incfs/vfs.c",
+        "line": 1856
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611",
+        "file": "fs/fs_context.c",
+        "line": 611
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517",
+        "file": "fs/super.c",
+        "line": 1517
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005",
+        "file": "fs/namespace.c",
+        "line": 3005
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335",
+        "file": "fs/namespace.c",
+        "line": 3335
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348",
+        "file": "fs/namespace.c",
+        "line": 3348
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556",
+        "file": "fs/namespace.c",
+        "line": 3556
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533",
+        "file": "fs/namespace.c",
+        "line": 3533
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533",
+        "file": "fs/namespace.c",
+        "line": 3533
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50",
+        "file": "arch/x86/entry/common.c",
+        "line": 50
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80",
+        "file": "arch/x86/entry/common.c",
+        "line": 80
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503",
+        "file": "include/linux/dcache.h",
+        "line": 503
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459",
+        "file": "fs/incfs/vfs.c",
+        "line": 459
+      }
+    ],
+    "frames": [],
+    "raw": "general protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000038-0x000000000000003f]\nCPU: 1 PID: 312 Comm: syz-executor352 Not tainted 5.15.148-syzkaller-00718-g993bed180178 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/29/2024\nRIP: 0010:d_really_is_positive <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503'>include/linux/dcache.h:503</a> [inline]\nRIP: 0010:open_or_create_special_dir+0x89/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459'>fs/incfs/vfs.c:459</a>\nCode: e8 3c ce 59 ff e9 07 01 00 00 e8 32 ce 59 ff 48 c7 c3 ea ff ff ff e9 f6 00 00 00 4c 89 6d d0 4c 8d 6b 30 4d 89 ef 49 c1 ef 03 <43> 80 3c 37 00 74 08 4c 89 ef e8 a8 de 9b ff 49 83 7d 00 00 74 26\nRSP: 0018:ffffc90000b07a98 EFLAGS: 00010202\nRAX: 0000000000000008 RBX: 0000000000000008 RCX: ffff88811f283b40\nRDX: 0000000000000000 RSI: 0000000000000004 RDI: ffff88811ee113e8\nRBP: ffffc90000b07ad0 R08: dffffc0000000000 R09: ffffed1023dc227e\nR10: 0000000000000000 R11: dffffc0000000001 R12: ffff88811c0b4900\nR13: 0000000000000038 R14: dffffc0000000000 R15: 0000000000000007\nFS:  00007fe2ab8c36c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000020008fc0 CR3: 000000011ee83000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n <TASK>\n incfs_mount_fs+0x49b/0xa30 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856'>fs/incfs/vfs.c:1856</a>\n legacy_get_tree+0xf1/0x190 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611'>fs/fs_context.c:611</a>\n vfs_get_tree+0x88/0x290 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517'>fs/super.c:1517</a>\n do_new_mount+0x2ba/0xb30 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005'>fs/namespace.c:3005</a>\n path_mount+0x671/0x1070 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335'>fs/namespace.c:3335</a>\n do_mount <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348'>fs/namespace.c:3348</a> [inline]\n __do_sys_mount <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556'>fs/namespace.c:3556</a> [inline]\n __se_sys_mount+0x2c4/0x3b0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533'>fs/namespace.c:3533</a>\n __x64_sys_mount+0xbf/0xd0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533'>fs/namespace.c:3533</a>\n do_syscall_x64 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50'>arch/x86/entry/common.c:50</a> [inline]\n do_syscall_64+0x3d/0xb0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80'>arch/x86/entry/common.c:80</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7fe2ab926b49\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 81 18 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007fe2ab8c3218 EFLAGS: 00000246 ORIG_RAX: 00000000000000a5\nRAX: ffffffffffffffda RBX: 00007fe2ab9b03f8 RCX: 00007fe2ab926b49\nRDX: 0000000020000180 RSI: 00000000200000c0 RDI: 0000000020000080\nRBP: 00007fe2ab9b03f0 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 00007fe2ab97d0bc\nR13: 0030656c69662f2e R14: 00007fff6e7d5530 R15: 00007fe2ab97d0d4\n </TASK>\nModules linked in:\n---[ end trace b74d8b1343349fec ]---\nRIP: 0010:d_really_is_positive <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503'>include/linux/dcache.h:503</a> [inline]\nRIP: 0010:open_or_create_special_dir+0x89/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459'>fs/incfs/vfs.c:459</a>\nCode: e8 3c ce 59 ff e9 07 01 00 00 e8 32 ce 59 ff 48 c7 c3 ea ff ff ff e9 f6 00 00 00 4c 89 6d d0 4c 8d 6b 30 4d 89 ef 49 c1 ef 03 <43> 80 3c 37 00 74 08 4c 89 ef e8 a8 de 9b ff 49 83 7d 00 00 74 26\nRSP: 0018:ffffc90000b07a98 EFLAGS: 00010202\nRAX: 0000000000000008 RBX: 0000000000000008 RCX: ffff88811f283b40\nRDX: 0000000000000000 RSI: 0000000000000004 RDI: ffff88811ee113e8\nRBP: ffffc90000b07ad0 R08: dffffc0000000000 R09: ffffed1023dc227e\nR10: 0000000000000000 R11: dffffc0000000001 R12: ffff88811c0b4900\nR13: 0000000000000038 R14: dffffc0000000000 R15: 0000000000000007\nFS:  00007fe2ab8c36c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007fff6e7d55f8 CR3: 000000011ee83000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\te8 3c ce 59 ff       \tcall   0xff59ce41\n   5:\te9 07 01 00 00       \tjmp    0x111\n   a:\te8 32 ce 59 ff       \tcall   0xff59ce41\n   f:\t48 c7 c3 ea ff ff ff \tmov    $0xffffffffffffffea,%rbx\n  16:\te9 f6 00 00 00       \tjmp    0x111\n  1b:\t4c 89 6d d0          \tmov    %r13,-0x30(%rbp)\n  1f:\t4c 8d 6b 30          \tlea    0x30(%rbx),%r13\n  23:\t4d 89 ef             \tmov    %r13,%r15\n  26:\t49 c1 ef 03          \tshr    $0x3,%r15\n* 2a:\t43 80 3c 37 00       \tcmpb   $0x0,(%r15,%r14,1) <-- trapping instruction\n  2f:\t74 08                \tje     0x39\n  31:\t4c 89 ef             \tmov    %r13,%rdi\n  34:\te8 a8 de 9b ff       \tcall   0xff9bdee1\n  39:\t49 83 7d 00 00       \tcmpq   $0x0,0x0(%r13)\n  3e:\t74 26                \tje     0x66\n"
+  },
+  "snippets": {
+    "urls": {
+      "https://android.googlesource.com/kernel/common/": {
+        "error": "URL not in expected +/commit/path format"
+      }
+    },
+    "links": {
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503#503": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503",
+        "file": "include/linux/dcache.h",
+        "line": 503,
+        "function_snippet": "static inline bool d_really_is_positive(const struct dentry *dentry)\n{\n\treturn dentry->d_inode != NULL;"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459#459": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459",
+        "file": "fs/incfs/vfs.c",
+        "line": 459,
+        "function_snippet": "static struct dentry *open_or_create_special_dir(struct dentry *backing_dir,\n\t\t\t\t\t\t const char *name,\n\t\t\t\t\t\t bool *created)\n{\n\tstruct dentry *index_dentry;\n\tstruct inode *backing_inode = d_inode(backing_dir);\n\tint err = 0;\n\n\tindex_dentry = incfs_lookup_dentry(backing_dir, name);\n\tif (!index_dentry) {\n\t\treturn ERR_PTR(-EINVAL);\n\t} else if (IS_ERR(index_dentry)) {\n\t\treturn index_dentry;\n\t} else if (d_really_is_positive(index_dentry)) {"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856#1856": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856",
+        "file": "fs/incfs/vfs.c",
+        "line": 1856,
+        "function_snippet": "struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,\n\t\t\t      const char *dev_name, void *data)\n{\n\tstruct mount_options options = {};\n\tstruct mount_info *mi = NULL;\n\tstruct path backing_dir_path = {};\n\tstruct dentry *index_dir = NULL;\n\tstruct dentry *incomplete_dir = NULL;\n\tstruct super_block *src_fs_sb = NULL;\n\tstruct inode *root_inode = NULL;\n\tstruct super_block *sb = sget(type, NULL, set_anon_super, flags, NULL);\n\tbool dir_created = false;\n\tint error = 0;\n\n\tif (IS_ERR(sb))\n\t\treturn ERR_CAST(sb);\n\n\tsb->s_op = &incfs_super_ops;\n\tsb->s_d_op = &incfs_dentry_ops;\n\tsb->s_flags |= S_NOATIME;\n\tsb->s_magic = INCFS_MAGIC_NUMBER;\n\tsb->s_time_gran = 1;\n\tsb->s_blocksize = INCFS_DATA_FILE_BLOCK_SIZE;\n\tsb->s_blocksize_bits = blksize_bits(sb->s_blocksize);\n\tsb->s_xattr = incfs_xattr_ops;\n\n\tBUILD_BUG_ON(PAGE_SIZE != INCFS_DATA_FILE_BLOCK_SIZE);\n\n\tif (!dev_name) {\n\t\tpr_err(\"incfs: Backing dir is not set, filesystem can't be mounted.\\n\");\n\t\terror = -ENOENT;\n\t\tgoto err_deactivate;\n\t}\n\n\terror = parse_options(&options, (char *)data);\n\tif (error != 0) {\n\t\tpr_err(\"incfs: Options parsing error. %d\\n\", error);\n\t\tgoto err_deactivate;\n\t}\n\n\tsb->s_bdi->ra_pages = options.readahead_pages;\n\tif (!dev_name) {\n\t\tpr_err(\"incfs: Backing dir is not set, filesystem can't be mounted.\\n\");\n\t\terror = -ENOENT;\n\t\tgoto err_free_opts;\n\t}\n\n\terror = kern_path(dev_name, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,\n\t\t\t&backing_dir_path);\n\tif (error || backing_dir_path.dentry == NULL ||\n\t\t!d_really_is_positive(backing_dir_path.dentry)) {\n\t\tpr_err(\"incfs: Error accessing: %s.\\n\",\n\t\t\tdev_name);\n\t\tgoto err_free_opts;\n\t}\n\tsrc_fs_sb = backing_dir_path.dentry->d_sb;\n\tsb->s_maxbytes = src_fs_sb->s_maxbytes;\n\tsb->s_stack_depth = src_fs_sb->s_stack_depth + 1;\n\n\tif (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {\n\t\terror = -EINVAL;\n\t\tgoto err_put_path;\n\t}\n\n\tmi = incfs_alloc_mount_info(sb, &options, &backing_dir_path);\n\tif (IS_ERR_OR_NULL(mi)) {\n\t\terror = PTR_ERR(mi);\n\t\tpr_err(\"incfs: Error allocating mount info. %d\\n\", error);\n\t\tgoto err_put_path;\n\t}\n\n\tsb->s_fs_info = mi;\n\tmi->mi_backing_dir_path = backing_dir_path;\n\tindex_dir = open_or_create_special_dir(backing_dir_path.dentry,"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611#611": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611",
+        "file": "fs/fs_context.c",
+        "line": 611,
+        "function_snippet": "static int legacy_get_tree(struct fs_context *fc)\n{\n\tstruct legacy_fs_context *ctx = fc->fs_private;\n\tstruct super_block *sb;\n\tstruct dentry *root;\n\n\troot = fc->fs_type->mount(fc->fs_type, fc->sb_flags,"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517#1517": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517",
+        "file": "fs/super.c",
+        "line": 1517,
+        "function_snippet": "int vfs_get_tree(struct fs_context *fc)\n{\n\tstruct super_block *sb;\n\tint error;\n\n\tif (fc->root)\n\t\treturn -EBUSY;\n\n\t/* Get the mountable root in fc->root, with a ref on the root and a ref\n\t * on the superblock.\n\t */\n\terror = fc->ops->get_tree(fc);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005#3005": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005",
+        "file": "fs/namespace.c",
+        "line": 3005,
+        "function_snippet": "static int do_new_mount(struct path *path, const char *fstype, int sb_flags,\n\t\t\tint mnt_flags, const char *name, void *data)\n{\n\tstruct file_system_type *type;\n\tstruct fs_context *fc;\n\tconst char *subtype = NULL;\n\tint err = 0;\n\n\tif (!fstype)\n\t\treturn -EINVAL;\n\n\ttype = get_fs_type(fstype);\n\tif (!type)\n\t\treturn -ENODEV;\n\n\tif (type->fs_flags & FS_HAS_SUBTYPE) {\n\t\tsubtype = strchr(fstype, '.');\n\t\tif (subtype) {\n\t\t\tsubtype++;\n\t\t\tif (!*subtype) {\n\t\t\t\tput_filesystem(type);\n\t\t\t\treturn -EINVAL;\n\t\t\t}\n\t\t}\n\t}\n\n\tfc = fs_context_for_mount(type, sb_flags);\n\tput_filesystem(type);\n\tif (IS_ERR(fc))\n\t\treturn PTR_ERR(fc);\n\n\t/*\n\t * Indicate to the filesystem that the mount request is coming\n\t * from the legacy mount system call.\n\t */\n\tfc->oldapi = true;\n\n\tif (subtype)\n\t\terr = vfs_parse_fs_string(fc, \"subtype\",\n\t\t\t\t\t  subtype, strlen(subtype));\n\tif (!err && name)\n\t\terr = vfs_parse_fs_string(fc, \"source\", name, strlen(name));\n\tif (!err)\n\t\terr = parse_monolithic_mount_data(fc, data);\n\tif (!err && !mount_capable(fc))\n\t\terr = -EPERM;\n\tif (!err)\n\t\terr = vfs_get_tree(fc);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335#3335": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335",
+        "file": "fs/namespace.c",
+        "line": 3335,
+        "function_snippet": "\treturn do_new_mount(path, type_page, sb_flags, mnt_flags, dev_name,"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348#3348": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348",
+        "file": "fs/namespace.c",
+        "line": 3348,
+        "function_snippet": "long do_mount(const char *dev_name, const char __user *dir_name,\n\t\tconst char *type_page, unsigned long flags, void *data_page)\n{\n\tstruct path path;\n\tint ret;\n\n\tret = user_path_at(AT_FDCWD, dir_name, LOOKUP_FOLLOW, &path);\n\tif (ret)\n\t\treturn ret;\n\tret = path_mount(dev_name, &path, type_page, flags, data_page);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556#3556": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556",
+        "file": "fs/namespace.c",
+        "line": 3556,
+        "function_snippet": "SYSCALL_DEFINE5(mount, char __user *, dev_name, char __user *, dir_name,\n\t\tchar __user *, type, unsigned long, flags, void __user *, data)\n{\n\tint ret;\n\tchar *kernel_type;\n\tchar *kernel_dev;\n\tvoid *options;\n\n\tkernel_type = copy_mount_string(type);\n\tret = PTR_ERR(kernel_type);\n\tif (IS_ERR(kernel_type))\n\t\tgoto out_type;\n\n\tkernel_dev = copy_mount_string(dev_name);\n\tret = PTR_ERR(kernel_dev);\n\tif (IS_ERR(kernel_dev))\n\t\tgoto out_dev;\n\n\toptions = copy_mount_options(data);\n\tret = PTR_ERR(options);\n\tif (IS_ERR(options))\n\t\tgoto out_data;\n\n\tret = do_mount(kernel_dev, dir_name, kernel_type, flags, options);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533#3533": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533",
+        "file": "fs/namespace.c",
+        "line": 3533,
+        "function_snippet": "SYSCALL_DEFINE5(mount, char __user *, dev_name, char __user *, dir_name,"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50#50": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50",
+        "file": "arch/x86/entry/common.c",
+        "line": 50,
+        "function_snippet": "static __always_inline bool do_syscall_x64(struct pt_regs *regs, int nr)\n{\n\t/*\n\t * Convert negative numbers to very high and thus out of range\n\t * numbers for comparisons.\n\t */\n\tunsigned int unr = nr;\n\n\tif (likely(unr < NR_syscalls)) {\n\t\tunr = array_index_nospec(unr, NR_syscalls);\n\t\tregs->ax = sys_call_table[unr](regs);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80#80": {
+        "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80",
+        "file": "arch/x86/entry/common.c",
+        "line": 80,
+        "function_snippet": "__visible noinstr void do_syscall_64(struct pt_regs *regs, int nr)\n{\n\tadd_random_kstack_offset();\n\tnr = syscall_enter_from_user_mode(regs, nr);\n\n\tinstrumentation_begin();\n\n\tif (!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1) {"
+      }
+    }
+  },
+  "evidence": {
+    "https://android.googlesource.com/kernel/common/": {
+      "error": "URL not in expected +/commit/path format"
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503#503": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static inline bool d_really_is_positive(const struct dentry *dentry)"
+        ],
+        [
+          3,
+          "return dentry->d_inode != NULL;"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 0,
+      "deref_exprs": [
+        "dentry->d_inode"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503",
+      "source_file": "include/linux/dcache.h",
+      "source_line": 503
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459#459": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static struct dentry *open_or_create_special_dir(struct dentry *backing_dir,"
+        ],
+        [
+          2,
+          "const char *name,"
+        ],
+        [
+          3,
+          "bool *created)"
+        ],
+        [
+          5,
+          "struct dentry *index_dentry;"
+        ],
+        [
+          6,
+          "struct inode *backing_inode = d_inode(backing_dir);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459",
+      "source_file": "fs/incfs/vfs.c",
+      "source_line": 459
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856#1856": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,"
+        ],
+        [
+          2,
+          "const char *dev_name, void *data)"
+        ],
+        [
+          5,
+          "struct mount_info *mi = NULL;"
+        ],
+        [
+          7,
+          "struct dentry *index_dir = NULL;"
+        ],
+        [
+          8,
+          "struct dentry *incomplete_dir = NULL;"
+        ],
+        [
+          9,
+          "struct super_block *src_fs_sb = NULL;"
+        ],
+        [
+          10,
+          "struct inode *root_inode = NULL;"
+        ],
+        [
+          11,
+          "struct super_block *sb = sget(type, NULL, set_anon_super, flags, NULL);"
+        ],
+        [
+          18,
+          "sb->s_op = &incfs_super_ops;"
+        ],
+        [
+          19,
+          "sb->s_d_op = &incfs_dentry_ops;"
+        ],
+        [
+          20,
+          "sb->s_flags |= S_NOATIME;"
+        ],
+        [
+          21,
+          "sb->s_magic = INCFS_MAGIC_NUMBER;"
+        ],
+        [
+          22,
+          "sb->s_time_gran = 1;"
+        ],
+        [
+          23,
+          "sb->s_blocksize = INCFS_DATA_FILE_BLOCK_SIZE;"
+        ],
+        [
+          24,
+          "sb->s_blocksize_bits = blksize_bits(sb->s_blocksize);"
+        ],
+        [
+          25,
+          "sb->s_xattr = incfs_xattr_ops;"
+        ],
+        [
+          35,
+          "error = parse_options(&options, (char *)data);"
+        ],
+        [
+          41,
+          "sb->s_bdi->ra_pages = options.readahead_pages;"
+        ],
+        [
+          56,
+          "src_fs_sb = backing_dir_path.dentry->d_sb;"
+        ],
+        [
+          57,
+          "sb->s_maxbytes = src_fs_sb->s_maxbytes;"
+        ],
+        [
+          58,
+          "sb->s_stack_depth = src_fs_sb->s_stack_depth + 1;"
+        ],
+        [
+          60,
+          "if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {"
+        ],
+        [
+          72,
+          "sb->s_fs_info = mi;"
+        ],
+        [
+          73,
+          "mi->mi_backing_dir_path = backing_dir_path;"
+        ]
+      ],
+      "deref_writes": 19,
+      "deref_reads": 6,
+      "deref_exprs": [
+        "sb->s_op",
+        "sb->s_d_op",
+        "sb->s_flags",
+        "sb->s_magic",
+        "sb->s_time_gran",
+        "sb->s_blocksize",
+        "sb->s_blocksize_bits",
+        "sb->s_xattr",
+        "sb->s_bdi->ra_pages",
+        "dentry->d_sb",
+        "sb->s_maxbytes",
+        "src_fs_sb->s_maxbytes",
+        "sb->s_stack_depth",
+        "src_fs_sb->s_stack_depth",
+        "sb->s_fs_info",
+        "mi->mi_backing_dir_path"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856",
+      "source_file": "fs/incfs/vfs.c",
+      "source_line": 1856
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611#611": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static int legacy_get_tree(struct fs_context *fc)"
+        ],
+        [
+          3,
+          "struct legacy_fs_context *ctx = fc->fs_private;"
+        ],
+        [
+          4,
+          "struct super_block *sb;"
+        ],
+        [
+          5,
+          "struct dentry *root;"
+        ],
+        [
+          7,
+          "root = fc->fs_type->mount(fc->fs_type, fc->sb_flags,"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "fc->fs_private",
+        "fc->fs_type->mount",
+        "fc->fs_type",
+        "fc->sb_flags"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611",
+      "source_file": "fs/fs_context.c",
+      "source_line": 611
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517#1517": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "int vfs_get_tree(struct fs_context *fc)"
+        ],
+        [
+          3,
+          "struct super_block *sb;"
+        ],
+        [
+          6,
+          "if (fc->root)"
+        ],
+        [
+          9,
+          "/* Get the mountable root in fc->root, with a ref on the root and a ref"
+        ],
+        [
+          11,
+          "*/"
+        ],
+        [
+          12,
+          "error = fc->ops->get_tree(fc);"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 3,
+      "deref_exprs": [
+        "fc->root",
+        "fc->ops->get_tree"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517",
+      "source_file": "fs/super.c",
+      "source_line": 1517
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005#3005": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static int do_new_mount(struct path *path, const char *fstype, int sb_flags,"
+        ],
+        [
+          2,
+          "int mnt_flags, const char *name, void *data)"
+        ],
+        [
+          4,
+          "struct file_system_type *type;"
+        ],
+        [
+          5,
+          "struct fs_context *fc;"
+        ],
+        [
+          6,
+          "const char *subtype = NULL;"
+        ],
+        [
+          16,
+          "if (type->fs_flags & FS_HAS_SUBTYPE) {"
+        ],
+        [
+          20,
+          "if (!*subtype) {"
+        ],
+        [
+          32,
+          "/*"
+        ],
+        [
+          33,
+          "* Indicate to the filesystem that the mount request is coming"
+        ],
+        [
+          35,
+          "*/"
+        ],
+        [
+          36,
+          "fc->oldapi = true;"
+        ]
+      ],
+      "deref_writes": 2,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "type->fs_flags",
+        "fc->oldapi"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005",
+      "source_file": "fs/namespace.c",
+      "source_line": 3005
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335#3335": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335",
+      "source_file": "fs/namespace.c",
+      "source_line": 3335
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348#3348": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "long do_mount(const char *dev_name, const char __user *dir_name,"
+        ],
+        [
+          2,
+          "const char *type_page, unsigned long flags, void *data_page)"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348",
+      "source_file": "fs/namespace.c",
+      "source_line": 3348
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556#3556": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "SYSCALL_DEFINE5(mount, char __user *, dev_name, char __user *, dir_name,"
+        ],
+        [
+          2,
+          "char __user *, type, unsigned long, flags, void __user *, data)"
+        ],
+        [
+          5,
+          "char *kernel_type;"
+        ],
+        [
+          6,
+          "char *kernel_dev;"
+        ],
+        [
+          7,
+          "void *options;"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556",
+      "source_file": "fs/namespace.c",
+      "source_line": 3556
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533#3533": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "SYSCALL_DEFINE5(mount, char __user *, dev_name, char __user *, dir_name,"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533",
+      "source_file": "fs/namespace.c",
+      "source_line": 3533
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50#50": {
+      "dereference": true,
+      "array_access": true,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static __always_inline bool do_syscall_x64(struct pt_regs *regs, int nr)"
+        ],
+        [
+          3,
+          "/*"
+        ],
+        [
+          4,
+          "* Convert negative numbers to very high and thus out of range"
+        ],
+        [
+          6,
+          "*/"
+        ],
+        [
+          11,
+          "regs->ax = sys_call_table[unr](regs);"
+        ],
+        [
+          11,
+          "regs->ax = sys_call_table[unr](regs);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "regs->ax"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 50
+    },
+    "link:https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80#80": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "__visible noinstr void do_syscall_64(struct pt_regs *regs, int nr)"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 80
+    }
+  },
+  "classification": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7100000, ffff8881f7000000, disassembly",
+      "Triggering syscall(s) from crash text: mount",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like dentry, open_or_create_special_dir, backing_dir may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): likely(unr < NR_syscalls) -- at arch/x86/entry/common.c:59",
+      "path constraint (input): !do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1 -- at arch/x86/entry/common.c:88",
+      "path constraint (kernel state): return dentry->d_inode != NULL; -- at include/linux/dcache.h:506",
+      "path constraint (kernel state): !index_dentry -- at fs/incfs/vfs.c:469",
+      "path constraint (kernel state): return ERR_PTR(-EINVAL); -- at fs/incfs/vfs.c:470",
+      "path constraint (kernel state): IS_ERR(index_dentry) -- at fs/incfs/vfs.c:471",
+      "path constraint (kernel state): return index_dentry; -- at fs/incfs/vfs.c:472",
+      "path constraint (kernel state): d_really_is_positive(index_dentry) -- at fs/incfs/vfs.c:473",
+      "path constraint (kernel state): IS_ERR(sb) -- at fs/incfs/vfs.c:1871",
+      "path constraint (kernel state): return ERR_CAST(sb); -- at fs/incfs/vfs.c:1872"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Source shows pointer dereference near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: include/linux/dcache.h:503 'static inline bool d_really_is_positive(const struct dentry *dentry)'",
+      "evidence: include/linux/dcache.h:505 'return dentry->d_inode != NULL;'",
+      "deref_exprs: dentry->d_inode, sb->s_op, sb->s_d_op",
+      "faulting address: 0xdffffc0000000007",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN; dcache.h:503 -> static inline bool d_really_is_positive(const struct dentry *dentry); dcache.h:505 -> return dentry->d_inode != NULL;; dereference expressions: dentry->d_inode, sb->s_op, sb->s_d_op; faulting address: 0xdffffc0000000007; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: mount",
+      "Syzkaller repro indicates syscalls: ffff8881f7100000, ffff8881f7000000, disassembly"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 59,
+          "code": "if (likely(unr < NR_syscalls)) {",
+          "condition": "likely(unr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "unr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'unr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 88,
+          "code": "if (!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1) {",
+          "condition": "!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1",
+          "variables": [
+            "do_syscall_x64",
+            "regs",
+            "nr",
+            "do_syscall_x32",
+            "regs",
+            "nr",
+            "nr"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'regs' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 503,
+          "code": "static inline bool d_really_is_positive(const struct dentry *dentry)",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "include/linux/dcache.h",
+              "line": 503,
+              "code": "static inline bool d_really_is_positive(const struct dentry *dentry)",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 506,
+          "code": "return dentry->d_inode != NULL;",
+          "condition": "return dentry->d_inode != NULL;",
+          "variables": [
+            "return",
+            "dentry",
+            "d_inode",
+            "NULL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 469,
+          "code": "if (!index_dentry) {",
+          "condition": "!index_dentry",
+          "variables": [
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 470,
+          "code": "return ERR_PTR(-EINVAL);",
+          "condition": "return ERR_PTR(-EINVAL);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 471,
+          "code": "} else if (IS_ERR(index_dentry)) {",
+          "condition": "IS_ERR(index_dentry)",
+          "variables": [
+            "IS_ERR",
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 472,
+          "code": "return index_dentry;",
+          "condition": "return index_dentry;",
+          "variables": [
+            "return",
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 473,
+          "code": "} else if (d_really_is_positive(index_dentry)) {",
+          "condition": "d_really_is_positive(index_dentry)",
+          "variables": [
+            "d_really_is_positive",
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1871,
+          "code": "if (IS_ERR(sb))",
+          "condition": "IS_ERR(sb)",
+          "variables": [
+            "IS_ERR",
+            "sb"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1872,
+          "code": "return ERR_CAST(sb);",
+          "condition": "return ERR_CAST(sb);",
+          "variables": [
+            "return",
+            "ERR_CAST",
+            "sb"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1885,
+          "code": "if (!dev_name) {",
+          "condition": "!dev_name",
+          "variables": [
+            "dev_name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1888,
+          "code": "goto err_deactivate;",
+          "condition": "goto err_deactivate;",
+          "variables": [
+            "goto",
+            "err_deactivate"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1892,
+          "code": "if (error != 0) {",
+          "condition": "error != 0",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1894,
+          "code": "goto err_deactivate;",
+          "condition": "goto err_deactivate;",
+          "variables": [
+            "goto",
+            "err_deactivate"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1898,
+          "code": "if (!dev_name) {",
+          "condition": "!dev_name",
+          "variables": [
+            "dev_name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1901,
+          "code": "goto err_free_opts;",
+          "condition": "goto err_free_opts;",
+          "variables": [
+            "goto",
+            "err_free_opts"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1906,
+          "code": "if (error || backing_dir_path.dentry == NULL ||",
+          "condition": "if (error || backing_dir_path.dentry == NULL ||",
+          "variables": [
+            "if",
+            "error",
+            "backing_dir_path",
+            "dentry",
+            "NULL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1910,
+          "code": "goto err_free_opts;",
+          "condition": "goto err_free_opts;",
+          "variables": [
+            "goto",
+            "err_free_opts"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1916,
+          "code": "if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {",
+          "condition": "sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH",
+          "variables": [
+            "sb",
+            "s_stack_depth",
+            "FILESYSTEM_MAX_STACK_DEPTH"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1918,
+          "code": "goto err_put_path;",
+          "condition": "goto err_put_path;",
+          "variables": [
+            "goto",
+            "err_put_path"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1922,
+          "code": "if (IS_ERR_OR_NULL(mi)) {",
+          "condition": "IS_ERR_OR_NULL(mi)",
+          "variables": [
+            "IS_ERR_OR_NULL",
+            "mi"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1925,
+          "code": "goto err_put_path;",
+          "condition": "goto err_put_path;",
+          "variables": [
+            "goto",
+            "err_put_path"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 1523,
+          "code": "if (fc->root)",
+          "condition": "fc->root",
+          "variables": [
+            "fc",
+            "root"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 1524,
+          "code": "return -EBUSY;",
+          "condition": "return -EBUSY;",
+          "variables": [
+            "return",
+            "EBUSY"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3014,
+          "code": "if (!fstype)",
+          "condition": "!fstype",
+          "variables": [
+            "fstype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3015,
+          "code": "return -EINVAL;",
+          "condition": "return -EINVAL;",
+          "variables": [
+            "return",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3018,
+          "code": "if (!type)",
+          "condition": "!type",
+          "variables": [
+            "type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3019,
+          "code": "return -ENODEV;",
+          "condition": "return -ENODEV;",
+          "variables": [
+            "return",
+            "ENODEV"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3021,
+          "code": "if (type->fs_flags & FS_HAS_SUBTYPE) {",
+          "condition": "type->fs_flags & FS_HAS_SUBTYPE",
+          "variables": [
+            "type",
+            "fs_flags",
+            "FS_HAS_SUBTYPE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3023,
+          "code": "if (subtype) {",
+          "condition": "subtype",
+          "variables": [
+            "subtype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3025,
+          "code": "if (!*subtype) {",
+          "condition": "!*subtype",
+          "variables": [
+            "subtype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3027,
+          "code": "return -EINVAL;",
+          "condition": "return -EINVAL;",
+          "variables": [
+            "return",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3034,
+          "code": "if (IS_ERR(fc))",
+          "condition": "IS_ERR(fc)",
+          "variables": [
+            "IS_ERR",
+            "fc"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3035,
+          "code": "return PTR_ERR(fc);",
+          "condition": "return PTR_ERR(fc);",
+          "variables": [
+            "return",
+            "PTR_ERR",
+            "fc"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3043,
+          "code": "if (subtype)",
+          "condition": "subtype",
+          "variables": [
+            "subtype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3046,
+          "code": "if (!err && name)",
+          "condition": "!err && name",
+          "variables": [
+            "err",
+            "name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3048,
+          "code": "if (!err)",
+          "condition": "!err",
+          "variables": [
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3050,
+          "code": "if (!err && !mount_capable(fc))",
+          "condition": "!err && !mount_capable(fc)",
+          "variables": [
+            "err",
+            "mount_capable",
+            "fc"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3052,
+          "code": "if (!err)",
+          "condition": "!err",
+          "variables": [
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3336,
+          "code": "return do_new_mount(path, type_page, sb_flags, mnt_flags, dev_name,",
+          "condition": "return do_new_mount(path, type_page, sb_flags, mnt_flags, dev_name,",
+          "variables": [
+            "return",
+            "do_new_mount",
+            "path",
+            "type_page",
+            "sb_flags",
+            "mnt_flags",
+            "dev_name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3356,
+          "code": "if (ret)",
+          "condition": "ret",
+          "variables": [
+            "ret"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3357,
+          "code": "return ret;",
+          "condition": "return ret;",
+          "variables": [
+            "return",
+            "ret"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3567,
+          "code": "if (IS_ERR(kernel_type))",
+          "condition": "IS_ERR(kernel_type)",
+          "variables": [
+            "IS_ERR",
+            "kernel_type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3568,
+          "code": "goto out_type;",
+          "condition": "goto out_type;",
+          "variables": [
+            "goto",
+            "out_type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3572,
+          "code": "if (IS_ERR(kernel_dev))",
+          "condition": "IS_ERR(kernel_dev)",
+          "variables": [
+            "IS_ERR",
+            "kernel_dev"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3573,
+          "code": "goto out_dev;",
+          "condition": "goto out_dev;",
+          "variables": [
+            "goto",
+            "out_dev"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3577,
+          "code": "if (IS_ERR(options))",
+          "condition": "IS_ERR(options)",
+          "variables": [
+            "IS_ERR",
+            "options"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3578,
+          "code": "goto out_data;",
+          "condition": "goto out_data;",
+          "variables": [
+            "goto",
+            "out_data"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000007",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=14, writes=25)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "exploitability": {
+    "free_site": null,
+    "trigger_site": {
+      "file": "include/linux/dcache.h",
+      "line": 503,
+      "url": "https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503",
+      "func": "static inline bool d_really_is_positive"
+    },
+    "allocation_site": null,
+    "object": null,
+    "struct_info": {
+      "struct_name": null,
+      "fields_used": [
+        "ax",
+        "d_inode",
+        "d_sb",
+        "dentry",
+        "fs_flags",
+        "fs_private",
+        "fs_type",
+        "get_tree",
+        "mi_backing_dir_path",
+        "mount",
+        "oldapi",
+        "ops",
+        "ra_pages",
+        "readahead_pages",
+        "root",
+        "s_bdi",
+        "s_blocksize",
+        "s_blocksize_bits",
+        "s_d_op",
+        "s_flags",
+        "s_fs_info",
+        "s_magic",
+        "s_maxbytes",
+        "s_op",
+        "s_stack_depth",
+        "s_time_gran",
+        "s_xattr",
+        "sb_flags"
+      ],
+      "struct_def_snippet": null
+    },
+    "usage_examples": [
+      {
+        "line_no": 1,
+        "text": "static inline bool d_really_is_positive(const struct dentry *dentry)"
+      },
+      {
+        "line_no": 3,
+        "text": "return dentry->d_inode != NULL;"
+      }
+    ],
+    "notes": [],
+    "concrete_preconditions": [
+      {
+        "file": "include/linux/dcache.h",
+        "line": 503,
+        "code": "static inline bool d_really_is_positive(const struct dentry *dentry)",
+        "variables": [
+          "dentry"
+        ],
+        "indices": [],
+        "constraint": "variable(s) dentry may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "static inline bool d_really_is_positive(const struct dentry *dentry)"
+          },
+          {
+            "line_no": 3,
+            "text": "return dentry->d_inode != NULL;"
+          }
+        ]
+      },
+      {
+        "file": "include/linux/dcache.h",
+        "line": 503,
+        "code": "return dentry->d_inode != NULL;",
+        "variables": [
+          "dentry"
+        ],
+        "indices": [],
+        "constraint": "field(s) d_inode may contain malformed/large values leading to OOB access",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "static inline bool d_really_is_positive(const struct dentry *dentry)"
+          },
+          {
+            "line_no": 3,
+            "text": "return dentry->d_inode != NULL;"
+          }
+        ]
+      }
+    ]
+  },
+  "strong_report": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7100000, ffff8881f7000000, disassembly",
+      "Triggering syscall(s) from crash text: mount",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like dentry, open_or_create_special_dir, backing_dir may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): likely(unr < NR_syscalls) -- at arch/x86/entry/common.c:59",
+      "path constraint (input): !do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1 -- at arch/x86/entry/common.c:88",
+      "path constraint (kernel state): return dentry->d_inode != NULL; -- at include/linux/dcache.h:506",
+      "path constraint (kernel state): !index_dentry -- at fs/incfs/vfs.c:469",
+      "path constraint (kernel state): return ERR_PTR(-EINVAL); -- at fs/incfs/vfs.c:470",
+      "path constraint (kernel state): IS_ERR(index_dentry) -- at fs/incfs/vfs.c:471",
+      "path constraint (kernel state): return index_dentry; -- at fs/incfs/vfs.c:472",
+      "path constraint (kernel state): d_really_is_positive(index_dentry) -- at fs/incfs/vfs.c:473",
+      "path constraint (kernel state): IS_ERR(sb) -- at fs/incfs/vfs.c:1871",
+      "path constraint (kernel state): return ERR_CAST(sb); -- at fs/incfs/vfs.c:1872"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Source shows pointer dereference near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: include/linux/dcache.h:503 'static inline bool d_really_is_positive(const struct dentry *dentry)'",
+      "evidence: include/linux/dcache.h:505 'return dentry->d_inode != NULL;'",
+      "deref_exprs: dentry->d_inode, sb->s_op, sb->s_d_op",
+      "faulting address: 0xdffffc0000000007",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN; dcache.h:503 -> static inline bool d_really_is_positive(const struct dentry *dentry); dcache.h:505 -> return dentry->d_inode != NULL;; dereference expressions: dentry->d_inode, sb->s_op, sb->s_d_op; faulting address: 0xdffffc0000000007; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: mount",
+      "Syzkaller repro indicates syscalls: ffff8881f7100000, ffff8881f7000000, disassembly"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 59,
+          "code": "if (likely(unr < NR_syscalls)) {",
+          "condition": "likely(unr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "unr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'unr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 88,
+          "code": "if (!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1) {",
+          "condition": "!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1",
+          "variables": [
+            "do_syscall_x64",
+            "regs",
+            "nr",
+            "do_syscall_x32",
+            "regs",
+            "nr",
+            "nr"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'regs' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 503,
+          "code": "static inline bool d_really_is_positive(const struct dentry *dentry)",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "include/linux/dcache.h",
+              "line": 503,
+              "code": "static inline bool d_really_is_positive(const struct dentry *dentry)",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 506,
+          "code": "return dentry->d_inode != NULL;",
+          "condition": "return dentry->d_inode != NULL;",
+          "variables": [
+            "return",
+            "dentry",
+            "d_inode",
+            "NULL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 469,
+          "code": "if (!index_dentry) {",
+          "condition": "!index_dentry",
+          "variables": [
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 470,
+          "code": "return ERR_PTR(-EINVAL);",
+          "condition": "return ERR_PTR(-EINVAL);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 471,
+          "code": "} else if (IS_ERR(index_dentry)) {",
+          "condition": "IS_ERR(index_dentry)",
+          "variables": [
+            "IS_ERR",
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 472,
+          "code": "return index_dentry;",
+          "condition": "return index_dentry;",
+          "variables": [
+            "return",
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 473,
+          "code": "} else if (d_really_is_positive(index_dentry)) {",
+          "condition": "d_really_is_positive(index_dentry)",
+          "variables": [
+            "d_really_is_positive",
+            "index_dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1871,
+          "code": "if (IS_ERR(sb))",
+          "condition": "IS_ERR(sb)",
+          "variables": [
+            "IS_ERR",
+            "sb"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1872,
+          "code": "return ERR_CAST(sb);",
+          "condition": "return ERR_CAST(sb);",
+          "variables": [
+            "return",
+            "ERR_CAST",
+            "sb"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1885,
+          "code": "if (!dev_name) {",
+          "condition": "!dev_name",
+          "variables": [
+            "dev_name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1888,
+          "code": "goto err_deactivate;",
+          "condition": "goto err_deactivate;",
+          "variables": [
+            "goto",
+            "err_deactivate"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1892,
+          "code": "if (error != 0) {",
+          "condition": "error != 0",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1894,
+          "code": "goto err_deactivate;",
+          "condition": "goto err_deactivate;",
+          "variables": [
+            "goto",
+            "err_deactivate"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1898,
+          "code": "if (!dev_name) {",
+          "condition": "!dev_name",
+          "variables": [
+            "dev_name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1901,
+          "code": "goto err_free_opts;",
+          "condition": "goto err_free_opts;",
+          "variables": [
+            "goto",
+            "err_free_opts"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1906,
+          "code": "if (error || backing_dir_path.dentry == NULL ||",
+          "condition": "if (error || backing_dir_path.dentry == NULL ||",
+          "variables": [
+            "if",
+            "error",
+            "backing_dir_path",
+            "dentry",
+            "NULL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1910,
+          "code": "goto err_free_opts;",
+          "condition": "goto err_free_opts;",
+          "variables": [
+            "goto",
+            "err_free_opts"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1916,
+          "code": "if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {",
+          "condition": "sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH",
+          "variables": [
+            "sb",
+            "s_stack_depth",
+            "FILESYSTEM_MAX_STACK_DEPTH"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1918,
+          "code": "goto err_put_path;",
+          "condition": "goto err_put_path;",
+          "variables": [
+            "goto",
+            "err_put_path"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1922,
+          "code": "if (IS_ERR_OR_NULL(mi)) {",
+          "condition": "IS_ERR_OR_NULL(mi)",
+          "variables": [
+            "IS_ERR_OR_NULL",
+            "mi"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/incfs/vfs.c",
+          "line": 1925,
+          "code": "goto err_put_path;",
+          "condition": "goto err_put_path;",
+          "variables": [
+            "goto",
+            "err_put_path"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 1523,
+          "code": "if (fc->root)",
+          "condition": "fc->root",
+          "variables": [
+            "fc",
+            "root"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/super.c",
+          "line": 1524,
+          "code": "return -EBUSY;",
+          "condition": "return -EBUSY;",
+          "variables": [
+            "return",
+            "EBUSY"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3014,
+          "code": "if (!fstype)",
+          "condition": "!fstype",
+          "variables": [
+            "fstype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3015,
+          "code": "return -EINVAL;",
+          "condition": "return -EINVAL;",
+          "variables": [
+            "return",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3018,
+          "code": "if (!type)",
+          "condition": "!type",
+          "variables": [
+            "type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3019,
+          "code": "return -ENODEV;",
+          "condition": "return -ENODEV;",
+          "variables": [
+            "return",
+            "ENODEV"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3021,
+          "code": "if (type->fs_flags & FS_HAS_SUBTYPE) {",
+          "condition": "type->fs_flags & FS_HAS_SUBTYPE",
+          "variables": [
+            "type",
+            "fs_flags",
+            "FS_HAS_SUBTYPE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3023,
+          "code": "if (subtype) {",
+          "condition": "subtype",
+          "variables": [
+            "subtype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3025,
+          "code": "if (!*subtype) {",
+          "condition": "!*subtype",
+          "variables": [
+            "subtype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3027,
+          "code": "return -EINVAL;",
+          "condition": "return -EINVAL;",
+          "variables": [
+            "return",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3034,
+          "code": "if (IS_ERR(fc))",
+          "condition": "IS_ERR(fc)",
+          "variables": [
+            "IS_ERR",
+            "fc"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3035,
+          "code": "return PTR_ERR(fc);",
+          "condition": "return PTR_ERR(fc);",
+          "variables": [
+            "return",
+            "PTR_ERR",
+            "fc"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3043,
+          "code": "if (subtype)",
+          "condition": "subtype",
+          "variables": [
+            "subtype"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3046,
+          "code": "if (!err && name)",
+          "condition": "!err && name",
+          "variables": [
+            "err",
+            "name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3048,
+          "code": "if (!err)",
+          "condition": "!err",
+          "variables": [
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3050,
+          "code": "if (!err && !mount_capable(fc))",
+          "condition": "!err && !mount_capable(fc)",
+          "variables": [
+            "err",
+            "mount_capable",
+            "fc"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3052,
+          "code": "if (!err)",
+          "condition": "!err",
+          "variables": [
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3336,
+          "code": "return do_new_mount(path, type_page, sb_flags, mnt_flags, dev_name,",
+          "condition": "return do_new_mount(path, type_page, sb_flags, mnt_flags, dev_name,",
+          "variables": [
+            "return",
+            "do_new_mount",
+            "path",
+            "type_page",
+            "sb_flags",
+            "mnt_flags",
+            "dev_name"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3356,
+          "code": "if (ret)",
+          "condition": "ret",
+          "variables": [
+            "ret"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3357,
+          "code": "return ret;",
+          "condition": "return ret;",
+          "variables": [
+            "return",
+            "ret"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3567,
+          "code": "if (IS_ERR(kernel_type))",
+          "condition": "IS_ERR(kernel_type)",
+          "variables": [
+            "IS_ERR",
+            "kernel_type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3568,
+          "code": "goto out_type;",
+          "condition": "goto out_type;",
+          "variables": [
+            "goto",
+            "out_type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3572,
+          "code": "if (IS_ERR(kernel_dev))",
+          "condition": "IS_ERR(kernel_dev)",
+          "variables": [
+            "IS_ERR",
+            "kernel_dev"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3573,
+          "code": "goto out_dev;",
+          "condition": "goto out_dev;",
+          "variables": [
+            "goto",
+            "out_dev"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3577,
+          "code": "if (IS_ERR(options))",
+          "condition": "IS_ERR(options)",
+          "variables": [
+            "IS_ERR",
+            "options"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namespace.c",
+          "line": 3578,
+          "code": "goto out_data;",
+          "condition": "goto out_data;",
+          "variables": [
+            "goto",
+            "out_data"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000007",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=14, writes=25)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "llm_analysis": {
+    "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000038-0x000000000000003f]\nCPU: 1 PID: 312 Comm: syz-executor352 Not tainted 5.15.148-syzkaller-00718-g993bed180178 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/29/2024\nRIP: 0010:d_really_is_positive <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503'>include/linux/dcache.h:503</a> [inline]\nRIP: 0010:open_or_create_special_dir+0x89/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459'>fs/incfs/vfs.c:459</a>\nCode: e8 3c ce 59 ff e9 07 01 00 00 e8 32 ce 59 ff 48 c7 c3 ea ff ff ff e9 f6 00 00 00 4c 89 6d d0 4c 8d 6b 30 4d 89 ef 49 c1 ef 03 <43> 80 3c 37 00 74 08 4c 89 ef e8 a8 de 9b ff 49 83 7d 00 00 74 26\nRSP: 0018:ffffc90000b07a98 EFLAGS: 00010202\nRAX: 0000000000000008 RBX: 0000000000000008 RCX: ffff88811f283b40\nRDX: 0000000000000000 RSI: 0000000000000004 RDI: ffff88811ee113e8\nRBP: ffffc90000b07ad0 R08: dffffc0000000000 R09: ffffed1023dc227e\nR10: 0000000000000000 R11: dffffc0000000001 R12: ffff88811c0b4900\nR13: 0000000000000038 R14: dffffc0000000000 R15: 0000000000000007\nFS:  00007fe2ab8c36c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000020008fc0 CR3: 000000011ee83000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n <TASK>\n incfs_mount_fs+0x49b/0xa30 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856'>fs/incfs/vfs.c:1856</a>\n legacy_get_tree+0xf1/0x190 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611'>fs/fs_context.c:611</a>\n vfs_get_tree+0x88/0x290 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517'>fs/super.c:1517</a>\n do_new_mount+0x2ba/0xb30 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005'>fs/namespace.c:3005</a>\n path_mount+0x671/0x1070 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335'>fs/namespace.c:3335</a>\n do_mount <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348'>fs/namespace.c:3348</a> [inline]\n __do_sys_mount <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556'>fs/namespace.c:3556</a> [inline]\n __se_sys_mount+0x2c4/0x3b0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533'>fs/namespace.c:3533</a>\n __x64_sys_mount+0xbf/0xd0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533'>fs/namespace.c:3533</a>\n do_syscall_x64 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50'>arch/x86/entry/common.c:50</a> [inline]\n do_syscall_64+0x3d/0xb0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80'>arch/x86/entry/common.c:80</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7fe2ab926b49\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 81 18 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007fe2ab8c3218 EFLAGS: 00000246 ORIG_RAX: 00000000000000a5\nRAX: ffffffffffffffda RBX: 00007fe2ab9b03f8 RCX: 00007fe2ab926b49\nRDX: 0000000020000180 RSI: 00000000200000c0 RDI: 0000000020000080\nRBP: 00007fe2ab9b03f0 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 00007fe2ab97d0bc\nR13: 0030656c69662f2e R14: 00007fff6e7d5530 R15: 00007fe2ab97d0d4\n </TASK>\nModules linked in:\n---[ end trace b74d8b1343349fec ]---\nRIP: 0010:d_really_is_positive <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503'>include/linux/dcache.h:503</a> [inline]\nRIP: 0010:open_or_create_special_dir+0x89/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459'>fs/incfs/vfs.c:459</a>\nCode: e8 3c ce 59 ff e9 07 01 00 00 e8 32 ce 59 ff 48 c7 c3 ea ff ff ff e9 f6 00 00 00 4c 89 6d d0 4c 8d 6b 30 4d 89 ef 49 c1 ef 03 <43> 80 3c 37 00 74 08 4c 89 ef e8 a8 de 9b ff 49 83 7d 00 00 74 26\nRSP: 0018:ffffc90000b07a98 EFLAGS: 00010202\nRAX: 0000000000000008 RBX: 0000000000000008 RCX: ffff88811f283b40\nRDX: 0000000000000000 RSI: 0000000000000004 RDI: ffff88811ee113e8\nRBP: ffffc90000b07ad0 R08: dffffc0000000000 R09: ffffed1023dc227e\nR10: 0000000000000000 R11: dffffc0000000001 R12: ffff88811c0b4900\nR13: 0000000000000038 R14: dffffc0000000000 R15: 0000000000000007\nFS:  00007fe2ab8c36c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007fff6e7d55f8 CR3: 000000011ee83000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\te8 3c ce 59 ff       \tcall   0xff59ce41\n   5:\te9 07 01 00 00       \tjmp    0x111\n   a:\te8 32 ce 59 ff       \tcall   0xff59ce41\n   f:\t48 c7 c3 ea ff ff ff \tmov    $0xffffffffffffffea,%rbx\n  16:\te9 f6 00 00 00       \tjmp    0x111\n  1b:\t4c 89 6d d0          \tmov    %r13,-0x30(%rbp)\n  1f:\t4c 8d 6b 30          \tlea    0x30(%rbx),%r13\n  23:\t4d 89 ef             \tmov    %r13,%r15\n  26:\t49 c1 ef 03          \tshr    $0x3,%r15\n* 2a:\t43 80 3c 37 00       \tcmpb   $0x0,(%r15,%r14,1) <-- trapping instruction\n  2f:\t74 08                \tje     0x39\n  31:\t4c 89 ef             \tmov    %r13,%rdi\n  34:\te8 a8 de 9b ff       \tcall   0xff9bdee1\n  39:\t49 83 7d 00 00       \tcmpq   $0x0,0x0(%r13)\n  3e:\t74 26                \tje     0x66\n\n-- include/linux/dcache.h:503 -> static inline bool d_really_is_positive(const struct dentry *dentry)\n{\n\treturn dentry->d_inode != NULL;\n---\n-- fs/incfs/vfs.c:459 -> static struct dentry *open_or_create_special_dir(struct dentry *backing_dir,\n\t\t\t\t\t\t const char *name,\n\t\t\t\t\t\t bool *created)\n{\n\tstruct dentry *index_dentry;\n\tstruct inode *backing_inode = d_inode(backing_dir);\n\tint err = 0;\n\n\tindex_dentry = incfs_lookup_dentry(backing_dir, name);\n\tif (!index_dentry) {\n\t\treturn ERR_PTR(-EINVAL);\n\t} else if (IS_ERR(index_dentry)) {\n\t\treturn index_dentry;\n\t} else if (d_really_is_positive(index_dentry)) {\n---\n-- fs/incfs/vfs.c:1856 -> struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,\n\t\t\t      const char *dev_name, void *data)\n{\n\tstruct mount_options options = {};\n\tstruct mount_info *mi = NULL;\n\tstruct path backing_dir_path = {};\n\tstruct dentry *index_dir = NULL;\n\tstruct dentry *incomplete_dir = NULL;\n\tstruct super_block *src_fs_sb = NULL;\n\tstruct inode *root_inode = NULL;\n\tstruct super_block *sb = sget(type, NULL, set_anon_super, flags, NULL);\n\tbool dir_created = false;\n\tint error = 0;\n\n\tif (IS_ERR(sb))\n\t\treturn ERR_CAST(sb);\n\n\tsb->s_op = &incfs_super_ops;\n\tsb->s_d_op = &incfs_dentry_ops;\n\tsb->s_flags |= S_NOATIME;\n\tsb->s_magic = INCFS_MAGIC_NUMBER;\n\tsb->s_time_gran = 1;\n\tsb->s_blocksize = INCFS_DATA_FILE_BLOCK_SIZE;\n\tsb->s_blocksize_bits = blksize_bits(sb->s_blocksize);\n\tsb->s_xattr = incfs_xattr_ops;\n\n\tBUILD_BUG_ON(PAGE_SIZE != INCFS_DATA_FILE_BLOCK_SIZE);\n\n\tif (!dev_name) {\n\t\tpr_err(\"incfs: Backing dir is not set, filesystem can't be mounted.\\n\");\n\t\terror = -ENOENT;\n\t\tgoto err_deactivate;\n\t}\n\n\terror = parse_options(&options, (char *)data);\n\tif (error != 0) {\n\t\tpr_err(\"incfs: Options parsing error. %d\\n\", error);\n\t\tgoto err_deactivate;\n\t}\n\n\tsb->s_bdi->ra_pages = options.readahead_pages;\n\tif (!dev_name) {\n\t\tpr_err(\"incfs: Backing dir is not set, filesystem can't be mounted.\\n\");\n\t\terror = -ENOENT;\n\t\tgoto err_free_opts;\n\t}\n\n\terror = kern_path(dev_name, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,\n\t\t\t&backing_dir_path);\n\tif (error || backing_dir_path.dentry == NULL ||\n\t\t!d_really_is_positive(backing_dir_path.dentry)) {\n\t\tpr_err(\"incfs: Error accessing: %s.\\n\",\n\t\t\tdev_name);\n\t\tgoto err_free_opts;\n\t}\n\tsrc_fs_sb = backing_dir_path.dentry->d_sb;\n\tsb->s_maxbytes = src_fs_sb->s_maxbytes;\n\tsb->s_stack_depth = src_fs_sb->s_stack_depth + 1;\n\n\tif (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {\n\t\terror = -EINVAL;\n\t\tgoto err_put_path;\n\t}\n\n\tmi = incfs_alloc_mount_info(sb, &options, &backing_dir_path);\n\tif (IS_ERR_OR_NULL(mi)) {\n\t\terror = PTR_ERR(mi);\n\t\tpr_err(\"incfs: Error allocating mount info. %d\\n\", error);\n\t\tgoto err_put_path;\n\t}\n\n\tsb->s_fs_info = mi;\n\tmi->mi_backing_dir_path = backing_dir_path;\n\tindex_dir = open_or_create_special_dir(backing_dir_path.dentry,\n---",
+    "local_llm": {
+      "ok": false,
+      "error": "Local LLM calls disabled in this version",
+      "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000038-0x000000000000003f]\nCPU: 1 PID: 312 Comm: syz-executor352 Not tainted 5.15.148-syzkaller-00718-g993bed180178 #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/29/2024\nRIP: 0010:d_really_is_positive <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503'>include/linux/dcache.h:503</a> [inline]\nRIP: 0010:open_or_create_special_dir+0x89/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459'>fs/incfs/vfs.c:459</a>\nCode: e8 3c ce 59 ff e9 07 01 00 00 e8 32 ce 59 ff 48 c7 c3 ea ff ff ff e9 f6 00 00 00 4c 89 6d d0 4c 8d 6b 30 4d 89 ef 49 c1 ef 03 <43> 80 3c 37 00 74 08 4c 89 ef e8 a8 de 9b ff 49 83 7d 00 00 74 26\nRSP: 0018:ffffc90000b07a98 EFLAGS: 00010202\nRAX: 0000000000000008 RBX: 0000000000000008 RCX: ffff88811f283b40\nRDX: 0000000000000000 RSI: 0000000000000004 RDI: ffff88811ee113e8\nRBP: ffffc90000b07ad0 R08: dffffc0000000000 R09: ffffed1023dc227e\nR10: 0000000000000000 R11: dffffc0000000001 R12: ffff88811c0b4900\nR13: 0000000000000038 R14: dffffc0000000000 R15: 0000000000000007\nFS:  00007fe2ab8c36c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000000020008fc0 CR3: 000000011ee83000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n <TASK>\n incfs_mount_fs+0x49b/0xa30 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#1856'>fs/incfs/vfs.c:1856</a>\n legacy_get_tree+0xf1/0x190 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/fs_context.c#611'>fs/fs_context.c:611</a>\n vfs_get_tree+0x88/0x290 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/super.c#1517'>fs/super.c:1517</a>\n do_new_mount+0x2ba/0xb30 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3005'>fs/namespace.c:3005</a>\n path_mount+0x671/0x1070 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3335'>fs/namespace.c:3335</a>\n do_mount <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3348'>fs/namespace.c:3348</a> [inline]\n __do_sys_mount <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3556'>fs/namespace.c:3556</a> [inline]\n __se_sys_mount+0x2c4/0x3b0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533'>fs/namespace.c:3533</a>\n __x64_sys_mount+0xbf/0xd0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/namespace.c#3533'>fs/namespace.c:3533</a>\n do_syscall_x64 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#50'>arch/x86/entry/common.c:50</a> [inline]\n do_syscall_64+0x3d/0xb0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/arch/x86/entry/common.c#80'>arch/x86/entry/common.c:80</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7fe2ab926b49\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 81 18 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007fe2ab8c3218 EFLAGS: 00000246 ORIG_RAX: 00000000000000a5\nRAX: ffffffffffffffda RBX: 00007fe2ab9b03f8 RCX: 00007fe2ab926b49\nRDX: 0000000020000180 RSI: 00000000200000c0 RDI: 0000000020000080\nRBP: 00007fe2ab9b03f0 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 00007fe2ab97d0bc\nR13: 0030656c69662f2e R14: 00007fff6e7d5530 R15: 00007fe2ab97d0d4\n </TASK>\nModules linked in:\n---[ end trace b74d8b1343349fec ]---\nRIP: 0010:d_really_is_positive <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/include/linux/dcache.h#503'>include/linux/dcache.h:503</a> [inline]\nRIP: 0010:open_or_create_special_dir+0x89/0x1d0 <a href='https://android.googlesource.com/kernel/common/+/993bed180178156a70afdafe8aaf23a117107352/fs/incfs/vfs.c#459'>fs/incfs/vfs.c:459</a>\nCode: e8 3c ce 59 ff e9 07 01 00 00 e8 32 ce 59 ff 48 c7 c3 ea ff ff ff e9 f6 00 00 00 4c 89 6d d0 4c 8d 6b 30 4d 89 ef 49 c1 ef 03 <43> 80 3c 37 00 74 08 4c 89 ef e8 a8 de 9b ff 49 83 7d 00 00 74 26\nRSP: 0018:ffffc90000b07a98 EFLAGS: 00010202\nRAX: 0000000000000008 RBX: 0000000000000008 RCX: ffff88811f283b40\nRDX: 0000000000000000 RSI: 0000000000000004 RDI: ffff88811ee113e8\nRBP: ffffc90000b07ad0 R08: dffffc0000000000 R09: ffffed1023dc227e\nR10: 0000000000000000 R11: dffffc0000000001 R12: ffff88811c0b4900\nR13: 0000000000000038 R14: dffffc0000000000 R15: 0000000000000007\nFS:  00007fe2ab8c36c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007fff6e7d55f8 CR3: 000000011ee83000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\te8 3c ce 59 ff       \tcall   0xff59ce41\n   5:\te9 07 01 00 00       \tjmp    0x111\n   a:\te8 32 ce 59 ff       \tcall   0xff59ce41\n   f:\t48 c7 c3 ea ff ff ff \tmov    $0xffffffffffffffea,%rbx\n  16:\te9 f6 00 00 00       \tjmp    0x111\n  1b:\t4c 89 6d d0          \tmov    %r13,-0x30(%rbp)\n  1f:\t4c 8d 6b 30          \tlea    0x30(%rbx),%r13\n  23:\t4d 89 ef             \tmov    %r13,%r15\n  26:\t49 c1 ef 03          \tshr    $0x3,%r15\n* 2a:\t43 80 3c 37 00       \tcmpb   $0x0,(%r15,%r14,1) <-- trapping instruction\n  2f:\t74 08                \tje     0x39\n  31:\t4c 89 ef             \tmov    %r13,%rdi\n  34:\te8 a8 de 9b ff       \tcall   0xff9bdee1\n  39:\t49 83 7d 00 00       \tcmpq   $0x0,0x0(%r13)\n  3e:\t74 26                \tje     0x66\n\n-- include/linux/dcache.h:503 -> static inline bool d_really_is_positive(const struct dentry *dentry)\n{\n\treturn dentry->d_inode != NULL;\n---\n-- fs/incfs/vfs.c:459 -> static struct dentry *open_or_create_special_dir(struct dentry *backing_dir,\n\t\t\t\t\t\t const char *name,\n\t\t\t\t\t\t bool *created)\n{\n\tstruct dentry *index_dentry;\n\tstruct inode *backing_inode = d_inode(backing_dir);\n\tint err = 0;\n\n\tindex_dentry = incfs_lookup_dentry(backing_dir, name);\n\tif (!index_dentry) {\n\t\treturn ERR_PTR(-EINVAL);\n\t} else if (IS_ERR(index_dentry)) {\n\t\treturn index_dentry;\n\t} else if (d_really_is_positive(index_dentry)) {\n---\n-- fs/incfs/vfs.c:1856 -> struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,\n\t\t\t      const char *dev_name, void *data)\n{\n\tstruct mount_options options = {};\n\tstruct mount_info *mi = NULL;\n\tstruct path backing_dir_path = {};\n\tstruct dentry *index_dir = NULL;\n\tstruct dentry *incomplete_dir = NULL;\n\tstruct super_block *src_fs_sb = NULL;\n\tstruct inode *root_inode = NULL;\n\tstruct super_block *sb = sget(type, NULL, set_anon_super, flags, NULL);\n\tbool dir_created = false;\n\tint error = 0;\n\n\tif (IS_ERR(sb))\n\t\treturn ERR_CAST(sb);\n\n\tsb->s_op = &incfs_super_ops;\n\tsb->s_d_op = &incfs_dentry_ops;\n\tsb->s_flags |= S_NOATIME;\n\tsb->s_magic = INCFS_MAGIC_NUMBER;\n\tsb->s_time_gran = 1;\n\tsb->s_blocksize = INCFS_DATA_FILE_BLOCK_SIZE;\n\tsb->s_blocksize_bits = blksize_bits(sb->s_blocksize);\n\tsb->s_xattr = incfs_xattr_ops;\n\n\tBUILD_BUG_ON(PAGE_SIZE != INCFS_DATA_FILE_BLOCK_SIZE);\n\n\tif (!dev_name) {\n\t\tpr_err(\"incfs: Backing dir is not set, filesystem can't be mounted.\\n\");\n\t\terror = -ENOENT;\n\t\tgoto err_deactivate;\n\t}\n\n\terror = parse_options(&options, (char *)data);\n\tif (error != 0) {\n\t\tpr_err(\"incfs: Options parsing error. %d\\n\", error);\n\t\tgoto err_deactivate;\n\t}\n\n\tsb->s_bdi->ra_pages = options.readahead_pages;\n\tif (!dev_name) {\n\t\tpr_err(\"incfs: Backing dir is not set, filesystem can't be mounted.\\n\");\n\t\terror = -ENOENT;\n\t\tgoto err_free_opts;\n\t}\n\n\terror = kern_path(dev_name, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,\n\t\t\t&backing_dir_path);\n\tif (error || backing_dir_path.dentry == NULL ||\n\t\t!d_really_is_positive(backing_dir_path.dentry)) {\n\t\tpr_err(\"incfs: Error accessing: %s.\\n\",\n\t\t\tdev_name);\n\t\tgoto err_free_opts;\n\t}\n\tsrc_fs_sb = backing_dir_path.dentry->d_sb;\n\tsb->s_maxbytes = src_fs_sb->s_maxbytes;\n\tsb->s_stack_depth = src_fs_sb->s_stack_depth + 1;\n\n\tif (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {\n\t\terror = -EINVAL;\n\t\tgoto err_put_path;\n\t}\n\n\tmi = incfs_alloc_mount_info(sb, &options, &backing_dir_path);\n\tif (IS_ERR_OR_NULL(mi)) {\n\t\terror = PTR_ERR(mi);\n\t\tpr_err(\"incfs: Error allocating mount info. %d\\n\", error);\n\t\tgoto err_put_path;\n\t}\n\n\tsb->s_fs_info = mi;\n\tmi->mi_backing_dir_path = backing_dir_path;\n\tindex_dir = open_or_create_special_dir(backing_dir_path.dentry,\n---"
+    },
+    "openai_llm": {
+      "raw_output": "{\n  \"overview\": {\n    \"exploitability\": \"LOW\",\n    \"rationale\": \"Crash is a NULL/UAF dereference during a read-only check (dentry->d_inode) inside d_really_is_positive, leading to a kernel oops/DoS without an apparent write primitive.\",\n    \"primitive_capabilities\": \"At most, an attacker who can mount incfs can crash the kernel (DoS). Mounting typically requires CAP_SYS_ADMIN, further lowering impact.\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"Mount incfs on a backing directory such that incfs_mount_fs progresses to open_or_create_special_dir.\",\n      \"concrete_constraints\": [\n        \"fsname (sys_mount) => \\\"incfs\\\"\",\n        \"dev_name => non-NULL path that resolves to an existing directory (kern_path(...)=0 and d_really_is_positive(backing_dir_path.dentry)=true)\",\n        \"data (mount options) => parse_options(data) returns 0\",\n        \"src_fs_sb->s_stack_depth + 1 <= FILESYSTEM_MAX_STACK_DEPTH\",\n        \"incfs_alloc_mount_info(...) => returns non-NULL and not ERR\"\n      ],\n      \"why_reaches_crash\": \"These conditions allow incfs_mount_fs to proceed far enough to call open_or_create_special_dir where the crash occurs.\"\n    },\n    {\n      \"summary\": \"incfs_lookup_dentry(backing_dir, name) must return a non-NULL, non-ERR pointer (but is observed to be invalid when dereferenced).\",\n      \"concrete_constraints\": [\n        \"index_dentry (result of incfs_lookup_dentry) => index_dentry != NULL\",\n        \"index_dentry => !IS_ERR(index_dentry)\"\n      ],\n      \"why_reaches_crash\": \"Early returns in open_or_create_special_dir are bypassed only if index_dentry is non-NULL and not an ERR_PTR, leading to d_really_is_positive(index_dentry) which dereferences the (invalid) dentry.\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 1856,\n        \"code\": \"if (!dev_name) {\",\n        \"condition\": \"dev_name must be non-NULL\",\n        \"why_it_blocks\": \"User-controlled mount arg; NULL dev_name aborts before reaching crash.\"\n      },\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 1856,\n        \"code\": \"if (error != 0) {\",\n        \"condition\": \"parse_options(data) must succeed (error == 0)\",\n        \"why_it_blocks\": \"Invalid/unsupported mount options stop mount before reaching crash.\"\n      },\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 1856,\n        \"code\": \"if (error || backing_dir_path.dentry == NULL || !d_really_is_positive(backing_dir_path.dentry)) {\",\n        \"condition\": \"kern_path(dev_name, LOOKUP_FOLLOW|LOOKUP_DIRECTORY) must succeed and resolve to a positive dentry\",\n        \"why_it_blocks\": \"If the provided path doesn't resolve to a live directory, mount aborts.\"\n      }\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 1856,\n        \"code\": \"if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {\",\n        \"condition\": \"src_fs_sb->s_stack_depth + 1 <= FILESYSTEM_MAX_STACK_DEPTH\",\n        \"why_it_blocks\": \"Prevents stacking too deep; otherwise mount aborts.\"\n      },\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 1856,\n        \"code\": \"if (IS_ERR_OR_NULL(mi)) {\",\n        \"condition\": \"incfs_alloc_mount_info(...) must return a valid pointer\",\n        \"why_it_blocks\": \"Allocation/initialization must succeed to continue to the crashing path.\"\n      },\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 459,\n        \"code\": \"if (!index_dentry) {\",\n        \"condition\": \"incfs_lookup_dentry(...) must not return NULL\",\n        \"why_it_blocks\": \"NULL would early-return, avoiding the dereference that crashes.\"\n      },\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 459,\n        \"code\": \"} else if (IS_ERR(index_dentry)) {\",\n        \"condition\": \"incfs_lookup_dentry(...) must not return ERR_PTR\",\n        \"why_it_blocks\": \"ERR_PTR would early-return, avoiding the dereference that crashes.\"\n      },\n      {\n        \"file\": \"fs/incfs/vfs.c\",\n        \"line\": 459,\n        \"code\": \"} else if (d_really_is_positive(index_dentry)) {\",\n        \"condition\": \"Execution reaches d_really_is_positive(index_dentry)\",\n        \"why_it_blocks\": \"This call dereferences index_dentry->d_inode; if index_dentry is stale/invalid, it crashes.\",\n        \"note\": \"incfs_lookup_dentry() implementation not present in snippets; validity of returned dentry depends on VFS/dcache state.\"\n      }\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"include/linux/dcache.h\", \"line\": 503, \"code\": \"return dentry->d_inode != NULL;\", \"note\": \"Crash site: dereferences dentry to read d_inode.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 459, \"code\": \"index_dentry = incfs_lookup_dentry(backing_dir, name);\", \"note\": \"Supplier of index_dentry later passed to d_really_is_positive().\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 459, \"code\": \"if (!index_dentry) {\", \"note\": \"Early return if NULL; must be bypassed to reach crash.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 459, \"code\": \"} else if (IS_ERR(index_dentry)) {\", \"note\": \"Early return if ERR_PTR; must be bypassed to reach crash.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 459, \"code\": \"} else if (d_really_is_positive(index_dentry)) {\", \"note\": \"Dereference of index_dentry->d_inode happens here.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 1856, \"code\": \"if (!dev_name) {\", \"note\": \"Mount argument must be provided.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 1856, \"code\": \"error = parse_options(&options, (char *)data);\", \"note\": \"Mount options parsing must succeed (error == 0).\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 1856, \"code\": \"error = kern_path(dev_name, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,\", \"note\": \"Backed path lookup must succeed.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 1856, \"code\": \"if (error || backing_dir_path.dentry == NULL || !d_really_is_positive(backing_dir_path.dentry)) {\", \"note\": \"Backed path must resolve to a live directory dentry.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 1856, \"code\": \"if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {\", \"note\": \"Filesystem stacking depth must be within limits.\" },\n    { \"file\": \"fs/incfs/vfs.c\", \"line\": 1856, \"code\": \"if (IS_ERR_OR_NULL(mi)) {\", \"note\": \"Mount info allocation must succeed to reach open_or_create_special_dir().\" }\n  ]\n}",
+      "parsed": {
+        "overview": {
+          "exploitability": "LOW",
+          "rationale": "Crash is a NULL/UAF dereference during a read-only check (dentry->d_inode) inside d_really_is_positive, leading to a kernel oops/DoS without an apparent write primitive.",
+          "primitive_capabilities": "At most, an attacker who can mount incfs can crash the kernel (DoS). Mounting typically requires CAP_SYS_ADMIN, further lowering impact."
+        },
+        "preconditions": [
+          {
+            "summary": "Mount incfs on a backing directory such that incfs_mount_fs progresses to open_or_create_special_dir.",
+            "concrete_constraints": [
+              "fsname (sys_mount) => \"incfs\"",
+              "dev_name => non-NULL path that resolves to an existing directory (kern_path(...)=0 and d_really_is_positive(backing_dir_path.dentry)=true)",
+              "data (mount options) => parse_options(data) returns 0",
+              "src_fs_sb->s_stack_depth + 1 <= FILESYSTEM_MAX_STACK_DEPTH",
+              "incfs_alloc_mount_info(...) => returns non-NULL and not ERR"
+            ],
+            "why_reaches_crash": "These conditions allow incfs_mount_fs to proceed far enough to call open_or_create_special_dir where the crash occurs."
+          },
+          {
+            "summary": "incfs_lookup_dentry(backing_dir, name) must return a non-NULL, non-ERR pointer (but is observed to be invalid when dereferenced).",
+            "concrete_constraints": [
+              "index_dentry (result of incfs_lookup_dentry) => index_dentry != NULL",
+              "index_dentry => !IS_ERR(index_dentry)"
+            ],
+            "why_reaches_crash": "Early returns in open_or_create_special_dir are bypassed only if index_dentry is non-NULL and not an ERR_PTR, leading to d_really_is_positive(index_dentry) which dereferences the (invalid) dentry."
+          }
+        ],
+        "path_constraints": {
+          "input": [
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 1856,
+              "code": "if (!dev_name) {",
+              "condition": "dev_name must be non-NULL",
+              "why_it_blocks": "User-controlled mount arg; NULL dev_name aborts before reaching crash."
+            },
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 1856,
+              "code": "if (error != 0) {",
+              "condition": "parse_options(data) must succeed (error == 0)",
+              "why_it_blocks": "Invalid/unsupported mount options stop mount before reaching crash."
+            },
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 1856,
+              "code": "if (error || backing_dir_path.dentry == NULL || !d_really_is_positive(backing_dir_path.dentry)) {",
+              "condition": "kern_path(dev_name, LOOKUP_FOLLOW|LOOKUP_DIRECTORY) must succeed and resolve to a positive dentry",
+              "why_it_blocks": "If the provided path doesn't resolve to a live directory, mount aborts."
+            }
+          ],
+          "kernel_state": [
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 1856,
+              "code": "if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {",
+              "condition": "src_fs_sb->s_stack_depth + 1 <= FILESYSTEM_MAX_STACK_DEPTH",
+              "why_it_blocks": "Prevents stacking too deep; otherwise mount aborts."
+            },
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 1856,
+              "code": "if (IS_ERR_OR_NULL(mi)) {",
+              "condition": "incfs_alloc_mount_info(...) must return a valid pointer",
+              "why_it_blocks": "Allocation/initialization must succeed to continue to the crashing path."
+            },
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 459,
+              "code": "if (!index_dentry) {",
+              "condition": "incfs_lookup_dentry(...) must not return NULL",
+              "why_it_blocks": "NULL would early-return, avoiding the dereference that crashes."
+            },
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 459,
+              "code": "} else if (IS_ERR(index_dentry)) {",
+              "condition": "incfs_lookup_dentry(...) must not return ERR_PTR",
+              "why_it_blocks": "ERR_PTR would early-return, avoiding the dereference that crashes."
+            },
+            {
+              "file": "fs/incfs/vfs.c",
+              "line": 459,
+              "code": "} else if (d_really_is_positive(index_dentry)) {",
+              "condition": "Execution reaches d_really_is_positive(index_dentry)",
+              "why_it_blocks": "This call dereferences index_dentry->d_inode; if index_dentry is stale/invalid, it crashes.",
+              "note": "incfs_lookup_dentry() implementation not present in snippets; validity of returned dentry depends on VFS/dcache state."
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "file": "include/linux/dcache.h",
+            "line": 503,
+            "code": "return dentry->d_inode != NULL;",
+            "note": "Crash site: dereferences dentry to read d_inode."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 459,
+            "code": "index_dentry = incfs_lookup_dentry(backing_dir, name);",
+            "note": "Supplier of index_dentry later passed to d_really_is_positive()."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 459,
+            "code": "if (!index_dentry) {",
+            "note": "Early return if NULL; must be bypassed to reach crash."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 459,
+            "code": "} else if (IS_ERR(index_dentry)) {",
+            "note": "Early return if ERR_PTR; must be bypassed to reach crash."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 459,
+            "code": "} else if (d_really_is_positive(index_dentry)) {",
+            "note": "Dereference of index_dentry->d_inode happens here."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 1856,
+            "code": "if (!dev_name) {",
+            "note": "Mount argument must be provided."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 1856,
+            "code": "error = parse_options(&options, (char *)data);",
+            "note": "Mount options parsing must succeed (error == 0)."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 1856,
+            "code": "error = kern_path(dev_name, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,",
+            "note": "Backed path lookup must succeed."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 1856,
+            "code": "if (error || backing_dir_path.dentry == NULL || !d_really_is_positive(backing_dir_path.dentry)) {",
+            "note": "Backed path must resolve to a live directory dentry."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 1856,
+            "code": "if (sb->s_stack_depth > FILESYSTEM_MAX_STACK_DEPTH) {",
+            "note": "Filesystem stacking depth must be within limits."
+          },
+          {
+            "file": "fs/incfs/vfs.c",
+            "line": 1856,
+            "code": "if (IS_ERR_OR_NULL(mi)) {",
+            "note": "Mount info allocation must succeed to reach open_or_create_special_dir()."
+          }
+        ]
+      }
+    },
+    "summary": null
+  }
+}
