@@ -1,4 +1,4 @@
-# Crash Analyzer
+# Kernel Primitives Characterization
 
 
 ## Purpose
