@@ -1,4 +1,4 @@
-# Syzbot Repro Analysis
+# Syzbot Repro Analyzer
 
 ### Docker
 
