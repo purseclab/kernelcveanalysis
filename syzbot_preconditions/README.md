@@ -1,4 +1,4 @@
-# Kernel Primitives Characterization
+# Kernel Primitives Analyzer
 
 
 ## Purpose
