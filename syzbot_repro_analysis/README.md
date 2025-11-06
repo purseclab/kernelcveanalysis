@@ -2,7 +2,7 @@
 
 ### Docker
 
-Alternatively, you can run kexploit in a docker container. The Dockerfile is provided in the repository. We also provide a script to run everything once the docker container is built.
+You can run kexploit in a docker container. The Dockerfile is provided in the repository. We also provide a script to run everything once the docker container is built.
 To build the docker image, run:
 ```sh
 docker build -t syzbot-repro-env .
@@ -32,7 +32,7 @@ ssh -L localhost:5037:localhost:5037 cuttlefish-user@cuttlefish-host
 
 ## Running
 
-In the kexploit folder, run `uv run kexploit` to run kexploit. There are various commands and subcommands that can be run (see `uv run kexploit --help` or `src/kexploit/main.py` for details).
+Run `uv run kexploit` to run kexploit. There are various commands and subcommands that can be run (see `uv run kexploit --help` or `src/kexploit/main.py` for details).
 
 ### Syzkaller POC Reproduction
 - `uv run kexploit syzkall pull`: pull exploits from syzkaller website and save locally
