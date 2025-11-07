@@ -1,0 +1,751 @@
+{
+  "parsed": {
+    "kind": "KASAN: slab-out-of-bounds in __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]",
+    "access": {
+      "op": "read",
+      "size": 4,
+      "addr": "ffff88811471cbc0"
+    },
+    "object_info": {
+      "obj_addr": "ffff88811471c800",
+      "cache": "kmalloc-1k",
+      "obj_size": 1024,
+      "offset": 960,
+      "region": {
+        "start": "ffff88811471c800",
+        "end": "ffff88811471cc00"
+      }
+    },
+    "allocated_by": [
+      "Allocated by task 817:\n kasan_save_stack  mm/kasan/common.c:38  [inline]\n kasan_set_track  mm/kasan/common.c:45  [inline]\n set_alloc_info  mm/kasan/common.c:430  [inline]\n ____kasan_kmalloc  mm/kasan/common.c:509  [inline]\n __kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518 \n kasan_kmalloc  include/linux/kasan.h:254  [inline]\n __kmalloc+0x1a7/0x330  mm/slub.c:4033 \n __kmalloc_node  include/linux/slab.h:418  [inline]\n kmalloc_node  include/linux/slab.h:575  [inline]\n kvmalloc_node+0x88/0x130  mm/util.c:612 \n kvmalloc  include/linux/mm.h:833  [inline]\n f2fs_kvmalloc  fs/f2fs/f2fs.h:3374  [inline]\n f2fs_kvzalloc  fs/f2fs/f2fs.h:3380  [inline]\n build_sit_info  fs/f2fs/segment.c:4395  [inline]\n f2fs_build_segment_manager+0xdba/0x48f0  fs/f2fs/segment.c:5258 \n f2fs_fill_super+0x42d1/0x6c70  fs/f2fs/super.c:4315 \n mount_bdev+0x28b/0x3a0  fs/super.c:1442 \n f2fs_mount+0x34/0x40  fs/f2fs/super.c:4595 \n legacy_get_tree+0xed/0x190  fs/fs_context.c:593 \n vfs_get_tree+0x89/0x260  fs/super.c:1572 \n do_new_mount+0x25a/0xa20  fs/namespace.c:2997 \n path_mount+0x572/0xc80  fs/namespace.c:3327 \n do_mount  fs/namespace.c:3340  [inline]\n __do_sys_mount  fs/namespace.c:3548  [inline]\n __se_sys_mount+0x318/0x380  fs/namespace.c:3525 \n __x64_sys_mount+0xbf/0xd0  fs/namespace.c:3525 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb"
+    ],
+    "freed_by": [],
+    "link_frames": [],
+    "frames": [
+      {
+        "func": "__dump_stack",
+        "file": "lib/dump_stack.c",
+        "line": 77,
+        "raw": "__dump_stack+0x21/0x24  lib/dump_stack.c:77"
+      },
+      {
+        "func": "dump_stack_lvl",
+        "file": "lib/dump_stack.c",
+        "line": 118,
+        "raw": "dump_stack_lvl+0x169/0x1d8  lib/dump_stack.c:118"
+      },
+      {
+        "func": "__set_sit_entry_type",
+        "file": "fs/f2fs/segment.c",
+        "line": 2257,
+        "raw": "__set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]"
+      },
+      {
+        "func": "reset_curseg",
+        "file": "fs/f2fs/segment.c",
+        "line": 2663,
+        "raw": "reset_curseg+0x4dd/0x560  fs/f2fs/segment.c:2663"
+      },
+      {
+        "func": "new_curseg",
+        "file": "fs/f2fs/segment.c",
+        "line": 2723,
+        "raw": "new_curseg+0x12f6/0x18a0  fs/f2fs/segment.c:2723"
+      },
+      {
+        "func": "__allocate_new_segment",
+        "file": "fs/f2fs/segment.c",
+        "line": 3039,
+        "raw": "__allocate_new_segment+0x13d/0x810  fs/f2fs/segment.c:3039"
+      },
+      {
+        "func": "__allocate_new_section",
+        "file": "fs/f2fs/segment.c",
+        "line": 3047,
+        "raw": "__allocate_new_section  fs/f2fs/segment.c:3047  [inline]"
+      },
+      {
+        "func": "f2fs_allocate_new_section",
+        "file": "fs/f2fs/segment.c",
+        "line": 3054,
+        "raw": "f2fs_allocate_new_section+0x1d5/0x280  fs/f2fs/segment.c:3054"
+      },
+      {
+        "func": "expand_inode_data",
+        "file": "fs/f2fs/file.c",
+        "line": 1720,
+        "raw": "expand_inode_data+0x5a8/0x930  fs/f2fs/file.c:1720"
+      },
+      {
+        "func": "f2fs_fallocate",
+        "file": "fs/f2fs/file.c",
+        "line": 1825,
+        "raw": "f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825"
+      },
+      {
+        "func": "vfs_fallocate",
+        "file": "fs/open.c",
+        "line": 310,
+        "raw": "vfs_fallocate+0x4b4/0x590  fs/open.c:310"
+      },
+      {
+        "func": "ioctl_preallocate",
+        "file": "fs/ioctl.c",
+        "line": 494,
+        "raw": "ioctl_preallocate  fs/ioctl.c:494  [inline]"
+      },
+      {
+        "func": "do_vfs_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 732,
+        "raw": "do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732"
+      },
+      {
+        "func": "__do_sys_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 751,
+        "raw": "__do_sys_ioctl  fs/ioctl.c:751  [inline]"
+      },
+      {
+        "func": "__se_sys_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 739,
+        "raw": "__se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739"
+      },
+      {
+        "func": "__x64_sys_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 739,
+        "raw": "__x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739"
+      },
+      {
+        "func": "do_syscall_64",
+        "file": "arch/x86/entry/common.c",
+        "line": 46,
+        "raw": "do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46"
+      },
+      {
+        "func": "__kmalloc",
+        "file": "mm/slub.c",
+        "line": 4033,
+        "raw": "__kmalloc+0x1a7/0x330  mm/slub.c:4033"
+      },
+      {
+        "func": "__kmalloc_node",
+        "file": "include/linux/slab.h",
+        "line": 418,
+        "raw": "__kmalloc_node  include/linux/slab.h:418  [inline]"
+      },
+      {
+        "func": "kmalloc_node",
+        "file": "include/linux/slab.h",
+        "line": 575,
+        "raw": "kmalloc_node  include/linux/slab.h:575  [inline]"
+      },
+      {
+        "func": "kvmalloc_node",
+        "file": "mm/util.c",
+        "line": 612,
+        "raw": "kvmalloc_node+0x88/0x130  mm/util.c:612"
+      },
+      {
+        "func": "kvmalloc",
+        "file": "include/linux/mm.h",
+        "line": 833,
+        "raw": "kvmalloc  include/linux/mm.h:833  [inline]"
+      },
+      {
+        "func": "f2fs_kvmalloc",
+        "file": "fs/f2fs/f2fs.h",
+        "line": 3374,
+        "raw": "f2fs_kvmalloc  fs/f2fs/f2fs.h:3374  [inline]"
+      },
+      {
+        "func": "f2fs_kvzalloc",
+        "file": "fs/f2fs/f2fs.h",
+        "line": 3380,
+        "raw": "f2fs_kvzalloc  fs/f2fs/f2fs.h:3380  [inline]"
+      },
+      {
+        "func": "build_sit_info",
+        "file": "fs/f2fs/segment.c",
+        "line": 4395,
+        "raw": "build_sit_info  fs/f2fs/segment.c:4395  [inline]"
+      },
+      {
+        "func": "f2fs_build_segment_manager",
+        "file": "fs/f2fs/segment.c",
+        "line": 5258,
+        "raw": "f2fs_build_segment_manager+0xdba/0x48f0  fs/f2fs/segment.c:5258"
+      },
+      {
+        "func": "f2fs_fill_super",
+        "file": "fs/f2fs/super.c",
+        "line": 4315,
+        "raw": "f2fs_fill_super+0x42d1/0x6c70  fs/f2fs/super.c:4315"
+      },
+      {
+        "func": "mount_bdev",
+        "file": "fs/super.c",
+        "line": 1442,
+        "raw": "mount_bdev+0x28b/0x3a0  fs/super.c:1442"
+      },
+      {
+        "func": "f2fs_mount",
+        "file": "fs/f2fs/super.c",
+        "line": 4595,
+        "raw": "f2fs_mount+0x34/0x40  fs/f2fs/super.c:4595"
+      },
+      {
+        "func": "legacy_get_tree",
+        "file": "fs/fs_context.c",
+        "line": 593,
+        "raw": "legacy_get_tree+0xed/0x190  fs/fs_context.c:593"
+      },
+      {
+        "func": "vfs_get_tree",
+        "file": "fs/super.c",
+        "line": 1572,
+        "raw": "vfs_get_tree+0x89/0x260  fs/super.c:1572"
+      },
+      {
+        "func": "do_new_mount",
+        "file": "fs/namespace.c",
+        "line": 2997,
+        "raw": "do_new_mount+0x25a/0xa20  fs/namespace.c:2997"
+      },
+      {
+        "func": "path_mount",
+        "file": "fs/namespace.c",
+        "line": 3327,
+        "raw": "path_mount+0x572/0xc80  fs/namespace.c:3327"
+      },
+      {
+        "func": "do_mount",
+        "file": "fs/namespace.c",
+        "line": 3340,
+        "raw": "do_mount  fs/namespace.c:3340  [inline]"
+      },
+      {
+        "func": "__do_sys_mount",
+        "file": "fs/namespace.c",
+        "line": 3548,
+        "raw": "__do_sys_mount  fs/namespace.c:3548  [inline]"
+      },
+      {
+        "func": "__se_sys_mount",
+        "file": "fs/namespace.c",
+        "line": 3525,
+        "raw": "__se_sys_mount+0x318/0x380  fs/namespace.c:3525"
+      },
+      {
+        "func": "__x64_sys_mount",
+        "file": "fs/namespace.c",
+        "line": 3525,
+        "raw": "__x64_sys_mount+0xbf/0xd0  fs/namespace.c:3525"
+      },
+      {
+        "func": "do_syscall_64",
+        "file": "arch/x86/entry/common.c",
+        "line": 46,
+        "raw": "do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46"
+      },
+      {
+        "func": "set_page_owner",
+        "file": "include/linux/page_owner.h",
+        "line": 35,
+        "raw": "set_page_owner  include/linux/page_owner.h:35  [inline]"
+      },
+      {
+        "func": "post_alloc_hook",
+        "file": "mm/page_alloc.c",
+        "line": 2456,
+        "raw": "post_alloc_hook  mm/page_alloc.c:2456  [inline]"
+      },
+      {
+        "func": "prep_new_page",
+        "file": "mm/page_alloc.c",
+        "line": 2462,
+        "raw": "prep_new_page+0x179/0x180  mm/page_alloc.c:2462"
+      },
+      {
+        "func": "get_page_from_freelist",
+        "file": "mm/page_alloc.c",
+        "line": 4254,
+        "raw": "get_page_from_freelist+0x2235/0x23d0  mm/page_alloc.c:4254"
+      },
+      {
+        "func": "__alloc_pages_nodemask",
+        "file": "mm/page_alloc.c",
+        "line": 5370,
+        "raw": "__alloc_pages_nodemask+0x268/0x5f0  mm/page_alloc.c:5370"
+      },
+      {
+        "func": "allocate_slab",
+        "file": "mm/slub.c",
+        "line": 1808,
+        "raw": "allocate_slab  mm/slub.c:1808  [inline]"
+      },
+      {
+        "func": "new_slab",
+        "file": "mm/slub.c",
+        "line": 1869,
+        "raw": "new_slab+0x84/0x3f0  mm/slub.c:1869"
+      },
+      {
+        "func": "new_slab_objects",
+        "file": "mm/slub.c",
+        "line": 2627,
+        "raw": "new_slab_objects  mm/slub.c:2627  [inline]"
+      },
+      {
+        "func": "___slab_alloc",
+        "file": "mm/slub.c",
+        "line": 2791,
+        "raw": "___slab_alloc+0x2a6/0x450  mm/slub.c:2791"
+      },
+      {
+        "func": "__slab_alloc",
+        "file": "mm/slub.c",
+        "line": 2831,
+        "raw": "__slab_alloc+0x63/0xa0  mm/slub.c:2831"
+      },
+      {
+        "func": "slab_alloc_node",
+        "file": "mm/slub.c",
+        "line": 2913,
+        "raw": "slab_alloc_node  mm/slub.c:2913  [inline]"
+      },
+      {
+        "func": "slab_alloc",
+        "file": "mm/slub.c",
+        "line": 2955,
+        "raw": "slab_alloc  mm/slub.c:2955  [inline]"
+      },
+      {
+        "func": "__kmalloc_track_caller",
+        "file": "mm/slub.c",
+        "line": 4536,
+        "raw": "__kmalloc_track_caller+0x1ef/0x320  mm/slub.c:4536"
+      },
+      {
+        "func": "__kmalloc_reserve",
+        "file": "net/core/skbuff.c",
+        "line": 144,
+        "raw": "__kmalloc_reserve  net/core/skbuff.c:144  [inline]"
+      },
+      {
+        "func": "__alloc_skb",
+        "file": "net/core/skbuff.c",
+        "line": 212,
+        "raw": "__alloc_skb+0xdc/0x520  net/core/skbuff.c:212"
+      },
+      {
+        "func": "alloc_skb",
+        "file": "include/linux/skbuff.h",
+        "line": 1126,
+        "raw": "alloc_skb  include/linux/skbuff.h:1126  [inline]"
+      },
+      {
+        "func": "netlink_alloc_large_skb",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1178,
+        "raw": "netlink_alloc_large_skb  net/netlink/af_netlink.c:1178  [inline]"
+      },
+      {
+        "func": "netlink_sendmsg",
+        "file": "net/netlink/af_netlink.c",
+        "line": 1889,
+        "raw": "netlink_sendmsg+0x5f6/0xb30  net/netlink/af_netlink.c:1889"
+      },
+      {
+        "func": "sock_sendmsg_nosec",
+        "file": "net/socket.c",
+        "line": 652,
+        "raw": "sock_sendmsg_nosec  net/socket.c:652  [inline]"
+      },
+      {
+        "func": "__sock_sendmsg",
+        "file": "net/socket.c",
+        "line": 664,
+        "raw": "__sock_sendmsg  net/socket.c:664  [inline]"
+      },
+      {
+        "func": "____sys_sendmsg",
+        "file": "net/socket.c",
+        "line": 2376,
+        "raw": "____sys_sendmsg+0x5a2/0x8c0  net/socket.c:2376"
+      },
+      {
+        "func": "___sys_sendmsg",
+        "file": "net/socket.c",
+        "line": 2430,
+        "raw": "___sys_sendmsg+0x1f0/0x260  net/socket.c:2430"
+      },
+      {
+        "func": "__sys_sendmsg",
+        "file": "net/socket.c",
+        "line": 2459,
+        "raw": "__sys_sendmsg  net/socket.c:2459  [inline]"
+      },
+      {
+        "func": "__do_sys_sendmsg",
+        "file": "net/socket.c",
+        "line": 2468,
+        "raw": "__do_sys_sendmsg  net/socket.c:2468  [inline]"
+      },
+      {
+        "func": "__se_sys_sendmsg",
+        "file": "net/socket.c",
+        "line": 2466,
+        "raw": "__se_sys_sendmsg  net/socket.c:2466  [inline]"
+      },
+      {
+        "func": "__x64_sys_sendmsg",
+        "file": "net/socket.c",
+        "line": 2466,
+        "raw": "__x64_sys_sendmsg+0x1e2/0x2a0  net/socket.c:2466"
+      },
+      {
+        "func": "do_syscall_64",
+        "file": "arch/x86/entry/common.c",
+        "line": 46,
+        "raw": "do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46"
+      },
+      {
+        "func": "f2fs_allocate_data_block",
+        "file": "fs/f2fs/segment.c",
+        "line": 3481,
+        "raw": "f2fs_allocate_data_block+0x156b/0x3a10  fs/f2fs/segment.c:3481"
+      },
+      {
+        "func": "__allocate_data_block",
+        "file": "fs/f2fs/data.c",
+        "line": 1407,
+        "raw": "__allocate_data_block+0x52a/0x980  fs/f2fs/data.c:1407"
+      },
+      {
+        "func": "f2fs_map_blocks",
+        "file": "fs/f2fs/data.c",
+        "line": 1575,
+        "raw": "f2fs_map_blocks+0xdc8/0x35c0  fs/f2fs/data.c:1575"
+      },
+      {
+        "func": "expand_inode_data",
+        "file": "fs/f2fs/file.c",
+        "line": 1724,
+        "raw": "expand_inode_data+0x5d7/0x930  fs/f2fs/file.c:1724"
+      },
+      {
+        "func": "f2fs_fallocate",
+        "file": "fs/f2fs/file.c",
+        "line": 1825,
+        "raw": "f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825"
+      },
+      {
+        "func": "vfs_fallocate",
+        "file": "fs/open.c",
+        "line": 310,
+        "raw": "vfs_fallocate+0x4b4/0x590  fs/open.c:310"
+      },
+      {
+        "func": "ioctl_preallocate",
+        "file": "fs/ioctl.c",
+        "line": 494,
+        "raw": "ioctl_preallocate  fs/ioctl.c:494  [inline]"
+      },
+      {
+        "func": "do_vfs_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 732,
+        "raw": "do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732"
+      },
+      {
+        "func": "__do_sys_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 751,
+        "raw": "__do_sys_ioctl  fs/ioctl.c:751  [inline]"
+      },
+      {
+        "func": "__se_sys_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 739,
+        "raw": "__se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739"
+      },
+      {
+        "func": "__x64_sys_ioctl",
+        "file": "fs/ioctl.c",
+        "line": 739,
+        "raw": "__x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739"
+      },
+      {
+        "func": "do_syscall_64",
+        "file": "arch/x86/entry/common.c",
+        "line": 46,
+        "raw": "do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46"
+      }
+    ],
+    "raw": "R10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\n---[ end trace b21af47fc54341fe ]---\n==================================================================\nBUG: KASAN: slab-out-of-bounds in __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\nBUG: KASAN: slab-out-of-bounds in reset_curseg+0x4dd/0x560  fs/f2fs/segment.c:2663 \nRead of size 4 at addr ffff88811471cbc0 by task syz.6.85/837\n\nCPU: 0 PID: 837 Comm: syz.6.85 Tainted: G        W         syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nCall Trace:\n __dump_stack+0x21/0x24  lib/dump_stack.c:77 \n dump_stack_lvl+0x169/0x1d8  lib/dump_stack.c:118 \n print_address_description+0x7f/0x2c0  mm/kasan/report.c:248 \n __kasan_report  mm/kasan/report.c:435  [inline]\n kasan_report+0xe2/0x130  mm/kasan/report.c:452 \n __asan_report_load4_noabort+0x14/0x20  mm/kasan/report_generic.c:308 \n __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\n reset_curseg+0x4dd/0x560  fs/f2fs/segment.c:2663 \n new_curseg+0x12f6/0x18a0  fs/f2fs/segment.c:2723 \n __allocate_new_segment+0x13d/0x810  fs/f2fs/segment.c:3039 \n __allocate_new_section  fs/f2fs/segment.c:3047  [inline]\n f2fs_allocate_new_section+0x1d5/0x280  fs/f2fs/segment.c:3054 \n expand_inode_data+0x5a8/0x930  fs/f2fs/file.c:1720 \n f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825 \n vfs_fallocate+0x4b4/0x590  fs/open.c:310 \n ioctl_preallocate  fs/ioctl.c:494  [inline]\n file_ioctl fs/ioctl.c:-1 [inline]\n do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732 \n __do_sys_ioctl  fs/ioctl.c:751  [inline]\n __se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739 \n __x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7feae1e11be9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007feae1c40038 EFLAGS: 00000246 ORIG_RAX: 0000000000000010\nRAX: ffffffffffffffda RBX: 00007feae2049180 RCX: 00007feae1e11be9\nRDX: 00002000000000c0 RSI: 0000000040305828 RDI: 0000000000000005\nRBP: 00007feae1e94e19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\n\nAllocated by task 817:\n kasan_save_stack  mm/kasan/common.c:38  [inline]\n kasan_set_track  mm/kasan/common.c:45  [inline]\n set_alloc_info  mm/kasan/common.c:430  [inline]\n ____kasan_kmalloc  mm/kasan/common.c:509  [inline]\n __kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518 \n kasan_kmalloc  include/linux/kasan.h:254  [inline]\n __kmalloc+0x1a7/0x330  mm/slub.c:4033 \n __kmalloc_node  include/linux/slab.h:418  [inline]\n kmalloc_node  include/linux/slab.h:575  [inline]\n kvmalloc_node+0x88/0x130  mm/util.c:612 \n kvmalloc  include/linux/mm.h:833  [inline]\n f2fs_kvmalloc  fs/f2fs/f2fs.h:3374  [inline]\n f2fs_kvzalloc  fs/f2fs/f2fs.h:3380  [inline]\n build_sit_info  fs/f2fs/segment.c:4395  [inline]\n f2fs_build_segment_manager+0xdba/0x48f0  fs/f2fs/segment.c:5258 \n f2fs_fill_super+0x42d1/0x6c70  fs/f2fs/super.c:4315 \n mount_bdev+0x28b/0x3a0  fs/super.c:1442 \n f2fs_mount+0x34/0x40  fs/f2fs/super.c:4595 \n legacy_get_tree+0xed/0x190  fs/fs_context.c:593 \n vfs_get_tree+0x89/0x260  fs/super.c:1572 \n do_new_mount+0x25a/0xa20  fs/namespace.c:2997 \n path_mount+0x572/0xc80  fs/namespace.c:3327 \n do_mount  fs/namespace.c:3340  [inline]\n __do_sys_mount  fs/namespace.c:3548  [inline]\n __se_sys_mount+0x318/0x380  fs/namespace.c:3525 \n __x64_sys_mount+0xbf/0xd0  fs/namespace.c:3525 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\n\nThe buggy address belongs to the object at ffff88811471c800\n which belongs to the cache kmalloc-1k of size 1024\nThe buggy address is located 960 bytes inside of\n 1024-byte region [ffff88811471c800, ffff88811471cc00)\nThe buggy address belongs to the page:\npage:ffffea000451c600 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x114718\nhead:ffffea000451c600 order:3 compound_mapcount:0 compound_pincount:0\nflags: 0x4000000000010200(slab|head)\nraw: 4000000000010200 ffffea0004522200 0000000300000003 ffff888100042f00\nraw: 0000000000000000 0000000000100010 00000001ffffffff 0000000000000000\npage dumped because: kasan: bad access detected\npage_owner tracks the page as allocated\npage last allocated via order 3, migratetype Unmovable, gfp_mask 0xd20c0(__GFP_IO|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 95, ts 5090814031, free_ts 0\n set_page_owner  include/linux/page_owner.h:35  [inline]\n post_alloc_hook  mm/page_alloc.c:2456  [inline]\n prep_new_page+0x179/0x180  mm/page_alloc.c:2462 \n get_page_from_freelist+0x2235/0x23d0  mm/page_alloc.c:4254 \n __alloc_pages_nodemask+0x268/0x5f0  mm/page_alloc.c:5370 \n alloc_slab_page mm/slub.c:-1 [inline]\n allocate_slab  mm/slub.c:1808  [inline]\n new_slab+0x84/0x3f0  mm/slub.c:1869 \n new_slab_objects  mm/slub.c:2627  [inline]\n ___slab_alloc+0x2a6/0x450  mm/slub.c:2791 \n __slab_alloc+0x63/0xa0  mm/slub.c:2831 \n slab_alloc_node  mm/slub.c:2913  [inline]\n slab_alloc  mm/slub.c:2955  [inline]\n __kmalloc_track_caller+0x1ef/0x320  mm/slub.c:4536 \n __kmalloc_reserve  net/core/skbuff.c:144  [inline]\n __alloc_skb+0xdc/0x520  net/core/skbuff.c:212 \n alloc_skb  include/linux/skbuff.h:1126  [inline]\n netlink_alloc_large_skb  net/netlink/af_netlink.c:1178  [inline]\n netlink_sendmsg+0x5f6/0xb30  net/netlink/af_netlink.c:1889 \n sock_sendmsg_nosec  net/socket.c:652  [inline]\n __sock_sendmsg  net/socket.c:664  [inline]\n ____sys_sendmsg+0x5a2/0x8c0  net/socket.c:2376 \n ___sys_sendmsg+0x1f0/0x260  net/socket.c:2430 \n __sys_sendmsg  net/socket.c:2459  [inline]\n __do_sys_sendmsg  net/socket.c:2468  [inline]\n __se_sys_sendmsg  net/socket.c:2466  [inline]\n __x64_sys_sendmsg+0x1e2/0x2a0  net/socket.c:2466 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\npage_owner free stack trace missing\n\nMemory state around the buggy address:\n ffff88811471ca80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n ffff88811471cb00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n>ffff88811471cb80: 00 00 00 00 00 00 00 00 fc fc fc fc fc fc fc fc\n                                           ^\n ffff88811471cc00: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc\n ffff88811471cc80: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc\n==================================================================\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000000: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000000-0x0000000000000007]\nCPU: 1 PID: 837 Comm: syz.6.85 Tainted: G    B   W         syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nRIP: 0010:update_sit_entry+0x3eb/0xf50 fs/f2fs/segment.c:-1\nCode: 89 45 a8 49 01 c5 41 f6 d7 41 80 e7 07 44 89 f9 41 bf 01 00 00 00 41 d3 e7 4d 89 ee 49 c1 ee 03 48 b8 00 00 00 00 00 fc ff df <41> 0f b6 04 06 84 c0 0f 85 a5 08 00 00 41 0f b6 5d 00 44 89 f8 41\nRSP: 0018:ffffc90001207350 EFLAGS: 00010246\nRAX: dffffc0000000000 RBX: ffff88811471cbc8 RCX: 0000000000000007\nRDX: 0000000000000000 RSI: 0000000000000008 RDI: ffff88811471cbc8\nRBP: ffffc900012073d0 R08: ffff888115c193c0 R09: 0000000000000003\nR10: 00000000ffffffff R11: 0000000000000000 R12: 0000000000004000\nR13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000080\nFS:  00007feae1c406c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007ffd90c62f98 CR3: 0000000127a9b000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n f2fs_allocate_data_block+0x156b/0x3a10  fs/f2fs/segment.c:3481 \n __allocate_data_block+0x52a/0x980  fs/f2fs/data.c:1407 \n f2fs_map_blocks+0xdc8/0x35c0  fs/f2fs/data.c:1575 \n expand_inode_data+0x5d7/0x930  fs/f2fs/file.c:1724 \n f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825 \n vfs_fallocate+0x4b4/0x590  fs/open.c:310 \n ioctl_preallocate  fs/ioctl.c:494  [inline]\n file_ioctl fs/ioctl.c:-1 [inline]\n do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732 \n __do_sys_ioctl  fs/ioctl.c:751  [inline]\n __se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739 \n __x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7feae1e11be9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007feae1c40038 EFLAGS: 00000246 ORIG_RAX: 0000000000000010\nRAX: ffffffffffffffda RBX: 00007feae2049180 RCX: 00007feae1e11be9\nRDX: 00002000000000c0 RSI: 0000000040305828 RDI: 0000000000000005\nRBP: 00007feae1e94e19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\nModules linked in:\n---[ end trace b21af47fc54341ff ]---\nRIP: 0010:update_sit_entry+0x3eb/0xf50 fs/f2fs/segment.c:-1\nCode: 89 45 a8 49 01 c5 41 f6 d7 41 80 e7 07 44 89 f9 41 bf 01 00 00 00 41 d3 e7 4d 89 ee 49 c1 ee 03 48 b8 00 00 00 00 00 fc ff df <41> 0f b6 04 06 84 c0 0f 85 a5 08 00 00 41 0f b6 5d 00 44 89 f8 41\nRSP: 0018:ffffc90001207350 EFLAGS: 00010246\nRAX: dffffc0000000000 RBX: ffff88811471cbc8 RCX: 0000000000000007\nRDX: 0000000000000000 RSI: 0000000000000008 RDI: ffff88811471cbc8\nRBP: ffffc900012073d0 R08: ffff888115c193c0 R09: 0000000000000003\nR10: 00000000ffffffff R11: 0000000000000000 R12: 0000000000004000\nR13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000080\nFS:  00007feae1c406c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f0f2e064000 CR3: 0000000127a9b000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t89 45 a8             \tmov    %eax,-0x58(%rbp)\n   3:\t49 01 c5             \tadd    %rax,%r13\n   6:\t41 f6 d7             \tnot    %r15b\n   9:\t41 80 e7 07          \tand    $0x7,%r15b\n   d:\t44 89 f9             \tmov    %r15d,%ecx\n  10:\t41 bf 01 00 00 00    \tmov    $0x1,%r15d\n  16:\t41 d3 e7             \tshl    %cl,%r15d\n  19:\t4d 89 ee             \tmov    %r13,%r14\n  1c:\t49 c1 ee 03          \tshr    $0x3,%r14\n  20:\t48 b8 00 00 00 00 00 \tmovabs $0xdffffc0000000000,%rax\n  27:\tfc ff df\n* 2a:\t41 0f b6 04 06       \tmovzbl (%r14,%rax,1),%eax <-- trapping instruction\n  2f:\t84 c0                \ttest   %al,%al\n  31:\t0f 85 a5 08 00 00    \tjne    0x8dc\n  37:\t41 0f b6 5d 00       \tmovzbl 0x0(%r13),%ebx\n  3c:\t44 89 f8             \tmov    %r15d,%eax\n  3f:\t41                   \trex.B"
+  },
+  "snippets": {
+    "urls": {}
+  },
+  "evidence": {},
+  "classification": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 0.83,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7100000, disassembly, movzbl",
+      "Triggering syscall(s) from crash text: ioctl, mount, sendmsg",
+      "Triggering syscall: ioctl (entry __se_sys_ioctl) \u2014 call chain: ioctl_preallocate -> do_vfs_ioctl -> __do_sys_ioctl -> __se_sys_ioctl -> __x64_sys_ioctl -> do_syscall_64",
+      "How to create: allocate the object via code path that calls: __kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518",
+      "How to create hint: Allocation from slab/kmalloc: create objects via normal kernel paths (file ops, network ops, or module-specific APIs)",
+      "Object details: type 'kmalloc-1k', address ffff88811471c800, size 1024",
+      "Object: cache 'kmalloc-1k', address ffff88811471c800, size 1024, offset 960",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function '__set_sit_entry_type' (from crash context)"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "KASAN reported slab-out-of-bounds (log contains 'slab-out-of-bounds')",
+      "Access offset 960 inside object size 1024",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "faulting address: 0xdffffc0000000000",
+      "BUG: KASAN: slab-out-of-bounds in __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]; faulting address: 0xdffffc0000000000; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Allocation origin: __kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518",
+      "Syscall(s) detected in crash text: ioctl, mount, sendmsg",
+      "Syzkaller repro indicates syscalls: ffff8881f7100000, disassembly, movzbl"
+    ],
+    "path_constraints": {
+      "input_constraints": [],
+      "kernel_state_constraints": []
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000000",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; boundedness=bounded",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.0,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.5,
+        "reported_confidence": 0.83
+      }
+    },
+    "how_to_create": {
+      "alloc_frame": "__kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518",
+      "guidance": [
+        "Allocation from slab/kmalloc: create objects via normal kernel paths (file ops, network ops, or module-specific APIs)"
+      ]
+    }
+  },
+  "exploitability": {
+    "free_site": null,
+    "trigger_site": null,
+    "allocation_site": {
+      "raw": "Allocated by task 817:\n kasan_save_stack  mm/kasan/common.c:38  [inline]\n kasan_set_track  mm/kasan/common.c:45  [inline]\n set_alloc_info  mm/kasan/common.c:430  [inline]\n ____kasan_kmalloc  mm/kasan/common.c:509  [inline]\n __kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518 \n kasan_kmalloc  include/linux/kasan.h:254  [inline]\n __kmalloc+0x1a7/0x330  mm/slub.c:4033 \n __kmalloc_node  include/linux/slab.h:418  [inline]\n kmalloc_node  include/linux/slab.h:575  [inline]\n kvmalloc_node+0x88/0x130  mm/util.c:612 \n kvmalloc  include/linux/mm.h:833  [inline]\n f2fs_kvmalloc  fs/f2fs/f2fs.h:3374  [inline]\n f2fs_kvzalloc  fs/f2fs/f2fs.h:3380  [inline]\n build_sit_info  fs/f2fs/segment.c:4395  [inline]\n f2fs_build_segment_manager+0xdba/0x48f0  fs/f2fs/segment.c:5258 \n f2fs_fill_super+0x42d1/0x6c70  fs/f2fs/super.c:4315 \n mount_bdev+0x28b/0x3a0  fs/super.c:1442 \n f2fs_mount+0x34/0x40  fs/f2fs/super.c:4595 \n legacy_get_tree+0xed/0x190  fs/fs_context.c:593 \n vfs_get_tree+0x89/0x260  fs/super.c:1572 \n do_new_mount+0x25a/0xa20  fs/namespace.c:2997 \n path_mount+0x572/0xc80  fs/namespace.c:3327 \n do_mount  fs/namespace.c:3340  [inline]\n __do_sys_mount  fs/namespace.c:3548  [inline]\n __se_sys_mount+0x318/0x380  fs/namespace.c:3525 \n __x64_sys_mount+0xbf/0xd0  fs/namespace.c:3525 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb",
+      "file": "mm/kasan/common.c",
+      "line": 38
+    },
+    "object": {
+      "obj_addr": "ffff88811471c800",
+      "cache": "kmalloc-1k",
+      "obj_size": 1024,
+      "offset": 960
+    },
+    "struct_info": {
+      "struct_name": null,
+      "fields_used": [],
+      "struct_def_snippet": null
+    },
+    "usage_examples": [],
+    "notes": [
+      "Object allocated from cache 'kmalloc-1k', reallocation under attacker control increases exploitability",
+      "Object size=1024, access offset=960"
+    ]
+  },
+  "llm_analysis": {
+    "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\n---[ end trace b21af47fc54341fe ]---\n==================================================================\nBUG: KASAN: slab-out-of-bounds in __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\nBUG: KASAN: slab-out-of-bounds in reset_curseg+0x4dd/0x560  fs/f2fs/segment.c:2663 \nRead of size 4 at addr ffff88811471cbc0 by task syz.6.85/837\n\nCPU: 0 PID: 837 Comm: syz.6.85 Tainted: G        W         syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nCall Trace:\n __dump_stack+0x21/0x24  lib/dump_stack.c:77 \n dump_stack_lvl+0x169/0x1d8  lib/dump_stack.c:118 \n print_address_description+0x7f/0x2c0  mm/kasan/report.c:248 \n __kasan_report  mm/kasan/report.c:435  [inline]\n kasan_report+0xe2/0x130  mm/kasan/report.c:452 \n __asan_report_load4_noabort+0x14/0x20  mm/kasan/report_generic.c:308 \n __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\n reset_curseg+0x4dd/0x560  fs/f2fs/segment.c:2663 \n new_curseg+0x12f6/0x18a0  fs/f2fs/segment.c:2723 \n __allocate_new_segment+0x13d/0x810  fs/f2fs/segment.c:3039 \n __allocate_new_section  fs/f2fs/segment.c:3047  [inline]\n f2fs_allocate_new_section+0x1d5/0x280  fs/f2fs/segment.c:3054 \n expand_inode_data+0x5a8/0x930  fs/f2fs/file.c:1720 \n f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825 \n vfs_fallocate+0x4b4/0x590  fs/open.c:310 \n ioctl_preallocate  fs/ioctl.c:494  [inline]\n file_ioctl fs/ioctl.c:-1 [inline]\n do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732 \n __do_sys_ioctl  fs/ioctl.c:751  [inline]\n __se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739 \n __x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7feae1e11be9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007feae1c40038 EFLAGS: 00000246 ORIG_RAX: 0000000000000010\nRAX: ffffffffffffffda RBX: 00007feae2049180 RCX: 00007feae1e11be9\nRDX: 00002000000000c0 RSI: 0000000040305828 RDI: 0000000000000005\nRBP: 00007feae1e94e19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\n\nAllocated by task 817:\n kasan_save_stack  mm/kasan/common.c:38  [inline]\n kasan_set_track  mm/kasan/common.c:45  [inline]\n set_alloc_info  mm/kasan/common.c:430  [inline]\n ____kasan_kmalloc  mm/kasan/common.c:509  [inline]\n __kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518 \n kasan_kmalloc  include/linux/kasan.h:254  [inline]\n __kmalloc+0x1a7/0x330  mm/slub.c:4033 \n __kmalloc_node  include/linux/slab.h:418  [inline]\n kmalloc_node  include/linux/slab.h:575  [inline]\n kvmalloc_node+0x88/0x130  mm/util.c:612 \n kvmalloc  include/linux/mm.h:833  [inline]\n f2fs_kvmalloc  fs/f2fs/f2fs.h:3374  [inline]\n f2fs_kvzalloc  fs/f2fs/f2fs.h:3380  [inline]\n build_sit_info  fs/f2fs/segment.c:4395  [inline]\n f2fs_build_segment_manager+0xdba/0x48f0  fs/f2fs/segment.c:5258 \n f2fs_fill_super+0x42d1/0x6c70  fs/f2fs/super.c:4315 \n mount_bdev+0x28b/0x3a0  fs/super.c:1442 \n f2fs_mount+0x34/0x40  fs/f2fs/super.c:4595 \n legacy_get_tree+0xed/0x190  fs/fs_context.c:593 \n vfs_get_tree+0x89/0x260  fs/super.c:1572 \n do_new_mount+0x25a/0xa20  fs/namespace.c:2997 \n path_mount+0x572/0xc80  fs/namespace.c:3327 \n do_mount  fs/namespace.c:3340  [inline]\n __do_sys_mount  fs/namespace.c:3548  [inline]\n __se_sys_mount+0x318/0x380  fs/namespace.c:3525 \n __x64_sys_mount+0xbf/0xd0  fs/namespace.c:3525 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\n\nThe buggy address belongs to the object at ffff88811471c800\n which belongs to the cache kmalloc-1k of size 1024\nThe buggy address is located 960 bytes inside of\n 1024-byte region [ffff88811471c800, ffff88811471cc00)\nThe buggy address belongs to the page:\npage:ffffea000451c600 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x114718\nhead:ffffea000451c600 order:3 compound_mapcount:0 compound_pincount:0\nflags: 0x4000000000010200(slab|head)\nraw: 4000000000010200 ffffea0004522200 0000000300000003 ffff888100042f00\nraw: 0000000000000000 0000000000100010 00000001ffffffff 0000000000000000\npage dumped because: kasan: bad access detected\npage_owner tracks the page as allocated\npage last allocated via order 3, migratetype Unmovable, gfp_mask 0xd20c0(__GFP_IO|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 95, ts 5090814031, free_ts 0\n set_page_owner  include/linux/page_owner.h:35  [inline]\n post_alloc_hook  mm/page_alloc.c:2456  [inline]\n prep_new_page+0x179/0x180  mm/page_alloc.c:2462 \n get_page_from_freelist+0x2235/0x23d0  mm/page_alloc.c:4254 \n __alloc_pages_nodemask+0x268/0x5f0  mm/page_alloc.c:5370 \n alloc_slab_page mm/slub.c:-1 [inline]\n allocate_slab  mm/slub.c:1808  [inline]\n new_slab+0x84/0x3f0  mm/slub.c:1869 \n new_slab_objects  mm/slub.c:2627  [inline]\n ___slab_alloc+0x2a6/0x450  mm/slub.c:2791 \n __slab_alloc+0x63/0xa0  mm/slub.c:2831 \n slab_alloc_node  mm/slub.c:2913  [inline]\n slab_alloc  mm/slub.c:2955  [inline]\n __kmalloc_track_caller+0x1ef/0x320  mm/slub.c:4536 \n __kmalloc_reserve  net/core/skbuff.c:144  [inline]\n __alloc_skb+0xdc/0x520  net/core/skbuff.c:212 \n alloc_skb  include/linux/skbuff.h:1126  [inline]\n netlink_alloc_large_skb  net/netlink/af_netlink.c:1178  [inline]\n netlink_sendmsg+0x5f6/0xb30  net/netlink/af_netlink.c:1889 \n sock_sendmsg_nosec  net/socket.c:652  [inline]\n __sock_sendmsg  net/socket.c:664  [inline]\n ____sys_sendmsg+0x5a2/0x8c0  net/socket.c:2376 \n ___sys_sendmsg+0x1f0/0x260  net/socket.c:2430 \n __sys_sendmsg  net/socket.c:2459  [inline]\n __do_sys_sendmsg  net/socket.c:2468  [inline]\n __se_sys_sendmsg  net/socket.c:2466  [inline]\n __x64_sys_sendmsg+0x1e2/0x2a0  net/socket.c:2466 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\npage_owner free stack trace missing\n\nMemory state around the buggy address:\n ffff88811471ca80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n ffff88811471cb00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n>ffff88811471cb80: 00 00 00 00 00 00 00 00 fc fc fc fc fc fc fc fc\n                                           ^\n ffff88811471cc00: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc\n ffff88811471cc80: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc\n==================================================================\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000000: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000000-0x0000000000000007]\nCPU: 1 PID: 837 Comm: syz.6.85 Tainted: G    B   W         syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nRIP: 0010:update_sit_entry+0x3eb/0xf50 fs/f2fs/segment.c:-1\nCode: 89 45 a8 49 01 c5 41 f6 d7 41 80 e7 07 44 89 f9 41 bf 01 00 00 00 41 d3 e7 4d 89 ee 49 c1 ee 03 48 b8 00 00 00 00 00 fc ff df <41> 0f b6 04 06 84 c0 0f 85 a5 08 00 00 41 0f b6 5d 00 44 89 f8 41\nRSP: 0018:ffffc90001207350 EFLAGS: 00010246\nRAX: dffffc0000000000 RBX: ffff88811471cbc8 RCX: 0000000000000007\nRDX: 0000000000000000 RSI: 0000000000000008 RDI: ffff88811471cbc8\nRBP: ffffc900012073d0 R08: ffff888115c193c0 R09: 0000000000000003\nR10: 00000000ffffffff R11: 0000000000000000 R12: 0000000000004000\nR13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000080\nFS:  00007feae1c406c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007ffd90c62f98 CR3: 0000000127a9b000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n f2fs_allocate_data_block+0x156b/0x3a10  fs/f2fs/segment.c:3481 \n __allocate_data_block+0x52a/0x980  fs/f2fs/data.c:1407 \n f2fs_map_blocks+0xdc8/0x35c0  fs/f2fs/data.c:1575 \n expand_inode_data+0x5d7/0x930  fs/f2fs/file.c:1724 \n f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825 \n vfs_fallocate+0x4b4/0x590  fs/open.c:310 \n ioctl_preallocate  fs/ioctl.c:494  [inline]\n file_ioctl fs/ioctl.c:-1 [inline]\n do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732 \n __do_sys_ioctl  fs/ioctl.c:751  [inline]\n __se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739 \n __x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7feae1e11be9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007feae1c40038 EFLAGS: 00000246 ORIG_RAX: 0000000000000010\nRAX: ffffffffffffffda RBX: 00007feae2049180 RCX: 00007feae1e11be9\nRDX: 00002000000000c0 RSI: 0000000040305828 RDI: 0000000000000005\nRBP: 00007feae1e94e19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\nModules linked in:\n---[ end trace b21af47fc54341ff ]---\nRIP: 0010:update_sit_entry+0x3eb/0xf50 fs/f2fs/segment.c:-1\nCode: 89 45 a8 49 01 c5 41 f6 d7 41 80 e7 07 44 89 f9 41 bf 01 00 00 00 41 d3 e7 4d 89 ee 49 c1 ee 03 48 b8 00 00 00 00 00 fc ff df <41> 0f b6 04 06 84 c0 0f 85 a5 08 00 00 41 0f b6 5d 00 44 89 f8 41\nRSP: 0018:ffffc90001207350 EFLAGS: 00010246\nRAX: dffffc0000000000 RBX: ffff88811471cbc8 RCX: 0000000000000007\nRDX: 0000000000000000 RSI: 0000000000000008 RDI: ffff88811471cbc8\nRBP: ffffc900012073d0 R08: ffff888115c193c0 R09: 0000000000000003\nR10: 00000000ffffffff R11: 0000000000000000 R12: 0000000000004000\nR13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000080\nFS:  00007feae1c406c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f0f2e064000 CR3: 0000000127a9b000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t89 45 a8             \tmov    %eax,-0x58(%rbp)\n   3:\t49 01 c5             \tadd    %rax,%r13\n   6:\t41 f6 d7             \tnot    %r15b\n   9:\t41 80 e7 07          \tand    $0x7,%r15b\n   d:\t44 89 f9             \tmov    %r15d,%ecx\n  10:\t41 bf 01 00 00 00    \tmov    $0x1,%r15d\n  16:\t41 d3 e7             \tshl    %cl,%r15d\n  19:\t4d 89 ee             \tmov    %r13,%r14\n  1c:\t49 c1 ee 03          \tshr    $0x3,%r14\n  20:\t48 b8 00 00 00 00 00 \tmovabs $0xdffffc0000000000,%rax\n  27:\tfc ff df\n* 2a:\t41 0f b6 04 06       \tmovzbl (%r14,%rax,1),%eax <-- trapping instruction\n  2f:\t84 c0                \ttest   %al,%al\n  31:\t0f 85 a5 08 00 00    \tjne    0x8dc\n  37:\t41 0f b6 5d 00       \tmovzbl 0x0(%r13),%ebx\n  3c:\t44 89 f8             \tmov    %r15d,%eax\n  3f:\t41                   \trex.B",
+    "local_llm": {
+      "ok": false,
+      "error": "Local LLM calls disabled in this version",
+      "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\n---[ end trace b21af47fc54341fe ]---\n==================================================================\nBUG: KASAN: slab-out-of-bounds in __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\nBUG: KASAN: slab-out-of-bounds in reset_curseg+0x4dd/0x560  fs/f2fs/segment.c:2663 \nRead of size 4 at addr ffff88811471cbc0 by task syz.6.85/837\n\nCPU: 0 PID: 837 Comm: syz.6.85 Tainted: G        W         syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nCall Trace:\n __dump_stack+0x21/0x24  lib/dump_stack.c:77 \n dump_stack_lvl+0x169/0x1d8  lib/dump_stack.c:118 \n print_address_description+0x7f/0x2c0  mm/kasan/report.c:248 \n __kasan_report  mm/kasan/report.c:435  [inline]\n kasan_report+0xe2/0x130  mm/kasan/report.c:452 \n __asan_report_load4_noabort+0x14/0x20  mm/kasan/report_generic.c:308 \n __set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\n reset_curseg+0x4dd/0x560  fs/f2fs/segment.c:2663 \n new_curseg+0x12f6/0x18a0  fs/f2fs/segment.c:2723 \n __allocate_new_segment+0x13d/0x810  fs/f2fs/segment.c:3039 \n __allocate_new_section  fs/f2fs/segment.c:3047  [inline]\n f2fs_allocate_new_section+0x1d5/0x280  fs/f2fs/segment.c:3054 \n expand_inode_data+0x5a8/0x930  fs/f2fs/file.c:1720 \n f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825 \n vfs_fallocate+0x4b4/0x590  fs/open.c:310 \n ioctl_preallocate  fs/ioctl.c:494  [inline]\n file_ioctl fs/ioctl.c:-1 [inline]\n do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732 \n __do_sys_ioctl  fs/ioctl.c:751  [inline]\n __se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739 \n __x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7feae1e11be9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007feae1c40038 EFLAGS: 00000246 ORIG_RAX: 0000000000000010\nRAX: ffffffffffffffda RBX: 00007feae2049180 RCX: 00007feae1e11be9\nRDX: 00002000000000c0 RSI: 0000000040305828 RDI: 0000000000000005\nRBP: 00007feae1e94e19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\n\nAllocated by task 817:\n kasan_save_stack  mm/kasan/common.c:38  [inline]\n kasan_set_track  mm/kasan/common.c:45  [inline]\n set_alloc_info  mm/kasan/common.c:430  [inline]\n ____kasan_kmalloc  mm/kasan/common.c:509  [inline]\n __kasan_kmalloc+0xda/0x110  mm/kasan/common.c:518 \n kasan_kmalloc  include/linux/kasan.h:254  [inline]\n __kmalloc+0x1a7/0x330  mm/slub.c:4033 \n __kmalloc_node  include/linux/slab.h:418  [inline]\n kmalloc_node  include/linux/slab.h:575  [inline]\n kvmalloc_node+0x88/0x130  mm/util.c:612 \n kvmalloc  include/linux/mm.h:833  [inline]\n f2fs_kvmalloc  fs/f2fs/f2fs.h:3374  [inline]\n f2fs_kvzalloc  fs/f2fs/f2fs.h:3380  [inline]\n build_sit_info  fs/f2fs/segment.c:4395  [inline]\n f2fs_build_segment_manager+0xdba/0x48f0  fs/f2fs/segment.c:5258 \n f2fs_fill_super+0x42d1/0x6c70  fs/f2fs/super.c:4315 \n mount_bdev+0x28b/0x3a0  fs/super.c:1442 \n f2fs_mount+0x34/0x40  fs/f2fs/super.c:4595 \n legacy_get_tree+0xed/0x190  fs/fs_context.c:593 \n vfs_get_tree+0x89/0x260  fs/super.c:1572 \n do_new_mount+0x25a/0xa20  fs/namespace.c:2997 \n path_mount+0x572/0xc80  fs/namespace.c:3327 \n do_mount  fs/namespace.c:3340  [inline]\n __do_sys_mount  fs/namespace.c:3548  [inline]\n __se_sys_mount+0x318/0x380  fs/namespace.c:3525 \n __x64_sys_mount+0xbf/0xd0  fs/namespace.c:3525 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\n\nThe buggy address belongs to the object at ffff88811471c800\n which belongs to the cache kmalloc-1k of size 1024\nThe buggy address is located 960 bytes inside of\n 1024-byte region [ffff88811471c800, ffff88811471cc00)\nThe buggy address belongs to the page:\npage:ffffea000451c600 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x114718\nhead:ffffea000451c600 order:3 compound_mapcount:0 compound_pincount:0\nflags: 0x4000000000010200(slab|head)\nraw: 4000000000010200 ffffea0004522200 0000000300000003 ffff888100042f00\nraw: 0000000000000000 0000000000100010 00000001ffffffff 0000000000000000\npage dumped because: kasan: bad access detected\npage_owner tracks the page as allocated\npage last allocated via order 3, migratetype Unmovable, gfp_mask 0xd20c0(__GFP_IO|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 95, ts 5090814031, free_ts 0\n set_page_owner  include/linux/page_owner.h:35  [inline]\n post_alloc_hook  mm/page_alloc.c:2456  [inline]\n prep_new_page+0x179/0x180  mm/page_alloc.c:2462 \n get_page_from_freelist+0x2235/0x23d0  mm/page_alloc.c:4254 \n __alloc_pages_nodemask+0x268/0x5f0  mm/page_alloc.c:5370 \n alloc_slab_page mm/slub.c:-1 [inline]\n allocate_slab  mm/slub.c:1808  [inline]\n new_slab+0x84/0x3f0  mm/slub.c:1869 \n new_slab_objects  mm/slub.c:2627  [inline]\n ___slab_alloc+0x2a6/0x450  mm/slub.c:2791 \n __slab_alloc+0x63/0xa0  mm/slub.c:2831 \n slab_alloc_node  mm/slub.c:2913  [inline]\n slab_alloc  mm/slub.c:2955  [inline]\n __kmalloc_track_caller+0x1ef/0x320  mm/slub.c:4536 \n __kmalloc_reserve  net/core/skbuff.c:144  [inline]\n __alloc_skb+0xdc/0x520  net/core/skbuff.c:212 \n alloc_skb  include/linux/skbuff.h:1126  [inline]\n netlink_alloc_large_skb  net/netlink/af_netlink.c:1178  [inline]\n netlink_sendmsg+0x5f6/0xb30  net/netlink/af_netlink.c:1889 \n sock_sendmsg_nosec  net/socket.c:652  [inline]\n __sock_sendmsg  net/socket.c:664  [inline]\n ____sys_sendmsg+0x5a2/0x8c0  net/socket.c:2376 \n ___sys_sendmsg+0x1f0/0x260  net/socket.c:2430 \n __sys_sendmsg  net/socket.c:2459  [inline]\n __do_sys_sendmsg  net/socket.c:2468  [inline]\n __se_sys_sendmsg  net/socket.c:2466  [inline]\n __x64_sys_sendmsg+0x1e2/0x2a0  net/socket.c:2466 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\npage_owner free stack trace missing\n\nMemory state around the buggy address:\n ffff88811471ca80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n ffff88811471cb00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n>ffff88811471cb80: 00 00 00 00 00 00 00 00 fc fc fc fc fc fc fc fc\n                                           ^\n ffff88811471cc00: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc\n ffff88811471cc80: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc\n==================================================================\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000000: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000000-0x0000000000000007]\nCPU: 1 PID: 837 Comm: syz.6.85 Tainted: G    B   W         syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nRIP: 0010:update_sit_entry+0x3eb/0xf50 fs/f2fs/segment.c:-1\nCode: 89 45 a8 49 01 c5 41 f6 d7 41 80 e7 07 44 89 f9 41 bf 01 00 00 00 41 d3 e7 4d 89 ee 49 c1 ee 03 48 b8 00 00 00 00 00 fc ff df <41> 0f b6 04 06 84 c0 0f 85 a5 08 00 00 41 0f b6 5d 00 44 89 f8 41\nRSP: 0018:ffffc90001207350 EFLAGS: 00010246\nRAX: dffffc0000000000 RBX: ffff88811471cbc8 RCX: 0000000000000007\nRDX: 0000000000000000 RSI: 0000000000000008 RDI: ffff88811471cbc8\nRBP: ffffc900012073d0 R08: ffff888115c193c0 R09: 0000000000000003\nR10: 00000000ffffffff R11: 0000000000000000 R12: 0000000000004000\nR13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000080\nFS:  00007feae1c406c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007ffd90c62f98 CR3: 0000000127a9b000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n f2fs_allocate_data_block+0x156b/0x3a10  fs/f2fs/segment.c:3481 \n __allocate_data_block+0x52a/0x980  fs/f2fs/data.c:1407 \n f2fs_map_blocks+0xdc8/0x35c0  fs/f2fs/data.c:1575 \n expand_inode_data+0x5d7/0x930  fs/f2fs/file.c:1724 \n f2fs_fallocate+0x42b/0x7e0  fs/f2fs/file.c:1825 \n vfs_fallocate+0x4b4/0x590  fs/open.c:310 \n ioctl_preallocate  fs/ioctl.c:494  [inline]\n file_ioctl fs/ioctl.c:-1 [inline]\n do_vfs_ioctl+0x12e3/0x1510  fs/ioctl.c:732 \n __do_sys_ioctl  fs/ioctl.c:751  [inline]\n __se_sys_ioctl+0x9f/0x1a0  fs/ioctl.c:739 \n __x64_sys_ioctl+0x7b/0x90  fs/ioctl.c:739 \n do_syscall_64+0x31/0x40  arch/x86/entry/common.c:46 \n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7feae1e11be9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007feae1c40038 EFLAGS: 00000246 ORIG_RAX: 0000000000000010\nRAX: ffffffffffffffda RBX: 00007feae2049180 RCX: 00007feae1e11be9\nRDX: 00002000000000c0 RSI: 0000000040305828 RDI: 0000000000000005\nRBP: 00007feae1e94e19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007feae2049218 R14: 00007feae2049180 R15: 00007ffeedd3cd88\nModules linked in:\n---[ end trace b21af47fc54341ff ]---\nRIP: 0010:update_sit_entry+0x3eb/0xf50 fs/f2fs/segment.c:-1\nCode: 89 45 a8 49 01 c5 41 f6 d7 41 80 e7 07 44 89 f9 41 bf 01 00 00 00 41 d3 e7 4d 89 ee 49 c1 ee 03 48 b8 00 00 00 00 00 fc ff df <41> 0f b6 04 06 84 c0 0f 85 a5 08 00 00 41 0f b6 5d 00 44 89 f8 41\nRSP: 0018:ffffc90001207350 EFLAGS: 00010246\nRAX: dffffc0000000000 RBX: ffff88811471cbc8 RCX: 0000000000000007\nRDX: 0000000000000000 RSI: 0000000000000008 RDI: ffff88811471cbc8\nRBP: ffffc900012073d0 R08: ffff888115c193c0 R09: 0000000000000003\nR10: 00000000ffffffff R11: 0000000000000000 R12: 0000000000004000\nR13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000080\nFS:  00007feae1c406c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f0f2e064000 CR3: 0000000127a9b000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t89 45 a8             \tmov    %eax,-0x58(%rbp)\n   3:\t49 01 c5             \tadd    %rax,%r13\n   6:\t41 f6 d7             \tnot    %r15b\n   9:\t41 80 e7 07          \tand    $0x7,%r15b\n   d:\t44 89 f9             \tmov    %r15d,%ecx\n  10:\t41 bf 01 00 00 00    \tmov    $0x1,%r15d\n  16:\t41 d3 e7             \tshl    %cl,%r15d\n  19:\t4d 89 ee             \tmov    %r13,%r14\n  1c:\t49 c1 ee 03          \tshr    $0x3,%r14\n  20:\t48 b8 00 00 00 00 00 \tmovabs $0xdffffc0000000000,%rax\n  27:\tfc ff df\n* 2a:\t41 0f b6 04 06       \tmovzbl (%r14,%rax,1),%eax <-- trapping instruction\n  2f:\t84 c0                \ttest   %al,%al\n  31:\t0f 85 a5 08 00 00    \tjne    0x8dc\n  37:\t41 0f b6 5d 00       \tmovzbl 0x0(%r13),%ebx\n  3c:\t44 89 f8             \tmov    %r15d,%eax\n  3f:\t41                   \trex.B"
+    },
+    "openai_llm": {
+      "raw_output": "{\n  \"overview\": {\n    \"exploitability\": \"LOW\",\n    \"rationale\": \"The crash is from an out-of-bounds READ in __set_sit_entry_type on a kmalloc-1k buffer allocated by build_sit_info, reached via fallocate; this is a kernel DoS without an obvious controlled write.\",\n    \"primitive_capabilities\": \"An unprivileged user who can mount a crafted F2FS image and issue fallocate on it can reliably crash the kernel (DoS). No clear memory corruption write primitive is evidenced.\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"Mount a crafted F2FS image whose superblock/segment layout causes sit_info arrays (SIT entries/bitmaps) to be undersized so that reset_curseg indexes past them.\",\n      \"concrete_constraints\": [\n        \"superblock.segment_count_main = M such that sizeof(struct seg_entry) * M \u2272 1024 (e.g., M in ~[60, 85] assuming seg_entry \u2248 12\u201316 bytes)\",\n        \"segs_per_sec = S \u2265 1\",\n        \"Derived segno used by reset_curseg satisfies segno \u2265 M (e.g., segno = secno * S with secno \u2265 ceil(M/S))\",\n        \"Mount must pass F2FS sanity checks (valid magic/version, nonzero segment_count_main, etc.)\"\n      ],\n      \"why_reaches_crash\": \"build_sit_info allocates ~1 KiB for SIT-related arrays; later reset_curseg/__set_sit_entry_type computes segno \u2265 allocated entry count, causing an OOB read on sit_info memory.\"\n    },\n    {\n      \"summary\": \"On that mounted filesystem, perform an allocation that forces selecting/initializing a new current segment/section via fallocate.\",\n      \"concrete_constraints\": [\n        \"ioctl_preallocate/vfs_fallocate invoked on a regular file (S_ISREG) with write access\",\n        \"mode uses supported flags (e.g., 0 or FALLOC_FL_KEEP_SIZE), offset \u2265 0, len > 0\",\n        \"Filesystem has at least one free section/segment (free_sections > 0) so that f2fs_allocate_new_section \u2192 new_curseg \u2192 reset_curseg runs\"\n      ],\n      \"why_reaches_crash\": \"expand_inode_data \u2192 f2fs_allocate_new_section \u2192 new_curseg \u2192 reset_curseg calls __set_sit_entry_type with the out-of-range segno, triggering the OOB.\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"fs/open.c\",\n        \"line\": 310,\n        \"code\": \"vfs_fallocate+0x4b4/0x590\",\n        \"condition\": \"len > 0 and mode within supported set for fallocate via ioctl_preallocate\",\n        \"why_it_blocks\": \"Invalid mode or zero length would bypass the allocation path and avoid segment selection; user-controlled.\"\n      },\n      {\n        \"file\": \"fs/ioctl.c\",\n        \"line\": 494,\n        \"code\": \"ioctl_preallocate  fs/ioctl.c:494  [inline]\",\n        \"condition\": \"ioctl command must be one of the preallocation ioctls that route to vfs_fallocate\",\n        \"why_it_blocks\": \"Wrong ioctl would not call vfs_fallocate; user-controlled.\"\n      },\n      {\n        \"file\": \"fs/f2fs/file.c\",\n        \"line\": 1825,\n        \"code\": \"f2fs_fallocate+0x42b/0x7e0\",\n        \"condition\": \"File must be a regular, writable inode; flags not rejected by f2fs_fallocate\",\n        \"why_it_blocks\": \"Non-regular or disallowed flags stop before allocation; user-controlled choice of target file/flags.\"\n      }\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"fs/f2fs/segment.c\",\n        \"line\": 5258,\n        \"code\": \"f2fs_build_segment_manager+0xdba/0x48f0\",\n        \"condition\": \"build_sit_info allocates sit_info arrays based on segment_count_main yielding ~1 KiB buffer\",\n        \"why_it_blocks\": \"If SIT arrays were properly sized, later segno indexing would not go OOB; internal sizing derived from on-disk SB.\"\n      },\n      {\n        \"file\": \"fs/f2fs/segment.c\",\n        \"line\": 3039,\n        \"code\": \"__allocate_new_segment+0x13d/0x810\",\n        \"condition\": \"There must be free segments/sections to allocate\",\n        \"why_it_blocks\": \"ENOSPC would prevent new_curseg/reset_curseg from running; internal free-space state.\"\n      },\n      {\n        \"file\": \"fs/f2fs/segment.c\",\n        \"line\": 2723,\n        \"code\": \"new_curseg+0x12f6/0x18a0\",\n        \"condition\": \"new_curseg selects a segno (from secno*segs_per_sec + offset) that is \u2265 sit_info array length\",\n        \"why_it_blocks\": \"If segno < allocated entries, __set_sit_entry_type would be in-bounds; here it is not; derived from SB + runtime state.\"\n      },\n      {\n        \"file\": \"fs/f2fs/segment.c\",\n        \"line\": 2663,\n        \"code\": \"reset_curseg+0x4dd/0x560\",\n        \"condition\": \"reset_curseg calls __set_sit_entry_type(sbi, segno, type) without rejecting segno \u2265 MAIN_SEGS\",\n        \"why_it_blocks\": \"A guard against segno >= MAIN_SEGS would prevent the OOB; missing/ineffective internal invariant.\"\n      },\n      {\n        \"file\": \"fs/f2fs/segment.c\",\n        \"line\": 2257,\n        \"code\": \"__set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\",\n        \"condition\": \"Indexes sit_info per-seg entry by segno\",\n        \"why_it_blocks\": \"OOB arises only if segno indexes past allocated sit_info; internal array bounds.\"\n      }\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": 2257, \"code\": \"__set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]\", \"note\": \"KASAN: slab-out-of-bounds originates here while accessing SIT entry by segno.\" },\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": 2663, \"code\": \"reset_curseg+0x4dd/0x560\", \"note\": \"Caller that passes segno to __set_sit_entry_type; no prior bounds failure evident in trace.\" },\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": 2723, \"code\": \"new_curseg+0x12f6/0x18a0\", \"note\": \"Selects/initializes a new current segment; computes segno from section mapping.\" },\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": 3039, \"code\": \"__allocate_new_segment+0x13d/0x810\", \"note\": \"Allocation path that leads to new_curseg/reset_curseg.\" },\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": 3054, \"code\": \"f2fs_allocate_new_section+0x1d5/0x280\", \"note\": \"Triggers new section selection during fallocate expansion.\" },\n    { \"file\": \"fs/f2fs/file.c\", \"line\": 1720, \"code\": \"expand_inode_data+0x5a8/0x930\", \"note\": \"Fallocate expansion path into segment allocation.\" },\n    { \"file\": \"fs/f2fs/file.c\", \"line\": 1825, \"code\": \"f2fs_fallocate+0x42b/0x7e0\", \"note\": \"Entry from vfs_fallocate into F2FS implementation.\" },\n    { \"file\": \"fs/ioctl.c\", \"line\": 494, \"code\": \"ioctl_preallocate  fs/ioctl.c:494  [inline]\", \"note\": \"ioctl path feeding vfs_fallocate.\" },\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": 4395, \"code\": \"build_sit_info  fs/f2fs/segment.c:4395  [inline]\", \"note\": \"Allocator of the kmalloc-1k buffer; crash log shows object comes from here (kmalloc-1k).\" },\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": 5258, \"code\": \"f2fs_build_segment_manager+0xdba/0x48f0\", \"note\": \"Calls build_sit_info using on-disk superblock to size SIT metadata; crafted SB can mis-size arrays.\" },\n    { \"file\": \"fs/f2fs/segment.c\", \"line\": -1, \"code\": \"update_sit_entry+0x3eb/0xf50\", \"note\": \"Subsequent GPF in SIT update confirms out-of-bounds/corrupt indexing into SIT structures.\" },\n    { \"file\": \"<snippets>\", \"line\": 0, \"code\": \"<missing>\", \"note\": \"Exact guard code lines are not present in provided snippets; conditions inferred from call trace and symbol names.\" }\n  ]\n}",
+      "parsed": {
+        "overview": {
+          "exploitability": "LOW",
+          "rationale": "The crash is from an out-of-bounds READ in __set_sit_entry_type on a kmalloc-1k buffer allocated by build_sit_info, reached via fallocate; this is a kernel DoS without an obvious controlled write.",
+          "primitive_capabilities": "An unprivileged user who can mount a crafted F2FS image and issue fallocate on it can reliably crash the kernel (DoS). No clear memory corruption write primitive is evidenced."
+        },
+        "preconditions": [
+          {
+            "summary": "Mount a crafted F2FS image whose superblock/segment layout causes sit_info arrays (SIT entries/bitmaps) to be undersized so that reset_curseg indexes past them.",
+            "concrete_constraints": [
+              "superblock.segment_count_main = M such that sizeof(struct seg_entry) * M \u2272 1024 (e.g., M in ~[60, 85] assuming seg_entry \u2248 12\u201316 bytes)",
+              "segs_per_sec = S \u2265 1",
+              "Derived segno used by reset_curseg satisfies segno \u2265 M (e.g., segno = secno * S with secno \u2265 ceil(M/S))",
+              "Mount must pass F2FS sanity checks (valid magic/version, nonzero segment_count_main, etc.)"
+            ],
+            "why_reaches_crash": "build_sit_info allocates ~1 KiB for SIT-related arrays; later reset_curseg/__set_sit_entry_type computes segno \u2265 allocated entry count, causing an OOB read on sit_info memory."
+          },
+          {
+            "summary": "On that mounted filesystem, perform an allocation that forces selecting/initializing a new current segment/section via fallocate.",
+            "concrete_constraints": [
+              "ioctl_preallocate/vfs_fallocate invoked on a regular file (S_ISREG) with write access",
+              "mode uses supported flags (e.g., 0 or FALLOC_FL_KEEP_SIZE), offset \u2265 0, len > 0",
+              "Filesystem has at least one free section/segment (free_sections > 0) so that f2fs_allocate_new_section \u2192 new_curseg \u2192 reset_curseg runs"
+            ],
+            "why_reaches_crash": "expand_inode_data \u2192 f2fs_allocate_new_section \u2192 new_curseg \u2192 reset_curseg calls __set_sit_entry_type with the out-of-range segno, triggering the OOB."
+          }
+        ],
+        "path_constraints": {
+          "input": [
+            {
+              "file": "fs/open.c",
+              "line": 310,
+              "code": "vfs_fallocate+0x4b4/0x590",
+              "condition": "len > 0 and mode within supported set for fallocate via ioctl_preallocate",
+              "why_it_blocks": "Invalid mode or zero length would bypass the allocation path and avoid segment selection; user-controlled."
+            },
+            {
+              "file": "fs/ioctl.c",
+              "line": 494,
+              "code": "ioctl_preallocate  fs/ioctl.c:494  [inline]",
+              "condition": "ioctl command must be one of the preallocation ioctls that route to vfs_fallocate",
+              "why_it_blocks": "Wrong ioctl would not call vfs_fallocate; user-controlled."
+            },
+            {
+              "file": "fs/f2fs/file.c",
+              "line": 1825,
+              "code": "f2fs_fallocate+0x42b/0x7e0",
+              "condition": "File must be a regular, writable inode; flags not rejected by f2fs_fallocate",
+              "why_it_blocks": "Non-regular or disallowed flags stop before allocation; user-controlled choice of target file/flags."
+            }
+          ],
+          "kernel_state": [
+            {
+              "file": "fs/f2fs/segment.c",
+              "line": 5258,
+              "code": "f2fs_build_segment_manager+0xdba/0x48f0",
+              "condition": "build_sit_info allocates sit_info arrays based on segment_count_main yielding ~1 KiB buffer",
+              "why_it_blocks": "If SIT arrays were properly sized, later segno indexing would not go OOB; internal sizing derived from on-disk SB."
+            },
+            {
+              "file": "fs/f2fs/segment.c",
+              "line": 3039,
+              "code": "__allocate_new_segment+0x13d/0x810",
+              "condition": "There must be free segments/sections to allocate",
+              "why_it_blocks": "ENOSPC would prevent new_curseg/reset_curseg from running; internal free-space state."
+            },
+            {
+              "file": "fs/f2fs/segment.c",
+              "line": 2723,
+              "code": "new_curseg+0x12f6/0x18a0",
+              "condition": "new_curseg selects a segno (from secno*segs_per_sec + offset) that is \u2265 sit_info array length",
+              "why_it_blocks": "If segno < allocated entries, __set_sit_entry_type would be in-bounds; here it is not; derived from SB + runtime state."
+            },
+            {
+              "file": "fs/f2fs/segment.c",
+              "line": 2663,
+              "code": "reset_curseg+0x4dd/0x560",
+              "condition": "reset_curseg calls __set_sit_entry_type(sbi, segno, type) without rejecting segno \u2265 MAIN_SEGS",
+              "why_it_blocks": "A guard against segno >= MAIN_SEGS would prevent the OOB; missing/ineffective internal invariant."
+            },
+            {
+              "file": "fs/f2fs/segment.c",
+              "line": 2257,
+              "code": "__set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]",
+              "condition": "Indexes sit_info per-seg entry by segno",
+              "why_it_blocks": "OOB arises only if segno indexes past allocated sit_info; internal array bounds."
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": 2257,
+            "code": "__set_sit_entry_type  fs/f2fs/segment.c:2257  [inline]",
+            "note": "KASAN: slab-out-of-bounds originates here while accessing SIT entry by segno."
+          },
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": 2663,
+            "code": "reset_curseg+0x4dd/0x560",
+            "note": "Caller that passes segno to __set_sit_entry_type; no prior bounds failure evident in trace."
+          },
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": 2723,
+            "code": "new_curseg+0x12f6/0x18a0",
+            "note": "Selects/initializes a new current segment; computes segno from section mapping."
+          },
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": 3039,
+            "code": "__allocate_new_segment+0x13d/0x810",
+            "note": "Allocation path that leads to new_curseg/reset_curseg."
+          },
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": 3054,
+            "code": "f2fs_allocate_new_section+0x1d5/0x280",
+            "note": "Triggers new section selection during fallocate expansion."
+          },
+          {
+            "file": "fs/f2fs/file.c",
+            "line": 1720,
+            "code": "expand_inode_data+0x5a8/0x930",
+            "note": "Fallocate expansion path into segment allocation."
+          },
+          {
+            "file": "fs/f2fs/file.c",
+            "line": 1825,
+            "code": "f2fs_fallocate+0x42b/0x7e0",
+            "note": "Entry from vfs_fallocate into F2FS implementation."
+          },
+          {
+            "file": "fs/ioctl.c",
+            "line": 494,
+            "code": "ioctl_preallocate  fs/ioctl.c:494  [inline]",
+            "note": "ioctl path feeding vfs_fallocate."
+          },
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": 4395,
+            "code": "build_sit_info  fs/f2fs/segment.c:4395  [inline]",
+            "note": "Allocator of the kmalloc-1k buffer; crash log shows object comes from here (kmalloc-1k)."
+          },
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": 5258,
+            "code": "f2fs_build_segment_manager+0xdba/0x48f0",
+            "note": "Calls build_sit_info using on-disk superblock to size SIT metadata; crafted SB can mis-size arrays."
+          },
+          {
+            "file": "fs/f2fs/segment.c",
+            "line": -1,
+            "code": "update_sit_entry+0x3eb/0xf50",
+            "note": "Subsequent GPF in SIT update confirms out-of-bounds/corrupt indexing into SIT structures."
+          },
+          {
+            "file": "<snippets>",
+            "line": 0,
+            "code": "<missing>",
+            "note": "Exact guard code lines are not present in provided snippets; conditions inferred from call trace and symbol names."
+          }
+        ]
+      }
+    },
+    "summary": null
+  }
+}

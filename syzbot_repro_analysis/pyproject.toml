@@ -20,6 +20,10 @@ dependencies = [
     "requests>=2.32.3",
     "rich>=14.0.0",
     "typer>=0.16.0",
+    "openai>=2.6.1",
+    "transformers>=4.57.1",
+    "torch>=2.9.0",
+    "dotenv>=0.9.9",
 ]
 
 [tool.uv]
