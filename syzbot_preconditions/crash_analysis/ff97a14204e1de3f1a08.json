@@ -1,0 +1,2891 @@
+{
+  "parsed": {
+    "kind": null,
+    "access": null,
+    "object_info": null,
+    "allocated_by": [],
+    "freed_by": [],
+    "link_frames": [
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400",
+        "file": "include/linux/dcache.h",
+        "line": 400
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405",
+        "file": "include/linux/dcache.h",
+        "line": 405
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451",
+        "file": "include/linux/dcache.h",
+        "line": 451
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130",
+        "file": "fs/namei.c",
+        "line": 3130
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219",
+        "file": "fs/namei.c",
+        "line": 3219
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317",
+        "file": "fs/namei.c",
+        "line": 3317
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506",
+        "file": "fs/namei.c",
+        "line": 3506
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536",
+        "file": "fs/namei.c",
+        "line": 3536
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217",
+        "file": "fs/open.c",
+        "line": 1217
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274",
+        "file": "fs/open.c",
+        "line": 1274
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252",
+        "file": "fs/open.c",
+        "line": 1252
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252",
+        "file": "fs/open.c",
+        "line": 1252
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400",
+        "file": "include/linux/dcache.h",
+        "line": 400
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405",
+        "file": "include/linux/dcache.h",
+        "line": 405
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451",
+        "file": "include/linux/dcache.h",
+        "line": 451
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130",
+        "file": "fs/namei.c",
+        "line": 3130
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219",
+        "file": "fs/namei.c",
+        "line": 3219
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317",
+        "file": "fs/namei.c",
+        "line": 3317
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506",
+        "file": "fs/namei.c",
+        "line": 3506
+      }
+    ],
+    "frames": [],
+    "raw": "general protection fault, probably for non-canonical address 0xdffffc0000000001: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000008-0x000000000000000f]\nCPU: 0 PID: 283 Comm: syz-executor168 Not tainted 5.10.240-syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nRIP: 0010:__d_entry_type <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400'>include/linux/dcache.h:400</a> [inline]\nRIP: 0010:d_is_miss <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405'>include/linux/dcache.h:405</a> [inline]\nRIP: 0010:d_is_negative <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451'>include/linux/dcache.h:451</a> [inline]\nRIP: 0010:atomic_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130'>fs/namei.c:3130</a> [inline]\nRIP: 0010:lookup_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219'>fs/namei.c:3219</a> [inline]\nRIP: 0010:open_last_lookups <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317'>fs/namei.c:3317</a> [inline]\nRIP: 0010:path_openat+0x1738/0x3160 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506'>fs/namei.c:3506</a>\nCode: ae 61 02 00 49 63 de 4c 8b 74 24 38 e9 86 fb ff ff e8 ec 79 bb ff 44 8b 6c 24 14 44 8b a4 24 80 00 00 00 48 89 d8 48 c1 e8 03 <42> 0f b6 04 38 84 c0 0f 85 75 09 00 00 44 8b 33 be 00 00 70 00 44\nRSP: 0018:ffffc90000b37960 EFLAGS: 00010202\n\nRAX: 0000000000000001 RBX: 0000000000000008 RCX: ffff888107ffe2c0\nRDX: 0000000000000000 RSI: 0000000000000003 RDI: ffff888107ffe2c0\nRBP: ffffc90000b37b70 R08: dffffc0000000000 R09: ffffed102428f3a4\nR10: ffffed102428f3a4 R11: 1ffff1102428f3a3 R12: 0000000000000000\nR13: 0000000000000000 R14: ffff88811be9ac18 R15: dffffc0000000000\nFS:  00007f0fe7d0d6c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000200000006000 CR3: 000000011de7f000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n do_filp_open+0x1b3/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536'>fs/namei.c:3536</a>\n do_sys_openat2+0x14c/0x6d0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217'>fs/open.c:1217</a>\n __do_sys_openat2 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274'>fs/open.c:1274</a> [inline]\n __se_sys_openat2 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252'>fs/open.c:1252</a> [inline]\n __x64_sys_openat2+0x20e/0x270 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252'>fs/open.c:1252</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7f0fe7d4b539\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 c1 17 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007f0fe7d0d218 EFLAGS: 00000246\n ORIG_RAX: 00000000000001b5\nRAX: ffffffffffffffda RBX: 00007f0fe7dd83e8 RCX: 00007f0fe7d4b539\nRDX: 0000200000000100 RSI: 0000200000000000 RDI: 00000000ffffff9c\nRBP: 00007f0fe7dd83e0 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000018 R11: 0000000000000246 R12: 00007f0fe7da5034\nR13: 0000200000004280 R14: 00007f0fe7da300e R15: 00002000000020c0\nModules linked in:\n---[ end trace 77739026dae48e03 ]---\nRIP: 0010:__d_entry_type <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400'>include/linux/dcache.h:400</a> [inline]\nRIP: 0010:d_is_miss <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405'>include/linux/dcache.h:405</a> [inline]\nRIP: 0010:d_is_negative <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451'>include/linux/dcache.h:451</a> [inline]\nRIP: 0010:atomic_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130'>fs/namei.c:3130</a> [inline]\nRIP: 0010:lookup_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219'>fs/namei.c:3219</a> [inline]\nRIP: 0010:open_last_lookups <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317'>fs/namei.c:3317</a> [inline]\nRIP: 0010:path_openat+0x1738/0x3160 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506'>fs/namei.c:3506</a>\nCode: ae 61 02 00 49 63 de 4c 8b 74 24 38 e9 86 fb ff ff e8 ec 79 bb ff 44 8b 6c 24 14 44 8b a4 24 80 00 00 00 48 89 d8 48 c1 e8 03 <42> 0f b6 04 38 84 c0 0f 85 75 09 00 00 44 8b 33 be 00 00 70 00 44\nRSP: 0018:ffffc90000b37960 EFLAGS: 00010202\nRAX: 0000000000000001 RBX: 0000000000000008 RCX: ffff888107ffe2c0\nRDX: 0000000000000000 RSI: 0000000000000003 RDI: ffff888107ffe2c0\nRBP: ffffc90000b37b70 R08: dffffc0000000000 R09: ffffed102428f3a4\nR10: ffffed102428f3a4 R11: 1ffff1102428f3a3 R12: 0000000000000000\nR13: 0000000000000000 R14: ffff88811be9ac18 R15: dffffc0000000000\nFS:  00007f0fe7d0d6c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f0fe7da2118 CR3: 000000011de7f000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess), 2 bytes skipped:\n   0:\t02 00                \tadd    (%rax),%al\n   2:\t49 63 de             \tmovslq %r14d,%rbx\n   5:\t4c 8b 74 24 38       \tmov    0x38(%rsp),%r14\n   a:\te9 86 fb ff ff       \tjmp    0xfffffb95\n   f:\te8 ec 79 bb ff       \tcall   0xffbb7a00\n  14:\t44 8b 6c 24 14       \tmov    0x14(%rsp),%r13d\n  19:\t44 8b a4 24 80 00 00 \tmov    0x80(%rsp),%r12d\n  20:\t00\n  21:\t48 89 d8             \tmov    %rbx,%rax\n  24:\t48 c1 e8 03          \tshr    $0x3,%rax\n* 28:\t42 0f b6 04 38       \tmovzbl (%rax,%r15,1),%eax <-- trapping instruction\n  2d:\t84 c0                \ttest   %al,%al\n  2f:\t0f 85 75 09 00 00    \tjne    0x9aa\n  35:\t44 8b 33             \tmov    (%rbx),%r14d\n  38:\tbe 00 00 70 00       \tmov    $0x700000,%esi\n  3d:\t44                   \trex.R\n"
+  },
+  "snippets": {
+    "urls": {
+      "https://android.googlesource.com/kernel/common/": {
+        "error": "URL not in expected +/commit/path format"
+      }
+    },
+    "links": {
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400#400": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400",
+        "file": "include/linux/dcache.h",
+        "line": 400,
+        "function_snippet": "static inline unsigned __d_entry_type(const struct dentry *dentry)\n{\n\treturn dentry->d_flags & DCACHE_ENTRY_TYPE;"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405#405": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405",
+        "file": "include/linux/dcache.h",
+        "line": 405,
+        "function_snippet": "\treturn __d_entry_type(dentry) == DCACHE_MISS_TYPE;"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451#451": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451",
+        "file": "include/linux/dcache.h",
+        "line": 451,
+        "function_snippet": "\treturn d_is_miss(dentry);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130#3130": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130",
+        "file": "fs/namei.c",
+        "line": 3130,
+        "function_snippet": "static struct dentry *atomic_open(struct nameidata *nd, struct dentry *dentry,\n\t\t\t\t  struct file *file,\n\t\t\t\t  int open_flag, umode_t mode)\n{\n\tstruct dentry *const DENTRY_NOT_SET = (void *) -1UL;\n\tstruct inode *dir =  nd->path.dentry->d_inode;\n\tint error;\n\n\tif (nd->flags & LOOKUP_DIRECTORY)\n\t\topen_flag |= O_DIRECTORY;\n\n\tfile->f_path.dentry = DENTRY_NOT_SET;\n\tfile->f_path.mnt = nd->path.mnt;\n\terror = dir->i_op->atomic_open(dir, dentry, file,\n\t\t\t\t       open_to_namei_flags(open_flag), mode);\n\td_lookup_done(dentry);\n\tif (!error) {\n\t\tif (file->f_mode & FMODE_OPENED) {\n\t\t\tif (unlikely(dentry != file->f_path.dentry)) {\n\t\t\t\tdput(dentry);\n\t\t\t\tdentry = dget(file->f_path.dentry);\n\t\t\t}\n\t\t} else if (WARN_ON(file->f_path.dentry == DENTRY_NOT_SET)) {\n\t\t\terror = -EIO;\n\t\t} else {\n\t\t\tif (file->f_path.dentry) {\n\t\t\t\tdput(dentry);\n\t\t\t\tdentry = file->f_path.dentry;\n\t\t\t}\n\t\t\tif (unlikely(d_is_negative(dentry)))"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219#3219": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219",
+        "file": "fs/namei.c",
+        "line": 3219,
+        "function_snippet": "static struct dentry *lookup_open(struct nameidata *nd, struct file *file,\n\t\t\t\t  const struct open_flags *op,\n\t\t\t\t  bool got_write)\n{\n\tstruct dentry *dir = nd->path.dentry;\n\tstruct inode *dir_inode = dir->d_inode;\n\tint open_flag = op->open_flag;\n\tstruct dentry *dentry;\n\tint error, create_error = 0;\n\tumode_t mode = op->mode;\n\tDECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);\n\n\tif (unlikely(IS_DEADDIR(dir_inode)))\n\t\treturn ERR_PTR(-ENOENT);\n\n\tfile->f_mode &= ~FMODE_CREATED;\n\tdentry = d_lookup(dir, &nd->last);\n\tfor (;;) {\n\t\tif (!dentry) {\n\t\t\tdentry = d_alloc_parallel(dir, &nd->last, &wq);\n\t\t\tif (IS_ERR(dentry))\n\t\t\t\treturn dentry;\n\t\t}\n\t\tif (d_in_lookup(dentry))\n\t\t\tbreak;\n\n\t\terror = d_revalidate(dentry, nd->flags);\n\t\tif (likely(error > 0))\n\t\t\tbreak;\n\t\tif (error)\n\t\t\tgoto out_dput;\n\t\td_invalidate(dentry);\n\t\tdput(dentry);\n\t\tdentry = NULL;\n\t}\n\tif (dentry->d_inode) {\n\t\t/* Cached positive dentry: will open in f_op->open */\n\t\treturn dentry;\n\t}\n\n\t/*\n\t * Checking write permission is tricky, bacuse we don't know if we are\n\t * going to actually need it: O_CREAT opens should work as long as the\n\t * file exists.  But checking existence breaks atomicity.  The trick is\n\t * to check access and if not granted clear O_CREAT from the flags.\n\t *\n\t * Another problem is returing the \"right\" error value (e.g. for an\n\t * O_EXCL open we want to return EEXIST not EROFS).\n\t */\n\tif (unlikely(!got_write))\n\t\topen_flag &= ~O_TRUNC;\n\tif (open_flag & O_CREAT) {\n\t\tif (open_flag & O_EXCL)\n\t\t\topen_flag &= ~O_TRUNC;\n\t\tmode = vfs_prepare_mode(dir->d_inode, mode, mode, mode);\n\t\tif (likely(got_write))\n\t\t\tcreate_error = may_o_create(&nd->path, dentry, mode);\n\t\telse\n\t\t\tcreate_error = -EROFS;\n\t}\n\tif (create_error)\n\t\topen_flag &= ~O_CREAT;\n\tif (dir_inode->i_op->atomic_open) {\n\t\tdentry = atomic_open(nd, dentry, file, open_flag, mode);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317#3317": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317",
+        "file": "fs/namei.c",
+        "line": 3317,
+        "function_snippet": "static const char *open_last_lookups(struct nameidata *nd,\n\t\t   struct file *file, const struct open_flags *op)\n{\n\tstruct dentry *dir = nd->path.dentry;\n\tint open_flag = op->open_flag;\n\tbool got_write = false;\n\tunsigned seq;\n\tstruct inode *inode;\n\tstruct dentry *dentry;\n\tconst char *res;\n\n\tnd->flags |= op->intent;\n\n\tif (nd->last_type != LAST_NORM) {\n\t\tif (nd->depth)\n\t\t\tput_link(nd);\n\t\treturn handle_dots(nd, nd->last_type);\n\t}\n\n\tif (!(open_flag & O_CREAT)) {\n\t\tif (nd->last.name[nd->last.len])\n\t\t\tnd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;\n\t\t/* we _can_ be in RCU mode here */\n\t\tdentry = lookup_fast(nd, &inode, &seq);\n\t\tif (IS_ERR(dentry))\n\t\t\treturn ERR_CAST(dentry);\n\t\tif (likely(dentry))\n\t\t\tgoto finish_lookup;\n\n\t\tBUG_ON(nd->flags & LOOKUP_RCU);\n\t} else {\n\t\t/* create side of things */\n\t\tif (nd->flags & LOOKUP_RCU) {\n\t\t\tif (!try_to_unlazy(nd))\n\t\t\t\treturn ERR_PTR(-ECHILD);\n\t\t}\n\t\taudit_inode(nd->name, dir, AUDIT_INODE_PARENT);\n\t\t/* trailing slashes? */\n\t\tif (unlikely(nd->last.name[nd->last.len]))\n\t\t\treturn ERR_PTR(-EISDIR);\n\t}\n\n\tif (open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)) {\n\t\tgot_write = !mnt_want_write(nd->path.mnt);\n\t\t/*\n\t\t * do _not_ fail yet - we might not need that or fail with\n\t\t * a different error; let lookup_open() decide; we'll be\n\t\t * dropping this one anyway.\n\t\t */\n\t}\n\tif (open_flag & O_CREAT)\n\t\tinode_lock(dir->d_inode);\n\telse\n\t\tinode_lock_shared(dir->d_inode);\n\tdentry = lookup_open(nd, file, op, got_write);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506#3506": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506",
+        "file": "fs/namei.c",
+        "line": 3506,
+        "function_snippet": "static struct file *path_openat(struct nameidata *nd,\n\t\t\tconst struct open_flags *op, unsigned flags)\n{\n\tstruct file *file;\n\tint error;\n\n\tfile = alloc_empty_file(op->open_flag, current_cred());\n\tif (IS_ERR(file))\n\t\treturn file;\n\n\tif (unlikely(file->f_flags & __O_TMPFILE)) {\n\t\terror = do_tmpfile(nd, flags, op, file);\n\t} else if (unlikely(file->f_flags & O_PATH)) {\n\t\terror = do_o_path(nd, flags, file);\n\t} else {\n\t\tconst char *s = path_init(nd, flags);\n\t\twhile (!(error = link_path_walk(s, nd)) &&\n\t\t       (s = open_last_lookups(nd, file, op)) != NULL)"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536#3536": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536",
+        "file": "fs/namei.c",
+        "line": 3536,
+        "function_snippet": "struct file *do_filp_open(int dfd, struct filename *pathname,\n\t\tconst struct open_flags *op)\n{\n\tstruct nameidata nd;\n\tint flags = op->lookup_flags;\n\tstruct file *filp;\n\n\tset_nameidata(&nd, dfd, pathname);\n\tfilp = path_openat(&nd, op, flags | LOOKUP_RCU);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217#1217": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217",
+        "file": "fs/open.c",
+        "line": 1217,
+        "function_snippet": "static long do_sys_openat2(int dfd, const char __user *filename,\n\t\t\t   struct open_how *how)\n{\n\tstruct open_flags op;\n\tint fd = build_open_flags(how, &op);\n\tstruct filename *tmp;\n\n\tif (fd)\n\t\treturn fd;\n\n\ttmp = getname(filename);\n\tif (IS_ERR(tmp))\n\t\treturn PTR_ERR(tmp);\n\n\tfd = get_unused_fd_flags(how->flags);\n\tif (fd >= 0) {\n\t\tstruct file *f = do_filp_open(dfd, tmp, &op);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274#1274": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274",
+        "file": "fs/open.c",
+        "line": 1274,
+        "function_snippet": "SYSCALL_DEFINE4(openat2, int, dfd, const char __user *, filename,\n\t\tstruct open_how __user *, how, size_t, usize)\n{\n\tint err;\n\tstruct open_how tmp;\n\n\tBUILD_BUG_ON(sizeof(struct open_how) < OPEN_HOW_SIZE_VER0);\n\tBUILD_BUG_ON(sizeof(struct open_how) != OPEN_HOW_SIZE_LATEST);\n\n\tif (unlikely(usize < OPEN_HOW_SIZE_VER0))\n\t\treturn -EINVAL;\n\tif (unlikely(usize > PAGE_SIZE))\n\t\treturn -E2BIG;\n\n\terr = copy_struct_from_user(&tmp, sizeof(tmp), how, usize);\n\tif (err)\n\t\treturn err;\n\n\t/* O_LARGEFILE is only allowed for non-O_PATH. */\n\tif (!(tmp.flags & O_PATH) && force_o_largefile())\n\t\ttmp.flags |= O_LARGEFILE;\n\n\treturn do_sys_openat2(dfd, filename, &tmp);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252#1252": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252",
+        "file": "fs/open.c",
+        "line": 1252,
+        "function_snippet": "SYSCALL_DEFINE4(openat2, int, dfd, const char __user *, filename,"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46#46": {
+        "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46",
+        "file": "arch/x86/entry/common.c",
+        "line": 46,
+        "function_snippet": "__visible noinstr void do_syscall_64(unsigned long nr, struct pt_regs *regs)\n{\n\tnr = syscall_enter_from_user_mode(regs, nr);\n\n\tinstrumentation_begin();\n\tif (likely(nr < NR_syscalls)) {\n\t\tnr = array_index_nospec(nr, NR_syscalls);\n\t\tregs->ax = sys_call_table[nr](regs);"
+      }
+    }
+  },
+  "evidence": {
+    "https://android.googlesource.com/kernel/common/": {
+      "error": "URL not in expected +/commit/path format"
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400#400": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static inline unsigned __d_entry_type(const struct dentry *dentry)"
+        ],
+        [
+          3,
+          "return dentry->d_flags & DCACHE_ENTRY_TYPE;"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "dentry->d_flags"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400",
+      "source_file": "include/linux/dcache.h",
+      "source_line": 400
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405#405": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405",
+      "source_file": "include/linux/dcache.h",
+      "source_line": 405
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451#451": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451",
+      "source_file": "include/linux/dcache.h",
+      "source_line": 451
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130#3130": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static struct dentry *atomic_open(struct nameidata *nd, struct dentry *dentry,"
+        ],
+        [
+          2,
+          "struct file *file,"
+        ],
+        [
+          5,
+          "struct dentry *const DENTRY_NOT_SET = (void *) -1UL;"
+        ],
+        [
+          6,
+          "struct inode *dir =  nd->path.dentry->d_inode;"
+        ],
+        [
+          9,
+          "if (nd->flags & LOOKUP_DIRECTORY)"
+        ],
+        [
+          12,
+          "file->f_path.dentry = DENTRY_NOT_SET;"
+        ],
+        [
+          13,
+          "file->f_path.mnt = nd->path.mnt;"
+        ],
+        [
+          14,
+          "error = dir->i_op->atomic_open(dir, dentry, file,"
+        ],
+        [
+          18,
+          "if (file->f_mode & FMODE_OPENED) {"
+        ],
+        [
+          19,
+          "if (unlikely(dentry != file->f_path.dentry)) {"
+        ],
+        [
+          21,
+          "dentry = dget(file->f_path.dentry);"
+        ],
+        [
+          23,
+          "} else if (WARN_ON(file->f_path.dentry == DENTRY_NOT_SET)) {"
+        ],
+        [
+          26,
+          "if (file->f_path.dentry) {"
+        ],
+        [
+          28,
+          "dentry = file->f_path.dentry;"
+        ]
+      ],
+      "deref_writes": 5,
+      "deref_reads": 10,
+      "deref_exprs": [
+        "nd->path",
+        "dentry->d_inode",
+        "nd->flags",
+        "file->f_path",
+        "dir->i_op->atomic_open",
+        "file->f_mode"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130",
+      "source_file": "fs/namei.c",
+      "source_line": 3130
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219#3219": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static struct dentry *lookup_open(struct nameidata *nd, struct file *file,"
+        ],
+        [
+          2,
+          "const struct open_flags *op,"
+        ],
+        [
+          5,
+          "struct dentry *dir = nd->path.dentry;"
+        ],
+        [
+          6,
+          "struct inode *dir_inode = dir->d_inode;"
+        ],
+        [
+          7,
+          "int open_flag = op->open_flag;"
+        ],
+        [
+          8,
+          "struct dentry *dentry;"
+        ],
+        [
+          10,
+          "umode_t mode = op->mode;"
+        ],
+        [
+          16,
+          "file->f_mode &= ~FMODE_CREATED;"
+        ],
+        [
+          17,
+          "dentry = d_lookup(dir, &nd->last);"
+        ],
+        [
+          20,
+          "dentry = d_alloc_parallel(dir, &nd->last, &wq);"
+        ],
+        [
+          27,
+          "error = d_revalidate(dentry, nd->flags);"
+        ],
+        [
+          36,
+          "if (dentry->d_inode) {"
+        ],
+        [
+          37,
+          "/* Cached positive dentry: will open in f_op->open */"
+        ],
+        [
+          41,
+          "/*"
+        ],
+        [
+          42,
+          "* Checking write permission is tricky, bacuse we don't know if we are"
+        ],
+        [
+          43,
+          "* going to actually need it: O_CREAT opens should work as long as the"
+        ],
+        [
+          46,
+          "*"
+        ],
+        [
+          49,
+          "*/"
+        ],
+        [
+          55,
+          "mode = vfs_prepare_mode(dir->d_inode, mode, mode, mode);"
+        ],
+        [
+          57,
+          "create_error = may_o_create(&nd->path, dentry, mode);"
+        ],
+        [
+          63,
+          "if (dir_inode->i_op->atomic_open) {"
+        ]
+      ],
+      "deref_writes": 3,
+      "deref_reads": 13,
+      "deref_exprs": [
+        "nd->path",
+        "dir->d_inode",
+        "op->open_flag",
+        "op->mode",
+        "file->f_mode",
+        "nd->last",
+        "nd->flags",
+        "dentry->d_inode",
+        "f_op->open",
+        "dir_inode->i_op->atomic_open"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219",
+      "source_file": "fs/namei.c",
+      "source_line": 3219
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317#3317": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static const char *open_last_lookups(struct nameidata *nd,"
+        ],
+        [
+          2,
+          "struct file *file, const struct open_flags *op)"
+        ],
+        [
+          4,
+          "struct dentry *dir = nd->path.dentry;"
+        ],
+        [
+          5,
+          "int open_flag = op->open_flag;"
+        ],
+        [
+          8,
+          "struct inode *inode;"
+        ],
+        [
+          9,
+          "struct dentry *dentry;"
+        ],
+        [
+          10,
+          "const char *res;"
+        ],
+        [
+          12,
+          "nd->flags |= op->intent;"
+        ],
+        [
+          14,
+          "if (nd->last_type != LAST_NORM) {"
+        ],
+        [
+          15,
+          "if (nd->depth)"
+        ],
+        [
+          17,
+          "return handle_dots(nd, nd->last_type);"
+        ],
+        [
+          21,
+          "if (nd->last.name[nd->last.len])"
+        ],
+        [
+          22,
+          "nd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;"
+        ],
+        [
+          23,
+          "/* we _can_ be in RCU mode here */"
+        ],
+        [
+          30,
+          "BUG_ON(nd->flags & LOOKUP_RCU);"
+        ],
+        [
+          32,
+          "/* create side of things */"
+        ],
+        [
+          33,
+          "if (nd->flags & LOOKUP_RCU) {"
+        ],
+        [
+          37,
+          "audit_inode(nd->name, dir, AUDIT_INODE_PARENT);"
+        ],
+        [
+          38,
+          "/* trailing slashes? */"
+        ],
+        [
+          39,
+          "if (unlikely(nd->last.name[nd->last.len]))"
+        ],
+        [
+          44,
+          "got_write = !mnt_want_write(nd->path.mnt);"
+        ],
+        [
+          45,
+          "/*"
+        ],
+        [
+          46,
+          "* do _not_ fail yet - we might not need that or fail with"
+        ],
+        [
+          47,
+          "* a different error; let lookup_open() decide; we'll be"
+        ],
+        [
+          49,
+          "*/"
+        ],
+        [
+          52,
+          "inode_lock(dir->d_inode);"
+        ],
+        [
+          54,
+          "inode_lock_shared(dir->d_inode);"
+        ]
+      ],
+      "deref_writes": 4,
+      "deref_reads": 13,
+      "deref_exprs": [
+        "nd->path",
+        "op->open_flag",
+        "nd->flags",
+        "op->intent",
+        "nd->last_type",
+        "nd->depth",
+        "nd->last",
+        "nd->name",
+        "dir->d_inode"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317",
+      "source_file": "fs/namei.c",
+      "source_line": 3317
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506#3506": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static struct file *path_openat(struct nameidata *nd,"
+        ],
+        [
+          2,
+          "const struct open_flags *op, unsigned flags)"
+        ],
+        [
+          4,
+          "struct file *file;"
+        ],
+        [
+          7,
+          "file = alloc_empty_file(op->open_flag, current_cred());"
+        ],
+        [
+          11,
+          "if (unlikely(file->f_flags & __O_TMPFILE)) {"
+        ],
+        [
+          13,
+          "} else if (unlikely(file->f_flags & O_PATH)) {"
+        ],
+        [
+          16,
+          "const char *s = path_init(nd, flags);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 3,
+      "deref_exprs": [
+        "op->open_flag",
+        "file->f_flags"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506",
+      "source_file": "fs/namei.c",
+      "source_line": 3506
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536#3536": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "struct file *do_filp_open(int dfd, struct filename *pathname,"
+        ],
+        [
+          2,
+          "const struct open_flags *op)"
+        ],
+        [
+          5,
+          "int flags = op->lookup_flags;"
+        ],
+        [
+          6,
+          "struct file *filp;"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "op->lookup_flags"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536",
+      "source_file": "fs/namei.c",
+      "source_line": 3536
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217#1217": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static long do_sys_openat2(int dfd, const char __user *filename,"
+        ],
+        [
+          2,
+          "struct open_how *how)"
+        ],
+        [
+          6,
+          "struct filename *tmp;"
+        ],
+        [
+          15,
+          "fd = get_unused_fd_flags(how->flags);"
+        ],
+        [
+          17,
+          "struct file *f = do_filp_open(dfd, tmp, &op);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "how->flags"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217",
+      "source_file": "fs/open.c",
+      "source_line": 1217
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274#1274": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "SYSCALL_DEFINE4(openat2, int, dfd, const char __user *, filename,"
+        ],
+        [
+          2,
+          "struct open_how __user *, how, size_t, usize)"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274",
+      "source_file": "fs/open.c",
+      "source_line": 1274
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252#1252": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "SYSCALL_DEFINE4(openat2, int, dfd, const char __user *, filename,"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252",
+      "source_file": "fs/open.c",
+      "source_line": 1252
+    },
+    "link:https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46#46": {
+      "dereference": true,
+      "array_access": true,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "__visible noinstr void do_syscall_64(unsigned long nr, struct pt_regs *regs)"
+        ],
+        [
+          8,
+          "regs->ax = sys_call_table[nr](regs);"
+        ],
+        [
+          8,
+          "regs->ax = sys_call_table[nr](regs);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 1,
+      "deref_exprs": [
+        "regs->ax"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 46
+    }
+  },
+  "classification": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7000000, ffff8881f7100000, disassembly, add, movzbl, mov",
+      "Triggering syscall(s) from crash text: openat2",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like dentry, atomic_open, nd may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): nd->flags & LOOKUP_DIRECTORY -- at fs/namei.c:3139",
+      "path constraint (input): nd->last.name[nd->last.len] -- at fs/namei.c:3338",
+      "path constraint (input): nd->flags & LOOKUP_RCU -- at fs/namei.c:3350",
+      "path constraint (input): unlikely(nd->last.name[nd->last.len]) -- at fs/namei.c:3356",
+      "path constraint (input): unlikely(file->f_flags & O_PATH) -- at fs/namei.c:3519",
+      "path constraint (kernel state): return dentry->d_flags & DCACHE_ENTRY_TYPE; -- at include/linux/dcache.h:403",
+      "path constraint (kernel state): return __d_entry_type(dentry) == DCACHE_MISS_TYPE; -- at include/linux/dcache.h:406",
+      "path constraint (kernel state): return d_is_miss(dentry); -- at include/linux/dcache.h:452",
+      "path constraint (kernel state): !error -- at fs/namei.c:3147",
+      "path constraint (kernel state): file->f_mode & FMODE_OPENED -- at fs/namei.c:3148",
+      "path constraint (kernel state): unlikely(dentry != file->f_path.dentry) -- at fs/namei.c:3149",
+      "path constraint (kernel state): WARN_ON(file->f_path.dentry == DENTRY_NOT_SET) -- at fs/namei.c:3153",
+      "path constraint (kernel state): file->f_path.dentry -- at fs/namei.c:3156"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: include/linux/dcache.h:400 'static inline unsigned __d_entry_type(const struct dentry *dentry)'",
+      "evidence: include/linux/dcache.h:402 'return dentry->d_flags & DCACHE_ENTRY_TYPE;'",
+      "deref_exprs: dentry->d_flags, nd->path, dentry->d_inode",
+      "faulting address: 0xdffffc0000000001",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000001: 0000 [#1] PREEMPT SMP KASAN; dcache.h:400 -> static inline unsigned __d_entry_type(const struct dentry *dentry); dcache.h:402 -> return dentry->d_flags & DCACHE_ENTRY_TYPE;; dereference expressions: dentry->d_flags, nd->path, dentry->d_inode; faulting address: 0xdffffc0000000001; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: openat2",
+      "Syzkaller repro indicates syscalls: ffff8881f7000000, ffff8881f7100000, disassembly, add, movzbl, mov"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3139,
+          "code": "if (nd->flags & LOOKUP_DIRECTORY)",
+          "condition": "nd->flags & LOOKUP_DIRECTORY",
+          "variables": [
+            "nd",
+            "flags",
+            "LOOKUP_DIRECTORY"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3338,
+          "code": "if (nd->last.name[nd->last.len])",
+          "condition": "nd->last.name[nd->last.len]",
+          "variables": [
+            "nd",
+            "last",
+            "name",
+            "nd",
+            "last",
+            "len"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3350,
+          "code": "if (nd->flags & LOOKUP_RCU) {",
+          "condition": "nd->flags & LOOKUP_RCU",
+          "variables": [
+            "nd",
+            "flags",
+            "LOOKUP_RCU"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3356,
+          "code": "if (unlikely(nd->last.name[nd->last.len]))",
+          "condition": "unlikely(nd->last.name[nd->last.len])",
+          "variables": [
+            "unlikely",
+            "nd",
+            "last",
+            "name",
+            "nd",
+            "last",
+            "len"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3519,
+          "code": "} else if (unlikely(file->f_flags & O_PATH)) {",
+          "condition": "unlikely(file->f_flags & O_PATH)",
+          "variables": [
+            "unlikely",
+            "file",
+            "f_flags",
+            "O_PATH"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'O_PATH' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1225,
+          "code": "if (fd)",
+          "condition": "fd",
+          "variables": [
+            "fd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'fd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1226,
+          "code": "return fd;",
+          "condition": "return fd;",
+          "variables": [
+            "return",
+            "fd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'fd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1229,
+          "code": "if (IS_ERR(tmp))",
+          "condition": "IS_ERR(tmp)",
+          "variables": [
+            "IS_ERR",
+            "tmp"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'tmp' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1230,
+          "code": "return PTR_ERR(tmp);",
+          "condition": "return PTR_ERR(tmp);",
+          "variables": [
+            "return",
+            "PTR_ERR",
+            "tmp"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'tmp' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1233,
+          "code": "if (fd >= 0) {",
+          "condition": "fd >= 0",
+          "variables": [
+            "fd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'fd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1284,
+          "code": "if (unlikely(usize < OPEN_HOW_SIZE_VER0))",
+          "condition": "unlikely(usize < OPEN_HOW_SIZE_VER0)",
+          "variables": [
+            "unlikely",
+            "usize",
+            "OPEN_HOW_SIZE_VER0"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'usize' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1286,
+          "code": "if (unlikely(usize > PAGE_SIZE))",
+          "condition": "unlikely(usize > PAGE_SIZE)",
+          "variables": [
+            "unlikely",
+            "usize",
+            "PAGE_SIZE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'usize' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1290,
+          "code": "if (err)",
+          "condition": "err",
+          "variables": [
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'err' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1291,
+          "code": "return err;",
+          "condition": "return err;",
+          "variables": [
+            "return",
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'err' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1294,
+          "code": "if (!(tmp.flags & O_PATH) && force_o_largefile())",
+          "condition": "!(tmp.flags & O_PATH) && force_o_largefile()",
+          "variables": [
+            "tmp",
+            "flags",
+            "O_PATH",
+            "force_o_largefile"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'tmp' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1297,
+          "code": "return do_sys_openat2(dfd, filename, &tmp);",
+          "condition": "return do_sys_openat2(dfd, filename, &tmp);",
+          "variables": [
+            "return",
+            "do_sys_openat2",
+            "dfd",
+            "filename",
+            "tmp"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'dfd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 52,
+          "code": "if (likely(nr < NR_syscalls)) {",
+          "condition": "likely(nr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "nr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 400,
+          "code": "static inline unsigned __d_entry_type(const struct dentry *dentry)",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "include/linux/dcache.h",
+              "line": 400,
+              "code": "static inline unsigned __d_entry_type(const struct dentry *dentry)",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 403,
+          "code": "return dentry->d_flags & DCACHE_ENTRY_TYPE;",
+          "condition": "return dentry->d_flags & DCACHE_ENTRY_TYPE;",
+          "variables": [
+            "return",
+            "dentry",
+            "d_flags",
+            "DCACHE_ENTRY_TYPE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 406,
+          "code": "return __d_entry_type(dentry) == DCACHE_MISS_TYPE;",
+          "condition": "return __d_entry_type(dentry) == DCACHE_MISS_TYPE;",
+          "variables": [
+            "return",
+            "__d_entry_type",
+            "dentry",
+            "DCACHE_MISS_TYPE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 452,
+          "code": "return d_is_miss(dentry);",
+          "condition": "return d_is_miss(dentry);",
+          "variables": [
+            "return",
+            "d_is_miss",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3147,
+          "code": "if (!error) {",
+          "condition": "!error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3148,
+          "code": "if (file->f_mode & FMODE_OPENED) {",
+          "condition": "file->f_mode & FMODE_OPENED",
+          "variables": [
+            "file",
+            "f_mode",
+            "FMODE_OPENED"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3149,
+          "code": "if (unlikely(dentry != file->f_path.dentry)) {",
+          "condition": "unlikely(dentry != file->f_path.dentry)",
+          "variables": [
+            "unlikely",
+            "dentry",
+            "file",
+            "f_path",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3153,
+          "code": "} else if (WARN_ON(file->f_path.dentry == DENTRY_NOT_SET)) {",
+          "condition": "WARN_ON(file->f_path.dentry == DENTRY_NOT_SET)",
+          "variables": [
+            "WARN_ON",
+            "file",
+            "f_path",
+            "dentry",
+            "DENTRY_NOT_SET"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3156,
+          "code": "if (file->f_path.dentry) {",
+          "condition": "file->f_path.dentry",
+          "variables": [
+            "file",
+            "f_path",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3160,
+          "code": "if (unlikely(d_is_negative(dentry)))",
+          "condition": "unlikely(d_is_negative(dentry))",
+          "variables": [
+            "unlikely",
+            "d_is_negative",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3232,
+          "code": "if (unlikely(IS_DEADDIR(dir_inode)))",
+          "condition": "unlikely(IS_DEADDIR(dir_inode))",
+          "variables": [
+            "unlikely",
+            "IS_DEADDIR",
+            "dir_inode"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3233,
+          "code": "return ERR_PTR(-ENOENT);",
+          "condition": "return ERR_PTR(-ENOENT);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "ENOENT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3237,
+          "code": "for (;;) {",
+          "condition": ";;",
+          "variables": [],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3238,
+          "code": "if (!dentry) {",
+          "condition": "!dentry",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3240,
+          "code": "if (IS_ERR(dentry))",
+          "condition": "IS_ERR(dentry)",
+          "variables": [
+            "IS_ERR",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3241,
+          "code": "return dentry;",
+          "condition": "return dentry;",
+          "variables": [
+            "return",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3243,
+          "code": "if (d_in_lookup(dentry))",
+          "condition": "d_in_lookup(dentry)",
+          "variables": [
+            "d_in_lookup",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3247,
+          "code": "if (likely(error > 0))",
+          "condition": "likely(error > 0)",
+          "variables": [
+            "likely",
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3249,
+          "code": "if (error)",
+          "condition": "error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3250,
+          "code": "goto out_dput;",
+          "condition": "goto out_dput;",
+          "variables": [
+            "goto",
+            "out_dput"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3255,
+          "code": "if (dentry->d_inode) {",
+          "condition": "dentry->d_inode",
+          "variables": [
+            "dentry",
+            "d_inode"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3257,
+          "code": "return dentry;",
+          "condition": "return dentry;",
+          "variables": [
+            "return",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3267,
+          "code": "* O_EXCL open we want to return EEXIST not EROFS).",
+          "condition": "* O_EXCL open we want to return EEXIST not EROFS).",
+          "variables": [
+            "O_EXCL",
+            "open",
+            "we",
+            "want",
+            "to",
+            "return",
+            "EEXIST",
+            "not",
+            "EROFS"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3269,
+          "code": "if (unlikely(!got_write))",
+          "condition": "unlikely(!got_write)",
+          "variables": [
+            "unlikely",
+            "got_write"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3271,
+          "code": "if (open_flag & O_CREAT) {",
+          "condition": "open_flag & O_CREAT",
+          "variables": [
+            "open_flag",
+            "O_CREAT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3272,
+          "code": "if (open_flag & O_EXCL)",
+          "condition": "open_flag & O_EXCL",
+          "variables": [
+            "open_flag",
+            "O_EXCL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3275,
+          "code": "if (likely(got_write))",
+          "condition": "likely(got_write)",
+          "variables": [
+            "likely",
+            "got_write"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3280,
+          "code": "if (create_error)",
+          "condition": "create_error",
+          "variables": [
+            "create_error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3282,
+          "code": "if (dir_inode->i_op->atomic_open) {",
+          "condition": "dir_inode->i_op->atomic_open",
+          "variables": [
+            "dir_inode",
+            "i_op",
+            "atomic_open"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3331,
+          "code": "if (nd->last_type != LAST_NORM) {",
+          "condition": "nd->last_type != LAST_NORM",
+          "variables": [
+            "nd",
+            "last_type",
+            "LAST_NORM"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3332,
+          "code": "if (nd->depth)",
+          "condition": "nd->depth",
+          "variables": [
+            "nd",
+            "depth"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3334,
+          "code": "return handle_dots(nd, nd->last_type);",
+          "condition": "return handle_dots(nd, nd->last_type);",
+          "variables": [
+            "return",
+            "handle_dots",
+            "nd",
+            "nd",
+            "last_type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3337,
+          "code": "if (!(open_flag & O_CREAT)) {",
+          "condition": "!(open_flag & O_CREAT)",
+          "variables": [
+            "open_flag",
+            "O_CREAT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3342,
+          "code": "if (IS_ERR(dentry))",
+          "condition": "IS_ERR(dentry)",
+          "variables": [
+            "IS_ERR",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3343,
+          "code": "return ERR_CAST(dentry);",
+          "condition": "return ERR_CAST(dentry);",
+          "variables": [
+            "return",
+            "ERR_CAST",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3344,
+          "code": "if (likely(dentry))",
+          "condition": "likely(dentry)",
+          "variables": [
+            "likely",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3345,
+          "code": "goto finish_lookup;",
+          "condition": "goto finish_lookup;",
+          "variables": [
+            "goto",
+            "finish_lookup"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3351,
+          "code": "if (!try_to_unlazy(nd))",
+          "condition": "!try_to_unlazy(nd)",
+          "variables": [
+            "try_to_unlazy",
+            "nd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3352,
+          "code": "return ERR_PTR(-ECHILD);",
+          "condition": "return ERR_PTR(-ECHILD);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "ECHILD"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3357,
+          "code": "return ERR_PTR(-EISDIR);",
+          "condition": "return ERR_PTR(-EISDIR);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "EISDIR"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3360,
+          "code": "if (open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)) {",
+          "condition": "open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)",
+          "variables": [
+            "open_flag",
+            "O_CREAT",
+            "O_TRUNC",
+            "O_WRONLY",
+            "O_RDWR"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3368,
+          "code": "if (open_flag & O_CREAT)",
+          "condition": "open_flag & O_CREAT",
+          "variables": [
+            "open_flag",
+            "O_CREAT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3514,
+          "code": "if (IS_ERR(file))",
+          "condition": "IS_ERR(file)",
+          "variables": [
+            "IS_ERR",
+            "file"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3515,
+          "code": "return file;",
+          "condition": "return file;",
+          "variables": [
+            "return",
+            "file"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3517,
+          "code": "if (unlikely(file->f_flags & __O_TMPFILE)) {",
+          "condition": "unlikely(file->f_flags & __O_TMPFILE)",
+          "variables": [
+            "unlikely",
+            "file",
+            "f_flags",
+            "__O_TMPFILE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3523,
+          "code": "while (!(error = link_path_walk(s, nd)) &&",
+          "condition": "!(error = link_path_walk(s, nd)",
+          "variables": [
+            "error",
+            "link_path_walk",
+            "s",
+            "nd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1285,
+          "code": "return -EINVAL;",
+          "condition": "return -EINVAL;",
+          "variables": [
+            "return",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1287,
+          "code": "return -E2BIG;",
+          "condition": "return -E2BIG;",
+          "variables": [
+            "return",
+            "E2BIG"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000001",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=43, writes=15)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "exploitability": {
+    "free_site": null,
+    "trigger_site": {
+      "file": "include/linux/dcache.h",
+      "line": 400,
+      "url": "https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400",
+      "func": "static inline unsigned __d_entry_type"
+    },
+    "allocation_site": null,
+    "object": null,
+    "struct_info": {
+      "struct_name": null,
+      "fields_used": [
+        "But",
+        "The",
+        "atomic_open",
+        "ax",
+        "d_flags",
+        "d_inode",
+        "dentry",
+        "depth",
+        "f_flags",
+        "f_mode",
+        "f_path",
+        "flags",
+        "for",
+        "g",
+        "i_op",
+        "intent",
+        "last",
+        "last_type",
+        "len",
+        "lookup_flags",
+        "mnt",
+        "mode",
+        "name",
+        "open",
+        "open_flag",
+        "path"
+      ],
+      "struct_def_snippet": null
+    },
+    "usage_examples": [
+      {
+        "line_no": 1,
+        "text": "static inline unsigned __d_entry_type(const struct dentry *dentry)"
+      },
+      {
+        "line_no": 3,
+        "text": "return dentry->d_flags & DCACHE_ENTRY_TYPE;"
+      }
+    ],
+    "notes": [],
+    "concrete_preconditions": [
+      {
+        "file": "include/linux/dcache.h",
+        "line": 400,
+        "code": "static inline unsigned __d_entry_type(const struct dentry *dentry)",
+        "variables": [
+          "dentry"
+        ],
+        "indices": [],
+        "constraint": "variable(s) dentry may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "static inline unsigned __d_entry_type(const struct dentry *dentry)"
+          },
+          {
+            "line_no": 3,
+            "text": "return dentry->d_flags & DCACHE_ENTRY_TYPE;"
+          }
+        ]
+      },
+      {
+        "file": "include/linux/dcache.h",
+        "line": 400,
+        "code": "return dentry->d_flags & DCACHE_ENTRY_TYPE;",
+        "variables": [
+          "dentry"
+        ],
+        "indices": [],
+        "constraint": "field(s) d_flags may contain malformed/large values leading to OOB access",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "static inline unsigned __d_entry_type(const struct dentry *dentry)"
+          },
+          {
+            "line_no": 3,
+            "text": "return dentry->d_flags & DCACHE_ENTRY_TYPE;"
+          }
+        ]
+      }
+    ]
+  },
+  "strong_report": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7000000, ffff8881f7100000, disassembly, add, movzbl, mov",
+      "Triggering syscall(s) from crash text: openat2",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like dentry, atomic_open, nd may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): nd->flags & LOOKUP_DIRECTORY -- at fs/namei.c:3139",
+      "path constraint (input): nd->last.name[nd->last.len] -- at fs/namei.c:3338",
+      "path constraint (input): nd->flags & LOOKUP_RCU -- at fs/namei.c:3350",
+      "path constraint (input): unlikely(nd->last.name[nd->last.len]) -- at fs/namei.c:3356",
+      "path constraint (input): unlikely(file->f_flags & O_PATH) -- at fs/namei.c:3519",
+      "path constraint (kernel state): return dentry->d_flags & DCACHE_ENTRY_TYPE; -- at include/linux/dcache.h:403",
+      "path constraint (kernel state): return __d_entry_type(dentry) == DCACHE_MISS_TYPE; -- at include/linux/dcache.h:406",
+      "path constraint (kernel state): return d_is_miss(dentry); -- at include/linux/dcache.h:452",
+      "path constraint (kernel state): !error -- at fs/namei.c:3147",
+      "path constraint (kernel state): file->f_mode & FMODE_OPENED -- at fs/namei.c:3148",
+      "path constraint (kernel state): unlikely(dentry != file->f_path.dentry) -- at fs/namei.c:3149",
+      "path constraint (kernel state): WARN_ON(file->f_path.dentry == DENTRY_NOT_SET) -- at fs/namei.c:3153",
+      "path constraint (kernel state): file->f_path.dentry -- at fs/namei.c:3156"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows array/index access near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: include/linux/dcache.h:400 'static inline unsigned __d_entry_type(const struct dentry *dentry)'",
+      "evidence: include/linux/dcache.h:402 'return dentry->d_flags & DCACHE_ENTRY_TYPE;'",
+      "deref_exprs: dentry->d_flags, nd->path, dentry->d_inode",
+      "faulting address: 0xdffffc0000000001",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000001: 0000 [#1] PREEMPT SMP KASAN; dcache.h:400 -> static inline unsigned __d_entry_type(const struct dentry *dentry); dcache.h:402 -> return dentry->d_flags & DCACHE_ENTRY_TYPE;; dereference expressions: dentry->d_flags, nd->path, dentry->d_inode; faulting address: 0xdffffc0000000001; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: openat2",
+      "Syzkaller repro indicates syscalls: ffff8881f7000000, ffff8881f7100000, disassembly, add, movzbl, mov"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3139,
+          "code": "if (nd->flags & LOOKUP_DIRECTORY)",
+          "condition": "nd->flags & LOOKUP_DIRECTORY",
+          "variables": [
+            "nd",
+            "flags",
+            "LOOKUP_DIRECTORY"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3338,
+          "code": "if (nd->last.name[nd->last.len])",
+          "condition": "nd->last.name[nd->last.len]",
+          "variables": [
+            "nd",
+            "last",
+            "name",
+            "nd",
+            "last",
+            "len"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3350,
+          "code": "if (nd->flags & LOOKUP_RCU) {",
+          "condition": "nd->flags & LOOKUP_RCU",
+          "variables": [
+            "nd",
+            "flags",
+            "LOOKUP_RCU"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'flags' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3356,
+          "code": "if (unlikely(nd->last.name[nd->last.len]))",
+          "condition": "unlikely(nd->last.name[nd->last.len])",
+          "variables": [
+            "unlikely",
+            "nd",
+            "last",
+            "name",
+            "nd",
+            "last",
+            "len"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3519,
+          "code": "} else if (unlikely(file->f_flags & O_PATH)) {",
+          "condition": "unlikely(file->f_flags & O_PATH)",
+          "variables": [
+            "unlikely",
+            "file",
+            "f_flags",
+            "O_PATH"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'O_PATH' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1225,
+          "code": "if (fd)",
+          "condition": "fd",
+          "variables": [
+            "fd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'fd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1226,
+          "code": "return fd;",
+          "condition": "return fd;",
+          "variables": [
+            "return",
+            "fd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'fd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1229,
+          "code": "if (IS_ERR(tmp))",
+          "condition": "IS_ERR(tmp)",
+          "variables": [
+            "IS_ERR",
+            "tmp"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'tmp' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1230,
+          "code": "return PTR_ERR(tmp);",
+          "condition": "return PTR_ERR(tmp);",
+          "variables": [
+            "return",
+            "PTR_ERR",
+            "tmp"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'tmp' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1233,
+          "code": "if (fd >= 0) {",
+          "condition": "fd >= 0",
+          "variables": [
+            "fd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'fd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1284,
+          "code": "if (unlikely(usize < OPEN_HOW_SIZE_VER0))",
+          "condition": "unlikely(usize < OPEN_HOW_SIZE_VER0)",
+          "variables": [
+            "unlikely",
+            "usize",
+            "OPEN_HOW_SIZE_VER0"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'usize' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1286,
+          "code": "if (unlikely(usize > PAGE_SIZE))",
+          "condition": "unlikely(usize > PAGE_SIZE)",
+          "variables": [
+            "unlikely",
+            "usize",
+            "PAGE_SIZE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'usize' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1290,
+          "code": "if (err)",
+          "condition": "err",
+          "variables": [
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'err' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1291,
+          "code": "return err;",
+          "condition": "return err;",
+          "variables": [
+            "return",
+            "err"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'err' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1294,
+          "code": "if (!(tmp.flags & O_PATH) && force_o_largefile())",
+          "condition": "!(tmp.flags & O_PATH) && force_o_largefile()",
+          "variables": [
+            "tmp",
+            "flags",
+            "O_PATH",
+            "force_o_largefile"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'tmp' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1297,
+          "code": "return do_sys_openat2(dfd, filename, &tmp);",
+          "condition": "return do_sys_openat2(dfd, filename, &tmp);",
+          "variables": [
+            "return",
+            "do_sys_openat2",
+            "dfd",
+            "filename",
+            "tmp"
+          ],
+          "evidence": [],
+          "why_it_blocks": "variable 'dfd' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 52,
+          "code": "if (likely(nr < NR_syscalls)) {",
+          "condition": "likely(nr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "nr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'nr' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 400,
+          "code": "static inline unsigned __d_entry_type(const struct dentry *dentry)",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "include/linux/dcache.h",
+              "line": 400,
+              "code": "static inline unsigned __d_entry_type(const struct dentry *dentry)",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 403,
+          "code": "return dentry->d_flags & DCACHE_ENTRY_TYPE;",
+          "condition": "return dentry->d_flags & DCACHE_ENTRY_TYPE;",
+          "variables": [
+            "return",
+            "dentry",
+            "d_flags",
+            "DCACHE_ENTRY_TYPE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 406,
+          "code": "return __d_entry_type(dentry) == DCACHE_MISS_TYPE;",
+          "condition": "return __d_entry_type(dentry) == DCACHE_MISS_TYPE;",
+          "variables": [
+            "return",
+            "__d_entry_type",
+            "dentry",
+            "DCACHE_MISS_TYPE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "include/linux/dcache.h",
+          "line": 452,
+          "code": "return d_is_miss(dentry);",
+          "condition": "return d_is_miss(dentry);",
+          "variables": [
+            "return",
+            "d_is_miss",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3147,
+          "code": "if (!error) {",
+          "condition": "!error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3148,
+          "code": "if (file->f_mode & FMODE_OPENED) {",
+          "condition": "file->f_mode & FMODE_OPENED",
+          "variables": [
+            "file",
+            "f_mode",
+            "FMODE_OPENED"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3149,
+          "code": "if (unlikely(dentry != file->f_path.dentry)) {",
+          "condition": "unlikely(dentry != file->f_path.dentry)",
+          "variables": [
+            "unlikely",
+            "dentry",
+            "file",
+            "f_path",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3153,
+          "code": "} else if (WARN_ON(file->f_path.dentry == DENTRY_NOT_SET)) {",
+          "condition": "WARN_ON(file->f_path.dentry == DENTRY_NOT_SET)",
+          "variables": [
+            "WARN_ON",
+            "file",
+            "f_path",
+            "dentry",
+            "DENTRY_NOT_SET"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3156,
+          "code": "if (file->f_path.dentry) {",
+          "condition": "file->f_path.dentry",
+          "variables": [
+            "file",
+            "f_path",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3160,
+          "code": "if (unlikely(d_is_negative(dentry)))",
+          "condition": "unlikely(d_is_negative(dentry))",
+          "variables": [
+            "unlikely",
+            "d_is_negative",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3232,
+          "code": "if (unlikely(IS_DEADDIR(dir_inode)))",
+          "condition": "unlikely(IS_DEADDIR(dir_inode))",
+          "variables": [
+            "unlikely",
+            "IS_DEADDIR",
+            "dir_inode"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3233,
+          "code": "return ERR_PTR(-ENOENT);",
+          "condition": "return ERR_PTR(-ENOENT);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "ENOENT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3237,
+          "code": "for (;;) {",
+          "condition": ";;",
+          "variables": [],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3238,
+          "code": "if (!dentry) {",
+          "condition": "!dentry",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3240,
+          "code": "if (IS_ERR(dentry))",
+          "condition": "IS_ERR(dentry)",
+          "variables": [
+            "IS_ERR",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3241,
+          "code": "return dentry;",
+          "condition": "return dentry;",
+          "variables": [
+            "return",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3243,
+          "code": "if (d_in_lookup(dentry))",
+          "condition": "d_in_lookup(dentry)",
+          "variables": [
+            "d_in_lookup",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3247,
+          "code": "if (likely(error > 0))",
+          "condition": "likely(error > 0)",
+          "variables": [
+            "likely",
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3249,
+          "code": "if (error)",
+          "condition": "error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3250,
+          "code": "goto out_dput;",
+          "condition": "goto out_dput;",
+          "variables": [
+            "goto",
+            "out_dput"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3255,
+          "code": "if (dentry->d_inode) {",
+          "condition": "dentry->d_inode",
+          "variables": [
+            "dentry",
+            "d_inode"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3257,
+          "code": "return dentry;",
+          "condition": "return dentry;",
+          "variables": [
+            "return",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3267,
+          "code": "* O_EXCL open we want to return EEXIST not EROFS).",
+          "condition": "* O_EXCL open we want to return EEXIST not EROFS).",
+          "variables": [
+            "O_EXCL",
+            "open",
+            "we",
+            "want",
+            "to",
+            "return",
+            "EEXIST",
+            "not",
+            "EROFS"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3269,
+          "code": "if (unlikely(!got_write))",
+          "condition": "unlikely(!got_write)",
+          "variables": [
+            "unlikely",
+            "got_write"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3271,
+          "code": "if (open_flag & O_CREAT) {",
+          "condition": "open_flag & O_CREAT",
+          "variables": [
+            "open_flag",
+            "O_CREAT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3272,
+          "code": "if (open_flag & O_EXCL)",
+          "condition": "open_flag & O_EXCL",
+          "variables": [
+            "open_flag",
+            "O_EXCL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3275,
+          "code": "if (likely(got_write))",
+          "condition": "likely(got_write)",
+          "variables": [
+            "likely",
+            "got_write"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3280,
+          "code": "if (create_error)",
+          "condition": "create_error",
+          "variables": [
+            "create_error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3282,
+          "code": "if (dir_inode->i_op->atomic_open) {",
+          "condition": "dir_inode->i_op->atomic_open",
+          "variables": [
+            "dir_inode",
+            "i_op",
+            "atomic_open"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3331,
+          "code": "if (nd->last_type != LAST_NORM) {",
+          "condition": "nd->last_type != LAST_NORM",
+          "variables": [
+            "nd",
+            "last_type",
+            "LAST_NORM"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3332,
+          "code": "if (nd->depth)",
+          "condition": "nd->depth",
+          "variables": [
+            "nd",
+            "depth"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3334,
+          "code": "return handle_dots(nd, nd->last_type);",
+          "condition": "return handle_dots(nd, nd->last_type);",
+          "variables": [
+            "return",
+            "handle_dots",
+            "nd",
+            "nd",
+            "last_type"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3337,
+          "code": "if (!(open_flag & O_CREAT)) {",
+          "condition": "!(open_flag & O_CREAT)",
+          "variables": [
+            "open_flag",
+            "O_CREAT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3342,
+          "code": "if (IS_ERR(dentry))",
+          "condition": "IS_ERR(dentry)",
+          "variables": [
+            "IS_ERR",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3343,
+          "code": "return ERR_CAST(dentry);",
+          "condition": "return ERR_CAST(dentry);",
+          "variables": [
+            "return",
+            "ERR_CAST",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3344,
+          "code": "if (likely(dentry))",
+          "condition": "likely(dentry)",
+          "variables": [
+            "likely",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3345,
+          "code": "goto finish_lookup;",
+          "condition": "goto finish_lookup;",
+          "variables": [
+            "goto",
+            "finish_lookup"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3351,
+          "code": "if (!try_to_unlazy(nd))",
+          "condition": "!try_to_unlazy(nd)",
+          "variables": [
+            "try_to_unlazy",
+            "nd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3352,
+          "code": "return ERR_PTR(-ECHILD);",
+          "condition": "return ERR_PTR(-ECHILD);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "ECHILD"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3357,
+          "code": "return ERR_PTR(-EISDIR);",
+          "condition": "return ERR_PTR(-EISDIR);",
+          "variables": [
+            "return",
+            "ERR_PTR",
+            "EISDIR"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3360,
+          "code": "if (open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)) {",
+          "condition": "open_flag & (O_CREAT | O_TRUNC | O_WRONLY | O_RDWR)",
+          "variables": [
+            "open_flag",
+            "O_CREAT",
+            "O_TRUNC",
+            "O_WRONLY",
+            "O_RDWR"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3368,
+          "code": "if (open_flag & O_CREAT)",
+          "condition": "open_flag & O_CREAT",
+          "variables": [
+            "open_flag",
+            "O_CREAT"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3514,
+          "code": "if (IS_ERR(file))",
+          "condition": "IS_ERR(file)",
+          "variables": [
+            "IS_ERR",
+            "file"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3515,
+          "code": "return file;",
+          "condition": "return file;",
+          "variables": [
+            "return",
+            "file"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3517,
+          "code": "if (unlikely(file->f_flags & __O_TMPFILE)) {",
+          "condition": "unlikely(file->f_flags & __O_TMPFILE)",
+          "variables": [
+            "unlikely",
+            "file",
+            "f_flags",
+            "__O_TMPFILE"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 3523,
+          "code": "while (!(error = link_path_walk(s, nd)) &&",
+          "condition": "!(error = link_path_walk(s, nd)",
+          "variables": [
+            "error",
+            "link_path_walk",
+            "s",
+            "nd"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1285,
+          "code": "return -EINVAL;",
+          "condition": "return -EINVAL;",
+          "variables": [
+            "return",
+            "EINVAL"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/open.c",
+          "line": 1287,
+          "code": "return -E2BIG;",
+          "condition": "return -E2BIG;",
+          "variables": [
+            "return",
+            "E2BIG"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000001",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=43, writes=15)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.4,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.9,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "llm_analysis": {
+    "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000001: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000008-0x000000000000000f]\nCPU: 0 PID: 283 Comm: syz-executor168 Not tainted 5.10.240-syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nRIP: 0010:__d_entry_type <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400'>include/linux/dcache.h:400</a> [inline]\nRIP: 0010:d_is_miss <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405'>include/linux/dcache.h:405</a> [inline]\nRIP: 0010:d_is_negative <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451'>include/linux/dcache.h:451</a> [inline]\nRIP: 0010:atomic_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130'>fs/namei.c:3130</a> [inline]\nRIP: 0010:lookup_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219'>fs/namei.c:3219</a> [inline]\nRIP: 0010:open_last_lookups <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317'>fs/namei.c:3317</a> [inline]\nRIP: 0010:path_openat+0x1738/0x3160 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506'>fs/namei.c:3506</a>\nCode: ae 61 02 00 49 63 de 4c 8b 74 24 38 e9 86 fb ff ff e8 ec 79 bb ff 44 8b 6c 24 14 44 8b a4 24 80 00 00 00 48 89 d8 48 c1 e8 03 <42> 0f b6 04 38 84 c0 0f 85 75 09 00 00 44 8b 33 be 00 00 70 00 44\nRSP: 0018:ffffc90000b37960 EFLAGS: 00010202\n\nRAX: 0000000000000001 RBX: 0000000000000008 RCX: ffff888107ffe2c0\nRDX: 0000000000000000 RSI: 0000000000000003 RDI: ffff888107ffe2c0\nRBP: ffffc90000b37b70 R08: dffffc0000000000 R09: ffffed102428f3a4\nR10: ffffed102428f3a4 R11: 1ffff1102428f3a3 R12: 0000000000000000\nR13: 0000000000000000 R14: ffff88811be9ac18 R15: dffffc0000000000\nFS:  00007f0fe7d0d6c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000200000006000 CR3: 000000011de7f000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n do_filp_open+0x1b3/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536'>fs/namei.c:3536</a>\n do_sys_openat2+0x14c/0x6d0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217'>fs/open.c:1217</a>\n __do_sys_openat2 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274'>fs/open.c:1274</a> [inline]\n __se_sys_openat2 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252'>fs/open.c:1252</a> [inline]\n __x64_sys_openat2+0x20e/0x270 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252'>fs/open.c:1252</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7f0fe7d4b539\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 c1 17 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007f0fe7d0d218 EFLAGS: 00000246\n ORIG_RAX: 00000000000001b5\nRAX: ffffffffffffffda RBX: 00007f0fe7dd83e8 RCX: 00007f0fe7d4b539\nRDX: 0000200000000100 RSI: 0000200000000000 RDI: 00000000ffffff9c\nRBP: 00007f0fe7dd83e0 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000018 R11: 0000000000000246 R12: 00007f0fe7da5034\nR13: 0000200000004280 R14: 00007f0fe7da300e R15: 00002000000020c0\nModules linked in:\n---[ end trace 77739026dae48e03 ]---\nRIP: 0010:__d_entry_type <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400'>include/linux/dcache.h:400</a> [inline]\nRIP: 0010:d_is_miss <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405'>include/linux/dcache.h:405</a> [inline]\nRIP: 0010:d_is_negative <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451'>include/linux/dcache.h:451</a> [inline]\nRIP: 0010:atomic_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130'>fs/namei.c:3130</a> [inline]\nRIP: 0010:lookup_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219'>fs/namei.c:3219</a> [inline]\nRIP: 0010:open_last_lookups <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317'>fs/namei.c:3317</a> [inline]\nRIP: 0010:path_openat+0x1738/0x3160 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506'>fs/namei.c:3506</a>\nCode: ae 61 02 00 49 63 de 4c 8b 74 24 38 e9 86 fb ff ff e8 ec 79 bb ff 44 8b 6c 24 14 44 8b a4 24 80 00 00 00 48 89 d8 48 c1 e8 03 <42> 0f b6 04 38 84 c0 0f 85 75 09 00 00 44 8b 33 be 00 00 70 00 44\nRSP: 0018:ffffc90000b37960 EFLAGS: 00010202\nRAX: 0000000000000001 RBX: 0000000000000008 RCX: ffff888107ffe2c0\nRDX: 0000000000000000 RSI: 0000000000000003 RDI: ffff888107ffe2c0\nRBP: ffffc90000b37b70 R08: dffffc0000000000 R09: ffffed102428f3a4\nR10: ffffed102428f3a4 R11: 1ffff1102428f3a3 R12: 0000000000000000\nR13: 0000000000000000 R14: ffff88811be9ac18 R15: dffffc0000000000\nFS:  00007f0fe7d0d6c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f0fe7da2118 CR3: 000000011de7f000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess), 2 bytes skipped:\n   0:\t02 00                \tadd    (%rax),%al\n   2:\t49 63 de             \tmovslq %r14d,%rbx\n   5:\t4c 8b 74 24 38       \tmov    0x38(%rsp),%r14\n   a:\te9 86 fb ff ff       \tjmp    0xfffffb95\n   f:\te8 ec 79 bb ff       \tcall   0xffbb7a00\n  14:\t44 8b 6c 24 14       \tmov    0x14(%rsp),%r13d\n  19:\t44 8b a4 24 80 00 00 \tmov    0x80(%rsp),%r12d\n  20:\t00\n  21:\t48 89 d8             \tmov    %rbx,%rax\n  24:\t48 c1 e8 03          \tshr    $0x3,%rax\n* 28:\t42 0f b6 04 38       \tmovzbl (%rax,%r15,1),%eax <-- trapping instruction\n  2d:\t84 c0                \ttest   %al,%al\n  2f:\t0f 85 75 09 00 00    \tjne    0x9aa\n  35:\t44 8b 33             \tmov    (%rbx),%r14d\n  38:\tbe 00 00 70 00       \tmov    $0x700000,%esi\n  3d:\t44                   \trex.R\n\n-- include/linux/dcache.h:400 -> static inline unsigned __d_entry_type(const struct dentry *dentry)\n{\n\treturn dentry->d_flags & DCACHE_ENTRY_TYPE;\n---\n-- include/linux/dcache.h:405 -> \treturn __d_entry_type(dentry) == DCACHE_MISS_TYPE;\n---\n-- include/linux/dcache.h:451 -> \treturn d_is_miss(dentry);\n---",
+    "local_llm": {
+      "ok": false,
+      "error": "Local LLM calls disabled in this version",
+      "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000001: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000008-0x000000000000000f]\nCPU: 0 PID: 283 Comm: syz-executor168 Not tainted 5.10.240-syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/14/2025\nRIP: 0010:__d_entry_type <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400'>include/linux/dcache.h:400</a> [inline]\nRIP: 0010:d_is_miss <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405'>include/linux/dcache.h:405</a> [inline]\nRIP: 0010:d_is_negative <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451'>include/linux/dcache.h:451</a> [inline]\nRIP: 0010:atomic_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130'>fs/namei.c:3130</a> [inline]\nRIP: 0010:lookup_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219'>fs/namei.c:3219</a> [inline]\nRIP: 0010:open_last_lookups <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317'>fs/namei.c:3317</a> [inline]\nRIP: 0010:path_openat+0x1738/0x3160 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506'>fs/namei.c:3506</a>\nCode: ae 61 02 00 49 63 de 4c 8b 74 24 38 e9 86 fb ff ff e8 ec 79 bb ff 44 8b 6c 24 14 44 8b a4 24 80 00 00 00 48 89 d8 48 c1 e8 03 <42> 0f b6 04 38 84 c0 0f 85 75 09 00 00 44 8b 33 be 00 00 70 00 44\nRSP: 0018:ffffc90000b37960 EFLAGS: 00010202\n\nRAX: 0000000000000001 RBX: 0000000000000008 RCX: ffff888107ffe2c0\nRDX: 0000000000000000 RSI: 0000000000000003 RDI: ffff888107ffe2c0\nRBP: ffffc90000b37b70 R08: dffffc0000000000 R09: ffffed102428f3a4\nR10: ffffed102428f3a4 R11: 1ffff1102428f3a3 R12: 0000000000000000\nR13: 0000000000000000 R14: ffff88811be9ac18 R15: dffffc0000000000\nFS:  00007f0fe7d0d6c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000200000006000 CR3: 000000011de7f000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n do_filp_open+0x1b3/0x3e0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3536'>fs/namei.c:3536</a>\n do_sys_openat2+0x14c/0x6d0 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1217'>fs/open.c:1217</a>\n __do_sys_openat2 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1274'>fs/open.c:1274</a> [inline]\n __se_sys_openat2 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252'>fs/open.c:1252</a> [inline]\n __x64_sys_openat2+0x20e/0x270 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/open.c#1252'>fs/open.c:1252</a>\n do_syscall_64+0x31/0x40 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/arch/x86/entry/common.c#46'>arch/x86/entry/common.c:46</a>\n entry_SYSCALL_64_after_hwframe+0x61/0xcb\nRIP: 0033:0x7f0fe7d4b539\nCode: 28 00 00 00 75 05 48 83 c4 28 c3 e8 c1 17 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007f0fe7d0d218 EFLAGS: 00000246\n ORIG_RAX: 00000000000001b5\nRAX: ffffffffffffffda RBX: 00007f0fe7dd83e8 RCX: 00007f0fe7d4b539\nRDX: 0000200000000100 RSI: 0000200000000000 RDI: 00000000ffffff9c\nRBP: 00007f0fe7dd83e0 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000018 R11: 0000000000000246 R12: 00007f0fe7da5034\nR13: 0000200000004280 R14: 00007f0fe7da300e R15: 00002000000020c0\nModules linked in:\n---[ end trace 77739026dae48e03 ]---\nRIP: 0010:__d_entry_type <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#400'>include/linux/dcache.h:400</a> [inline]\nRIP: 0010:d_is_miss <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#405'>include/linux/dcache.h:405</a> [inline]\nRIP: 0010:d_is_negative <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/include/linux/dcache.h#451'>include/linux/dcache.h:451</a> [inline]\nRIP: 0010:atomic_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3130'>fs/namei.c:3130</a> [inline]\nRIP: 0010:lookup_open <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3219'>fs/namei.c:3219</a> [inline]\nRIP: 0010:open_last_lookups <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3317'>fs/namei.c:3317</a> [inline]\nRIP: 0010:path_openat+0x1738/0x3160 <a href='https://android.googlesource.com/kernel/common/+/1154f779f3f3d196ace7d5084498f5d7f418ba64/fs/namei.c#3506'>fs/namei.c:3506</a>\nCode: ae 61 02 00 49 63 de 4c 8b 74 24 38 e9 86 fb ff ff e8 ec 79 bb ff 44 8b 6c 24 14 44 8b a4 24 80 00 00 00 48 89 d8 48 c1 e8 03 <42> 0f b6 04 38 84 c0 0f 85 75 09 00 00 44 8b 33 be 00 00 70 00 44\nRSP: 0018:ffffc90000b37960 EFLAGS: 00010202\nRAX: 0000000000000001 RBX: 0000000000000008 RCX: ffff888107ffe2c0\nRDX: 0000000000000000 RSI: 0000000000000003 RDI: ffff888107ffe2c0\nRBP: ffffc90000b37b70 R08: dffffc0000000000 R09: ffffed102428f3a4\nR10: ffffed102428f3a4 R11: 1ffff1102428f3a3 R12: 0000000000000000\nR13: 0000000000000000 R14: ffff88811be9ac18 R15: dffffc0000000000\nFS:  00007f0fe7d0d6c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007f0fe7da2118 CR3: 000000011de7f000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess), 2 bytes skipped:\n   0:\t02 00                \tadd    (%rax),%al\n   2:\t49 63 de             \tmovslq %r14d,%rbx\n   5:\t4c 8b 74 24 38       \tmov    0x38(%rsp),%r14\n   a:\te9 86 fb ff ff       \tjmp    0xfffffb95\n   f:\te8 ec 79 bb ff       \tcall   0xffbb7a00\n  14:\t44 8b 6c 24 14       \tmov    0x14(%rsp),%r13d\n  19:\t44 8b a4 24 80 00 00 \tmov    0x80(%rsp),%r12d\n  20:\t00\n  21:\t48 89 d8             \tmov    %rbx,%rax\n  24:\t48 c1 e8 03          \tshr    $0x3,%rax\n* 28:\t42 0f b6 04 38       \tmovzbl (%rax,%r15,1),%eax <-- trapping instruction\n  2d:\t84 c0                \ttest   %al,%al\n  2f:\t0f 85 75 09 00 00    \tjne    0x9aa\n  35:\t44 8b 33             \tmov    (%rbx),%r14d\n  38:\tbe 00 00 70 00       \tmov    $0x700000,%esi\n  3d:\t44                   \trex.R\n\n-- include/linux/dcache.h:400 -> static inline unsigned __d_entry_type(const struct dentry *dentry)\n{\n\treturn dentry->d_flags & DCACHE_ENTRY_TYPE;\n---\n-- include/linux/dcache.h:405 -> \treturn __d_entry_type(dentry) == DCACHE_MISS_TYPE;\n---\n-- include/linux/dcache.h:451 -> \treturn d_is_miss(dentry);\n---"
+    },
+    "openai_llm": {
+      "raw_output": "{\n  \"overview\": {\n    \"exploitability\": \"LOW\",\n    \"rationale\": \"Null-pointer dereference of dentry->d_flags in __d_entry_type (include/linux/dcache.h:400) during openat2 path; KASAN reports deref of address 0x8 from NULL, indicating a logic/state bug rather than memory corruption.\",\n    \"primitive_capabilities\": \"Process-level DoS (task crashes during openat2). No evident write primitive or controllable memory corruption.\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"atomic_open() is invoked with a NULL dentry, leading d_is_negative(dentry) to dereference dentry->d_flags.\",\n      \"concrete_constraints\": [\n        \"dentry == NULL at the point d_is_negative() is evaluated\",\n        \"path_openat() -> open_last_lookups() -> lookup_open() reaches atomic_open() (normal openat2 on a pathname suffices)\"\n      ],\n      \"why_reaches_crash\": \"d_is_negative() calls __d_entry_type(dentry) which unconditionally reads dentry->d_flags; with dentry == NULL the access is NULL+8, triggering the KASAN-detected fault.\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [],\n    \"kernel_state\": [\n      {\n        \"file\": \"include/linux/dcache.h\",\n        \"line\": 451,\n        \"code\": \"return d_is_miss(dentry);\",\n        \"condition\": \"d_is_negative() evaluates properties of the provided dentry\",\n        \"why_it_blocks\": \"No guard on dentry; if dentry is NULL this path proceeds into __d_entry_type() and crashes (internal invariant that dentry must be non-NULL).\"\n      },\n      {\n        \"file\": \"include/linux/dcache.h\",\n        \"line\": 405,\n        \"code\": \"return __d_entry_type(dentry) == DCACHE_MISS_TYPE;\",\n        \"condition\": \"Comparison requires reading dentry->d_flags to compute entry type\",\n        \"why_it_blocks\": \"Requires a valid dentry; if dentry is NULL, the read in __d_entry_type() will fault (kernel must ensure non-NULL).\"\n      },\n      {\n        \"file\": \"include/linux/dcache.h\",\n        \"line\": 400,\n        \"code\": \"return dentry->d_flags & DCACHE_ENTRY_TYPE;\",\n        \"condition\": \"Dereference of dentry->d_flags\",\n        \"why_it_blocks\": \"This dereference is unconditional; a NULL dentry violates the expected kernel invariant and causes the crash.\"\n      }\n    ]\n  },\n  \"evidence\": [\n    {\n      \"file\": \"include/linux/dcache.h\",\n      \"line\": 400,\n      \"code\": \"return dentry->d_flags & DCACHE_ENTRY_TYPE;\",\n      \"note\": \"Crashing dereference site; KASAN reports null-ptr-deref at offset 0x8 consistent with field access.\"\n    },\n    {\n      \"file\": \"include/linux/dcache.h\",\n      \"line\": 405,\n      \"code\": \"return __d_entry_type(dentry) == DCACHE_MISS_TYPE;\",\n      \"note\": \"d_is_miss() calls __d_entry_type(dentry), leading to the dereference.\"\n    },\n    {\n      \"file\": \"include/linux/dcache.h\",\n      \"line\": 451,\n      \"code\": \"return d_is_miss(dentry);\",\n      \"note\": \"d_is_negative(dentry) entry point on the stack (atomic_open -> lookup_open -> open_last_lookups -> path_openat).\"\n    },\n    {\n      \"file\": \"crash_log\",\n      \"line\": 1,\n      \"code\": \"KASAN: null-ptr-deref in range [0x0000000000000008-0x000000000000000f]\",\n      \"note\": \"Confirms NULL+8 dereference consistent with dentry->d_flags.\"\n    },\n    {\n      \"file\": \"crash_log\",\n      \"line\": 2,\n      \"code\": \"RIP: __d_entry_type / d_is_miss / d_is_negative in path_openat() chain\",\n      \"note\": \"Stack shows deref originates from d_is_negative() inside atomic_open().\"\n    },\n    {\n      \"file\": \"crash_log\",\n      \"line\": 3,\n      \"code\": \"* 28: 42 0f b6 04 38        movzbl (%rax,%r15,1),%eax <-- trapping instruction\",\n      \"note\": \"KASAN shadow access for real address 0x8 (RBX==8) indicates NULL base.\"\n    },\n    {\n      \"file\": \"note\",\n      \"line\": 0,\n      \"code\": \"fs/namei.c atomic_open()/lookup_open()/open_last_lookups() guards are not present in provided snippets\",\n      \"note\": \"Caller-side conditional guards (if/early returns) cannot be quoted; crash path inferred from stack.\"\n    }\n  ]\n}",
+      "parsed": {
+        "overview": {
+          "exploitability": "LOW",
+          "rationale": "Null-pointer dereference of dentry->d_flags in __d_entry_type (include/linux/dcache.h:400) during openat2 path; KASAN reports deref of address 0x8 from NULL, indicating a logic/state bug rather than memory corruption.",
+          "primitive_capabilities": "Process-level DoS (task crashes during openat2). No evident write primitive or controllable memory corruption."
+        },
+        "preconditions": [
+          {
+            "summary": "atomic_open() is invoked with a NULL dentry, leading d_is_negative(dentry) to dereference dentry->d_flags.",
+            "concrete_constraints": [
+              "dentry == NULL at the point d_is_negative() is evaluated",
+              "path_openat() -> open_last_lookups() -> lookup_open() reaches atomic_open() (normal openat2 on a pathname suffices)"
+            ],
+            "why_reaches_crash": "d_is_negative() calls __d_entry_type(dentry) which unconditionally reads dentry->d_flags; with dentry == NULL the access is NULL+8, triggering the KASAN-detected fault."
+          }
+        ],
+        "path_constraints": {
+          "input": [],
+          "kernel_state": [
+            {
+              "file": "include/linux/dcache.h",
+              "line": 451,
+              "code": "return d_is_miss(dentry);",
+              "condition": "d_is_negative() evaluates properties of the provided dentry",
+              "why_it_blocks": "No guard on dentry; if dentry is NULL this path proceeds into __d_entry_type() and crashes (internal invariant that dentry must be non-NULL)."
+            },
+            {
+              "file": "include/linux/dcache.h",
+              "line": 405,
+              "code": "return __d_entry_type(dentry) == DCACHE_MISS_TYPE;",
+              "condition": "Comparison requires reading dentry->d_flags to compute entry type",
+              "why_it_blocks": "Requires a valid dentry; if dentry is NULL, the read in __d_entry_type() will fault (kernel must ensure non-NULL)."
+            },
+            {
+              "file": "include/linux/dcache.h",
+              "line": 400,
+              "code": "return dentry->d_flags & DCACHE_ENTRY_TYPE;",
+              "condition": "Dereference of dentry->d_flags",
+              "why_it_blocks": "This dereference is unconditional; a NULL dentry violates the expected kernel invariant and causes the crash."
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "file": "include/linux/dcache.h",
+            "line": 400,
+            "code": "return dentry->d_flags & DCACHE_ENTRY_TYPE;",
+            "note": "Crashing dereference site; KASAN reports null-ptr-deref at offset 0x8 consistent with field access."
+          },
+          {
+            "file": "include/linux/dcache.h",
+            "line": 405,
+            "code": "return __d_entry_type(dentry) == DCACHE_MISS_TYPE;",
+            "note": "d_is_miss() calls __d_entry_type(dentry), leading to the dereference."
+          },
+          {
+            "file": "include/linux/dcache.h",
+            "line": 451,
+            "code": "return d_is_miss(dentry);",
+            "note": "d_is_negative(dentry) entry point on the stack (atomic_open -> lookup_open -> open_last_lookups -> path_openat)."
+          },
+          {
+            "file": "crash_log",
+            "line": 1,
+            "code": "KASAN: null-ptr-deref in range [0x0000000000000008-0x000000000000000f]",
+            "note": "Confirms NULL+8 dereference consistent with dentry->d_flags."
+          },
+          {
+            "file": "crash_log",
+            "line": 2,
+            "code": "RIP: __d_entry_type / d_is_miss / d_is_negative in path_openat() chain",
+            "note": "Stack shows deref originates from d_is_negative() inside atomic_open()."
+          },
+          {
+            "file": "crash_log",
+            "line": 3,
+            "code": "* 28: 42 0f b6 04 38        movzbl (%rax,%r15,1),%eax <-- trapping instruction",
+            "note": "KASAN shadow access for real address 0x8 (RBX==8) indicates NULL base."
+          },
+          {
+            "file": "note",
+            "line": 0,
+            "code": "fs/namei.c atomic_open()/lookup_open()/open_last_lookups() guards are not present in provided snippets",
+            "note": "Caller-side conditional guards (if/early returns) cannot be quoted; crash path inferred from stack."
+          }
+        ]
+      }
+    },
+    "summary": null
+  }
+}

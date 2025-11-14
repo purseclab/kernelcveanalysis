@@ -1,1 +1,14 @@
-# no external dependencies for now
+# Runtime dependencies inferred from `crash_analyzer.py`:
+# - openai: used for OpenAI API client
+# - transformers: used for local transformer model support (AutoTokenizer/AutoModelForCausalLM)
+# - torch: required by transformers model generation (device, tensors)
+# - python-dotenv: optional, to load .env files
+
+openai
+transformers
+torch
+python-dotenv
+
+# Optional (only if you need HF hub auth helpers or faster tokenizers):
+# huggingface-hub
+# tokenizers

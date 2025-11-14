@@ -1,0 +1,1227 @@
+{
+  "parsed": {
+    "kind": null,
+    "access": null,
+    "object_info": null,
+    "allocated_by": [],
+    "freed_by": [],
+    "link_frames": [
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340",
+        "file": "fs/namei.c",
+        "line": 4340
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391",
+        "file": "fs/namei.c",
+        "line": 4391
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384",
+        "file": "fs/namei.c",
+        "line": 4384
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384",
+        "file": "fs/namei.c",
+        "line": 4384
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/include/generated/asm/syscalls_64.h#264",
+        "file": "arch/x86/include/generated/asm/syscalls_64.h",
+        "line": 264
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50",
+        "file": "arch/x86/entry/common.c",
+        "line": 50
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80",
+        "file": "arch/x86/entry/common.c",
+        "line": 80
+      },
+      {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340",
+        "file": "fs/namei.c",
+        "line": 4340
+      }
+    ],
+    "frames": [],
+    "raw": "general protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000038-0x000000000000003f]\nCPU: 1 PID: 374 Comm: syz.2.17 Not tainted syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 07/12/2025\nRIP: 0010:do_unlinkat+0x27d/0x6b0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340'>fs/namei.c:4340</a>\nCode: 44 89 ee e8 95 c9 b6 ff 45 31 e4 41 81 fd 00 00 20 00 41 0f 95 c4 41 83 c4 eb e9 bd 00 00 00 49 8d 7e 30 48 89 f8 48 c1 e8 03 <42> 80 3c 28 00 4c 8b 7c 24 18 74 05 e8 12 3e f5 ff 49 8b 46 30 48\nRSP: 0018:ffffc90004107de0 EFLAGS: 00010202\nRAX: 0000000000000007 RBX: 1ffff110219a1e06 RCX: ffff88811ded3b40\nRDX: 0000000000000000 RSI: 0000000000000000 RDI: 0000000000000038\nRBP: ffffc90004107ed0 R08: dffffc0000000000 R09: ffffed10219a1e0c\nR10: ffffed10219a1e0c R11: 1ffff110219a1e0b R12: 0000000000000000\nR13: dffffc0000000000 R14: 0000000000000008 R15: 0000000000000000\nFS:  00007fc0d052c6c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007fc0d050af98 CR3: 000000011dc0e000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n <TASK>\n __do_sys_unlinkat <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391'>fs/namei.c:4391</a> [inline]\n __se_sys_unlinkat <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384'>fs/namei.c:4384</a> [inline]\n __x64_sys_unlinkat+0xd8/0xf0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384'>fs/namei.c:4384</a>\n x64_sys_call+0x4c0/0x9a0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/include/generated/asm/syscalls_64.h#264'>arch/x86/include/generated/asm/syscalls_64.h:264</a>\n do_syscall_x64 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50'>arch/x86/entry/common.c:50</a> [inline]\n do_syscall_64+0x4c/0xa0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80'>arch/x86/entry/common.c:80</a>\n entry_SYSCALL_64_after_hwframe+0x66/0xd0\nRIP: 0033:0x7fc0d06bbbe9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007fc0d052c038 EFLAGS: 00000246 ORIG_RAX: 0000000000000107\nRAX: ffffffffffffffda RBX: 00007fc0d08f2fa0 RCX: 00007fc0d06bbbe9\nRDX: 0000000000000000 RSI: 0000200000000040 RDI: ffffffffffffff9c\nRBP: 00007fc0d073ee19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007fc0d08f3038 R14: 00007fc0d08f2fa0 R15: 00007ffc226eb318\n </TASK>\nModules linked in:\n---[ end trace ebcff47afcb8fae6 ]---\nRIP: 0010:do_unlinkat+0x27d/0x6b0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340'>fs/namei.c:4340</a>\nCode: 44 89 ee e8 95 c9 b6 ff 45 31 e4 41 81 fd 00 00 20 00 41 0f 95 c4 41 83 c4 eb e9 bd 00 00 00 49 8d 7e 30 48 89 f8 48 c1 e8 03 <42> 80 3c 28 00 4c 8b 7c 24 18 74 05 e8 12 3e f5 ff 49 8b 46 30 48\nRSP: 0018:ffffc90004107de0 EFLAGS: 00010202\nRAX: 0000000000000007 RBX: 1ffff110219a1e06 RCX: ffff88811ded3b40\nRDX: 0000000000000000 RSI: 0000000000000000 RDI: 0000000000000038\nRBP: ffffc90004107ed0 R08: dffffc0000000000 R09: ffffed10219a1e0c\nR10: ffffed10219a1e0c R11: 1ffff110219a1e0b R12: 0000000000000000\nR13: dffffc0000000000 R14: 0000000000000008 R15: 0000000000000000\nFS:  00007fc0d052c6c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000200000008fe0 CR3: 000000011dc0e000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t44 89 ee             \tmov    %r13d,%esi\n   3:\te8 95 c9 b6 ff       \tcall   0xffb6c99d\n   8:\t45 31 e4             \txor    %r12d,%r12d\n   b:\t41 81 fd 00 00 20 00 \tcmp    $0x200000,%r13d\n  12:\t41 0f 95 c4          \tsetne  %r12b\n  16:\t41 83 c4 eb          \tadd    $0xffffffeb,%r12d\n  1a:\te9 bd 00 00 00       \tjmp    0xdc\n  1f:\t49 8d 7e 30          \tlea    0x30(%r14),%rdi\n  23:\t48 89 f8             \tmov    %rdi,%rax\n  26:\t48 c1 e8 03          \tshr    $0x3,%rax\n* 2a:\t42 80 3c 28 00       \tcmpb   $0x0,(%rax,%r13,1) <-- trapping instruction\n  2f:\t4c 8b 7c 24 18       \tmov    0x18(%rsp),%r15\n  34:\t74 05                \tje     0x3b\n  36:\te8 12 3e f5 ff       \tcall   0xfff53e4d\n  3b:\t49 8b 46 30          \tmov    0x30(%r14),%rax\n  3f:\t48                   \trex.W\n"
+  },
+  "snippets": {
+    "urls": {
+      "https://android.googlesource.com/kernel/common/": {
+        "error": "URL not in expected +/commit/path format"
+      }
+    },
+    "links": {
+      "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340#4340": {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340",
+        "file": "fs/namei.c",
+        "line": 4340,
+        "function_snippet": "int do_unlinkat(int dfd, struct filename *name)\n{\n\tint error;\n\tstruct dentry *dentry;\n\tstruct path path;\n\tstruct qstr last;\n\tint type;\n\tstruct inode *inode = NULL;\n\tstruct inode *delegated_inode = NULL;\n\tunsigned int lookup_flags = 0;\nretry:\n\terror = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);\n\tif (error)\n\t\tgoto exit1;\n\n\terror = -EISDIR;\n\tif (type != LAST_NORM)\n\t\tgoto exit2;\n\n\terror = mnt_want_write(path.mnt);\n\tif (error)\n\t\tgoto exit2;\nretry_deleg:\n\tinode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);\n\tdentry = lookup_one_qstr_excl(&last, path.dentry, lookup_flags);\n\terror = PTR_ERR(dentry);\n\tif (!IS_ERR(dentry)) {\n\t\tstruct user_namespace *mnt_userns;\n\n\t\t/* Why not before? Because we want correct error value */\n\t\tif (last.name[last.len])\n\t\t\tgoto slashes;\n\t\tinode = dentry->d_inode;"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391#4391": {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391",
+        "file": "fs/namei.c",
+        "line": 4391,
+        "function_snippet": "\treturn do_unlinkat(dfd, getname(pathname));"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384#4384": {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384",
+        "file": "fs/namei.c",
+        "line": 4384,
+        "function_snippet": "SYSCALL_DEFINE3(unlinkat, int, dfd, const char __user *, pathname, int, flag)"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/include/generated/asm/syscalls_64.h#264#264": {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/include/generated/asm/syscalls_64.h#264",
+        "error": "HTTP Error 404: Not Found"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50#50": {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50",
+        "file": "arch/x86/entry/common.c",
+        "line": 50,
+        "function_snippet": "static __always_inline bool do_syscall_x64(struct pt_regs *regs, int nr)\n{\n\t/*\n\t * Convert negative numbers to very high and thus out of range\n\t * numbers for comparisons.\n\t */\n\tunsigned int unr = nr;\n\n\tif (likely(unr < NR_syscalls)) {\n\t\tunr = array_index_nospec(unr, NR_syscalls);\n\t\tregs->ax = x64_sys_call(regs, unr);"
+      },
+      "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80#80": {
+        "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80",
+        "file": "arch/x86/entry/common.c",
+        "line": 80,
+        "function_snippet": "__visible noinstr void do_syscall_64(struct pt_regs *regs, int nr)\n{\n\tadd_random_kstack_offset();\n\tnr = syscall_enter_from_user_mode(regs, nr);\n\n\tinstrumentation_begin();\n\n\tif (!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1) {"
+      }
+    }
+  },
+  "evidence": {
+    "https://android.googlesource.com/kernel/common/": {
+      "error": "URL not in expected +/commit/path format"
+    },
+    "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340#4340": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "int do_unlinkat(int dfd, struct filename *name)"
+        ],
+        [
+          4,
+          "struct dentry *dentry;"
+        ],
+        [
+          8,
+          "struct inode *inode = NULL;"
+        ],
+        [
+          9,
+          "struct inode *delegated_inode = NULL;"
+        ],
+        [
+          24,
+          "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+        ],
+        [
+          28,
+          "struct user_namespace *mnt_userns;"
+        ],
+        [
+          30,
+          "/* Why not before? Because we want correct error value */"
+        ],
+        [
+          33,
+          "inode = dentry->d_inode;"
+        ]
+      ],
+      "deref_writes": 2,
+      "deref_reads": 2,
+      "deref_exprs": [
+        "dentry->d_inode"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340",
+      "source_file": "fs/namei.c",
+      "source_line": 4340
+    },
+    "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391#4391": {
+      "dereference": false,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391",
+      "source_file": "fs/namei.c",
+      "source_line": 4391
+    },
+    "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384#4384": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "SYSCALL_DEFINE3(unlinkat, int, dfd, const char __user *, pathname, int, flag)"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384",
+      "source_file": "fs/namei.c",
+      "source_line": 4384
+    },
+    "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/include/generated/asm/syscalls_64.h#264#264": {
+      "error": "HTTP Error 404: Not Found",
+      "note": null
+    },
+    "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50#50": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "static __always_inline bool do_syscall_x64(struct pt_regs *regs, int nr)"
+        ],
+        [
+          3,
+          "/*"
+        ],
+        [
+          4,
+          "* Convert negative numbers to very high and thus out of range"
+        ],
+        [
+          6,
+          "*/"
+        ],
+        [
+          11,
+          "regs->ax = x64_sys_call(regs, unr);"
+        ]
+      ],
+      "deref_writes": 1,
+      "deref_reads": 0,
+      "deref_exprs": [
+        "regs->ax"
+      ],
+      "source_url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 50
+    },
+    "link:https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80#80": {
+      "dereference": true,
+      "array_access": false,
+      "alloc_calls": [],
+      "free_calls": [],
+      "nearby_lines": [
+        [
+          1,
+          "__visible noinstr void do_syscall_64(struct pt_regs *regs, int nr)"
+        ]
+      ],
+      "deref_writes": 0,
+      "deref_reads": 0,
+      "deref_exprs": [],
+      "source_url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80",
+      "source_file": "arch/x86/entry/common.c",
+      "source_line": 80
+    }
+  },
+  "classification": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7100000, ffff8881f7000000, disassembly",
+      "Triggering syscall(s) from crash text: unlinkat",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like name, dentry, inode may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): last.name[last.len] -- at fs/namei.c:4371",
+      "path constraint (input): likely(unr < NR_syscalls) -- at arch/x86/entry/common.c:59",
+      "path constraint (input): !do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1 -- at arch/x86/entry/common.c:88",
+      "path constraint (kernel state): error -- at fs/namei.c:4353",
+      "path constraint (kernel state): goto exit1; -- at fs/namei.c:4354",
+      "path constraint (kernel state): type != LAST_NORM -- at fs/namei.c:4357",
+      "path constraint (kernel state): goto exit2; -- at fs/namei.c:4358",
+      "path constraint (kernel state): error -- at fs/namei.c:4361",
+      "path constraint (kernel state): goto exit2; -- at fs/namei.c:4362",
+      "path constraint (kernel state): !IS_ERR(dentry) -- at fs/namei.c:4367",
+      "path constraint (kernel state): goto slashes; -- at fs/namei.c:4372"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: fs/namei.c:4343 'struct dentry *dentry;'",
+      "evidence: fs/namei.c:4363 'inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);'",
+      "deref_exprs: dentry->d_inode, regs->ax",
+      "faulting address: 0xdffffc0000000007",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN; namei.c:4343 -> struct dentry *dentry;; namei.c:4363 -> inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);; dereference expressions: dentry->d_inode, regs->ax; faulting address: 0xdffffc0000000007; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: unlinkat",
+      "Syzkaller repro indicates syscalls: ffff8881f7100000, ffff8881f7000000, disassembly"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4371,
+          "code": "if (last.name[last.len])",
+          "condition": "last.name[last.len]",
+          "variables": [
+            "last",
+            "name",
+            "last",
+            "len"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 59,
+          "code": "if (likely(unr < NR_syscalls)) {",
+          "condition": "likely(unr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "unr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'unr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 88,
+          "code": "if (!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1) {",
+          "condition": "!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1",
+          "variables": [
+            "do_syscall_x64",
+            "regs",
+            "nr",
+            "do_syscall_x32",
+            "regs",
+            "nr",
+            "nr"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'regs' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4343,
+          "code": "struct dentry *dentry;",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "fs/namei.c",
+              "line": 4343,
+              "code": "struct dentry *dentry;",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4353,
+          "code": "if (error)",
+          "condition": "error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4354,
+          "code": "goto exit1;",
+          "condition": "goto exit1;",
+          "variables": [
+            "goto",
+            "exit1"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4357,
+          "code": "if (type != LAST_NORM)",
+          "condition": "type != LAST_NORM",
+          "variables": [
+            "type",
+            "LAST_NORM"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4358,
+          "code": "goto exit2;",
+          "condition": "goto exit2;",
+          "variables": [
+            "goto",
+            "exit2"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4361,
+          "code": "if (error)",
+          "condition": "error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4362,
+          "code": "goto exit2;",
+          "condition": "goto exit2;",
+          "variables": [
+            "goto",
+            "exit2"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4367,
+          "code": "if (!IS_ERR(dentry)) {",
+          "condition": "!IS_ERR(dentry)",
+          "variables": [
+            "IS_ERR",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4372,
+          "code": "goto slashes;",
+          "condition": "goto slashes;",
+          "variables": [
+            "goto",
+            "slashes"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4392,
+          "code": "return do_unlinkat(dfd, getname(pathname));",
+          "condition": "return do_unlinkat(dfd, getname(pathname));",
+          "variables": [
+            "return",
+            "do_unlinkat",
+            "dfd",
+            "getname",
+            "pathname"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000007",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=2, writes=3)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.1,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.6,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "exploitability": {
+    "free_site": null,
+    "trigger_site": {
+      "file": "fs/namei.c",
+      "line": 4340,
+      "url": "https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340",
+      "func": "int do_unlinkat"
+    },
+    "allocation_site": null,
+    "object": null,
+    "struct_info": {
+      "struct_name": null,
+      "fields_used": [
+        "ax",
+        "d_inode",
+        "dentry",
+        "len",
+        "mnt",
+        "name"
+      ],
+      "struct_def_snippet": null
+    },
+    "usage_examples": [
+      {
+        "line_no": 1,
+        "text": "int do_unlinkat(int dfd, struct filename *name)"
+      },
+      {
+        "line_no": 4,
+        "text": "struct dentry *dentry;"
+      },
+      {
+        "line_no": 8,
+        "text": "struct inode *inode = NULL;"
+      },
+      {
+        "line_no": 9,
+        "text": "struct inode *delegated_inode = NULL;"
+      },
+      {
+        "line_no": 24,
+        "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+      },
+      {
+        "line_no": 28,
+        "text": "struct user_namespace *mnt_userns;"
+      },
+      {
+        "line_no": 30,
+        "text": "/* Why not before? Because we want correct error value */"
+      },
+      {
+        "line_no": 31,
+        "text": "if (last.name[last.len])"
+      },
+      {
+        "line_no": 33,
+        "text": "inode = dentry->d_inode;"
+      }
+    ],
+    "notes": [],
+    "concrete_preconditions": [
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "int do_unlinkat(int dfd, struct filename *name)",
+        "variables": [
+          "name"
+        ],
+        "indices": [],
+        "constraint": "variable(s) name may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "int do_unlinkat(int dfd, struct filename *name)"
+          },
+          {
+            "line_no": 12,
+            "text": "error = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);"
+          },
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 28,
+            "text": "struct user_namespace *mnt_userns;"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "struct dentry *dentry;",
+        "variables": [
+          "dentry"
+        ],
+        "indices": [],
+        "constraint": "variable(s) dentry may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 4,
+            "text": "struct dentry *dentry;"
+          },
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 25,
+            "text": "dentry = lookup_one_qstr_excl(&last, path.dentry, lookup_flags);"
+          },
+          {
+            "line_no": 26,
+            "text": "error = PTR_ERR(dentry);"
+          },
+          {
+            "line_no": 27,
+            "text": "if (!IS_ERR(dentry)) {"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "struct inode *inode = NULL;",
+        "variables": [
+          "inode"
+        ],
+        "indices": [],
+        "constraint": "variable(s) inode may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 8,
+            "text": "struct inode *inode = NULL;"
+          },
+          {
+            "line_no": 9,
+            "text": "struct inode *delegated_inode = NULL;"
+          },
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "struct inode *delegated_inode = NULL;",
+        "variables": [
+          "delegated_inode"
+        ],
+        "indices": [],
+        "constraint": "variable(s) delegated_inode may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 9,
+            "text": "struct inode *delegated_inode = NULL;"
+          },
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);",
+        "variables": [
+          "dentry"
+        ],
+        "indices": [],
+        "constraint": "field(s) d_inode may contain malformed/large values leading to OOB access",
+        "evidence": [
+          {
+            "line_no": 4,
+            "text": "struct dentry *dentry;"
+          },
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 25,
+            "text": "dentry = lookup_one_qstr_excl(&last, path.dentry, lookup_flags);"
+          },
+          {
+            "line_no": 26,
+            "text": "error = PTR_ERR(dentry);"
+          },
+          {
+            "line_no": 27,
+            "text": "if (!IS_ERR(dentry)) {"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "struct user_namespace *mnt_userns;",
+        "variables": [
+          "mnt_userns"
+        ],
+        "indices": [],
+        "constraint": "variable(s) mnt_userns may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 28,
+            "text": "struct user_namespace *mnt_userns;"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "/* Why not before? Because we want correct error value */",
+        "variables": [
+          "Why"
+        ],
+        "indices": [],
+        "constraint": "variable(s) Why may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices",
+        "evidence": [
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 30,
+            "text": "/* Why not before? Because we want correct error value */"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "if (last.name[last.len])",
+        "variables": [
+          "name"
+        ],
+        "indices": [
+          {
+            "base": "name",
+            "index_expr": "last.len"
+          }
+        ],
+        "constraint": "index expression 'last.len' on name may be attacker-controlled and cause OOB access",
+        "evidence": [
+          {
+            "line_no": 1,
+            "text": "int do_unlinkat(int dfd, struct filename *name)"
+          },
+          {
+            "line_no": 12,
+            "text": "error = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);"
+          },
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 28,
+            "text": "struct user_namespace *mnt_userns;"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      },
+      {
+        "file": "fs/namei.c",
+        "line": 4340,
+        "code": "inode = dentry->d_inode;",
+        "variables": [
+          "dentry"
+        ],
+        "indices": [],
+        "constraint": "field(s) d_inode may contain malformed/large values leading to OOB access",
+        "evidence": [
+          {
+            "line_no": 4,
+            "text": "struct dentry *dentry;"
+          },
+          {
+            "line_no": 24,
+            "text": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);"
+          },
+          {
+            "line_no": 25,
+            "text": "dentry = lookup_one_qstr_excl(&last, path.dentry, lookup_flags);"
+          },
+          {
+            "line_no": 26,
+            "text": "error = PTR_ERR(dentry);"
+          },
+          {
+            "line_no": 27,
+            "text": "if (!IS_ERR(dentry)) {"
+          },
+          {
+            "line_no": 31,
+            "text": "if (last.name[last.len])"
+          },
+          {
+            "line_no": 33,
+            "text": "inode = dentry->d_inode;"
+          }
+        ]
+      }
+    ]
+  },
+  "strong_report": {
+    "primitive": "null-pointer-deref",
+    "vulnerability": "denial-of-service (kernel crash)",
+    "confidence": 1.0,
+    "preconditions": [
+      "Triggering syzkaller syscall(s): ffff8881f7100000, ffff8881f7000000, disassembly",
+      "Triggering syscall(s) from crash text: unlinkat",
+      "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths",
+      "An externally-controlled syscall input (fuzzer/syzkaller) reached the vulnerable syscall path",
+      "Input state: attacker-controlled syscall parameters or user-supplied data must reach the vulnerable code path",
+      "Code path: execution reaches function 'range' (from crash context)",
+      "State: variable(s) like name, dentry, inode may point into freed/reclaimed memory (observed in nearby source lines)",
+      "path constraint (input): last.name[last.len] -- at fs/namei.c:4371",
+      "path constraint (input): likely(unr < NR_syscalls) -- at arch/x86/entry/common.c:59",
+      "path constraint (input): !do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1 -- at arch/x86/entry/common.c:88",
+      "path constraint (kernel state): error -- at fs/namei.c:4353",
+      "path constraint (kernel state): goto exit1; -- at fs/namei.c:4354",
+      "path constraint (kernel state): type != LAST_NORM -- at fs/namei.c:4357",
+      "path constraint (kernel state): goto exit2; -- at fs/namei.c:4358",
+      "path constraint (kernel state): error -- at fs/namei.c:4361",
+      "path constraint (kernel state): goto exit2; -- at fs/namei.c:4362",
+      "path constraint (kernel state): !IS_ERR(dentry) -- at fs/namei.c:4367",
+      "path constraint (kernel state): goto slashes; -- at fs/namei.c:4372"
+    ],
+    "postconditions": [
+      "KASAN or BUG report emitted indicating invalid memory access"
+    ],
+    "support": [
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Source shows pointer dereference near crash site",
+      "Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)",
+      "KASAN reported null-ptr-deref in crash log",
+      "evidence: fs/namei.c:4343 'struct dentry *dentry;'",
+      "evidence: fs/namei.c:4363 'inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);'",
+      "deref_exprs: dentry->d_inode, regs->ax",
+      "faulting address: 0xdffffc0000000007",
+      "general protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN; namei.c:4343 -> struct dentry *dentry;; namei.c:4363 -> inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);; dereference expressions: dentry->d_inode, regs->ax; faulting address: 0xdffffc0000000007; No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)",
+      "Syscall(s) detected in crash text: unlinkat",
+      "Syzkaller repro indicates syscalls: ffff8881f7100000, ffff8881f7000000, disassembly"
+    ],
+    "path_constraints": {
+      "input_constraints": [
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4371,
+          "code": "if (last.name[last.len])",
+          "condition": "last.name[last.len]",
+          "variables": [
+            "last",
+            "name",
+            "last",
+            "len"
+          ],
+          "evidence": [],
+          "why_it_blocks": "size/len/offset token present in condition"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 59,
+          "code": "if (likely(unr < NR_syscalls)) {",
+          "condition": "likely(unr < NR_syscalls)",
+          "variables": [
+            "likely",
+            "unr",
+            "NR_syscalls"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'unr' traced to user/syscall source: syscall_param"
+        },
+        {
+          "frame": null,
+          "file": "arch/x86/entry/common.c",
+          "line": 88,
+          "code": "if (!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1) {",
+          "condition": "!do_syscall_x64(regs, nr) && !do_syscall_x32(regs, nr) && nr != -1",
+          "variables": [
+            "do_syscall_x64",
+            "regs",
+            "nr",
+            "do_syscall_x32",
+            "regs",
+            "nr",
+            "nr"
+          ],
+          "evidence": [],
+          "why_it_blocks": "contains explicit user-copy/syscall keywords; variable 'regs' traced to user/syscall source: syscall_param"
+        }
+      ],
+      "kernel_state_constraints": [
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4343,
+          "code": "struct dentry *dentry;",
+          "condition": "dentry pointer may be NULL or invalid",
+          "variables": [
+            "dentry"
+          ],
+          "evidence": [
+            {
+              "file": "fs/namei.c",
+              "line": 4343,
+              "code": "struct dentry *dentry;",
+              "note": "dentry-related line near crash site"
+            }
+          ],
+          "why_it_blocks": "null/invalid dentry pointer will cause dereference and crash"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4353,
+          "code": "if (error)",
+          "condition": "error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4354,
+          "code": "goto exit1;",
+          "condition": "goto exit1;",
+          "variables": [
+            "goto",
+            "exit1"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4357,
+          "code": "if (type != LAST_NORM)",
+          "condition": "type != LAST_NORM",
+          "variables": [
+            "type",
+            "LAST_NORM"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4358,
+          "code": "goto exit2;",
+          "condition": "goto exit2;",
+          "variables": [
+            "goto",
+            "exit2"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4361,
+          "code": "if (error)",
+          "condition": "error",
+          "variables": [
+            "error"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4362,
+          "code": "goto exit2;",
+          "condition": "goto exit2;",
+          "variables": [
+            "goto",
+            "exit2"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4367,
+          "code": "if (!IS_ERR(dentry)) {",
+          "condition": "!IS_ERR(dentry)",
+          "variables": [
+            "IS_ERR",
+            "dentry"
+          ],
+          "evidence": [],
+          "why_it_blocks": "null/is_err/warn guard"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4372,
+          "code": "goto slashes;",
+          "condition": "goto slashes;",
+          "variables": [
+            "goto",
+            "slashes"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        },
+        {
+          "frame": null,
+          "file": "fs/namei.c",
+          "line": 4392,
+          "code": "return do_unlinkat(dfd, getname(pathname));",
+          "condition": "return do_unlinkat(dfd, getname(pathname));",
+          "variables": [
+            "return",
+            "do_unlinkat",
+            "dfd",
+            "getname",
+            "pathname"
+          ],
+          "evidence": [],
+          "why_it_blocks": "guard or conditional that may prevent reaching crash site"
+        }
+      ]
+    },
+    "exploitability": "high",
+    "non_canonical_addr": "0xdffffc0000000007",
+    "overview": {
+      "exploitability": "HIGH",
+      "rationale": "attacker-controlled input reaches vulnerable path; pointer deref evidence (reads=2, writes=3)",
+      "primitive_capabilities": "Unknown or limited primitive; further manual analysis required",
+      "confidence_breakdown": {
+        "attacker_control": 0.4,
+        "evidence_strength": 0.1,
+        "boundedness_score": 0.0,
+        "kasan_indicator": 0.1,
+        "aggregate_estimate": 0.6,
+        "reported_confidence": 1.0
+      }
+    }
+  },
+  "llm_analysis": {
+    "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000038-0x000000000000003f]\nCPU: 1 PID: 374 Comm: syz.2.17 Not tainted syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 07/12/2025\nRIP: 0010:do_unlinkat+0x27d/0x6b0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340'>fs/namei.c:4340</a>\nCode: 44 89 ee e8 95 c9 b6 ff 45 31 e4 41 81 fd 00 00 20 00 41 0f 95 c4 41 83 c4 eb e9 bd 00 00 00 49 8d 7e 30 48 89 f8 48 c1 e8 03 <42> 80 3c 28 00 4c 8b 7c 24 18 74 05 e8 12 3e f5 ff 49 8b 46 30 48\nRSP: 0018:ffffc90004107de0 EFLAGS: 00010202\nRAX: 0000000000000007 RBX: 1ffff110219a1e06 RCX: ffff88811ded3b40\nRDX: 0000000000000000 RSI: 0000000000000000 RDI: 0000000000000038\nRBP: ffffc90004107ed0 R08: dffffc0000000000 R09: ffffed10219a1e0c\nR10: ffffed10219a1e0c R11: 1ffff110219a1e0b R12: 0000000000000000\nR13: dffffc0000000000 R14: 0000000000000008 R15: 0000000000000000\nFS:  00007fc0d052c6c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007fc0d050af98 CR3: 000000011dc0e000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n <TASK>\n __do_sys_unlinkat <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391'>fs/namei.c:4391</a> [inline]\n __se_sys_unlinkat <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384'>fs/namei.c:4384</a> [inline]\n __x64_sys_unlinkat+0xd8/0xf0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384'>fs/namei.c:4384</a>\n x64_sys_call+0x4c0/0x9a0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/include/generated/asm/syscalls_64.h#264'>arch/x86/include/generated/asm/syscalls_64.h:264</a>\n do_syscall_x64 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50'>arch/x86/entry/common.c:50</a> [inline]\n do_syscall_64+0x4c/0xa0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80'>arch/x86/entry/common.c:80</a>\n entry_SYSCALL_64_after_hwframe+0x66/0xd0\nRIP: 0033:0x7fc0d06bbbe9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007fc0d052c038 EFLAGS: 00000246 ORIG_RAX: 0000000000000107\nRAX: ffffffffffffffda RBX: 00007fc0d08f2fa0 RCX: 00007fc0d06bbbe9\nRDX: 0000000000000000 RSI: 0000200000000040 RDI: ffffffffffffff9c\nRBP: 00007fc0d073ee19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007fc0d08f3038 R14: 00007fc0d08f2fa0 R15: 00007ffc226eb318\n </TASK>\nModules linked in:\n---[ end trace ebcff47afcb8fae6 ]---\nRIP: 0010:do_unlinkat+0x27d/0x6b0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340'>fs/namei.c:4340</a>\nCode: 44 89 ee e8 95 c9 b6 ff 45 31 e4 41 81 fd 00 00 20 00 41 0f 95 c4 41 83 c4 eb e9 bd 00 00 00 49 8d 7e 30 48 89 f8 48 c1 e8 03 <42> 80 3c 28 00 4c 8b 7c 24 18 74 05 e8 12 3e f5 ff 49 8b 46 30 48\nRSP: 0018:ffffc90004107de0 EFLAGS: 00010202\nRAX: 0000000000000007 RBX: 1ffff110219a1e06 RCX: ffff88811ded3b40\nRDX: 0000000000000000 RSI: 0000000000000000 RDI: 0000000000000038\nRBP: ffffc90004107ed0 R08: dffffc0000000000 R09: ffffed10219a1e0c\nR10: ffffed10219a1e0c R11: 1ffff110219a1e0b R12: 0000000000000000\nR13: dffffc0000000000 R14: 0000000000000008 R15: 0000000000000000\nFS:  00007fc0d052c6c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000200000008fe0 CR3: 000000011dc0e000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t44 89 ee             \tmov    %r13d,%esi\n   3:\te8 95 c9 b6 ff       \tcall   0xffb6c99d\n   8:\t45 31 e4             \txor    %r12d,%r12d\n   b:\t41 81 fd 00 00 20 00 \tcmp    $0x200000,%r13d\n  12:\t41 0f 95 c4          \tsetne  %r12b\n  16:\t41 83 c4 eb          \tadd    $0xffffffeb,%r12d\n  1a:\te9 bd 00 00 00       \tjmp    0xdc\n  1f:\t49 8d 7e 30          \tlea    0x30(%r14),%rdi\n  23:\t48 89 f8             \tmov    %rdi,%rax\n  26:\t48 c1 e8 03          \tshr    $0x3,%rax\n* 2a:\t42 80 3c 28 00       \tcmpb   $0x0,(%rax,%r13,1) <-- trapping instruction\n  2f:\t4c 8b 7c 24 18       \tmov    0x18(%rsp),%r15\n  34:\t74 05                \tje     0x3b\n  36:\te8 12 3e f5 ff       \tcall   0xfff53e4d\n  3b:\t49 8b 46 30          \tmov    0x30(%r14),%rax\n  3f:\t48                   \trex.W\n\n-- fs/namei.c:4340 -> int do_unlinkat(int dfd, struct filename *name)\n{\n\tint error;\n\tstruct dentry *dentry;\n\tstruct path path;\n\tstruct qstr last;\n\tint type;\n\tstruct inode *inode = NULL;\n\tstruct inode *delegated_inode = NULL;\n\tunsigned int lookup_flags = 0;\nretry:\n\terror = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);\n\tif (error)\n\t\tgoto exit1;\n\n\terror = -EISDIR;\n\tif (type != LAST_NORM)\n\t\tgoto exit2;\n\n\terror = mnt_want_write(path.mnt);\n\tif (error)\n\t\tgoto exit2;\nretry_deleg:\n\tinode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);\n\tdentry = lookup_one_qstr_excl(&last, path.dentry, lookup_flags);\n\terror = PTR_ERR(dentry);\n\tif (!IS_ERR(dentry)) {\n\t\tstruct user_namespace *mnt_userns;\n\n\t\t/* Why not before? Because we want correct error value */\n\t\tif (last.name[last.len])\n\t\t\tgoto slashes;\n\t\tinode = dentry->d_inode;\n---\n-- fs/namei.c:4391 -> \treturn do_unlinkat(dfd, getname(pathname));\n---\n-- fs/namei.c:4384 -> SYSCALL_DEFINE3(unlinkat, int, dfd, const char __user *, pathname, int, flag)\n---",
+    "local_llm": {
+      "ok": false,
+      "error": "Local LLM calls disabled in this version",
+      "prompt": "Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.\n\nINPUTS I WILL PROVIDE:\n- \"crash_log\": the full kernel oops/trace.\n- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.\nOUTPUT FORMAT (strict JSON):\n{\n  \"overview\": {\n    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",\n    \"rationale\": \"<one-sentence justification with evidence>\"\n    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"<one-sentence developer-friendly precondition>\",\n      \"concrete_constraints\": [\n         \"<variable> => <allowed range or constraint, be concrete>\"\n      ],\n      \"why_reaches_crash\": \"<short reasoning>\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet that is the condition>\",\n        \"condition\": \"<short human-readable condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"\n      }, ...\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"<file path>\",\n        \"line\": <line number>,\n        \"code\": \"<exact single-line snippet>\",\n        \"condition\": \"<short kernel-state condition>\",\n        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"\n      }, ...\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }\n  ]\n}\n\nREQUIREMENTS:\n1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.\n2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).\n3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").\n4. If a condition is ambiguous about whether it\u2019s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.\n5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).\n6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.\n\nNow analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.\ngeneral protection fault, probably for non-canonical address 0xdffffc0000000007: 0000 [#1] PREEMPT SMP KASAN\nKASAN: null-ptr-deref in range [0x0000000000000038-0x000000000000003f]\nCPU: 1 PID: 374 Comm: syz.2.17 Not tainted syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 07/12/2025\nRIP: 0010:do_unlinkat+0x27d/0x6b0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340'>fs/namei.c:4340</a>\nCode: 44 89 ee e8 95 c9 b6 ff 45 31 e4 41 81 fd 00 00 20 00 41 0f 95 c4 41 83 c4 eb e9 bd 00 00 00 49 8d 7e 30 48 89 f8 48 c1 e8 03 <42> 80 3c 28 00 4c 8b 7c 24 18 74 05 e8 12 3e f5 ff 49 8b 46 30 48\nRSP: 0018:ffffc90004107de0 EFLAGS: 00010202\nRAX: 0000000000000007 RBX: 1ffff110219a1e06 RCX: ffff88811ded3b40\nRDX: 0000000000000000 RSI: 0000000000000000 RDI: 0000000000000038\nRBP: ffffc90004107ed0 R08: dffffc0000000000 R09: ffffed10219a1e0c\nR10: ffffed10219a1e0c R11: 1ffff110219a1e0b R12: 0000000000000000\nR13: dffffc0000000000 R14: 0000000000000008 R15: 0000000000000000\nFS:  00007fc0d052c6c0(0000) GS:ffff8881f7100000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 00007fc0d050af98 CR3: 000000011dc0e000 CR4: 00000000003506a0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\nCall Trace:\n <TASK>\n __do_sys_unlinkat <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4391'>fs/namei.c:4391</a> [inline]\n __se_sys_unlinkat <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384'>fs/namei.c:4384</a> [inline]\n __x64_sys_unlinkat+0xd8/0xf0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4384'>fs/namei.c:4384</a>\n x64_sys_call+0x4c0/0x9a0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/include/generated/asm/syscalls_64.h#264'>arch/x86/include/generated/asm/syscalls_64.h:264</a>\n do_syscall_x64 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#50'>arch/x86/entry/common.c:50</a> [inline]\n do_syscall_64+0x4c/0xa0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/arch/x86/entry/common.c#80'>arch/x86/entry/common.c:80</a>\n entry_SYSCALL_64_after_hwframe+0x66/0xd0\nRIP: 0033:0x7fc0d06bbbe9\nCode: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48\nRSP: 002b:00007fc0d052c038 EFLAGS: 00000246 ORIG_RAX: 0000000000000107\nRAX: ffffffffffffffda RBX: 00007fc0d08f2fa0 RCX: 00007fc0d06bbbe9\nRDX: 0000000000000000 RSI: 0000200000000040 RDI: ffffffffffffff9c\nRBP: 00007fc0d073ee19 R08: 0000000000000000 R09: 0000000000000000\nR10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000\nR13: 00007fc0d08f3038 R14: 00007fc0d08f2fa0 R15: 00007ffc226eb318\n </TASK>\nModules linked in:\n---[ end trace ebcff47afcb8fae6 ]---\nRIP: 0010:do_unlinkat+0x27d/0x6b0 <a href='https://android.googlesource.com/kernel/common/+/da3dbfdd15be0f7780f9c4807c7bf5429d52f201/fs/namei.c#4340'>fs/namei.c:4340</a>\nCode: 44 89 ee e8 95 c9 b6 ff 45 31 e4 41 81 fd 00 00 20 00 41 0f 95 c4 41 83 c4 eb e9 bd 00 00 00 49 8d 7e 30 48 89 f8 48 c1 e8 03 <42> 80 3c 28 00 4c 8b 7c 24 18 74 05 e8 12 3e f5 ff 49 8b 46 30 48\nRSP: 0018:ffffc90004107de0 EFLAGS: 00010202\nRAX: 0000000000000007 RBX: 1ffff110219a1e06 RCX: ffff88811ded3b40\nRDX: 0000000000000000 RSI: 0000000000000000 RDI: 0000000000000038\nRBP: ffffc90004107ed0 R08: dffffc0000000000 R09: ffffed10219a1e0c\nR10: ffffed10219a1e0c R11: 1ffff110219a1e0b R12: 0000000000000000\nR13: dffffc0000000000 R14: 0000000000000008 R15: 0000000000000000\nFS:  00007fc0d052c6c0(0000) GS:ffff8881f7000000(0000) knlGS:0000000000000000\nCS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000200000008fe0 CR3: 000000011dc0e000 CR4: 00000000003506b0\nDR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000\nDR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400\n----------------\nCode disassembly (best guess):\n   0:\t44 89 ee             \tmov    %r13d,%esi\n   3:\te8 95 c9 b6 ff       \tcall   0xffb6c99d\n   8:\t45 31 e4             \txor    %r12d,%r12d\n   b:\t41 81 fd 00 00 20 00 \tcmp    $0x200000,%r13d\n  12:\t41 0f 95 c4          \tsetne  %r12b\n  16:\t41 83 c4 eb          \tadd    $0xffffffeb,%r12d\n  1a:\te9 bd 00 00 00       \tjmp    0xdc\n  1f:\t49 8d 7e 30          \tlea    0x30(%r14),%rdi\n  23:\t48 89 f8             \tmov    %rdi,%rax\n  26:\t48 c1 e8 03          \tshr    $0x3,%rax\n* 2a:\t42 80 3c 28 00       \tcmpb   $0x0,(%rax,%r13,1) <-- trapping instruction\n  2f:\t4c 8b 7c 24 18       \tmov    0x18(%rsp),%r15\n  34:\t74 05                \tje     0x3b\n  36:\te8 12 3e f5 ff       \tcall   0xfff53e4d\n  3b:\t49 8b 46 30          \tmov    0x30(%r14),%rax\n  3f:\t48                   \trex.W\n\n-- fs/namei.c:4340 -> int do_unlinkat(int dfd, struct filename *name)\n{\n\tint error;\n\tstruct dentry *dentry;\n\tstruct path path;\n\tstruct qstr last;\n\tint type;\n\tstruct inode *inode = NULL;\n\tstruct inode *delegated_inode = NULL;\n\tunsigned int lookup_flags = 0;\nretry:\n\terror = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);\n\tif (error)\n\t\tgoto exit1;\n\n\terror = -EISDIR;\n\tif (type != LAST_NORM)\n\t\tgoto exit2;\n\n\terror = mnt_want_write(path.mnt);\n\tif (error)\n\t\tgoto exit2;\nretry_deleg:\n\tinode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);\n\tdentry = lookup_one_qstr_excl(&last, path.dentry, lookup_flags);\n\terror = PTR_ERR(dentry);\n\tif (!IS_ERR(dentry)) {\n\t\tstruct user_namespace *mnt_userns;\n\n\t\t/* Why not before? Because we want correct error value */\n\t\tif (last.name[last.len])\n\t\t\tgoto slashes;\n\t\tinode = dentry->d_inode;\n---\n-- fs/namei.c:4391 -> \treturn do_unlinkat(dfd, getname(pathname));\n---\n-- fs/namei.c:4384 -> SYSCALL_DEFINE3(unlinkat, int, dfd, const char __user *, pathname, int, flag)\n---"
+    },
+    "openai_llm": {
+      "raw_output": "{\n  \"overview\": {\n    \"exploitability\": \"LOW\",\n    \"rationale\": \"Crash is a NULL/near-NULL pointer dereference of path.dentry->d_inode in do_unlinkat (KASAN reports deref at 0x38), yielding a kernel oops/DoS without evident controlled memory overwrite.\",\n    \"primitive_capabilities\": \"An unprivileged user can trigger a kernel crash (denial-of-service) via unlinkat under specific VFS state leading to path.dentry being NULL/invalid.\"\n  },\n  \"preconditions\": [\n    {\n      \"summary\": \"unlinkat must resolve a normal (non-slash-terminated) pathname whose parent directory exists on a writable mount, and filename_parentat must wrongly return success with a NULL/invalid path.dentry.\",\n      \"concrete_constraints\": [\n        \"dfd => AT_FDCWD (-100) or a valid directory fd\",\n        \"pathname => user pointer to a NUL-terminated path whose final component is a normal name (no trailing '/', not '.' or '..')\",\n        \"parent(pathname) => must resolve successfully (filename_parentat returns 0)\",\n        \"mount(pathname) => not read-only (mnt_want_write(path.mnt) == 0)\",\n        \"kernel internal => path.dentry == NULL or an invalid low pointer (e.g., 0x0..0x8), despite filename_parentat() returning 0\"\n      ],\n      \"why_reaches_crash\": \"After passing the error/type/mount checks, do_unlinkat unconditionally dereferences path.dentry->d_inode; if path.dentry is NULL/invalid, inode_lock_nested() dereferences at offset 0x30/0x38 and crashes.\"\n    }\n  ],\n  \"path_constraints\": {\n    \"input\": [\n      {\n        \"file\": \"fs/namei.c\",\n        \"line\": 4352,\n        \"code\": \"if (error)\",\n        \"condition\": \"filename_parentat(dfd, name, ...) must return 0\",\n        \"why_it_blocks\": \"Any path resolution error (bad dfd/path, missing parent) exits before the crash; user controls the pathname and dfd.\"\n      },\n      {\n        \"file\": \"fs/namei.c\",\n        \"line\": 4356,\n        \"code\": \"if (type != LAST_NORM)\",\n        \"condition\": \"type == LAST_NORM (final component is a normal name)\",\n        \"why_it_blocks\": \"Non-normal final components (e.g., trailing slash) cause early exit; user controls pathname form.\"\n      }\n    ],\n    \"kernel_state\": [\n      {\n        \"file\": \"fs/namei.c\",\n        \"line\": 4360,\n        \"code\": \"if (error)\",\n        \"condition\": \"mnt_want_write(path.mnt) returns 0 (mount writable)\",\n        \"why_it_blocks\": \"Read-only mounts or write failures abort before dereferencing path.dentry->d_inode.\"\n      },\n      {\n        \"file\": \"fs/namei.c\",\n        \"line\": 4363,\n        \"code\": \"inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);\",\n        \"condition\": \"path.dentry must be non-NULL and valid (internal VFS invariant)\",\n        \"why_it_blocks\": \"If path.dentry is NULL/invalid due to internal corruption, dereferencing ->d_inode causes the observed NULL deref.\"\n      }\n    ]\n  },\n  \"evidence\": [\n    { \"file\": \"fs/namei.c\", \"line\": 4351, \"code\": \"error = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);\", \"note\": \"Path resolution must succeed (error == 0) to proceed.\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4352, \"code\": \"if (error)\", \"note\": \"Early exit on resolution error; user-controlled via dfd/pathname.\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4355, \"code\": \"error = -EISDIR;\", \"note\": \"Set for subsequent LAST_NORM check.\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4356, \"code\": \"if (type != LAST_NORM)\", \"note\": \"Requires a normal final component (no trailing '/').\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4359, \"code\": \"error = mnt_want_write(path.mnt);\", \"note\": \"Write access to mount required; otherwise early exit.\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4360, \"code\": \"if (error)\", \"note\": \"Blocks progress on read-only mount or write denial.\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4363, \"code\": \"inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);\", \"note\": \"Crash site: dereferences path.dentry->d_inode; KASAN shows NULL/near-NULL deref at offset 0x38.\" },\n    { \"file\": \"fs/namei.c\", \"line\": 4391, \"code\": \"return do_unlinkat(dfd, getname(pathname));\", \"note\": \"Caller passes control directly into do_unlinkat (no additional guards shown in snippet).\" }\n  ]\n}",
+      "parsed": {
+        "overview": {
+          "exploitability": "LOW",
+          "rationale": "Crash is a NULL/near-NULL pointer dereference of path.dentry->d_inode in do_unlinkat (KASAN reports deref at 0x38), yielding a kernel oops/DoS without evident controlled memory overwrite.",
+          "primitive_capabilities": "An unprivileged user can trigger a kernel crash (denial-of-service) via unlinkat under specific VFS state leading to path.dentry being NULL/invalid."
+        },
+        "preconditions": [
+          {
+            "summary": "unlinkat must resolve a normal (non-slash-terminated) pathname whose parent directory exists on a writable mount, and filename_parentat must wrongly return success with a NULL/invalid path.dentry.",
+            "concrete_constraints": [
+              "dfd => AT_FDCWD (-100) or a valid directory fd",
+              "pathname => user pointer to a NUL-terminated path whose final component is a normal name (no trailing '/', not '.' or '..')",
+              "parent(pathname) => must resolve successfully (filename_parentat returns 0)",
+              "mount(pathname) => not read-only (mnt_want_write(path.mnt) == 0)",
+              "kernel internal => path.dentry == NULL or an invalid low pointer (e.g., 0x0..0x8), despite filename_parentat() returning 0"
+            ],
+            "why_reaches_crash": "After passing the error/type/mount checks, do_unlinkat unconditionally dereferences path.dentry->d_inode; if path.dentry is NULL/invalid, inode_lock_nested() dereferences at offset 0x30/0x38 and crashes."
+          }
+        ],
+        "path_constraints": {
+          "input": [
+            {
+              "file": "fs/namei.c",
+              "line": 4352,
+              "code": "if (error)",
+              "condition": "filename_parentat(dfd, name, ...) must return 0",
+              "why_it_blocks": "Any path resolution error (bad dfd/path, missing parent) exits before the crash; user controls the pathname and dfd."
+            },
+            {
+              "file": "fs/namei.c",
+              "line": 4356,
+              "code": "if (type != LAST_NORM)",
+              "condition": "type == LAST_NORM (final component is a normal name)",
+              "why_it_blocks": "Non-normal final components (e.g., trailing slash) cause early exit; user controls pathname form."
+            }
+          ],
+          "kernel_state": [
+            {
+              "file": "fs/namei.c",
+              "line": 4360,
+              "code": "if (error)",
+              "condition": "mnt_want_write(path.mnt) returns 0 (mount writable)",
+              "why_it_blocks": "Read-only mounts or write failures abort before dereferencing path.dentry->d_inode."
+            },
+            {
+              "file": "fs/namei.c",
+              "line": 4363,
+              "code": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);",
+              "condition": "path.dentry must be non-NULL and valid (internal VFS invariant)",
+              "why_it_blocks": "If path.dentry is NULL/invalid due to internal corruption, dereferencing ->d_inode causes the observed NULL deref."
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "file": "fs/namei.c",
+            "line": 4351,
+            "code": "error = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);",
+            "note": "Path resolution must succeed (error == 0) to proceed."
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4352,
+            "code": "if (error)",
+            "note": "Early exit on resolution error; user-controlled via dfd/pathname."
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4355,
+            "code": "error = -EISDIR;",
+            "note": "Set for subsequent LAST_NORM check."
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4356,
+            "code": "if (type != LAST_NORM)",
+            "note": "Requires a normal final component (no trailing '/')."
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4359,
+            "code": "error = mnt_want_write(path.mnt);",
+            "note": "Write access to mount required; otherwise early exit."
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4360,
+            "code": "if (error)",
+            "note": "Blocks progress on read-only mount or write denial."
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4363,
+            "code": "inode_lock_nested(path.dentry->d_inode, I_MUTEX_PARENT);",
+            "note": "Crash site: dereferences path.dentry->d_inode; KASAN shows NULL/near-NULL deref at offset 0x38."
+          },
+          {
+            "file": "fs/namei.c",
+            "line": 4391,
+            "code": "return do_unlinkat(dfd, getname(pathname));",
+            "note": "Caller passes control directly into do_unlinkat (no additional guards shown in snippet)."
+          }
+        ]
+      }
+    },
+    "summary": null
+  }
+}

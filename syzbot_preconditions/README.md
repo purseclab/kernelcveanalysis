@@ -1,75 +1,133 @@
-Crash Analyzer
-================
+# Kernel Primitives Analyzer
 
-Small heuristic tool to parse kernel crash logs (KASAN/BUG) and extract frames,
-allocation/free traces, object info and attempt a primitive classification.
 
-Usage:
+## Purpose
 
-1. Analyze a log and print human readable summary:
+This small heuristic tool parses Linux kernel crash logs (KASAN, BUG, general protection faults, etc.),
+extracts the stack frames, allocation/free traces and object metadata, pulls nearby source snippets
+when available, and produces both a compact triage report and a richer JSON report with
+evidence-driven static analysis (including a best-effort exploitability judgment and path constraints).
 
-   python3 crash_analyzer.py crashlog.txt
+The analyzer is intentionally conservative: it reports the low-level primitive (e.g. "null-pointer-deref",
+"use-after-free", "out-of-bounds") and a human-friendly `overview` that explains the reasoning
+and relevant evidence lines. It also supports optional LLM enrichment if you configure a local model
+or API keys.
 
-2. Emit JSON with optional source lookups:
+## Quick start
 
-   python3 crash_analyzer.py crashlog.txt --source-root /path/to/linux
+1) Human-readable summary of a crash log:
 
-3. Emit full JSON (parsed, snippets, evidence, strong heuristics):
+```bash
+python3 crash_analyzer.py crashlog.txt
+```
 
-   python3 crash_analyzer.py crashlog.txt --json
+2) Emit full JSON (parsed fields, fetched snippets, per-snippet evidence, strong heuristics):
 
-4. Emit compact triage JSON report:
+```bash
+python3 crash_analyzer.py crashlog.txt --json
+```
 
-   python3 crash_analyzer.py crashlog.txt --json-report
+3) Prefer a local kernel source tree when fetching context lines:
 
-5. Generate a human-friendly HTML report with snippets and evidence:
+```bash
+python3 crash_analyzer.py crashlog.txt --source-root /path/to/linux --json
+```
 
-   python3 crash_analyzer.py crashlog.txt --html-report /tmp/crash_report.html
+4) Compact triage JSON suitable for automation:
 
-Notes:
-- If the crash log contains web links to source files (for example GitHub or android.googlesource links), the tool will try to fetch the single file and extract the requested lines (via URL fragments) rather than cloning the entire repository.
-- If you have a local kernel source tree that matches the build, provide `--source-root` to prefer local file lookups.
+```bash
+python3 crash_analyzer.py crashlog.txt --json-report > triage.json
+```
 
-Output fields (JSON):
+5) Generate an HTML report (includes fetched snippets and evidence):
+
+```bash
+python3 crash_analyzer.py crashlog.txt --html-report /tmp/crash_report.html
+```
+
+6) Download and analyze a syzkaller bug page (attachments + embedded <pre> text):
+
+```bash
+python3 crash_analyzer.py --syz-bug 'https://syzkaller.appspot.com/bug?extid=FEEDBEEF' --json
+```
+
+## Notes on source fetching
+
+- If the crash log includes links to viewers (GitHub, android.googlesource, git.kernel.org), the tool will
+  try to fetch the single file and extract the requested fragment using the URL fragment (#L123 or #123).
+- If you provide `--source-root` pointing at a matching kernel source checkout, local files are preferred
+  to remote fetches (faster and more reliable for offline analysis).
+
+## LLM integration (optional)
+
+The analyzer contains optional LLM-driven enrichment to produce more natural preconditions and
+reasoning. There are two main modes:
+
+- Local transformers model: configure `TRANSFORMERS_DIRECT_MODEL` and install `transformers`, `torch`,
+  and related runtimes in a virtual environment. This is disabled by default.
+- API-based providers: the code has a small OpenAI helper (`get_openai_response`) you can enable by
+  setting appropriate API keys.
+- To enable utilize OpenAI, fill in the `.env` file with your key or set the environment variable directly:
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+If you don't want LLM calls, the analyzer will still produce the full static analysis (`strong_report`)
+which includes `overview`, `preconditions`, `path_constraints`, and supporting evidence.
+
+## Dependencies and environment
+
+- Python 3.8+ recommended.
+- Network access is required to fetch remote source files or to run API-based LLM calls.
+- Optional: Installing `transformers` and `torch` enables the local LLM path. On many systems a CPU-only
+  install is easiest (pip wheels). Use a virtualenv to avoid polluting system packages.
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+If you encounter binary import errors (for example with Pillow or compiled extensions), prefer using the
+project's venv or a system package manager to install the required native libs.
+
+## Output fields (JSON)
+
+Top-level keys in the full JSON output (`--json`) include:
+
 - `parsed`: structured fields extracted from the log (kind, access, frames, object_info, allocated_by, freed_by)
-- `snippets`: fetched source snippets (urls/local)
-- `evidence`: per-snippet heuristic evidence
-- `classification`: initial classification based on log text
-- `strong_report`: stronger heuristic report including `primitive`, `confidence`, `preconditions`, `postconditions`, and `support`
+- `snippets`: fetched source snippets keyed by link/local id (contains `function_snippet`, `file`, `line`)
+- `evidence`: per-snippet heuristic evidence (dereference counts, deref expressions, alloc/free calls)
+- `strong_report` (produced by `stronger_heuristics`): a best-effort analysis containing:
+  - `primitive`: low-level bug primitive (null-pointer-deref, use-after-free, out-of-bounds, etc.)
+  - `vulnerability`: what an attacker could do (arbitrary_read/arbitrary_write/info-leak/DoS)
+  - `confidence`: 0.0..1.0 score
+  - `exploitability`: LOW/MEDIUM/HIGH (heuristic aggregation)
+  - `preconditions` / `postconditions`: natural-language pre/postconditions
+  - `path_constraints`: structured list of input and kernel-state checks (file/line/code/why_it_blocks)
+  - `overview`: compact summary with `exploitability`, `rationale`, and a `primitive_capabilities`
 
-Examples:
+## Examples and debugging tips
 
-1) Quick triage (compact JSON):
+- If `path_constraints` is empty but snippets exist, try increasing `--source-root` coverage or ensure the
+  fetched snippets include the function header (we attempt to walk to the function start but remote viewers
+  sometimes return truncated fragments).
+- KASAN frames and shadow-memory helpers are filtered out by default. If you need them, you can modify
+  the frame-filtering heuristics in `parse_crash_log()`.
+- If the static analysis and LLM disagree (e.g., static reports HIGH but LLM reports LOW), examine the
+  `strong_report.support` array and `overview.confidence_breakdown` to see which signals influenced the verdict.
 
-   python3 crash_analyzer.py crash.txt --json-report > triage.json
+## Common commands summary
 
-2) Full analysis and HTML for human triage:
+```bash
+# basic summary
+python3 crash_analyzer.py crash.txt
 
-   python3 crash_analyzer.py crash.txt --source-root ~/linux --html-report /tmp/report.html
+# full JSON with local source context
+python3 crash_analyzer.py crash.txt --json --source-root ~/linux
 
-Bulk analysis
--------------
-You can analyze many syzbot crash logs at once.
+# compact triage JSON
+python3 crash_analyzer.py crash.txt --json-report > triage.json
 
-1) Analyze all crash log files in a directory and write per-crash JSON+HTML:
-
-   python3 crash_analyzer.py --bulk-dir /path/to/crash_logs --out-dir /tmp/crash_reports --source-root ~/linux
-
-2) Fetch crash report text files from a list of URLs and analyze them:
-
-   python3 crash_analyzer.py --fetch-urls crash_urls.txt --out-dir /tmp/crash_reports
-
-Output
-- The bulk commands create `{basename}.json` and `{basename}.html` for each input crash report under the `--out-dir`.
-
-Download and analyze a single syzkaller bug page (attachments + page pre text):
-
-   python3 crash_analyzer.py --download-syz 'https://syzkaller.appspot.com/bug?extid=feecbbf039dd054a80e1' --out-dir /tmp/bug123 --source-root ~/linux
-
-This command will:
- - download attachments and the page <pre> block into `/tmp/bug123`
- - run the analyzer on all downloaded files (producing per-file JSON and HTML in `/tmp/bug123`)
-
-
-
-
+# analyze a syzkaller bug page (downloads attachments)
+python3 crash_analyzer.py --syz-bug 'https://syzkaller.appspot.com/bug?extid=ff97a14204e1de3f1a08' --json
+```

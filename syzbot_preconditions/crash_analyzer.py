@@ -15,7 +15,11 @@ import re
 import sys
 import urllib.parse
 import urllib.request
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
+from openai import OpenAI
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
+from dotenv import load_dotenv
 
 
 def parse_crash_log(text: str) -> Dict[str, Any]:
@@ -109,7 +113,13 @@ def parse_crash_log(text: str) -> Dict[str, Any]:
     for l in lines:
         m = frame_re.match(l)
         if m:
-            frames.append({"func": m.group(1), "file": m.group(2).strip(), "line": int(m.group(3)), "raw": l.strip()})
+            func_name = m.group(1)
+            # skip KASAN/shadow-memory helper frames -- they refer to shadow memory handling, not the actual buggy code
+            file_path = (m.group(2) or '').strip()
+            if (func_name and 'kasan' in func_name.lower()) or ('kasan' in file_path.lower()):
+                # ignore any frames that refer to KASAN/shadow or kernel sanitizers
+                continue
+            frames.append({"func": func_name, "file": file_path, "line": int(m.group(3)), "raw": l.strip()})
 
     # A looser fallback: lines like "f2fs_iget+0x43aa/0x4dc0 fs/f2fs/inode.c:514"
     loose_re = re.compile(r"^\s*([\w0-9_@\-]+)(?:\+0x[0-9a-fA-F]+/0x[0-9a-fA-F]+)?\s+([^:]+):(\d+)\b")
@@ -117,7 +127,11 @@ def parse_crash_log(text: str) -> Dict[str, Any]:
         for l in lines:
             m = loose_re.match(l)
             if m:
-                frames.append({"func": m.group(1), "file": m.group(2).strip(), "line": int(m.group(3)), "raw": l.strip()})
+                func_name = m.group(1)
+                file_path = (m.group(2) or '').strip()
+                if (func_name and 'kasan' in func_name.lower()) or ('kasan' in file_path.lower()):
+                    continue
+                frames.append({"func": func_name, "file": file_path, "line": int(m.group(3)), "raw": l.strip()})
 
     # Also extract frames embedded as HTML anchors: <a href='URL'>path/file.c:123</a>
     link_frames: List[Dict[str, Any]] = []
@@ -127,6 +141,9 @@ def parse_crash_log(text: str) -> Dict[str, Any]:
         # target like fs/ext4/namei.c:3704
         try:
             filepart, lineno = target.rsplit(':', 1)
+            # filter out KASAN-related anchors as well
+            if 'kasan' in (filepart or '').lower() or 'kasan' in (url or '').lower():
+                continue
             link_frames.append({"url": url, "file": filepart.strip(), "line": int(lineno)})
         except Exception:
             continue
@@ -351,13 +368,6 @@ def fetch_source_from_url(url: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": str(e)}
 
-    # DEBUG: report fetched size/lines for link frame urls
-    try:
-        print(f"[DEBUG] fetched link {u}: {len(text)} bytes, {len(text.splitlines())} lines", file=sys.stderr)
-        print(f"[DEBUG] fetched link preview: {text[:200]!r}", file=sys.stderr)
-    except Exception:
-        pass
-
 def convert_to_raw(url: str) -> Optional[str]:
     """Convert common source viewer URLs to raw file URLs when possible.
 
@@ -404,12 +414,76 @@ def analyze_snippet_for_evidence(snippet: str, access: Optional[Dict[str, Any]] 
 
     Returns a small evidence dict.
     """
-    evidence = {"dereference": False, "array_access": False, "alloc_calls": [], "free_calls": [], "nearby_lines": []}
+    evidence = {"dereference": False, "array_access": False, "alloc_calls": [], "free_calls": [], "nearby_lines": [],
+                # counts to help distinguish read vs write uses of dereferences
+                "deref_writes": 0, "deref_reads": 0,
+                # capture exact dereference expressions like "dentry->d_inode->i_mode"
+                "deref_exprs": []}
     lines = snippet.splitlines()
     for i, l in enumerate(lines):
-        if "->" in l or "(*" in l or "*" in l and "." not in l:
+        # detect pointer dereference usages
+        if "->" in l or "(*" in l or ("*" in l and "." not in l):
             evidence["dereference"] = True
             evidence["nearby_lines"].append((i + 1, l.strip()))
+            # capture full dereference expressions (var->field->...)
+            try:
+                for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*(?:->[A-Za-z_][A-Za-z0-9_]*)+)\b", l):
+                    expr = m.group(1)
+                    if expr not in evidence['deref_exprs']:
+                        evidence['deref_exprs'].append(expr)
+            except Exception:
+                pass
+            # improved LHS/RHS assignment heuristic: explicitly capture simple assignments
+            try:
+                assign_m = re.match(r"^\s*(?P<left>.+?)\s*=\s*(?P<right>.+);?\s*$", l)
+                if assign_m:
+                    left = assign_m.group('left')
+                    right = assign_m.group('right')
+                    # if LHS contains a deref/pointer/index, count as a write
+                    if re.search(r"->|\[|\*", left):
+                        evidence['deref_writes'] += 1
+                    # if RHS contains a deref, count as a read
+                    if re.search(r"->|\[|\*", right):
+                        evidence['deref_reads'] += 1
+                else:
+                    # no simple assignment detected: check for comparison or read-like usage
+                    if re.search(r"\bif\b|==|!=|<|>|memcmp|memcmp_from_user|strncmp|strcmp|memcmp", l):
+                        evidence['deref_reads'] += 1
+                    else:
+                        # conservative: leave counts unchanged when undecidable
+                        pass
+            except Exception:
+                pass
+        # detect mem* and copy_from_user/copy_to_user patterns which are strongly indicative
+        # of reads vs writes depending on argument position
+        mem_m = re.search(r"\b(memcpy|memmove|memset)\s*\((.*)\)", l)
+        if mem_m:
+            evidence['array_access'] = True
+            evidence['nearby_lines'].append((i + 1, l.strip()))
+            try:
+                args = mem_m.group(2)
+                # naive split by comma (works for common simple usages)
+                parts = [p.strip() for p in args.split(',')]
+                if parts:
+                    # dest is first arg for memcpy/memmove
+                    dest = parts[0]
+                    if re.search(r"->|\[|\*", dest):
+                        evidence['deref_writes'] += 1
+                    if len(parts) > 1:
+                        src = parts[1]
+                        if re.search(r"->|\[|\*", src):
+                            evidence['deref_reads'] += 1
+            except Exception:
+                pass
+        # copy_from_user(dst, src, n): copies from user into kernel (dst is written)
+        if re.search(r"\bcopy_from_user\s*\(", l):
+            evidence['nearby_lines'].append((i + 1, l.strip()))
+            # mark as write to kernel-side pointers
+            evidence['deref_writes'] += 1
+        # copy_to_user(dst, src, n): copies from kernel to user (src is read)
+        if re.search(r"\bcopy_to_user\s*\(", l):
+            evidence['nearby_lines'].append((i + 1, l.strip()))
+            evidence['deref_reads'] += 1
         if "[" in l and "]" in l and "if" not in l:
             evidence["array_access"] = True
             evidence["nearby_lines"].append((i + 1, l.strip()))
@@ -422,6 +496,384 @@ def analyze_snippet_for_evidence(snippet: str, access: Optional[Dict[str, Any]] 
         evidence["access_op"] = access.get("op")
         evidence["access_size"] = access.get("size")
     return evidence
+
+
+def _analyze_control_flow_path_constraints(parsed: Dict[str, Any], snippets: Dict[str, Any], evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Scan available snippets and stack frames backwards from the crash and extract
+    control-flow conditions (if/for/while/switch) and early blockers (returns/gotos).
+
+    Heuristics attempt to classify each condition as either an INPUT constraint
+    (checks that gate user-controlled/syscall-provided buffers/lengths/flags) or a
+    KERNEL-STATE constraint (NULL checks, capability/feature checks, allocation/ownership checks).
+
+    Returns dict with keys: input_constraints (list), kernel_state_constraints (list)
+    Each entry contains: frame,file,line,code,condition,variables,evidence (nearby lines),why_it_blocks
+    """
+    input_constraints = []
+    kernel_constraints = []
+
+    # Build a simple vars_found set from evidence if provided, otherwise attempt a best-effort scan
+    vars_found = set()
+    try:
+        if evidence:
+            for k, v in (evidence or {}).items():
+                if not isinstance(v, dict):
+                    continue
+                for (_, ln) in v.get('nearby_lines', []):
+                    # extract var-like tokens
+                    for tok in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", ln):
+                        if len(tok) > 1 and not tok.isupper():
+                            vars_found.add(tok)
+        # also inspect snippet texts for pointer/field usages
+        for section in (snippets.get('links') or {}).values():
+            if not isinstance(section, dict):
+                continue
+            txt = section.get('function_snippet') or ''
+            for m in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)", txt):
+                vars_found.add(m.group(1))
+            for m in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\s*\[", txt):
+                vars_found.add(m.group(1))
+    except Exception:
+        pass
+
+    # token lists for heuristics
+    input_indicators = set(["copy_from_user", "get_user", "put_user", "ioctl", "syscall", "user", "uid", "gid", "flags", "len", "count", "size", "addr", "offset", "buf", "name", "path", "dname", "name_len", "rec_len"])
+    kernel_indicators = set(["== NULL", "!= NULL", "IS_ERR", "IS_ERR_OR_NULL", "unlikely", "mutex", "spin_lock", "test_bit", "capable", "in_interrupt", "return -EINVAL", "return -ENOMEM", "goto", "return 0", "return -EPERM"])
+
+    # First: collect conditional-like lines from all available snippets (links, local, urls)
+    conditions = []
+
+    def _collect_from_text(file_hint, base_line, text, key):
+        if not text:
+            return
+        for i, ln in enumerate(text.splitlines(), start=1):
+            s = ln.strip()
+            if not s:
+                continue
+            # candidate conditional lines
+            if re.search(r"\b(if|for|while|switch)\b\s*\(|\breturn\b|\bgoto\b", s):
+                # extract a parenthesized condition when possible
+                cond = None
+                m = re.search(r"\bif\s*\((.+)\)", s)
+                if not m:
+                    m = re.search(r"\bfor\s*\((.+)\)", s)
+                if not m:
+                    m = re.search(r"\bwhile\s*\((.+)\)", s)
+                if not m:
+                    m = re.search(r"\bswitch\s*\((.+)\)", s)
+                if m:
+                    cond = m.group(1).strip()
+                else:
+                    # for returns/goto/other take the full line as condition text
+                    cond = s
+
+                vars_in_cond = [tok for tok in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", cond or '') if not re.match(r"^[0-9]+$", tok)]
+                conditions.append({'file': file_hint, 'line': (base_line or 0) + i, 'code': s, 'condition': cond, 'variables': vars_in_cond, 'key': key})
+
+    # collect from link snippets
+    for k, v in (snippets.get('links') or {}).items():
+        if isinstance(v, dict):
+            txt = v.get('function_snippet') or v.get('snippet') or ''
+            _collect_from_text(v.get('file'), v.get('line'), txt, k)
+    # collect from local snippets
+    for k, v in (snippets.get('local') or {}).items():
+        if isinstance(v, dict):
+            txt = v.get('snippet') or ''
+            _collect_from_text(os.path.basename(v.get('path') or ''), v.get('line') or 0, txt, k)
+    # collect from urls mapping
+    for k, v in (snippets.get('urls') or {}).items():
+        txt = v if isinstance(v, str) else (v.get('snippet') if isinstance(v, dict) else '')
+        _collect_from_text(None, None, txt, k)
+
+    # Heuristics for classification
+    input_kw = set(list(input_indicators) + ['name', 'd_name', 'nd', 'last', 'path', 'dentry', 'buf', 'filename', 'dirent', 'count', 'len', 'name_len'])
+    kernel_kw = set(list(kernel_indicators) + ['== NULL', '!= NULL', 'IS_ERR', 'WARN_ON', 'BUG_ON', 'unlikely', 'goto', 'return'])
+
+    # Helper: try to detect variable origin (copy_from_user/memcpy/syscall param)
+    def _trace_var_origin(var):
+        origins = set()
+        # scan all snippets for patterns that assign or copy into var
+        for k, v in (snippets.get('links') or {}).items():
+            if not isinstance(v, dict):
+                continue
+            txt = v.get('function_snippet') or v.get('snippet') or ''
+            for i, ln in enumerate(txt.splitlines(), start=1):
+                if re.search(rf"\bcopy_from_user\s*\(.*\b{re.escape(var)}\b|\bmemcpy\s*\(\s*{re.escape(var)}\b", ln):
+                    origins.add('copy_from_user')
+                if re.search(rf"\bcopy_to_user\s*\(.*\b{re.escape(var)}\b", ln):
+                    origins.add('copy_to_user')
+                if re.search(rf"\b{re.escape(var)}\b\s*=\s*.*\bcopy_from_user\b", ln):
+                    origins.add('copy_from_user')
+                # syscall param heuristic: presence of var in function header and function name suggests syscall origin
+                if re.search(rf"\b{re.escape(var)}\b\s*[,\)]", ln):
+                    # if snippet key suggests syscall wrapper, mark as param
+                    if re.search(r"__x64_sys_|__se_sys_|sys_|ksys_", v.get('function_snippet') or '' or '', re.I):
+                        origins.add('syscall_param')
+        # local snippets
+        for k, v in (snippets.get('local') or {}).items():
+            if not isinstance(v, dict):
+                continue
+            txt = v.get('snippet') or ''
+            for ln in txt.splitlines():
+                if re.search(rf"\bcopy_from_user\s*\(.*\b{re.escape(var)}\b", ln):
+                    origins.add('copy_from_user')
+        return list(origins)
+
+    # Classify collected conditions and attach to input/kernel lists
+    for c in conditions:
+        cond_text = (c.get('condition') or '')
+        lowc = cond_text.lower() if cond_text else ''
+        vars_in_cond = c.get('variables') or []
+        classification = 'kernel_state'
+        reasons = []
+
+        # direct indicators
+        if any(kw in lowc for kw in ('copy_from_user', 'get_user', 'put_user', 'ioctl', 'syscall', 'copy_to_user')):
+            classification = 'input'
+            reasons.append('contains explicit user-copy/syscall keywords')
+
+        # variable-origin tracing
+        for vname in vars_in_cond:
+            origins = _trace_var_origin(vname)
+            if any(o in ('copy_from_user', 'syscall_param', 'user_buffer') for o in origins):
+                classification = 'input'
+                reasons.append(f"variable '{vname}' traced to user/syscall source: {', '.join(origins)}")
+                break
+
+        # token heuristics
+        if classification != 'input':
+            if any(tok in lowc for tok in ('== null', '!= null', 'is_err', 'is_err_or_null', 'warn_on', 'bug_on')):
+                classification = 'kernel_state'
+                reasons.append('null/is_err/warn guard')
+            elif any(tok in lowc for tok in ('len', 'size', 'offset', 'addr', 'count', 'name_len')):
+                # likely input constraint if comparing sizes/offsets
+                classification = 'input'
+                reasons.append('size/len/offset token present in condition')
+
+        # if still ambiguous because both kernel and input tokens present
+        if any(tok in lowc for tok in ('copy_from_user', 'len')) and any(tok in lowc for tok in ('== null', 'is_err')):
+            classification = 'ambiguous'
+            reasons.append('both input and kernel-state patterns present')
+
+        entry = {
+            'frame': None,
+            'file': c.get('file'),
+            'line': c.get('line'),
+            'code': c.get('code'),
+            'condition': c.get('condition'),
+            'variables': vars_in_cond,
+            'evidence': [],
+            'why_it_blocks': '; '.join(reasons) if reasons else 'guard or conditional that may prevent reaching crash site',
+        }
+
+        if classification == 'input':
+            input_constraints.append(entry)
+        elif classification == 'kernel_state':
+            kernel_constraints.append(entry)
+        else:
+            # ambiguous entries go into kernel by default but marked
+            entry['why_it_blocks'] = (entry.get('why_it_blocks') + '; marked ambiguous') if entry.get('why_it_blocks') else 'ambiguous'
+            kernel_constraints.append(entry)
+
+    # dedupe by (file,line,condition)
+    def _dedupe(lst):
+        seen = set()
+        out = []
+        for e in lst:
+            key = (e.get('file'), e.get('line'), e.get('condition'))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(e)
+        return out
+
+    # If we found no constraints at all, attempt a weaker, broad scan over all
+    # available snippets (link snippets and local/url snippets) and extract any
+    # conditional lines we can find. This helps in cases where the original
+    # backward walk did not match frames to snippets tightly (common with inlined
+    # functions or different naming conventions). The results are lower-confidence
+    # but better than empty lists.
+    try:
+        if not input_constraints and not kernel_constraints:
+            fallback_hits = []
+            # collect candidate texts
+            candidates = []
+            for k, v in (snippets.get('links') or {}).items():
+                if isinstance(v, dict) and v.get('function_snippet'):
+                    candidates.append({'file': v.get('file'), 'line': v.get('line'), 'text': v.get('function_snippet'), 'key': k})
+            for k, v in (snippets.get('local') or {}).items():
+                if isinstance(v, dict) and v.get('snippet'):
+                    candidates.append({'file': os.path.basename(v.get('path') or ''), 'line': v.get('line'), 'text': v.get('snippet'), 'key': k})
+            for k, v in (snippets.get('urls') or {}).items():
+                txt = v if isinstance(v, str) else (v.get('snippet') if isinstance(v, dict) else '')
+                if txt:
+                    candidates.append({'file': None, 'line': None, 'text': txt, 'key': k})
+
+            for item in candidates:
+                text = item.get('text') or ''
+                file = item.get('file')
+                base_line = item.get('line') or 0
+                for i, ln in enumerate(text.splitlines(), start=1):
+                    s = ln.strip()
+                    # quick filter for lines likely to be conditionals
+                    if not s:
+                        continue
+                    if re.search(r"\b(if|for|while|switch)\b\s*\(|\breturn\b|\bgoto\b", s):
+                        # extract condition text where possible
+                        m = re.search(r"\bif\s*\((.+)\)", s)
+                        cond = None
+                        kind = 'kernel_state'
+                        if m:
+                            cond = m.group(1).strip()
+                        else:
+                            # try for for/while/switch
+                            m2 = re.search(r"\bfor\s*\((.+)\)", s) or re.search(r"\bwhile\s*\((.+)\)", s) or re.search(r"\bswitch\s*\((.+)\)", s)
+                            if m2:
+                                cond = m2.group(1).strip()
+                            else:
+                                # return/goto/other - keep the full line as condition
+                                cond = s
+
+                        lowc = (cond or '').lower()
+                        # classify heuristically
+                        if re.search(r"copy_from_user|get_user|put_user|ioctl|syscall|user|len|size|offset|count|buf|name|path", lowc):
+                            kind = 'input'
+                        elif re.search(r"==\s*NULL|!=\s*NULL|is_err|is_err_or_null|unlikely|mutex|spin_lock|capable|return\s*-E", lowc):
+                            kind = 'kernel_state'
+                        else:
+                            # fallback: if condition mentions numeric comparisons or size tokens, lean input
+                            if re.search(r"[<>]=?|\b(len|size|offset|count|addr)\b", lowc):
+                                kind = 'input'
+                            else:
+                                kind = 'kernel_state'
+
+                        entry = {'frame': None, 'file': file, 'line': base_line + i, 'code': s, 'condition': cond, 'variables': re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", cond or ''), 'evidence': [{'line_no': i, 'text': s}], 'why_it_blocks': 'fallback conditional extracted from snippet'}
+                        if kind == 'input':
+                            input_constraints.append(entry)
+                        else:
+                            kernel_constraints.append(entry)
+    except Exception:
+        pass
+
+    return {'input_constraints': _dedupe(input_constraints), 'kernel_state_constraints': _dedupe(kernel_constraints)}
+
+
+def _trace_variable_across_frames(parsed: Dict[str, Any], snippets: Dict[str, Any], var_names: List[str]) -> Dict[str, Any]:
+    """Attempt a lightweight backward trace for variables across frames/snippets.
+
+    For each variable name, search earlier frames/snippets for:
+      - copy_from_user/copy_to_user usages involving the var
+      - memcpy/memmove where var appears as a source/dest
+      - simple assignments 'var = ...' or '&var ='
+      - function parameter names in function headers present in snippets
+
+    Returns a map var -> list of trace records with keys: frame,file,line,code,source (one of copy_from_user,user_buffer,syscall_param,assignment,unknown)
+    This is a heuristic helper (best-effort) and not a full dataflow engine.
+    """
+    # Build a dataflow graph from available snippets and propagate taint from user/syscall seeds
+    try:
+        graph_result = build_dataflow_graph(parsed, snippets)
+        graph = graph_result.get('graph')
+        node_occurrences = graph_result.get('occurrences')
+        # identify seeds: copy_from_user destinations and syscall parameter nodes
+        seeds = {}
+        # copy_from_user detected ops
+        for node, meta in graph_result.get('meta', {}).get('copy_from_user', {}).items():
+            # meta may list occurrences; mark seed with label copy_from_user
+            seeds[node] = {'label': 'copy_from_user'}
+        # syscall parameter seeds: detect frames with syscall-like names
+        for f in (parsed.get('frames') or []):
+            fname = f.get('func') or ''
+            if re.search(r"^(__x64_sys_|__se_sys_|sys_|ksys_)", fname):
+                # add all param nodes for this function if present in graph
+                params = graph_result.get('func_params', {}).get(fname) or []
+                for p in params:
+                    n = f"{p}@{fname}"
+                    seeds[n] = {'label': 'syscall_param'}
+
+        # propagate taint forward from seeds
+        tainted = propagate_taint_graph(graph, seeds, max_depth=7, max_nodes=500)
+
+        out = {}
+        for v in var_names:
+            out[v] = []
+            # find any occurrences of variable 'v' in node_occurrences
+            for node, occs in node_occurrences.items():
+                # node format: var@func
+                if not node.startswith(v + '@') and not node.split('@')[0] == v:
+                    continue
+                # if node is tainted, collect traces
+                if node in tainted:
+                    tag = tainted[node].get('seed_label')
+                    dist = tainted[node].get('distance')
+                    # include all occurrence contexts for this node
+                    for occ in occs:
+                        rec = {'file': occ.get('file'), 'line': occ.get('line'), 'code': occ.get('code'), 'source': tag, 'distance': dist}
+                        out[v].append(rec)
+                else:
+                    # include occurrence as non-tainted mention
+                    for occ in occs:
+                        out[v].append({'file': occ.get('file'), 'line': occ.get('line'), 'code': occ.get('code'), 'source': None, 'distance': None})
+        return out
+    except Exception:
+        # fallback to previous simple heuristic when graphing fails
+        out = {}
+        frames = parsed.get('frames') or []
+        for v in var_names:
+            out[v] = []
+        try:
+            # collect snippet texts keyed by filename for quick search
+            texts = []
+            for k, s in (snippets.get('links') or {}).items():
+                if isinstance(s, dict) and s.get('function_snippet'):
+                    texts.append({'key': k, 'file': s.get('file'), 'text': s.get('function_snippet')})
+            for k, s in (snippets.get('local') or {}).items():
+                if isinstance(s, dict) and s.get('snippet'):
+                    texts.append({'key': k, 'file': os.path.basename(s.get('path') or ''), 'text': s.get('snippet')})
+            for k, s in (snippets.get('urls') or {}).items():
+                txt = s if isinstance(s, str) else (s.get('snippet') if isinstance(s, dict) else '')
+                if txt:
+                    texts.append({'key': k, 'file': None, 'text': txt})
+
+            # simple heuristics to identify origin
+            for item in texts:
+                file = item.get('file')
+                txt = item.get('text') or ''
+                for i, line in enumerate(txt.splitlines(), start=1):
+                    for v in var_names:
+                        # exact token boundary check
+                        if re.search(rf"\b{re.escape(v)}\b", line):
+                            rec = {'file': file, 'line': i, 'code': line.strip(), 'key': item.get('key')}
+                            if re.search(rf"copy_from_user\s*\(\s*{re.escape(v)}\s*,", line):
+                                rec['source'] = 'copy_from_user'
+                                out[v].append(rec)
+                                continue
+                            if re.search(rf"copy_to_user\s*\(.*,{re.escape(v)}\s*\)", line):
+                                rec['source'] = 'copy_to_user'
+                                out[v].append(rec)
+                                continue
+                            m_mem = re.search(rf"\b(memcpy|memmove)\s*\(\s*{re.escape(v)}\s*,\s*([^,]+)", line)
+                            if m_mem:
+                                src = m_mem.group(2).strip()
+                                if re.search(r"copy_from_user|user", src, re.I):
+                                    rec['source'] = 'user_buffer'
+                                else:
+                                    rec['source'] = 'memcpy_assignment'
+                                out[v].append(rec)
+                                continue
+                            if re.search(rf"\b{re.escape(v)}\s*=", line) or re.search(rf"\*\s*{re.escape(v)}\s*=" , line):
+                                rec['source'] = 'assignment'
+                                out[v].append(rec)
+                                continue
+                            if '(' in line and ')' in line and re.search(rf"\b{re.escape(v)}\b", line):
+                                rec['source'] = 'param' if re.search(r'syz_|sys_|__x64_sys_|__se_sys_', txt, re.I) else 'param'
+                                out[v].append(rec)
+                                continue
+                            rec['source'] = 'unknown'
+                            out[v].append(rec)
+        except Exception:
+            pass
+        return out
 
 
 def stronger_heuristics(parsed: Dict[str, Any], snippets: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
@@ -537,6 +989,8 @@ def stronger_heuristics(parsed: Dict[str, Any], snippets: Dict[str, Any], eviden
     any_free = False
     any_write = False
     any_read = False
+    deref_writes = 0
+    deref_reads = 0
     for k, v in (evidence or {}).items():
         if not isinstance(v, dict):
             continue
@@ -550,18 +1004,28 @@ def stronger_heuristics(parsed: Dict[str, Any], snippets: Dict[str, Any], eviden
             any_write = True
         if v.get("access_op") == "read":
             any_read = True
+        # aggregate deref read/write heuristics if present
+        try:
+            dw = int(v.get('deref_writes', 0) or 0)
+            dr = int(v.get('deref_reads', 0) or 0)
+            deref_writes += dw
+            deref_reads += dr
+        except Exception:
+            pass
 
     # heuristic mapping
     if "use-after-free" in prim:
         # if evidence indicates a read access and attacker-controlled input can reach the path,
         # prefer calling it an info-leak; if write evidence exists prefer arbitrary write.
-        if any_write:
-            vuln = "arbitrary write (via use-after-free dereference)"
-        elif any_read:
+        # Prefer evidence-driven decision: if deref_writes exceeds reads, call it an arbitrary write
+        if deref_writes > deref_reads or any_write:
+            vuln = "arbitrary_write"
+        elif deref_reads > 0 or any_read:
+            # pointer deref reads or array reads -> info leak
             if any_deref or any_array:
-                vuln = "info-leak (use-after-free read of reclaimed memory)"
+                vuln = "arbitrary_read"
             else:
-                vuln = "use-after-free (may allow read of reclaimed memory)"
+                vuln = "info-leak (use-after-free read of reclaimed memory)"
         else:
             vuln = "use-after-free (may allow read/write of reclaimed memory)"
     elif "double-free" in prim or "invalid-free" in prim:
@@ -571,17 +1035,21 @@ def stronger_heuristics(parsed: Dict[str, Any], snippets: Dict[str, Any], eviden
     elif "read" in prim or prim.startswith("read"):
         vuln = "info-leak (bounded or unbounded read)"
     elif "oob" in prim or "out-of-bounds" in " ".join(report.get("support", [])):
-        if any_write:
-            vuln = "arbitrary write (oob write)"
+        # for OOB prefer write if evidence shows deref writes or access op write
+        if deref_writes > deref_reads or any_write:
+            vuln = "arbitrary_write"
+        elif deref_reads > 0 or any_read:
+            vuln = "arbitrary_read"
         else:
+            # fallback to info-leak for reads
             vuln = "info-leak (oob read)"
     else:
         vuln = "unknown"
 
-    # Swap semantics: make vulnerability the primitive label (what low-level bug it is)
-    # and primitive a description of what an attacker can do (capability)
-    report["vulnerability"] = report.get("primitive") or "unknown"
-    report["primitive"] = vuln or report.get("primitive") or "unknown"
+    # Swap semantics: make vulnerability the primitive label (what attacker can do)
+    # and primitive the low-level bug description
+    report["vulnerability"] = vuln or report.get("vulnerability") or "unknown"
+    report["primitive"] = report.get("primitive") or "unknown"
 
     # Add final best-effort label if still unknown
     if not report["vulnerability"] or report["vulnerability"] == "unknown":
@@ -670,6 +1138,138 @@ def stronger_heuristics(parsed: Dict[str, Any], snippets: Dict[str, Any], eviden
         preconds.append(f"Code path: execution reaches function '{funcs[0]}' (from crash context)")
     if vars_found:
         preconds.append(f"State: variable(s) like {', '.join(vars_found[:3])} may point into freed/reclaimed memory (observed in nearby source lines)")
+
+    # Analyze control-flow along the stack to surface path constraints
+    try:
+        path_constraints = _analyze_control_flow_path_constraints(parsed, snippets, evidence)
+        # attach to report for downstream use and LLM context
+        report['path_constraints'] = path_constraints
+        # convert constraints into human-friendly preconditions
+        for ic in path_constraints.get('input_constraints', [])[:5]:
+            preconds.append(f"path constraint (input): {ic.get('condition') or ic.get('code')} -- at {ic.get('file')}:{ic.get('line')}")
+        for kc in path_constraints.get('kernel_state_constraints', [])[:8]:
+            preconds.append(f"path constraint (kernel state): {kc.get('condition') or kc.get('code')} -- at {kc.get('file')}:{kc.get('line')}")
+        report['support'].append('Control-flow path constraints extracted from stack snippets (if/for/while/switch, returns)')
+        report['confidence'] = min(1.0, report['confidence'] + 0.05)
+    except Exception:
+        # non-fatal
+        pass
+
+    # Special-case: KASAN null-pointer dereference -> likely a crash/DoS rather than arbitrary R/W
+    try:
+        raw = parsed.get('raw') or ''
+        raw_lower = raw.lower()
+        if 'kasan' in raw_lower and 'null-ptr-deref' in raw_lower:
+            # core classification for KASAN null-pointer derefs: low exploitability, DoS primitive
+            report['primitive'] = 'null-pointer-deref'
+            report['vulnerability'] = 'denial-of-service (kernel crash)'
+            report['exploitability'] = 'low'
+            report['confidence'] = min(1.0, report.get('confidence', 0) + 0.2)
+            report.setdefault('support', []).append('KASAN reported null-ptr-deref in crash log')
+
+            # Build a short evidence set and rationale including specific snippet lines when available
+            found = []
+            for k, s in (snippets.get('links') or {}).items():
+                if not isinstance(s, dict):
+                    continue
+                txt = (s.get('function_snippet') or s.get('snippet') or '')
+                base = s.get('line') or 0
+                for i, ln in enumerate(txt.splitlines(), start=1):
+                    low_ln = ln.lower()
+                    if 'dentry' in low_ln or 'd_is_negative' in low_ln or 'd_is_miss' in low_ln or 'dcache' in low_ln or 'path_openat' in low_ln:
+                        found.append({'file': s.get('file'), 'line': base + i - 1, 'code': ln.strip()})
+
+            # Add concrete precondition & kernel_state constraint if we found namei/dcache-related lines
+            if found:
+                report.setdefault('preconditions', []).insert(0, "State: dentry pointer may be NULL or invalid leading to null-pointer deref in dcache/namei code paths")
+                kc = {
+                    'frame': None,
+                    'file': found[0]['file'],
+                    'line': found[0]['line'],
+                    'code': found[0]['code'],
+                    'condition': 'dentry pointer may be NULL or invalid',
+                    'variables': ['dentry'],
+                    'evidence': [ {'file': found[0]['file'], 'line': found[0]['line'], 'code': found[0]['code'], 'note': 'dentry-related line near crash site'} ],
+                    'why_it_blocks': 'null/invalid dentry pointer will cause dereference and crash'
+                }
+                pc = report.setdefault('path_constraints', {'input_constraints': [], 'kernel_state_constraints': []})
+                pc['kernel_state_constraints'].insert(0, kc)
+
+            # Compose a concise rationale that includes the KASAN message and any snippet evidence
+            rationale_parts = []
+            # include the first non-empty KASAN line or the header
+            for ln in raw.splitlines():
+                if 'kasan' in ln.lower() or 'null-ptr-deref' in ln.lower() or 'general protection fault' in ln.lower():
+                    rationale_parts.append(ln.strip())
+                    break
+            if found:
+                # include up to two snippet evidence lines
+                for f in found[:2]:
+                    rationale_parts.append(f"{os.path.basename(f.get('file') or '')}:{f.get('line')} -> {f.get('code')}")
+                    report.setdefault('support', []).append(f"evidence: {f.get('file')}:{f.get('line')} '{f.get('code')}'")
+
+            # capture any explicit dereference expressions found by snippet analysis
+            try:
+                deref_exprs = []
+                for k, ev in (evidence or {}).items():
+                    if isinstance(ev, dict):
+                        for expr in ev.get('deref_exprs', []) or []:
+                            if expr not in deref_exprs:
+                                deref_exprs.append(expr)
+                if deref_exprs:
+                    rationale_parts.append(f"dereference expressions: {', '.join(deref_exprs[:3])}")
+                    report.setdefault('support', []).append(f"deref_exprs: {', '.join(deref_exprs[:3])}")
+            except Exception:
+                pass
+
+            # detect non-canonical fault address or CR2 from raw log and include as evidence
+            try:
+                m_nc = re.search(r"non-?canonical address\s*([0-9a-fxXA-F]+)", raw, re.I)
+                if not m_nc:
+                    m_nc = re.search(r"CR2:\s*([0-9a-fxXA-F]+)", raw, re.I)
+                if m_nc:
+                    addr = m_nc.group(1)
+                    report['non_canonical_addr'] = addr
+                    report.setdefault('support', []).append(f"faulting address: {addr}")
+                    rationale_parts.append(f"faulting address: {addr}")
+            except Exception:
+                pass
+
+            # fallback: include a short statement about lack of arbitrary R/W evidence
+            rationale_parts.append('No clear evidence of arbitrary read/write (KASAN null-pointer derefs commonly indicate DoS)')
+
+            kasan_rationale = '; '.join(rationale_parts)
+            report.setdefault('support', []).append(kasan_rationale)
+
+            # Ensure the overview reflects low exploitability and includes this rationale and primitive capability
+            # compute a compact confidence breakdown for KASAN case
+            try:
+                attack_ctrl = any(re.search(r'fuzzer|syzkaller|attacker|user-controlled|syscall|ioctl|copy_from_user', p, re.I) for p in report.get('preconditions', []) + report.get('support', []))
+                att_score = 0.4 if attack_ctrl else 0.0
+                deref_count = 0
+                for k, ev in (evidence or {}).items():
+                    if isinstance(ev, dict):
+                        deref_count += int(ev.get('deref_reads', 0) or 0) + int(ev.get('deref_writes', 0) or 0)
+                evidence_score = min(0.4, 0.02 * deref_count)
+                nc_flag = 0.1 if report.get('non_canonical_addr') else 0.0
+                breakdown_total = min(1.0, att_score + evidence_score + nc_flag)
+            except Exception:
+                att_score = evidence_score = nc_flag = breakdown_total = 0.0
+
+            report['overview'] = {
+                'exploitability': 'LOW',
+                'rationale': kasan_rationale,
+                'primitive_capabilities': 'Denial-of-service via kernel null-pointer dereference; no confirmed arbitrary read/write from static evidence.',
+                'confidence_breakdown': {
+                    'attacker_control': round(att_score, 2),
+                    'evidence_strength': round(evidence_score, 2),
+                    'non_canonical_address': round(nc_flag, 2),
+                    'aggregate_estimate': round(breakdown_total, 2),
+                    'reported_confidence': round(report.get('confidence', 0.0) or 0.0, 2)
+                }
+            }
+    except Exception:
+        pass
 
     # Concrete object precondition: use object_info when available
     if obj:
@@ -866,7 +1466,7 @@ def stronger_heuristics(parsed: Dict[str, Any], snippets: Dict[str, Any], eviden
         preconds.insert(0, f"Triggering syzkaller syscall(s): {', '.join(syz_syscalls)}")
 
     # If the vulnerability is an arbitrary write, make pre/post statements explicit
-    if report.get("vulnerability") and "arbitrary write" in report.get("vulnerability"):
+    if report.get("vulnerability") and ("arbitrary_write" in report.get("vulnerability") or "arbitrary write" in report.get("vulnerability")):
         preconds.append("Precondition: attacker must trigger the vulnerable path exposing a writable pointer or OOB write")
         report["postconditions"].append("Postcondition: attacker may achieve arbitrary memory write leading to code/data corruption or control-flow hijack")
     if report.get("vulnerability") and "info-leak" in report.get("vulnerability"):
@@ -976,6 +1576,124 @@ def stronger_heuristics(parsed: Dict[str, Any], snippets: Dict[str, Any], eviden
         exp = 'high'
     report['exploitability'] = exp
 
+    # ---- New: overview summarizing exploitability, short rationale, and primitive capabilities
+    try:
+        # Aggregate support evidence into concise, de-duplicated phrases
+        supports = []
+        for s in report.get('support', []):
+            if s not in supports:
+                supports.append(s)
+        top_support = supports[:5]
+
+        # Reuse signals computed earlier (fallback to conservative defaults)
+        vuln = (report.get('vulnerability') or 'unknown')
+        prim = (report.get('primitive') or 'unknown')
+        conf = float(report.get('confidence', 0.0) or 0.0)
+
+        # summarize low-level evidence counts
+        try:
+            dw = int(deref_writes or 0)
+            dr = int(deref_reads or 0)
+        except Exception:
+            dw = dr = 0
+        any_deref_flag = any_deref
+        any_array_flag = any_array
+        any_free_flag = any_free
+
+        # attacker control heuristic
+        attacker_control = any(re.search(r'fuzzer|syzkaller|attacker|user-controlled|syscall|ioctl|copy_from_user', p, re.I) for p in report.get('preconditions', []) + report.get('support', []))
+
+        # Compose rationale: vulnerability + primitive + key supporting facts
+        rationale_items = [f"vuln={vuln}", f"primitive={prim}", f"confidence={conf:.2f}"]
+        if any_deref_flag:
+            rationale_items.append(f"pointer derefs (reads={dr}, writes={dw})")
+        if any_array_flag:
+            rationale_items.append("array/index accesses observed")
+        if any_free_flag:
+            rationale_items.append("free-like calls observed")
+        if attacker_control:
+            rationale_items.append("attacker-controlled input observed")
+        if top_support:
+            # include up to two short support phrases
+            for s in top_support[:2]:
+                rationale_items.append(s if len(s) < 120 else s[:116] + '...')
+
+        rationale = '; '.join(rationale_items)
+
+        # More precise primitive capability description
+        prim_caps = 'Unknown or limited primitive; further manual analysis required'
+        lowv = vuln.lower()
+        if 'arbitrary_write' in lowv or 'arbitrary write' in lowv or ('write' in prim and dw >= dr):
+            size_note = ''
+            if access and access.get('size'):
+                size_note = f" (size={access.get('size')} bytes)"
+            prim_caps = f"Potential arbitrary write{size_note} — may permit kernel memory corruption or control/data corruption"
+        elif 'arbitrary_read' in lowv or 'info-leak' in lowv or ('read' in prim and dr >= 0):
+            size_note = ''
+            if access and access.get('size'):
+                size_note = f" (size={access.get('size')} bytes)"
+            bounded_note = ''
+            if boundedness:
+                bounded_note = f"; boundedness={boundedness}"
+            prim_caps = f"Potential info-leak{size_note}{bounded_note} — may expose kernel memory to attacker"
+        elif 'use-after-free' in lowv:
+            prim_caps = 'Use-after-free: may allow reading or writing reclaimed memory depending on attacker control of contents (may lead to info-leak or arbitrary write)'
+        elif 'double-free' in lowv or 'invalid-free' in lowv:
+            prim_caps = 'Double/invalid free: may enable heap corruption primitives (useful for exploitation if allocator behavior is controlled)'
+
+        # Expand exploitability rationale to include 2-3 concise reasons
+        reasons = []
+        if attacker_control:
+            reasons.append('attacker-controlled input reaches vulnerable path')
+        if any_deref_flag:
+            reasons.append(f'pointer deref evidence (reads={dr}, writes={dw})')
+        if any_free_flag:
+            reasons.append('free/cleanup observed near site')
+        if boundedness:
+            reasons.append(f'boundedness={boundedness}')
+        # fall back to support phrases if empty
+        if not reasons and top_support:
+            reasons.append(top_support[0])
+
+        expl_rationale = '; '.join(reasons) if reasons else 'heuristic indicates potential issue based on code evidence'
+
+        # Build a small confidence breakdown to explain the numeric confidence score
+        try:
+            conf_total = float(report.get('confidence', 0.0) or 0.0)
+            attacker_score = 0.4 if attacker_control else 0.0
+            evidence_score = min(0.4, 0.02 * float((dr or 0) + (dw or 0)))
+            if boundedness in ('oob', 'partially_bounded'):
+                bounded_score = 0.1
+            elif boundedness == 'likely_bounded':
+                bounded_score = 0.05
+            else:
+                bounded_score = 0.0
+            kasen_flag = 0.1 if re.search(r"kasan|null-ptr-deref", raw, re.I) else 0.0
+            breakdown_total = min(1.0, attacker_score + evidence_score + bounded_score + kasen_flag)
+        except Exception:
+            attacker_score = evidence_score = bounded_score = kasen_flag = breakdown_total = 0.0
+
+        report['overview'] = {
+            'exploitability': (report.get('exploitability') or 'unknown').upper(),
+            'rationale': expl_rationale,
+            'primitive_capabilities': prim_caps,
+            'confidence_breakdown': {
+                'attacker_control': round(attacker_score, 2),
+                'evidence_strength': round(evidence_score, 2),
+                'boundedness_score': round(bounded_score, 2),
+                'kasan_indicator': round(kasen_flag, 2),
+                'aggregate_estimate': round(breakdown_total, 2),
+                'reported_confidence': round(conf_total, 2)
+            }
+        }
+    except Exception:
+        # non-fatal: if overview building fails, still return report
+        report['overview'] = {
+            'exploitability': (report.get('exploitability') or 'unknown').upper(),
+            'rationale': 'overview generation failed',
+            'primitive_capabilities': 'unknown'
+        }
+
     return report
 
 
@@ -1060,97 +1778,257 @@ def parse_syz_repro(text: str) -> List[str]:
             norm.append(nn)
     return norm
 
+def safe_json_loads(s: str):
+    """
+    Extracts and repairs JSON from text containing a ```json block,
+    even if it's truncated or missing the closing ```
+    """
+    s = s.strip()
 
-def _call_llm(prompt: str, model_path: Optional[str] = None, max_tokens: int = 512) -> Dict[str, Any]:
+    # Extract JSON block between ```json ... ``` or until end of text
+    match = re.search(r"```json\s*(.*?)(?:```|$)", s, re.DOTALL)
+    if match:
+        s = match.group(1).strip()
+
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON parsing failed: {e}")
+        print("🧩 Attempting structured recovery...")
+
+        s_fixed = auto_fix_json(s)
+        try:
+            return json.loads(s_fixed)
+        except json.JSONDecodeError as e2:
+            print(f"⚠️ Second attempt failed: {e2}")
+            s_final = force_close_json(s_fixed)
+            try:
+                return json.loads(s_final)
+            except json.JSONDecodeError:
+                print("🚫 Could not recover valid JSON.")
+                return None
+
+
+def auto_fix_json(s: str):
+    """
+    Repair truncated JSON: close dangling quotes, braces, and brackets.
+    """
+    s = s.strip()
+
+    # Remove any incomplete trailing escape like \"
+    s = re.sub(r'\\+$', '', s)
+
+    # Close any unbalanced quotes
+    quote_count = s.count('"')
+    if quote_count % 2 != 0:
+        s += '"'
+
+    # Remove incomplete lines like "foo": "some partial
+    s = re.sub(r'\"[^\"]*$','"', s)
+
+    # Remove obvious trailing commas before } or ]
+    s = re.sub(r',\s*([\]}])', r'\1', s)
+
+    # Balance braces/brackets
+    s = balance_brackets(s)
+    return s
+
+
+def balance_brackets(s: str):
+    """
+    Ensures that curly and square brackets are balanced.
+    """
+    open_curly = s.count('{')
+    close_curly = s.count('}')
+    open_square = s.count('[')
+    close_square = s.count(']')
+
+    if open_curly > close_curly:
+        s += '}' * (open_curly - close_curly)
+    if open_square > close_square:
+        s += ']' * (open_square - close_square)
+
+    return s
+
+
+def force_close_json(s: str):
+    """
+    Final fallback: close strings, braces, and brackets until JSON parses.
+    """
+    for _ in range(5):
+        s = auto_fix_json(s)
+        try:
+            json.loads(s)
+            return s
+        except json.JSONDecodeError:
+            s += '}'
+    return s
+
+def get_openai_response(prompt: str, api_key: str, model: str = "gpt-5"):
+    """
+    Sends a prompt to the OpenAI API and returns the model's response text.
+
+    Args:
+        prompt (str): The text prompt to send.
+        api_key (str): Your OpenAI API key.
+        model (str): Model name (default: 'gpt-5').
+
+    Returns:
+        str: The model's response content.
+    """
+    client = OpenAI(api_key=api_key)
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a precise, structured assistant."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    # Extract text output
+    return response.choices[0].message.content.strip()
+
+def _call_llm(prompt: str, model_path: Optional[str] = None, max_tokens: int = 16000) -> Dict[str, Any]:
     """Try to call a local LLM (llama_cpp) if available.
 
     Returns a dict: {"ok": True, "answer": str} or {"ok": False, "error": str, "prompt": prompt}
     This avoids adding a hard requirement on llama_cpp: if it's not importable we return the prompt
     and an informative error so callers can run it manually.
     """
-    # First try local Llama (llama_cpp) if available
-    llama_err = None
+    # User-requested primary provider: Direct transformers AutoTokenizer + AutoModelForCausalLM
+    # The original multiple-provider fallbacks (llama_cpp, gpt4all, openai, pipeline) have been
+    # intentionally omitted/commented-out in favor of using the specified model below.
     try:
-        # lazy import to avoid hard dependency
-        from llama_cpp import Llama  # type: ignore
-        try:
-            kwargs = {"max_tokens": max_tokens, "temperature": 0.0}
-            if model_path:
-                llm = Llama(model_path=model_path)
-            else:
-                llm = Llama()
-            resp = llm.create(prompt=prompt, **kwargs)
-            # llama_cpp returns choices with text; try a few fallbacks
-            ans = None
-            if isinstance(resp, dict):
-                ch = resp.get('choices') or []
-                if ch and isinstance(ch, list):
-                    ans = ch[0].get('text')
-            if ans is None:
-                ans = getattr(resp, 'text', None) or str(resp)
-            return {"ok": True, "answer": ans}
-        except Exception as e:
-            # Record the llama-specific error and fall back to other providers
-            llama_err = f"llama_cpp invocation failed: {e}"
-    except Exception as e:
-        llama_err = f"llama_cpp not available: {e}"
-
-    # Fallback: try OpenAI if configured via environment (OPENAI_API_KEY)
-    openai_err = None
-    try:
-        import openai  # type: ignore
-        # require an API key in environment or openai package configuration
-        api_key = os.environ.get('OPENAI_API_KEY')
-        if not api_key and not getattr(openai, 'api_key', None):
-            openai_err = "OPENAI_API_KEY not set and openai.api_key not configured"
-        else:
-            if api_key:
-                openai.api_key = api_key
-            # Use ChatCompletion where available
+        # lazy import to avoid hard dependency at module import time
+        model_id = os.environ.get('TRANSFORMERS_DIRECT_MODEL', 'meta-llama/CodeLlama-34b-Instruct-hf')
+        # Load HuggingFace access token from env or keyfile. Prefer these env vars:
+        # HF_ACCESS_TOKEN, HUGGINGFACE_HUB_TOKEN, HF_TOKEN
+        hf_token = os.environ.get('HF_ACCESS_TOKEN') or os.environ.get('HUGGINGFACE_HUB_TOKEN') or os.environ.get('HF_TOKEN')
+        if not hf_token:
+            hf_key_file = os.environ.get('HF_ACCESS_TOKEN_FILE') or os.path.expanduser('~/.config/kernelcveanalysis/hf_token')
             try:
-                # prefer chat completion
-                msgs = [{"role": "system", "content": "You are a helpful assistant for analyzing kernel crashes."},
-                        {"role": "user", "content": prompt}]
-                resp = openai.ChatCompletion.create(model=os.environ.get('OPENAI_MODEL', 'gpt-3.5-turbo'), messages=msgs, max_tokens=max_tokens, temperature=0.0)
-                # extract text
-                ans = None
-                if resp and hasattr(resp, 'choices'):
-                    ch = resp.choices
-                    if isinstance(ch, (list, tuple)) and len(ch) > 0:
-                        delta = ch[0]
-                        # for chat-style, content may be in delta.message or delta['message'] depending on lib
-                        if isinstance(delta, dict):
-                            msg = delta.get('message') or delta.get('text')
-                            if isinstance(msg, dict):
-                                ans = msg.get('content')
-                            else:
-                                ans = msg
-                        else:
-                            # fallback to string conversion
-                            ans = getattr(delta, 'message', None) or getattr(delta, 'text', None) or str(delta)
-                if ans is None:
-                    # try alternative structure
-                    ans = getattr(resp, 'text', None) or str(resp)
-                return {"ok": True, "answer": ans}
-            except Exception as e:
-                openai_err = f"openai.ChatCompletion failed: {e}"
+                if hf_key_file and os.path.exists(hf_key_file):
+                    with open(hf_key_file, 'r') as _kf:
+                        hf_token = _kf.read().strip()
+            except Exception:
+                hf_token = None
+
+        # try loading from a .env if python-dotenv is available (non-fatal)
+        if not hf_token:
+            try:
+                load_dotenv()
+                hf_token = os.environ.get('HF_ACCESS_TOKEN') or os.environ.get('HUGGINGFACE_HUB_TOKEN') or os.environ.get('HF_TOKEN')
+            except Exception:
+                pass
+
+        # instantiate tokenizer and model (may download/check local cache)
+        # If no token is available, call from_pretrained without a token (may still work for public models)
+        if hf_token:
+            tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+            model = AutoModelForCausalLM.from_pretrained(model_id, token=hf_token)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(model_id)
+            model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        # Build chat-style messages and try to use tokenizer.apply_chat_template if present
+        messages = [{"role": "user", "content": prompt}]
+        try:
+            inputs = tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+            # move tensors to model device if available
+            device = next(model.parameters()).device if any(True for _ in model.parameters()) else torch.device('cpu')
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+        except Exception:
+            # fallback: simple single-text tokenization
+            inputs = tokenizer(prompt, return_tensors="pt")
+            device = next(model.parameters()).device if any(True for _ in model.parameters()) else torch.device('cpu')
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        # generate
+        gen = model.generate(**inputs, max_new_tokens=max_tokens)
+        # decode: skip prompt tokens when possible
+        try:
+            skip = inputs.get('input_ids').shape[-1]
+        except Exception:
+            skip = 0
+        decoded = tokenizer.decode(gen[0][skip:], skip_special_tokens=True)
+        formated_answer =  safe_json_loads(decoded)
+        return {"ok": True, "answer": decoded, "provider": "transformers_direct", "model": model_id, "analysis": formated_answer}
     except Exception as e:
-        openai_err = f"openai not available: {e}"
+        return {"ok": False, "error": f"transformers_direct failed: {e}", "prompt": prompt}
 
-    # If we reach here, neither llama_cpp nor OpenAI produced a usable result
-    errs = []
-    if llama_err:
-        errs.append(llama_err)
-    if openai_err:
-        errs.append(openai_err)
-    return {"ok": False, "error": " | ".join(errs) or "No LLM available", "prompt": prompt}
+"""
+Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.
 
+INPUTS I WILL PROVIDE:
+- "crash_log": the full kernel oops/trace.
+- "snippets": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.
 
-def llm_analyze_traces(frames: List[Dict[str, Any]], snippet_map: Dict[str, str], model_path: Optional[str] = None) -> Dict[str, Any]:
+OUTPUT FORMAT (strict JSON):
+{
+  "preconditions": [
+    {
+      "summary": "<one-sentence developer-friendly precondition>",
+      "concrete_constraints": [
+         "<variable> => <allowed range or constraint, be concrete>"
+      ],
+      "why_reaches_crash": "<short reasoning>"
+    }
+  ],
+  "path_constraints": {
+    "input": [
+      {
+        "file": "<file path>",
+        "line": <line number>,
+        "code": "<exact single-line snippet that is the condition>",
+        "condition": "<short human-readable condition>",
+        "why_it_blocks": "<why this prevents/restricts reaching crash (user-controlled?)>"
+      }, ...
+    ],
+    "kernel_state": [
+      {
+        "file": "<file path>",
+        "line": <line number>,
+        "code": "<exact single-line snippet>",
+        "condition": "<short kernel-state condition>",
+        "why_it_blocks": "<why this prevents/restricts reaching crash (internal invariant)>"
+      }, ...
+    ]
+  },
+  "evidence": [
+    { "file": "<file>", "line": <line>, "code": "<line text>", "note":"<one-line justification linking to precondition>" }
+  ]
+}
+
+REQUIREMENTS:
+1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.
+2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).
+3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., "note": "caller's guard not present in snippets").
+4. If a condition is ambiguous about whether it’s input vs kernel_state, mark as "ambiguous" and explain why in the same entry.
+5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).
+6. Do not propose exploit techniques. If asked about exploitability, respond with a short field `"exploitability": "<HIGH|MEDIUM|LOW>"` plus one-sentence rationale, but do not provide attack steps.
+
+Now analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.
+
+<<<INSERT crash_log BELOW>>>
+
+<<<INSERT snippets as a list; for each snippet include a header comment like:
+-- fs/ext4/extents.c:2730 -> <code lines>
+-- fs/ext4/extents.c:2952 -> <code lines>
+... >>>
+
+"""
+def llm_analyze_traces(crash: str, snippet_map: Dict[str, str], model_path: Optional[str] = None) -> Dict[str, Any]:
     """Use an LLM to analyze a function trace chain and suggest concrete preconditions.
 
     Inputs:
-      - frames: list of frame dicts (as parsed by parse_crash_log)
+      - crash: the crash log
       - snippet_map: mapping from a frame key or url to the source snippet string
       - model_path: optional local Llama model path for llama_cpp
 
@@ -1165,53 +2043,159 @@ def llm_analyze_traces(frames: List[Dict[str, Any]], snippet_map: Dict[str, str]
     If no LLM is available the function returns the assembled prompt under 'prompt' so
     it can be used manually.
     """
-    # Build call chain summary
-    chain = []
-    for f in frames:
-        func = f.get('func') or '<anon>'
-        file = f.get('file') or ''
-        line = f.get('line') or ''
-        chain.append(f"{func} @ {file}:{line}")
-
     prompt_lines = []
-    prompt_lines.append("You are given a kernel crash stack trace and surrounding source snippets. Your task is to produce a concise, developer-friendly description of the PRECONDITION(s) that must hold to reach the crash. Provide concrete input ranges, variable constraints, and reproduction hints.")
+    prompt_lines.append("Task: Given the crash log and the provided source snippets, produce a concise developer-friendly description of the PRECONDITION(s) required to reach the crash. Provide concrete input ranges and variable constraints. Analyze the full call chain from the crash point backwards and inspect all 'if/for/while/switch' conditions, early 'return' and 'goto' statements that restrict reaching the crash. For each such conditional, classify it as either an INPUT constraint (user-controlled) or KERNEL_STATE constraint. Also include short evidence lines from the provided snippets that justify each constraint.")
     prompt_lines.append("")
-    prompt_lines.append("Call chain (top -> bottom):")
-    for c in chain:
-        prompt_lines.append(" - " + c)
+    prompt_lines.append("INPUTS I WILL PROVIDE:")
+    prompt_lines.append("- \"crash_log\": the full kernel oops/trace.")
+    prompt_lines.append("- \"snippets\": a list of {file, line_start, line_end, code} entries (text blocks) containing the relevant source around frames in the call stack.")
+
+    prompt_lines.append("OUTPUT FORMAT (strict JSON):")
+    prompt_lines.append("{")
+    prompt_lines.append("  \"overview\": {")
+    prompt_lines.append("    \"exploitability\": \"<HIGH|MEDIUM|LOW>\",")
+    prompt_lines.append("    \"rationale\": \"<one-sentence justification with evidence>\"")
+    prompt_lines.append("    \"primitive_capabilities\": \"<1-2 sentence description of the capabilities this exploit provides, if any.>\"")
+    prompt_lines.append("  },")
+    prompt_lines.append("  \"preconditions\": [")
+    prompt_lines.append("    {")
+    prompt_lines.append("      \"summary\": \"<one-sentence developer-friendly precondition>\",")
+    prompt_lines.append("      \"concrete_constraints\": [")
+    prompt_lines.append("         \"<variable> => <allowed range or constraint, be concrete>\"")
+    prompt_lines.append("      ],")
+    prompt_lines.append("      \"why_reaches_crash\": \"<short reasoning>\"")
+    prompt_lines.append("    }")
+    prompt_lines.append("  ],")
+    prompt_lines.append("  \"path_constraints\": {")
+    prompt_lines.append("    \"input\": [")
+    prompt_lines.append("      {")
+    prompt_lines.append("        \"file\": \"<file path>\",")
+    prompt_lines.append("        \"line\": <line number>,")
+    prompt_lines.append("        \"code\": \"<exact single-line snippet that is the condition>\",")
+    prompt_lines.append("        \"condition\": \"<short human-readable condition>\",")
+    prompt_lines.append("        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (user-controlled?)>\"")
+    prompt_lines.append("      }, ...")
+    prompt_lines.append("    ],")
+    prompt_lines.append("    \"kernel_state\": [")
+    prompt_lines.append("      {")
+    prompt_lines.append("        \"file\": \"<file path>\",")
+    prompt_lines.append("        \"line\": <line number>,")
+    prompt_lines.append("        \"code\": \"<exact single-line snippet>\",")
+    prompt_lines.append("        \"condition\": \"<short kernel-state condition>\",")
+    prompt_lines.append("        \"why_it_blocks\": \"<why this prevents/restricts reaching crash (internal invariant)>\"")
+    prompt_lines.append("      }, ...")
+    prompt_lines.append("    ]")
+    prompt_lines.append("  },")
+    prompt_lines.append("  \"evidence\": [")
+    prompt_lines.append("    { \"file\": \"<file>\", \"line\": <line>, \"code\": \"<line text>\", \"note\":\"<one-line justification linking to precondition>\" }")
+    prompt_lines.append("  ]")
+    prompt_lines.append("}")
     prompt_lines.append("")
-    prompt_lines.append("Available source snippets (filename:line -> snippet):")
-    # limit snippet size
+    prompt_lines.append("REQUIREMENTS:")
+    prompt_lines.append("1. Keep JSON **compact** but include only necessary fields. Do not include extra commentary outside the JSON.")
+    prompt_lines.append("2. For each constraint entry in path_constraints.* produce **the exact single-line code text** from snippet that implements the check (or part of it) and a one-line explanation (why_it_blocks).")
+    prompt_lines.append("3. If the snippets are truncated or missing some callee lines, indicate that clearly with a short note in the JSON (e.g., \"note\": \"caller's guard not present in snippets\").")
+    prompt_lines.append("4. If a condition is ambiguous about whether it’s input vs kernel_state, mark as \"ambiguous\" and explain why in the same entry.")
+    prompt_lines.append("5. If the crash appears to be caused by corrupted metadata (e.g., extent header), give plausible concrete ranges/values that would cause arithmetic overflow or out-of-range lengths (e.g., `ee_len > EXT4_BLOCKS_PER_GROUP(sb)` or `ee_block + ee_len` wraps).")
+    prompt_lines.append("6. Do not propose exploit techniques. If asked about exploitability, respond with a short field \"exploitability\": \"<HIGH|MEDIUM|LOW>\" plus one-sentence rationale, but do not provide attack steps.")
+    prompt_lines.append("")
+    prompt_lines.append("Now analyze the following inputs. Be precise, inspect conditional checks and early returns, and output only JSON that follows the schema above.")
+
+    prompt_lines.append(crash)
+    count = 0
     for k, s in snippet_map.items():
-        snippet_preview = '\n'.join(s.splitlines()[:20])
-        prompt_lines.append(f"-- {k}:\n{snippet_preview}\n---")
-
-    prompt_lines.append("")
-    prompt_lines.append("Please output JSON with fields: preconditions (list of short statements), input_constraints (list of variable name -> allowed ranges), reproduction (steps), evidence (lines in the snippets that support each precondition). Keep answers concise and concrete.")
+        if count > 2:
+            break
+        if "kasan" not in s.get('file', ''):
+            count += 1
+            prompt_lines.append(f"-- {s.get('file', '')}:{s.get('line', '')} -> {s.get('function_snippet', '')}\n---")
     prompt = "\n".join(prompt_lines)
+    # Run local LLM
+    # llm_out = _call_llm(prompt, model_path=model_path)
+    llm_out = {"ok": False, "error": "Local LLM calls disabled in this version", "prompt": prompt}
+    # Run OpenAI LLM
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY")
+    if not api_key:
+        key_file = os.environ.get("OPENAI_API_KEY_FILE") or os.path.expanduser("~/.config/kernelcveanalysis/openai_api_key")
+        try:
+            if key_file and os.path.exists(key_file):
+                with open(key_file, "r") as _kf:
+                    api_key = _kf.read().strip()
+        except Exception:
+            api_key = None
 
-    llm_out = _call_llm(prompt, model_path=model_path, max_tokens=512)
-    out = {"prompt": prompt}
-    out.update(llm_out)
-    # Heuristic fallback summary in case LLM not available or failed
-    if not llm_out.get('ok'):
-        # produce a tiny heuristic summary using simple rules
-        summary = {"preconditions": [], "input_constraints": [], "reproduction": [], "evidence": []}
-        # if any snippet mentions copy_from_user or user pointers, mark user-controlled
-        combined = "\n".join(snippet_map.values())
-        if re.search(r"copy_from_user|get_user|put_user|ioctl|syscall|fuse|netlink", combined, re.I):
-            summary['preconditions'].append("Attacker-controlled user data must reach this code path (copy_from_user or ioctl-like path detected)")
-            summary['reproduction'].append("Call the syscall or ioctl which reaches the call chain above with crafted user-controlled buffers")
-        # look for alloc/free patterns
-        if re.search(r"kmalloc|kzalloc|kmem_cache_alloc|alloc_pages", combined):
-            summary['preconditions'].append("A kernel allocation of the relevant object must occur prior to the access")
-        # array/deref
-        if re.search(r"->|\[|\*", combined):
-            summary['input_constraints'].append({"note": "Pointer or index dereference observed near crash; consider off-by-one or size fields controlling ranges"})
-        out['summary'] = summary
+    # Try loading from a .env if python-dotenv is available (non-fatal)
+    if not api_key:
+        try:
+            
+            load_dotenv()
+            api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY")
+        except Exception:
+            pass
+
+    if not api_key:
+        raise RuntimeError(
+            "OpenAI API key not found. Set the OPENAI_API_KEY environment variable or create '" +
+            (os.environ.get("OPENAI_API_KEY_FILE") or os.path.expanduser("~/.config/kernelcveanalysis/openai_api_key")) +
+            "' with your key."
+        )
+    
+    result = get_openai_response(prompt, api_key)
+
+    # Base output structure
+    out = {
+        "prompt": prompt,
+        "local_llm": llm_out,
+        "openai_llm": {"raw_output": result, "parsed": safe_json_loads(result)},
+        "summary": None
+    }
+
+    # If local LLM produced structured JSON, try to merge
+    # if isinstance(llm_out, dict) and llm_out.get("ok"):
+    #     # Merge OpenAI raw output alongside local JSON
+    #     out.update({
+    #         "combined": {
+    #             "local": llm_out,
+    #             "openai": result
+    #         }
+    #     })
+
+    # # Heuristic fallback summary in case both failed or local failed
+    # if not llm_out.get("ok"):
+    #     summary = {
+    #         "preconditions": [],
+    #         "input_constraints": [],
+    #         "reproduction": [],
+    #         "evidence": []
+    #     }
+
+    #     # Combine snippet text for heuristic inference
+    #     combined = "\n".join(str(v) for v in snippet_map.values())
+
+    #     # Detect user-controlled input patterns
+    #     if re.search(r"copy_from_user|get_user|put_user|ioctl|syscall|fuse|netlink", combined, re.I):
+    #         summary["preconditions"].append(
+    #             "Attacker-controlled user data must reach this code path (copy_from_user or ioctl-like path detected)"
+    #         )
+    #         summary["reproduction"].append(
+    #             "Call the syscall or ioctl that reaches the call chain above with crafted user-controlled buffers"
+    #         )
+
+    #     # Detect kernel allocation patterns
+    #     if re.search(r"kmalloc|kzalloc|kmem_cache_alloc|alloc_pages", combined):
+    #         summary["preconditions"].append(
+    #             "A kernel allocation of the relevant object must occur prior to the access"
+    #         )
+
+    #     # Detect dereference or indexing behavior
+    #     if re.search(r"->|\[|\*", combined):
+    #         summary["input_constraints"].append({
+    #             "note": "Pointer or index dereference observed near crash; consider off-by-one or size fields controlling ranges"
+    #         })
+
+    #     out["summary"] = summary
+
     return out
-
-
 
 
 def load_source_snippets(frames: List[Dict[str, Any]], source_root: str, context: int = 6) -> Dict[str, Any]:
@@ -1247,93 +2231,152 @@ def classify(parsed: Dict[str, Any]) -> Dict[str, Any]:
         "preconditions": [],
         "postconditions": [],
         "notes": [],
+        # refined capability: one of unknown, arbitrary_read, arbitrary_write,
+        # partial_overwrite, controlled_read, controlled_write, info_leak
+        "vulnerability": "unknown",
     }
 
-    # Use direct hints from the KASAN/BUG lines and derive a vulnerability description
-    kind = parsed.get("kind", "") or ""
-    if "use-after-free" in kind.lower():
+    # primitive classification from crash text
+    kind = (parsed.get("kind") or "").lower()
+    if "use-after-free" in kind:
         cls["classification"] = "use-after-free"
-    elif "double-free" in kind.lower() or "invalid-free" in kind.lower():
-        cls["classification"] = "double-free/invalid-free"
+    elif "double-free" in kind or "invalid-free" in kind:
+        cls["classification"] = "double-free"
+    elif "out-of-bounds" in kind or "oob" in kind:
+        cls["classification"] = "out-of-bounds"
+    elif "null-deref" in kind or "null pointer" in kind:
+        cls["classification"] = "null-deref"
+    else:
+        cls["classification"] = kind or "unknown"
 
     access = parsed.get("access") or {}
-    if access:
-        op = access.get("op")
-        size = access.get("size")
-        if op == "read":
-            cls["notes"].append(f"Detected a read of size {size}")
-            # Primitive: limited read vs arbitrary read: if size small -> limited
-            if size <= 8:
-                prim = f"bounded read ({size} bytes)"
-            else:
-                prim = f"larger read ({size} bytes)"
-            cls["notes"].append(f"Primitive: {prim}")
-        elif op == "write":
-            cls["notes"].append(f"Detected a write of size {size}")
-            if size == 1:
-                cls["classification"] = cls["classification"] or "controlled write (1 byte)"
-            else:
-                cls["classification"] = cls["classification"] or f"write ({size} bytes)"
-
-    # Object info: offset/size can indicate OOB
     obj = parsed.get("object_info") or {}
-    if obj:
-        if "offset" in obj and "obj_size" in obj:
-            if obj["offset"] >= obj["obj_size"]:
-                cls["notes"].append("Access is out-of-bounds relative to object size")
-            else:
-                cls["notes"].append("Access is inside the object's bounds (but could be use-after-free)")
-        if "cache" in obj:
-            cls["notes"].append(f"Object comes from cache {obj['cache']}")
 
-    # Precondition: freed by earlier task + allocation trace
-    if parsed.get("freed_by"):
-        cls["preconditions"].append("Object was freed previously (see 'Freed by task' stack)")
-    if parsed.get("allocated_by"):
-        cls["preconditions"].append("Object was previously allocated (see 'Allocated by task' stack)")
-
-    # Postcondition: KASAN reported invalid access
+    # Always include KASAN/report postcondition hint
     cls["postconditions"].append("KASAN reported invalid memory access (see crash report)")
 
-    # Heuristic about attacker control: many syzkaller tasks indicate fuzzer-controlled inputs
+    # Heuristic: is the crash reachable from attacker-controlled entry (syscall/syz)?
     raw = parsed.get("raw", "") or ""
+    attacker_control = False
     if re.search(r"syz|syzkaller|syz-executor", raw, re.I):
-        cls["notes"].append("Triggering syscall likely came from syzkaller (fuzzer) — input may be controlled")
-        cls.setdefault("preconditions", []).append("Input state: attacker-controlled syscall parameters or fuzzer input must reach the syscall path")
+        attacker_control = True
+        cls["notes"].append("Crash generated by syzkaller/fuzzer - likely attacker-controlled input")
 
-    # Look at frames or alloc/free stacks for syscall entry points to infer attacker control
     frames = parsed.get("frames") or []
-    frame_text = " ".join([f.get("func","") + " " + str(f.get("file","")) for f in frames])
+    frame_text = " ".join([str(f.get("func", "")) + " " + str(f.get("file", "")) for f in frames])
     if re.search(r"__x64_sys|__se_sys|ksys_|do_syscall|entry_SYSCALL|sys_read|sys_write|ioctl", frame_text, re.I):
-        cls.setdefault("preconditions", []).append("Input state: a user-controlled syscall reaches the vulnerable code path")
+        attacker_control = True
+        cls["notes"].append("Call chain contains syscall entry points -> input may be attacker-controlled")
 
-    # Now derive a best-effort vulnerability label (attacker capability) from primitive hints
-    # Prefer to describe what an attacker could do (vulnerability) instead of the low-level primitive
-    primitive_hint = cls.get("classification", "") or ""
-    vuln = None
-    access = parsed.get("access") or {}
-    if "use-after-free" in primitive_hint:
-        # if read vs write, decide info-leak vs write primitive
-        if access.get("op") == "write":
-            vuln = "arbitrary write (via use-after-free)"
-        elif access.get("op") == "read":
-            vuln = "info-leak (use-after-free read of reclaimed memory)"
+    # detect common user-copy helpers near frames
+    if re.search(r"copy_from_user|get_user|strncpy_from_user|copy_to_user", frame_text, re.I):
+        attacker_control = True
+        cls["notes"].append("User-copy functions observed in call chain")
+
+    # If allocation/free traces exist, note them as preconditions
+    if parsed.get("freed_by"):
+        cls["preconditions"].append("Object must have been freed earlier on a prior code path (see freed_by stack)")
+    if parsed.get("allocated_by"):
+        cls["preconditions"].append("An allocation for the object occurred earlier (see allocated_by stack)")
+
+    # Analyze object layout and access to guess attacker capabilities
+    access_op = (access.get("op") or "").lower()
+    access_size = access.get("size")
+    obj_size = obj.get("obj_size")
+    obj_offset = obj.get("offset")
+
+    # If we have object size/offset, a write can be an arbitrary write if attacker controls allocation reuse
+    capability = "unknown"
+    if cls["classification"] == "use-after-free":
+        # base on access type
+        if access_op == "write":
+            # if attacker-controlled path exists and allocation came from slab/kmalloc then likely arbitrary write
+            cache = (obj.get("cache") or "")
+            if attacker_control and cache:
+                capability = "likely_arbitrary_write"
+                cls["notes"].append(f"Freed object from cache '{cache}' may be reallocated under attacker control")
+            elif attacker_control:
+                capability = "possible_arbitrary_write"
+            else:
+                capability = "write_uaf"
+        elif access_op == "read":
+            if attacker_control:
+                capability = "likely_arbitrary_read"
+            else:
+                capability = "read_uaf"
         else:
-            vuln = "use-after-free (may allow read/write of reclaimed memory)"
-    elif "double-free" in primitive_hint or "invalid-free" in primitive_hint:
-        vuln = "memory corruption (double/invalid free may lead to heap corruption)"
-    else:
-        # fallback based on detected access
-        if access:
-            if access.get("op") == "write":
-                vuln = f"write ({access.get('size')} bytes) — potential data corruption/arbitrary write"
-            elif access.get("op") == "read":
-                vuln = f"read ({access.get('size')} bytes) — potential info-leak"
-        if not vuln:
-            vuln = cls.get("classification") or "unknown"
+            capability = "use-after-free"
 
-    # set the vulnerability field (attacker capability) while preserving the primitive classification
-    cls["vulnerability"] = vuln
+        # if we can see the object size and the access offset, indicate whether full overwrite is possible
+        try:
+            if obj_size and access_size and obj_offset is not None:
+                # if access writes beyond the object's size it's an OOB write not just UAF
+                if int(obj_offset) + int(access_size) > int(obj_size):
+                    cls["notes"].append("Access appears to write past the original object size -> may allow out-of-bounds/wider overwrite")
+                    if capability.startswith("likely") or capability.startswith("possible"):
+                        capability = capability.replace("_write", "_partial_overwrite")
+        except Exception:
+            pass
+
+    elif cls["classification"] in ("out-of-bounds",):
+        if access_op == "write":
+            capability = "arbitrary_write"
+        elif access_op == "read":
+            capability = "arbitrary_read"
+        else:
+            capability = "oob"
+    else:
+        capability = "unknown"
+
+    # Convert capability to a concise vulnerability string
+    # prefer readable short labels
+    if capability.startswith("likely_arbitrary_write"):
+        vuln_label = "likely_arbitrary_write"
+    elif capability.startswith("possible_arbitrary_write"):
+        vuln_label = "possible_arbitrary_write"
+    elif capability == "likely_arbitrary_read":
+        vuln_label = "likely_arbitrary_read"
+    elif capability == "arbitrary_write":
+        vuln_label = "arbitrary_write"
+    elif capability == "arbitrary_read":
+        vuln_label = "arbitrary_read"
+    elif capability == "read_uaf":
+        vuln_label = "controlled_read?"
+    elif capability == "write_uaf":
+        vuln_label = "controlled_write?"
+    elif capability == "partial_overwrite" or "partial_overwrite" in capability:
+        vuln_label = "partial_overwrite"
+    else:
+        vuln_label = capability
+
+    cls["vulnerability"] = vuln_label
+
+    # Add an explicit precondition that the call chain must be reachable with attacker-controlled inputs
+    if attacker_control:
+        cls["preconditions"].append("Path from syscall/fuzzer entry to crash site must be executed with attacker-controlled inputs")
+    else:
+        cls["notes"].append("No clear evidence of attacker-controlled entry in call chain; exploitability may be limited")
+
+    # If freed_by/allocated_by are in different tasks/contexts, note the concurrency requirement
+    try:
+        freed = parsed.get("freed_by") or []
+        alloc = parsed.get("allocated_by") or []
+        if freed and alloc:
+            # cheap heuristic: if the allocation/free stacks differ, note that reallocation timing matters
+            if freed != alloc:
+                cls["preconditions"].append("A timing/reuse window must exist for the freed object to be reallocated and reused by the vulnerable code path")
+    except Exception:
+        pass
+
+    # small final hygiene: dedupe lists
+    for k in ("preconditions", "postconditions", "notes"):
+        seen = set()
+        out_list = []
+        for v in cls.get(k, []) or []:
+            if v not in seen:
+                seen.add(v)
+                out_list.append(v)
+        cls[k] = out_list
 
     return cls
 
@@ -1343,44 +2386,39 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
     snippets = {}
 
     # 1) Try URLs found in the log
+    # Only keep function-level snippets in-memory; do not write files or keep +/-6 line context
     urls = extract_source_urls(crash_text)
     url_snippets = {}
     for u in urls:
         fetched = fetch_source_from_url(u)
         if "text" in fetched:
-            # Use fragment parsing to extract a focused snippet when the URL contains a fragment
             text = fetched["text"]
-            try:
-                print(f"[DEBUG] fetched URL {u}: {len(text)} bytes, {len(text.splitlines())} lines", file=sys.stderr)
-                print(f"[DEBUG] fetched URL preview: {text[:200]!r}", file=sys.stderr)
-            except Exception:
-                pass
             sl, el = parse_fragment_for_range(u)
-            print(f"[DEBUG] parsed fragment for {u}: start_line={sl}, end_line={el}", file=sys.stderr)
+            function_snippet = None
             if sl is not None:
                 lines = text.splitlines()
-                # single-line fragment -> try to return from function start -> that line
-                if el == sl:
-                    ln = sl
-                    # use helper to find function start conservatively
-                    start_fn = _find_function_start(lines, ln)
+                # If fragment is a single line or a range, prefer function start -> fragment/end line
+                ln = el if (el is not None) else sl
+                try:
+                    start_fn = _find_function_start(lines, int(ln))
                     fn_start = start_fn
-                    fn_end = min(len(lines), ln)
-                    snippet = "\n".join(lines[fn_start - 1:fn_end])
-                else:
-                    # explicit range -> use exact range bounds
-                    start = max(1, sl)
-                    end = min(len(lines), el)
-                    snippet = "\n".join(lines[start - 1:end])
+                    fn_end = min(len(lines), int(ln))
+                    function_snippet = "\n".join(lines[fn_start - 1:fn_end])
+                except Exception:
+                    function_snippet = None
+            # If we were able to extract a function-level snippet, keep it as the URL's snippet
+            if function_snippet:
+                url_snippets[u] = function_snippet
             else:
-                snippet = text
-            url_snippets[u] = snippet
+                # Record that no function snippet was available (no files written)
+                url_snippets[u] = {"note": "no function snippet available", "text_len": len(text)}
         else:
             url_snippets[u] = {"error": fetched.get("error")}
 
     snippets.update({"urls": url_snippets})
 
     # 1.b) Try link_frames captured as HTML anchors in the crash report
+    # Keep only function-level snippets in-memory; do not write files or keep +/-6 context
     link_snippets = {}
     for lf in parsed.get("link_frames", []) or []:
         u = lf.get("url")
@@ -1389,166 +2427,36 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
         fetched = fetch_source_from_url(u)
         if "text" in fetched:
             text = fetched["text"]
-            try:
-                print(f"[DEBUG] fetched link {u}: {len(text)} bytes, {len(text.splitlines())} lines", file=sys.stderr)
-                print(f"[DEBUG] fetched link preview: {text[:200]!r}", file=sys.stderr)
-            except Exception:
-                pass
             sl, el = parse_fragment_for_range(u)
-            print(f"[DEBUG] parsed fragment for {u}: start_line={sl}, end_line={el}", file=sys.stderr)
+            function_snippet = None
+            ln = None
+            # prefer explicit fragment; fall back to anchor 'line' if present
             if sl is not None:
-                lines = text.splitlines()
-                if el == sl:
-                    start = max(1, sl - 6)
-                    end = min(len(lines), sl + 6)
-                else:
-                    start = max(1, sl)
-                    end = min(len(lines), el)
-                snippet = "\n".join(lines[start - 1:end])
-                # When fragment provides a specific line, also try to extract function start -> linked line
-                func_snippet = None
-                func_snippet_file = None
+                ln = el if (el is not None) else sl
+            elif lf.get("line"):
                 try:
-                    ln = sl
-                    # search backwards for probable function start (same heuristic as below)
-                    start_fn = _find_function_start(lines, ln)
-                    fn_start = start_fn
-                    fn_end = min(len(lines), ln)
-                    func_snippet = "\n".join(lines[fn_start - 1:fn_end])
-                    try:
-                        crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
-                        os.makedirs(crash_dir, exist_ok=True)
-                        default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
-                        bugid = determine_bug_id(parsed, default_name)
-                        bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
-                        safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
-                        out_name = f"{bugid}__{safe_bn}__L{ln}.txt"
-                        out_path = os.path.join(crash_dir, out_name)
-                        try:
-                            print(f"[DEBUG] writing function snippet {out_path}: {len(func_snippet) if func_snippet is not None else 0} chars", file=sys.stderr)
-                        except Exception:
-                            pass
-                        with open(out_path, 'w', encoding='utf-8') as ofh:
-                            ofh.write(func_snippet or "")
-                        func_snippet_file = out_path
-                    except Exception:
-                        func_snippet_file = None
-                except Exception:
-                    func_snippet = None
-                    func_snippet_file = None
-            else:
-                # try to extract around the reported line number in the anchor if present
-                if lf.get("line"):
-                    lines = text.splitlines()
-                    ln = lf.get("line")
-                    start = max(1, ln - 6)
-                    end = min(len(lines), ln + 6)
-                    snippet = "\n".join(lines[start - 1:end])
-                    # attempt function-snippet extraction (already implemented below)
-                    func_snippet = None
-                    func_snippet_file = None
-                    try:
-                        lines = text.splitlines()
-                        ln = int(lf.get("line"))
-                        # search backwards for a likely function definition start
-                        start_fn = _find_function_start(lines, ln)
-                        fn_start = start_fn
-                        fn_end = min(len(lines), ln)
-                        func_snippet = "\n".join(lines[fn_start - 1:fn_end])
-                        try:
-                            crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
-                            os.makedirs(crash_dir, exist_ok=True)
-                            default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
-                            bugid = determine_bug_id(parsed, default_name)
-                            bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
-                            safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
-                            out_name = f"{bugid}__{safe_bn}__L{ln}.txt"
-                            out_path = os.path.join(crash_dir, out_name)
-                            try:
-                                print(f"[DEBUG] writing function snippet {out_path}: {len(func_snippet) if func_snippet is not None else 0} chars", file=sys.stderr)
-                            except Exception:
-                                pass
-                            with open(out_path, 'w', encoding='utf-8') as ofh:
-                                ofh.write(func_snippet or "")
-                            func_snippet_file = out_path
-                        except Exception:
-                            func_snippet_file = None
-                    except Exception:
-                        func_snippet = None
-                        func_snippet_file = None
-                else:
-                    snippet = text
-            # additional: attempt to capture from function start to the linked line
-            func_snippet = None
-            func_snippet_file = None
-            try:
-                if lf.get("line"):
-                    lines = text.splitlines()
                     ln = int(lf.get("line"))
-                    # search backwards for a likely function definition start
-                    start_fn = _find_function_start(lines, ln)
-                    # build snippet from function start to the linked line (inclusive)
+                except Exception:
+                    ln = None
+
+            if ln is not None:
+                try:
+                    lines = text.splitlines()
+                    start_fn = _find_function_start(lines, int(ln))
                     fn_start = start_fn
-                    fn_end = min(len(lines), ln)
-                    func_snippet = "\n".join(lines[fn_start - 1:fn_end])
-                    # save to crash_analysis/<bugid>__<basename>__L<ln>.txt
-                    try:
-                        crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
-                        os.makedirs(crash_dir, exist_ok=True)
-                        # determine bug id from parsed (fallback to file basename without extension)
-                        default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
-                        bugid = determine_bug_id(parsed, default_name)
-                        bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
-                        safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
-                        out_name = f"{bugid}__{safe_bn}__L{ln}.txt"
-                        out_path = os.path.join(crash_dir, out_name)
-                        try:
-                            print(f"[DEBUG] writing function snippet {out_path}: {len(func_snippet) if func_snippet is not None else 0} chars", file=sys.stderr)
-                        except Exception:
-                            pass
-                        with open(out_path, 'w', encoding='utf-8') as ofh:
-                            ofh.write(func_snippet or "")
-                        func_snippet_file = out_path
-                    except Exception:
-                        func_snippet_file = None
-            except Exception:
-                func_snippet = None
-                func_snippet_file = None
-
-            # always try to save the context snippet to a file so we have a local copy
-            snippet_file = None
-            try:
-                crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
-                os.makedirs(crash_dir, exist_ok=True)
-                default_name = os.path.splitext(os.path.basename(lf.get('file') or 'link'))[0]
-                # prefer bugid when available, but don't fail on it
-                try:
-                    bugid = determine_bug_id(parsed, default_name)
+                    fn_end = min(len(lines), int(ln))
+                    function_snippet = "\n".join(lines[fn_start - 1:fn_end])
                 except Exception:
-                    bugid = default_name
-                bn = os.path.basename(urllib.parse.urlparse(u).path) or default_name
-                safe_bn = re.sub(r"[^A-Za-z0-9._-]", "_", bn)
-                ln_for_name = str(lf.get('line','?'))
-                snippet_name = f"{bugid}__{safe_bn}__L{ln_for_name}__ctx.txt"
-                snippet_path = os.path.join(crash_dir, snippet_name)
-                try:
-                    print(f"[DEBUG] writing context snippet {snippet_path}: {len(snippet) if snippet is not None else 0} chars", file=sys.stderr)
-                except Exception:
-                    pass
-                with open(snippet_path, 'w', encoding='utf-8') as sfh:
-                    sfh.write(snippet or "")
-                snippet_file = snippet_path
-            except Exception:
-                snippet_file = None
+                    function_snippet = None
 
-            key = f"link:{u}#{lf.get('line','?')}"
-            link_snippets[key] = {"url": u, "file": lf.get("file"), "line": lf.get("line"), "snippet": snippet}
-            if snippet_file:
-                link_snippets[key]["snippet_file"] = snippet_file
-            if func_snippet is not None:
-                link_snippets[key]["function_snippet"] = func_snippet
-            if func_snippet_file:
-                link_snippets[key]["function_snippet_file"] = func_snippet_file
+            key_line = ln if ln is not None else lf.get('line','?')
+            key = f"link:{u}#{key_line}"
+            entry = {"url": u, "file": lf.get("file"), "line": lf.get("line")}
+            if function_snippet:
+                entry["function_snippet"] = function_snippet
+            else:
+                entry["note"] = "no function snippet available"
+            link_snippets[key] = entry
         else:
             key = f"link:{u}#{lf.get('line','?')}"
             link_snippets[key] = {"url": u, "error": fetched.get("error")}
@@ -1571,24 +2479,267 @@ def analyze(crash_text: str, source_root: Optional[str] = None) -> Dict[str, Any
         else:
             evidence[u] = s
 
-    # analyze link-based snippets
+    # analyze link-based snippets (use function_snippet if available)
     for k, info in (snippets.get("links") or {}).items():
-        if isinstance(info, dict) and info.get("snippet"):
-            evidence[k] = analyze_snippet_for_evidence(info.get("snippet"), parsed.get("access"))
+        if isinstance(info, dict) and info.get("function_snippet"):
+            evidence[k] = analyze_snippet_for_evidence(info.get("function_snippet"), parsed.get("access"))
             # attach contextual url/file info
             evidence[k]["source_url"] = info.get("url")
             evidence[k]["source_file"] = info.get("file")
             evidence[k]["source_line"] = info.get("line")
         else:
-            evidence[k] = {"error": info.get("error")}
+            # preserve any error or note
+            err = info.get("error") if isinstance(info, dict) else None
+            note = info.get("note") if isinstance(info, dict) else None
+            evidence[k] = {"error": err, "note": note}
 
     if source_root and isinstance(snippets.get("local"), dict):
         for key, s in snippets.get("local", {}).items():
             if isinstance(s, dict) and "snippet" in s:
                 evidence[key] = analyze_snippet_for_evidence(s["snippet"], parsed.get("access"))
 
-    classification = classify(parsed)
-    return {"parsed": parsed, "snippets": snippets, "evidence": evidence, "classification": classification}
+    # Use stronger heuristics that combine parsed logs, snippets, and evidence
+    try:
+        classification = stronger_heuristics(parsed, snippets, evidence)
+    except Exception:
+        # fallback to older classify() if something goes wrong
+        classification = classify(parsed)
+    # Build a more detailed exploitability summary using parsed frames, snippets and evidence
+    exploitability = analyze_exploitability(parsed, snippets, evidence)
+    return {"parsed": parsed, "snippets": snippets, "evidence": evidence, "classification": classification, "exploitability": exploitability}
+
+
+def analyze_exploitability(parsed: Dict[str, Any], snippets: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    """Produce a per-bug exploitability summary with concrete sites and structure info.
+
+    Returns a dict with:
+      - free_site: {func,file,line,stack}
+      - trigger_site: {func,file,line,stack}
+      - allocation_site: {func,file,line,stack}
+      - object: {obj_addr, cache, obj_size, offset}
+      - struct_info: {struct_name, fields_used, struct_def_snippet}
+      - usage_examples: list of lines showing deref/index usage supporting preconditions
+      - notes: additional heuristics and exploitation-relevant observations
+    """
+    out: Dict[str, Any] = {"free_site": None, "trigger_site": None, "allocation_site": None, "object": None, "struct_info": {}, "usage_examples": [], "notes": []}
+
+    # Helper to extract file/line/func from stack-like strings or from parsed link_frames
+    def _extract_site_from_stack_entry(entry: str) -> Dict[str, Any]:
+        site = {"raw": entry}
+        try:
+            # attempt to extract filename and line like 'file.c:123' or within an anchor
+            m = re.search(r"([\w/.-]+\.(c|h))[:](\d{1,6})", entry)
+            if m:
+                site["file"] = m.group(1)
+                site["line"] = int(m.group(3))
+            # try to get a function name before any <a href or before the file token
+            func_m = re.match(r"\s*([^<\n]+?)\s*(?:<a href|$)", entry)
+            if func_m:
+                func = func_m.group(1).strip()
+                # sanitize: keep first token-like name
+                func = func.split()[-1]
+                site["func"] = func
+        except Exception:
+            pass
+        return site
+
+    # free site: prefer parsed['freed_by'] first entry
+    try:
+        freed = parsed.get("freed_by") or []
+        if isinstance(freed, list) and freed:
+            out["free_site"] = _extract_site_from_stack_entry(freed[0])
+        else:
+            # try to find an inline 'free' mention in raw
+            raw = parsed.get("raw", "") or ""
+            if "free(" in raw or "kfree" in raw:
+                out["notes"].append("Found 'free' mention in raw crash text; a free site may exist but not parsed into freed_by list")
+    except Exception:
+        pass
+
+    # allocation site
+    try:
+        alloc = parsed.get("allocated_by") or []
+        if isinstance(alloc, list) and alloc:
+            out["allocation_site"] = _extract_site_from_stack_entry(alloc[0])
+    except Exception:
+        pass
+
+    # trigger site: use parsed.link_frames first (they contain url/file/line)
+    try:
+        link_frames = parsed.get("link_frames") or []
+        if isinstance(link_frames, list) and link_frames:
+            lf = link_frames[0]
+            out["trigger_site"] = {"file": lf.get("file"), "line": lf.get("line"), "url": lf.get("url"), "func": None}
+            # try to extract func from snippets if available
+            key = f"link:{lf.get('url')}#{lf.get('line','?')}"
+            link_info = (snippets.get("links") or {}).get(key) or {}
+            if link_info and link_info.get("function_snippet"):
+                # attempt to find the function header line
+                header = link_info.get("function_snippet").splitlines()[0] if link_info.get("function_snippet") else None
+                if header:
+                    out["trigger_site"]["func"] = header.strip().split("(")[0][:120]
+    except Exception:
+        pass
+
+    # object info
+    try:
+        obj = parsed.get("object_info") or {}
+        if obj:
+            out["object"] = {"obj_addr": obj.get("obj_addr"), "cache": obj.get("cache"), "obj_size": obj.get("obj_size"), "offset": obj.get("offset")}
+    except Exception:
+        pass
+
+    # Struct / field inference: search snippets for struct definitions or '->' usages
+    struct_name = None
+    fields_used: Set[str] = set()
+    struct_def_snippet = None
+    try:
+        # scan all function snippets in links then urls
+        candidate_texts: List[str] = []
+        for d in (snippets.get("links") or {}).values():
+            if isinstance(d, dict) and d.get("function_snippet"):
+                candidate_texts.append(d.get("function_snippet"))
+        for t in (snippets.get("urls") or {}).values():
+            if isinstance(t, str):
+                candidate_texts.append(t)
+
+        for text in candidate_texts:
+            # find struct definition
+            m = re.search(r"struct\s+([A-Za-z0-9_]+)\s*\{([\s\S]{0,800})\};", text)
+            if m and not struct_name:
+                struct_name = m.group(1)
+                struct_def_snippet = m.group(0)[:2000]
+            # find arrow uses like 'ent->parent_de'
+            for f in re.findall(r"->\s*([A-Za-z0-9_]+)", text):
+                fields_used.add(f)
+            # find dot uses (struct.field)
+            for f in re.findall(r"\.\s*([A-Za-z0-9_]+)", text):
+                fields_used.add(f)
+    except Exception:
+        pass
+
+    out["struct_info"] = {"struct_name": struct_name, "fields_used": sorted(list(fields_used)), "struct_def_snippet": struct_def_snippet}
+
+    # usage examples: find specific lines in trigger function snippet that dereference fields
+    try:
+        usage_lines: List[str] = []
+        if out.get("trigger_site"):
+            ts = out.get("trigger_site")
+            lf_url = None
+            if parsed.get("link_frames"):
+                lf0 = parsed.get("link_frames")[0]
+                lf_url = lf0.get("url")
+            key = f"link:{lf_url}#{ts.get('line','?')}" if lf_url else None
+            link_info = (snippets.get("links") or {}).get(key) if key else None
+            if link_info and link_info.get("function_snippet"):
+                for i, line in enumerate(link_info.get("function_snippet").splitlines(), start=1):
+                    if "->" in line or "[" in line or "*" in line:
+                        usage_lines.append({"line_no": i, "text": line.strip()})
+        out["usage_examples"] = usage_lines
+    except Exception:
+        pass
+
+    # Add concrete exploitation-relevant notes
+    try:
+        if out.get("object"):
+            o = out.get("object")
+            if o.get("cache"):
+                out["notes"].append(f"Object allocated from cache '{o.get('cache')}', reallocation under attacker control increases exploitability")
+            if o.get("obj_size") and o.get("offset") is not None:
+                out["notes"].append(f"Object size={o.get('obj_size')}, access offset={o.get('offset')}")
+    except Exception:
+        pass
+
+    # ---- New: synthesize concrete preconditions from usage lines/snippets ----
+    try:
+        concrete_preconds: List[Dict[str, Any]] = []
+        ts = out.get('trigger_site') or {}
+        lf_url = ts.get('url') if ts else None
+        link_key = f"link:{lf_url}#{ts.get('line','?')}" if lf_url else None
+        link_info = (snippets.get('links') or {}).get(link_key) if link_key else None
+
+        # prefer usage_lines collected earlier; otherwise scan the trigger snippet for deref/index patterns
+        candidates = []
+        if out.get('usage_examples'):
+            for u in out.get('usage_examples'):
+                candidates.append(u.get('text'))
+        elif link_info and link_info.get('function_snippet'):
+            for line in link_info.get('function_snippet').splitlines():
+                if '->' in line or '[' in line or '*' in line:
+                    candidates.append(line.strip())
+
+        var_re = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*->\s*([A-Za-z_][A-Za-z0-9_]*)")
+        idx_re = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]+)\s*\]")
+        simple_var_re = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
+
+        for c in candidates:
+            try:
+                vars_found = []
+                fields = []
+                indices = []
+                for m in var_re.finditer(c):
+                    vars_found.append(m.group(1))
+                    fields.append(m.group(2))
+                for m in idx_re.finditer(c):
+                    indices.append({'base': m.group(1), 'index_expr': m.group(2)})
+                    vars_found.append(m.group(1))
+                # fallback: find pointer/deref var names
+                if not vars_found:
+                    for m in re.finditer(r"\*\s*([A-Za-z_][A-Za-z0-9_]*)", c):
+                        vars_found.append(m.group(1))
+                # dedupe
+                seen = set()
+                vars_found = [v for v in vars_found if not (v in seen or seen.add(v))]
+
+                evidence_lines = []
+                if link_info and link_info.get('function_snippet'):
+                    # include surrounding lines as evidence
+                    snippet_lines = link_info.get('function_snippet').splitlines()
+                    for i, l in enumerate(snippet_lines, start=1):
+                        if any(v in l for v in vars_found) or '->' in l or '[' in l:
+                            evidence_lines.append({'line_no': i, 'text': l.strip()})
+
+                # craft constraint/hypothesis
+                constraint = None
+                if indices:
+                    # if index expression is numeric or simple var, produce a range hint
+                    idx = indices[0]
+                    expr = idx.get('index_expr')
+                    # if it's a simple number
+                    try:
+                        num = int(expr)
+                        constraint = f"index {idx['base']} == {num} (literal index access)"
+                    except Exception:
+                        constraint = f"index expression '{expr}' on {idx['base']} may be attacker-controlled and cause OOB access"
+                elif fields:
+                    # if field length-like names present (len/len_field), hint at malformed length
+                    constraint = f"field(s) {', '.join(fields)} may contain malformed/large values leading to OOB access"
+                elif vars_found:
+                    constraint = f"variable(s) {', '.join(vars_found)} may point to reclaimed/out-of-bounds memory or contain attacker-controlled indices"
+                else:
+                    constraint = "A pointer or index dereference in the trigger function must be fed attacker-controlled data to reach the crash"
+
+                pre = {
+                    'file': ts.get('file') if ts else None,
+                    'line': ts.get('line') if ts else None,
+                    'code': c.strip(),
+                    'variables': vars_found,
+                    'indices': indices,
+                    'constraint': constraint,
+                    'evidence': evidence_lines,
+                }
+                concrete_preconds.append(pre)
+            except Exception:
+                continue
+
+        if concrete_preconds:
+            out['concrete_preconditions'] = concrete_preconds
+    except Exception:
+        # non-fatal
+        pass
+
+    return out
+
 
 
 def determine_bug_id(parsed: Dict[str, Any], default_name: str = "unknown") -> str:
@@ -1786,7 +2937,249 @@ def download_syz_bug_assets(url: str, out_dir: str) -> bool:
                 continue
     return True
 
-def save_to_json(result: Dict[str, Any], url: str) -> None:
+
+def parse_function_snippet(snippet_text: str) -> Dict[str, Any]:
+    """Parse a function-level snippet (heuristic) and return params, assignments, calls, and memops.
+
+    Returns: {
+      'func_name': str or None,
+      'params': [param_names],
+      'assigns': [{'dest': dest_var, 'rhs': [tokens], 'line': n, 'code': line}],
+      'calls': [{'callee': name, 'args': [tokens], 'line': n, 'code': line}],
+      'memops': [{'type': 'memcpy'|'memmove'|'copy_from_user'|'copy_to_user', 'args': [tokens], 'line': n, 'code': line}],
+    }
+    """
+    out: Dict[str, Any] = {'func_name': None, 'params': [], 'assigns': [], 'calls': [], 'memops': []}
+    if not snippet_text:
+        return out
+    lines = snippet_text.splitlines()
+    # try to find a function header in the first 8 lines
+    header = None
+    for l in lines[:8]:
+        s = l.strip()
+        if not s:
+            continue
+        if '(' in s and ')' in s and not re.match(r'^(if|for|while|switch)\b', s):
+            header = s
+            break
+    func_name = None
+    params = []
+    if header:
+        # extract function name as the token before the first '('
+        m = re.match(r".*?([A-Za-z_][A-Za-z0-9_]*)\s*\(", header)
+        if m:
+            func_name = m.group(1)
+        # extract parameter list between first ( and last ) in header
+        try:
+            pstart = header.index('(')
+            pend = header.rindex(')')
+            plen = header[pstart + 1:pend]
+            parts = [p.strip() for p in plen.split(',') if p.strip()]
+            for part in parts:
+                # parameter name is often the last token in the part
+                toks = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)", part)
+                if toks:
+                    pname = toks[-1]
+                    if pname not in params:
+                        params.append(pname)
+        except Exception:
+            pass
+    out['func_name'] = func_name
+    out['params'] = params
+
+    # patterns
+    assign_re = re.compile(r"^\s*(?P<left>[^=]+?)\s*=\s*(?P<right>[^;]+);?")
+    call_re = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)")
+    mem_re = re.compile(r"\b(memcpy|memmove|copy_from_user|copy_to_user)\s*\(([^)]*)\)")
+
+    for i, l in enumerate(lines, start=1):
+        try:
+            # assignments
+            m = assign_re.match(l)
+            if m:
+                left = m.group('left').strip()
+                right = m.group('right').strip()
+                # extract variable base names
+                left_vars = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)", left)
+                rhs_vars = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)", right)
+                if left_vars:
+                    dest = left_vars[-1]
+                else:
+                    dest = None
+                out['assigns'].append({'dest': dest, 'rhs': rhs_vars, 'line': i, 'code': l.strip()})
+            # mem ops
+            for mm in mem_re.finditer(l):
+                mtype = mm.group(1)
+                args = mm.group(2)
+                parts = [p.strip() for p in args.split(',') if p.strip()]
+                arg_vars = []
+                for p in parts:
+                    av = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)", p)
+                    if av:
+                        arg_vars.append(av[-1])
+                out['memops'].append({'type': mtype, 'args': arg_vars, 'line': i, 'code': l.strip()})
+            # calls
+            for mc in call_re.finditer(l):
+                cname = mc.group(1)
+                args = mc.group(2)
+                # skip control keywords
+                if cname in ('if', 'for', 'while', 'switch', 'return', 'sizeof'):
+                    continue
+                parts = [p.strip() for p in args.split(',') if p.strip()]
+                arg_vars = []
+                for p in parts:
+                    av = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)", p)
+                    if av:
+                        arg_vars.append(av[-1])
+                out['calls'].append({'callee': cname, 'args': arg_vars, 'line': i, 'code': l.strip()})
+        except Exception:
+            continue
+
+    return out
+
+
+def build_dataflow_graph(parsed: Dict[str, Any], snippets: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a simple dataflow graph from snippets.
+
+    Returns a dict with:
+      - graph: {node: set([dest_nodes])} where nodes are 'var@func'
+      - occurrences: {node: [{'file','line','code'}...]}
+      - meta: auxiliary info like copy_from_user occurrences
+      - func_params: {func_name: [param_names]}
+    """
+    graph: Dict[str, Set[str]] = {}
+    occurrences: Dict[str, List[Dict[str, Any]]] = {}
+    meta: Dict[str, Any] = {'copy_from_user': {}}
+    func_params: Dict[str, List[str]] = {}
+
+    def _add_node(n: str):
+        if n not in graph:
+            graph[n] = set()
+
+    # helper to register an occurrence
+    def _add_occ(node: str, file: Optional[str], line: Optional[int], code: str):
+        occurrences.setdefault(node, []).append({'file': file, 'line': line, 'code': code})
+
+    # iterate snippets sources: links, local, urls
+    candidates = []
+    for k, v in (snippets.get('links') or {}).items():
+        if isinstance(v, dict) and v.get('function_snippet'):
+            candidates.append((k, v.get('file'), v.get('line'), v.get('function_snippet')))
+    for k, v in (snippets.get('local') or {}).items():
+        if isinstance(v, dict) and v.get('snippet'):
+            candidates.append((k, os.path.basename(v.get('path') or ''), v.get('line'), v.get('snippet')))
+    for k, v in (snippets.get('urls') or {}).items():
+        txt = v if isinstance(v, str) else (v.get('snippet') if isinstance(v, dict) else None)
+        if txt:
+            candidates.append((k, None, None, txt))
+
+    # map of function names to parsed snippet content for callee lookup
+    func_snip_map: Dict[str, Dict[str, Any]] = {}
+
+    for key, file, start_line, txt in candidates:
+        parsed_snip = parse_function_snippet(txt)
+        func = parsed_snip.get('func_name') or key
+        func_snip_map[func] = parsed_snip
+        params = parsed_snip.get('params') or []
+        func_params[func] = params
+
+        # register occurrences for param nodes
+        for p in params:
+            node = f"{p}@{func}"
+            _add_node(node)
+            _add_occ(node, file, start_line, f"param {p} in {func}")
+
+        # process assigns
+        for a in parsed_snip.get('assigns', []):
+            dest = a.get('dest')
+            rhs = a.get('rhs') or []
+            if not dest:
+                continue
+            dest_node = f"{dest}@{func}"
+            _add_node(dest_node)
+            _add_occ(dest_node, file, start_line or a.get('line'), a.get('code'))
+            for r in rhs:
+                src_node = f"{r}@{func}"
+                _add_node(src_node)
+                # edge src -> dest
+                graph.setdefault(src_node, set()).add(dest_node)
+
+        # process memops
+        for m in parsed_snip.get('memops', []):
+            mtype = m.get('type')
+            args = m.get('args') or []
+            if mtype in ('memcpy', 'memmove') and len(args) >= 2:
+                dst = args[0]
+                src = args[1]
+                dst_node = f"{dst}@{func}"
+                src_node = f"{src}@{func}"
+                _add_node(dst_node)
+                _add_node(src_node)
+                graph.setdefault(src_node, set()).add(dst_node)
+                _add_occ(dst_node, file, start_line or m.get('line'), m.get('code'))
+            if mtype == 'copy_from_user' and len(args) >= 1:
+                dst = args[0]
+                dst_node = f"{dst}@{func}"
+                _add_node(dst_node)
+                _add_occ(dst_node, file, start_line or m.get('line'), m.get('code'))
+                meta['copy_from_user'].setdefault(dst_node, []).append({'file': file, 'line': start_line or m.get('line'), 'code': m.get('code')})
+
+        # process calls: create arg->param edges when callee parsed
+        for c in parsed_snip.get('calls', []):
+            callee = c.get('callee')
+            args = c.get('args') or []
+            # register occurrences for args
+            for idx, aarg in enumerate(args):
+                src_node = f"{aarg}@{func}"
+                _add_node(src_node)
+                _add_occ(src_node, file, start_line or c.get('line'), c.get('code'))
+            # if callee has params parsed, connect arg->param
+            callee_params = func_params.get(callee) or (func_snip_map.get(callee) or {}).get('params') or []
+            for i, arg_name in enumerate(args):
+                if i < len(callee_params):
+                    param = callee_params[i]
+                    src_node = f"{arg_name}@{func}"
+                    dst_node = f"{param}@{callee}"
+                    _add_node(src_node)
+                    _add_node(dst_node)
+                    graph.setdefault(src_node, set()).add(dst_node)
+                    # no direct occurrence for dst unless we have callee snippet
+    return {'graph': graph, 'occurrences': occurrences, 'meta': meta, 'func_params': func_params}
+
+
+def propagate_taint_graph(graph: Dict[str, Set[str]], seeds: Dict[str, Dict[str, Any]], max_depth: int = 7, max_nodes: int = 500) -> Dict[str, Dict[str, Any]]:
+    """Propagate taint forward from seed nodes over the dataflow graph.
+
+    Returns mapping node -> {'seed_label': label, 'distance': dist}
+    """
+    from collections import deque
+
+    tainted: Dict[str, Dict[str, Any]] = {}
+    q = deque()
+    # initialize queue
+    for node, info in (seeds or {}).items():
+        label = info.get('label')
+        if node:
+            tainted[node] = {'seed_label': label, 'distance': 0}
+            q.append((node, label, 0))
+
+    visited_count = len(tainted)
+    while q and visited_count < max_nodes:
+        node, label, dist = q.popleft()
+        if dist >= max_depth:
+            continue
+        for nb in graph.get(node, set()):
+            if nb in tainted:
+                # keep the shortest distance/earliest seed
+                continue
+            tainted[nb] = {'seed_label': label, 'distance': dist + 1}
+            q.append((nb, label, dist + 1))
+            visited_count += 1
+            if visited_count >= max_nodes:
+                break
+    return tainted
+
+def save_to_json(crash_log: str, result: Dict[str, Any], url: str) -> None:
     """Save the analysis result to a JSON file."""
     # write JSON to crash_analysis/<bugid>.json
     out_dir = os.path.join(os.getcwd(), 'crash_analysis')
@@ -1796,32 +3189,26 @@ def save_to_json(result: Dict[str, Any], url: str) -> None:
     # bugid = determine_bug_id(result.get('parsed', {}), default_name)
     # Attempt to enrich result with LLM analysis when possible
     try:
-        snippets = result.get('snippets', {}) or {}
-        def _build_snippet_map(snips: Dict[str, Any]) -> Dict[str, str]:
-            out = {}
-            # urls
-            for k, v in (snips.get('urls') or {}).items():
-                if isinstance(v, str):
-                    out[k] = v
-                elif isinstance(v, dict) and v.get('snippet'):
-                    out[k] = v.get('snippet')
-            # links
-            for k, v in (snips.get('links') or {}).items():
-                if isinstance(v, dict) and v.get('snippet'):
-                    out[k] = v.get('snippet')
-            # local
-            for k, v in (snips.get('local') or {}).items():
-                if isinstance(v, dict) and v.get('snippet'):
-                    out[k] = v.get('snippet')
-            return out
+        snippet_map = result.get('snippets', {}).get('links', {})
+        # output static analysis summary with just the exploitability level, the rationale, and the capabilities the primitive provides
+        print("Static Analysis Summary:")
+        print(f"  Exploitability Level: {result.get('strong_report', {}).get('overview', {}).get('exploitability', 'unknown')}")
+        print(f"  Rationale: {result.get('strong_report', {}).get('overview', {}).get('rationale', 'unknown')}")
+        print(f"  Capabilities: {result.get('strong_report', {}).get('overview', {}).get('primitive_capabilities', 'unknown')}")
 
-        frames = result.get('parsed', {}).get('frames', [])
-        snippet_map = _build_snippet_map(snippets)
-        try:
-            llm_res = llm_analyze_traces(frames, snippet_map)
-            result['llm_analysis'] = llm_res
-        except Exception as e:
-            result['llm_analysis'] = {"ok": False, "error": str(e)}
+        # provide a prompt to user output to decide whether to use LLM analysis
+        print("Would you like to perform LLM-based analysis of the crash? (y/n): ", end='', flush=True)
+        choice = input().strip().lower()
+        if choice == 'y':
+            try:
+                llm_res = llm_analyze_traces(crash_log, snippet_map)
+                print("LLM Analysis Summary:")
+                print(f"  Exploitability Level: {llm_res.get('openai_llm', {}).get('parsed', {}).get('overview', {}).get('exploitability', 'unknown')}")
+                print(f"  Rationale: {llm_res.get('openai_llm', {}).get('parsed', {}).get('overview', {}).get('rationale', 'unknown')}")
+                print(f"  Capabilities: {llm_res.get('openai_llm', {}).get('parsed', {}).get('overview', {}).get('primitive_capabilities', 'unknown')}")
+                result['llm_analysis'] = llm_res
+            except Exception as e:
+                result['llm_analysis'] = {"ok": False, "error": str(e)}
     except Exception:
         # non-fatal, continue without LLM
         pass
@@ -1830,7 +3217,6 @@ def save_to_json(result: Dict[str, Any], url: str) -> None:
     with open(out_path, 'w', encoding='utf-8') as fh:
         json.dump(result, fh, indent=2)
     print(out_path)
-
 
 def main():
     p = argparse.ArgumentParser(description="Analyze kernel crash logs and classify primitives")
@@ -1846,9 +3232,9 @@ def main():
     args = p.parse_args()
 
     # Bulk operations
-    if args.bulk_dir and args.out_dir:
-        analyze_directory(args.bulk_dir, args.out_dir, args.source_root)
-        return
+    # if args.bulk_dir and args.out_dir:
+    #     analyze_directory(args.bulk_dir, args.out_dir, args.source_root)
+    #     return
     if args.fetch_urls and args.out_dir:
         fetch_and_analyze_urls(args.fetch_urls, args.out_dir, args.source_root)
         return
@@ -1861,7 +3247,7 @@ def main():
         strong = stronger_heuristics(result["parsed"], result.get("snippets", {}), result.get("evidence", {}))
         result["strong_report"] = strong
         if args.json:
-            save_to_json(result, args.syz_bug)
+            save_to_json(txt, result, args.syz_bug)
             return
         if args.json_report:
             compact = {
@@ -1874,7 +3260,7 @@ def main():
                 "evidence_summary": {k: {"dereference": v.get("dereference"), "array_access": v.get("array_access")}
                                       for k, v in result.get("evidence", {}).items() if isinstance(v, dict)},
             }
-            save_to_json(compact, args.syz_bug)
+            save_to_json(txt, compact, args.syz_bug)
             return
         # default human summary
         print("Primitive:", strong["primitive"])
@@ -1885,14 +3271,14 @@ def main():
         if args.html_report:
             generate_html_report(result, args.html_report)
         return
-    if args.download_syz and args.out_dir:
-        ok = download_syz_bug_assets(args.download_syz, args.out_dir)
-        if not ok:
-            print("Failed to download syz bug assets")
-            return
-        # run analysis on downloaded directory
-        analyze_directory(args.out_dir, args.out_dir, args.source_root)
-        return
+    # if args.download_syz and args.out_dir:
+    #     ok = download_syz_bug_assets(args.download_syz, args.out_dir)
+    #     if not ok:
+    #         print("Failed to download syz bug assets")
+    #         return
+    #     # run analysis on downloaded directory
+    #     analyze_directory(args.out_dir, args.out_dir, args.source_root)
+    #     return
 
     result = analyze(txt, args.source_root)
     # run stronger heuristics and include in output
@@ -1900,7 +3286,7 @@ def main():
     result["strong_report"] = strong
 
     if args.json:
-        save_to_json(result, "input")
+        save_to_json(txt, result, "input")
         return
 
     if args.json_report:
@@ -1915,7 +3301,7 @@ def main():
             "evidence_summary": {k: {"dereference": v.get("dereference"), "array_access": v.get("array_access")}
                                   for k, v in result.get("evidence", {}).items() if isinstance(v, dict)},
         }
-        save_to_json(compact, "input")
+        save_to_json(txt, compact, "input")
         return
     else:
         # human friendly concise summary (show vulnerability prominently)
@@ -1942,39 +3328,39 @@ if __name__ == "__main__":
     main()
 
 
-def analyze_directory(input_dir: str, out_dir: str, source_root: Optional[str] = None) -> None:
-    """Analyze all crash log files in a directory and write per-file JSON+HTML to out_dir.
+# def analyze_directory(input_dir: str, out_dir: str, source_root: Optional[str] = None) -> None:
+#     """Analyze all crash log files in a directory and write per-file JSON+HTML to out_dir.
 
-    Behavior: scans files with .txt or .log extension; for each file runs analyze() and writes
-    `{basename}.json` and `{basename}.html` (HTML only if html generation is possible).
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    # central crash_analysis directory for JSON outputs
-    crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
-    os.makedirs(crash_dir, exist_ok=True)
-    for fn in os.listdir(input_dir):
-        if not (fn.endswith('.txt') or fn.endswith('.log') or fn.endswith('.crash')):
-            continue
-        path = os.path.join(input_dir, fn)
-        try:
-            with open(path, 'r', errors='ignore') as fh:
-                txt = fh.read()
-        except Exception:
-            continue
-        result = analyze(txt, source_root)
-        base = os.path.splitext(fn)[0]
-        # determine bug id and write JSON into crash_analysis (includes LLM enrichment)
-        bugid = determine_bug_id(result.get('parsed', {}), base)
-        save_to_json(result, bugid)
-        # generate HTML report
-        html_path = os.path.join(out_dir, base + '.html')
-        try:
-            strong = stronger_heuristics(result['parsed'], result.get('snippets', {}), result.get('evidence', {}))
-            result['strong_report'] = strong
-            generate_html_report(result, html_path)
-        except Exception:
-            # continue even if HTML generation fails
-            pass
+#     Behavior: scans files with .txt or .log extension; for each file runs analyze() and writes
+#     `{basename}.json` and `{basename}.html` (HTML only if html generation is possible).
+#     """
+#     os.makedirs(out_dir, exist_ok=True)
+#     # central crash_analysis directory for JSON outputs
+#     crash_dir = os.path.join(os.getcwd(), 'crash_analysis')
+#     os.makedirs(crash_dir, exist_ok=True)
+#     for fn in os.listdir(input_dir):
+#         if not (fn.endswith('.txt') or fn.endswith('.log') or fn.endswith('.crash')):
+#             continue
+#         path = os.path.join(input_dir, fn)
+#         try:
+#             with open(path, 'r', errors='ignore') as fh:
+#                 txt = fh.read()
+#         except Exception:
+#             continue
+#         result = analyze(txt, source_root)
+#         base = os.path.splitext(fn)[0]
+#         # determine bug id and write JSON into crash_analysis (includes LLM enrichment)
+#         bugid = determine_bug_id(result.get('parsed', {}), base)
+#         save_to_json(result, bugid)
+#         # generate HTML report
+#         html_path = os.path.join(out_dir, base + '.html')
+#         try:
+#             strong = stronger_heuristics(result['parsed'], result.get('snippets', {}), result.get('evidence', {}))
+#             result['strong_report'] = strong
+#             generate_html_report(result, html_path)
+#         except Exception:
+#             # continue even if HTML generation fails
+#             pass
 
 
 def fetch_and_analyze_urls(url_list_file: str, out_dir: str, source_root: Optional[str] = None) -> None:
@@ -2000,11 +3386,11 @@ def fetch_and_analyze_urls(url_list_file: str, out_dir: str, source_root: Option
         default_name = os.path.splitext(os.path.basename(urllib.parse.urlparse(u).path))[0] or 'url'
         bugid = determine_bug_id(result.get('parsed', {}), default_name)
         try:
-            save_to_json(result, bugid)
+            save_to_json(txt, result, bugid)
         except Exception:
             import hashlib
             h = hashlib.sha1(u.encode()).hexdigest()[:12]
-            save_to_json(result, h)
+            save_to_json(txt, result, h)
         html_path = os.path.join(out_dir, f'{os.path.splitext(os.path.basename(urllib.parse.urlparse(u).path))[0] or h}.html')
         try:
             strong = stronger_heuristics(result['parsed'], result.get('snippets', {}), result.get('evidence', {}))
