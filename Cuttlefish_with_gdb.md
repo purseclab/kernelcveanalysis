@@ -217,6 +217,23 @@ In gdb:
 Should break at address 0x0, and you can continue from there.
 
 Also you can see if symbols can be added to the kernel image for better debugging using [https://github.com/marin-m/vmlinux-to-elf](https://github.com/marin-m/vmlinux-to-elf "https://github.com/marin-m/vmlinux-to-elf")
+
+### Fixing GDB si or continue
+
+It may be the case the hitting a breakpoint and hitting running the step instruction command results in execution immediately transferring to `__bp_harden_el1_vectors` or similar, instead of the next instruction.
+Hitting continue will also cause the same breakpoint to be hit over and over, even if execution should continue later on.
+
+I think this is caused due to some interrupt firing, which transfers execution to `__bp_harden_el1_vectors`. When the interrupt finishes, the syscall is then restarted?
+
+The fix for this issue is to disable interrupts whenever a breakpoint is hit. This can be done easily with a gdb stop hook, shown below:
+
+```
+define hook-stop
+    # Mask IRQ + FIQ again automatically
+    set $cpsr = $cpsr | 0xc0
+end
+```
+
 ## Unknown Error
 
 When trying this on my raspberry pi, I encountered some issues with qemu:
