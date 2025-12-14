@@ -1,8 +1,0 @@
-# https://syzkaller.appspot.com/bug?id=e729259ad03d686939161e1e06f9f16c129e7e26
-# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
-#{"procs":1,"slowdown":1,"sandbox":"","close_fds":false,"segv":true}
-syz_mount_image$ext4(0x0, &(0x7f0000000040)='./file0\x00', 0x0, 0x0, 0x0, 0x0, 0x0)
-mount$incfs(&(0x7f00000002c0)='./file0\x00', &(0x7f0000000000)='./file0\x00', &(0x7f0000000340), 0x0, 0x0)
-r0 = openat(0xffffffffffffff9c, &(0x7f00000000c0)='./file0\x00', 0x0, 0x0)
-r1 = openat$incfs(r0, &(0x7f0000000080)='.pending_reads\x00', 0x0, 0x0)
-ioctl$KVM_CREATE_VCPU(r1, 0x40046721, 0x20000000)
