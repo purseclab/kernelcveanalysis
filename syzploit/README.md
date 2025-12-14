@@ -2,7 +2,7 @@
 
 Syzploit automates reproducing Syzkaller-reported kernel bugs and collecting dynamic analysis from both kernel and userspace. It orchestrates QEMU/Cuttlefish, GDB remote sessions, and structured JSON outputs that will be analyzed to produced primitives based off of the vulnerabilities discovered.
 
-![Overview](images/overview.png)
+![Overview](images/syzploit_overview.png)
 
 The diagram shows the flow: SyzVerify -> SyzAnalyze -> Exploit Synthesis.
 
