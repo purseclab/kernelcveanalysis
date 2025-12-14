@@ -19,6 +19,14 @@ To run the docker container, you can use the provided script:
 ```
 This will mount the current `syzploit` directory to `/workspace/syzbot-repro` in the container, match the network to the host network, and then also run it in user mode so all of the data collected can be accessed from the host machine.
 
+## LLM Integration
+Syzploit integrates with OpenAI's GPT models to assist in analyzing kernel bugs through the use of LiteLLM. It generates prompts based on crash data and dynamic analysis, and uses the model's output to identify exploitability, preconditions, postconditions, and path constraints. To enable this you will need to add your OpenAI API key to the environment variable `OPENAI_API_KEY` in an `.env` file.
+
+```
+cd src/syzploit/SyzAnalyze/
+echo "OPENAI_API_KEY=your_api_key_here" > .env
+```
+
 ## Cuttlefish Setup (Optional)
 
 Start the cuttlefish emulator on cuttlefish server, and run adb once to start adb daemon:
