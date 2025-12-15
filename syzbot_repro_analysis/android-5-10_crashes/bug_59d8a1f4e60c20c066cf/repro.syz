@@ -1,8 +1,0 @@
-# https://syzkaller.appspot.com/bug?id=7a59855e5d338e41606a925539a0d11206dc522e
-# See https://goo.gl/kgGztJ for information about syzkaller reproducers.
-#{"repeat":true,"procs":1,"slowdown":1,"sandbox":"none","close_fds":true}
-r0 = syz_io_uring_setup(0x12d4, &(0x7f0000000080)={0x0, 0x0, 0x1}, &(0x7f0000156000/0x3000)=nil, &(0x7f00006d4000/0x4000)=nil, &(0x7f0000000100)=<r1=>0x0, &(0x7f0000000180)=<r2=>0x0)
-r3 = open(&(0x7f0000000280)='./bus\x00', 0x14dc40, 0x0)
-syz_io_uring_submit(r1, r2, &(0x7f0000000000)=@IORING_OP_READV=@pass_iovec={0x1, 0x2, 0x0, @fd=r3, 0x0, 0x0}, 0x0)
-syz_memcpy_off$IO_URING_METADATA_GENERIC(r1, 0x40, &(0x7f0000000240)=0x3ff, 0x0, 0x4)
-io_uring_enter(r0, 0x2b66, 0x0, 0x0, 0x0, 0x5e)
