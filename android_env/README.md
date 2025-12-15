@@ -1,11 +1,23 @@
 # Android Env
 
-Scripts to analyze things about the environment of an Android device over adb.
+Scripts to analyze things about the environment of an Android device over adb. Contains basic features we have needed over time, such as dumping seccomp policies, selinux policies, reachable services, etc. Other miscaleanous features that just require scripting on an android device were included, such as expandin dynamicly linked binaries for exploit chaining.
 
-Setup ssh port forwarding for adb on local machine running kexploit:
+## Setup
+
+Setup ssh port forwarding for adb on local machine running aenv:
 ```sh
 ssh -L localhost:5037:localhost:5037 cuttlefish-user@cuttlefish-host
 ```
+
+Required dependencies are provided in the `shell.nix`, so just run `nix-shell`, and aenv scripts can be used.
+
+
+## Available Commands
+
+- `uv run aenv seccomp <output.json>`: save allowed syscalls by seccomp filters in `output.json` file
+- `uv run aenv selinux dump <setype>`: dump information about the given selinux type
+- `uv run aenv selinux diff <setype1> <setype2>`: diff information about the permissions for the 2 different selinux types
+
 
 ## Example Output and Policies
 
@@ -425,7 +437,9 @@ accessible files
 https://source.android.com/docs/setup/reference/build-numbers has a list mapping build IDs to branch names.
 Build ID can be gotten in ADB shell from getprop ro.build.id.
 
-Then clone with ```sh
+Then clone with:
+
+```sh
 repo init -u https://android.googlesource.com/platform/manifest -b <branch_name>
 repo sync -j8
 ```
