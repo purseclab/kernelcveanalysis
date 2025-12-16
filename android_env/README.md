@@ -1,4 +1,4 @@
-# Android Env
+# Android Environment Analyzer
 
 Scripts to analyze things about the environment of an Android device over adb. Contains basic features we have needed over time, such as dumping seccomp policies, selinux policies, reachable services, etc. Other miscaleanous features that just require scripting on an android device were included, such as expandin dynamicly linked binaries for exploit chaining.
 
