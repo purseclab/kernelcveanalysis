@@ -1,0 +1,6 @@
+[submodule "syzploit/src/chainreactor"]
+	path = syzploit/src/chainreactor
+	url = git@github.com:ucsb-seclab/chainreactor.git
+[submodule "syzploit/src/kernel-research"]
+	path = syzploit/src/kernel-research
+	url = git@github.com:google/kernel-research.git

@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import typer
 from . import SyzVerify
 from . import SyzAnalyze
+from . import Synthesizer
 
 app = typer.Typer(help="Syzkall/Syzbot tooling for pulling, testing, and analyzing bugs.")
 
@@ -85,6 +86,38 @@ def analyze(
 ):
     """Analyze a specific bug with static and optional dynamic analysis"""
     SyzAnalyze.analyze_bug(bug_id, syzkall_kernel, qemu, source_image, source_disk, dynamic_analysis, gdb_port, arch, output_dir)
+
+@app.command()
+def synthesize(
+    bug_id: Annotated[str, typer.Argument(help='Bug ID to synthesize exploit for')],
+    goal: Annotated[str, typer.Option(help='Desired exploit goal (e.g., privilege_escalation, shell)')] = 'privilege_escalation',
+    kernel_research_path: Annotated[Optional[Path], typer.Option(help='Path to google/kernel-research repo')] = None,
+    chainreactor_path: Annotated[Optional[Path], typer.Option(help='Path to ucsb-seclab/chainreactor repo')] = None,
+    analysis_dir: Annotated[Optional[Path], typer.Option(help='Path to analysis_<bug_id> directory')] = None,
+    vmlinux_path: Annotated[Optional[Path], typer.Option(help='Path to vmlinux for gadget analysis')] = None,
+):
+    """Synthesize an exploit plan using SyzAnalyze + kernelXDK primitives, optionally via ChainReactor."""
+    res = Synthesizer.synthesize(
+        bug_id=str(bug_id),
+        goal=str(goal),
+        kernel_research_path=str(kernel_research_path) if kernel_research_path else None,
+        chainreactor_path=str(chainreactor_path) if chainreactor_path else None,
+        analysis_dir=str(analysis_dir) if analysis_dir else None,
+        vmlinux_path=str(vmlinux_path) if vmlinux_path else None,
+    )
+    # Save a summary in the analysis directory
+    try:
+        ad = res.get('plan', {}).get('target_info', {}).get('analysis_dir')
+        if ad:
+            out = Path(ad) / 'synth_summary.json'
+            with out.open('w') as f:
+                import json
+                json.dump(res, f, indent=2)
+            typer.echo(f"[+] Synthesizer summary -> {out}")
+        else:
+            typer.echo("[+] Synthesizer completed; no analysis_dir available to write summary.")
+    except Exception:
+        typer.echo("[+] Synthesizer completed.")
 def main():
     load_dotenv()
     app()

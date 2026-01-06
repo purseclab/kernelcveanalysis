@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+import socket
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
 from elftools.elf.elffile import ELFFile  # type: ignore
@@ -52,6 +53,8 @@ class DynamicAnalysisConfig:
     ssh_user: str = "root"
     ssh_key: Optional[str] = None  # path to private key; None uses agent/default
     repro_remote_path: str = "/root/repro"  # path inside guest to run under gdbserver
+    # Host-side path to a gdbserver binary to upload if missing in guest
+    host_gdbserver_path: Optional[str] = None
     # Monitor-mode toggles
     kernel_monitor_all: bool = True
     userspace_monitor_all: bool = True
@@ -84,7 +87,17 @@ class QEMUManager:
     def __init__(self, config: DynamicAnalysisConfig):
         self.config = config
         self.qemu_process = None
-        self.gdb_script_path = None
+
+    def _wait_for_port(self, host: str, port: int, timeout: int = 30) -> bool:
+        """Wait until a TCP port is accepting connections."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with socket.create_connection((host, port), timeout=1):
+                    return True
+            except Exception:
+                time.sleep(0.5)
+        return False
         
     def start_qemu(self, kernel_image: str, kernel_disk: Optional[str] = None,
                    extra_args: List[str] = None) -> bool:
@@ -93,7 +106,13 @@ class QEMUManager:
         print(f"[DEBUG] kernel_image: {kernel_image}")
         print(f"[DEBUG] kernel_image exists: {os.path.exists(kernel_image)}")
         print(f"[DEBUG] initrd: {kernel_disk}")
-        
+
+        # Ensure 9p share path exists to avoid QEMU errors
+        try:
+            os.makedirs('/tmp/qemu-share', exist_ok=True)
+        except Exception:
+            pass
+
         cmd = [
             "qemu-system-x86_64",
             "-m", "2G",
@@ -101,21 +120,20 @@ class QEMUManager:
             "-kernel", str(kernel_image),
             "-append", "console=ttyS0 root=/dev/vda1 earlyprintk=serial net.ifnames=0 nokaslr",
             "-drive", f"file={str(kernel_disk)},format=raw,if=virtio",
-            "-netdev", "user,id=net0,host=10.0.2.10,hostfwd=tcp:127.0.0.1:10021-:22",
+            "-netdev", f"user,id=net0,host=10.0.2.10,hostfwd=tcp:127.0.0.1:{self.config.ssh_port}-:22,hostfwd=tcp:127.0.0.1:{self.config.userspace_gdb_port}-:{self.config.userspace_gdb_port}",
             "-device", "virtio-net-pci,netdev=net0",
-            # Provide a host share via 9p for trace/repro exchange
             "-virtfs", "local,path=/tmp/qemu-share,security_model=none,mount_tag=hostshare",
             "-enable-kvm",
             "-nographic",
-            "-s",  # GDB server on port 1234
-            "-S"  # Wait for GDB to connect
+            "-s",
+            "-S"
         ]
-            
+
         if extra_args:
             cmd.extend(extra_args)
-        
+
         print(f"[DEBUG] QEMU command: {' '.join(cmd)}")
-            
+
         try:
             print("[DEBUG] Starting QEMU process...")
             self.qemu_process = subprocess.Popen(
@@ -125,17 +143,18 @@ class QEMUManager:
                 universal_newlines=True
             )
             print(f"[DEBUG] QEMU process started with PID: {self.qemu_process.pid}")
-            # Give QEMU time to start
-            print("[DEBUG] Waiting 2 seconds for QEMU to initialize...")
-            time.sleep(2)
-            print("[DEBUG] QEMU started successfully")
+            print("[DEBUG] Waiting for QEMU gdb stub on 127.0.0.1:{}...".format(self.config.gdb_port))
+            if not self._wait_for_port('127.0.0.1', self.config.gdb_port, timeout=30):
+                print("[DEBUG] QEMU gdb stub not ready within timeout")
+                return False
+            print("[DEBUG] QEMU gdb stub is ready")
             return True
         except Exception as e:
             print(f"[DEBUG] Failed to start QEMU: {e}")
             import traceback
             traceback.print_exc()
             return False
-            
+
     def stop_qemu(self):
         """Stop the QEMU process."""
         if self.qemu_process:
@@ -166,9 +185,8 @@ class CuttlefishManager:
         if extra_args:
             cmd.extend(extra_args)
             
-        # Set up environment to inject GDB server args via wrapper script
         env = os.environ.copy()
-        env["QEMU_EXTRA_ARGS"] = f"-s -S"
+        env["QEMU_EXTRA_ARGS"] = "-s -S"
         
         try:
             self.cvd_process = subprocess.Popen(
@@ -178,7 +196,7 @@ class CuttlefishManager:
                 universal_newlines=True,
                 env=env
             )
-            time.sleep(5)  # Cuttlefish takes longer to start
+            time.sleep(5)
             return True
         except Exception as e:
             print(f"Failed to start Cuttlefish: {e}")
@@ -198,6 +216,75 @@ class GDBAnalyzer:
         self.config = config
         self.gdb_script = None
         self.gdb_output = ""
+
+    def _ensure_guest_gdbserver(self) -> bool:
+        """Ensure gdbserver exists in the guest; upload via scp if missing.
+        Returns True if available after the operation, False otherwise.
+        """
+        ssh_base = [
+            "ssh", "-o", "StrictHostKeyChecking=no",
+            "-p", str(self.config.ssh_port),
+            f"{self.config.ssh_user}@127.0.0.1",
+        ]
+        if self.config.ssh_key:
+            ssh_base.extend(["-i", self.config.ssh_key])
+        try:
+            # Wait up to 120s for SSH service to become available in guest
+            try:
+                deadline = time.time() + 120
+                while time.time() < deadline:
+                    try:
+                        with socket.create_connection(("127.0.0.1", self.config.ssh_port), timeout=2):
+                            break
+                    except Exception:
+                        time.sleep(1)
+            except Exception:
+                pass
+            # Check presence
+            chk = subprocess.run(ssh_base + ["command -v gdbserver || true"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            present = (chk.returncode == 0 and "gdbserver" in (chk.stdout or ""))
+            if present:
+                print("[DEBUG] gdbserver already present in guest")
+                return True
+            print("[DEBUG] gdbserver not found in guest; attempting upload via scp")
+            # Determine host gdbserver path
+            host_path = self.config.host_gdbserver_path or shutil.which("gdbserver")
+            if not host_path or not os.path.exists(host_path):
+                print("[DEBUG] Host gdbserver not found; install gdbserver on host or provide host_gdbserver_path")
+                return False
+            # Prefer statically linked and matching arch
+            try:
+                fi = subprocess.run(["file", host_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                finfo = fi.stdout.lower() if fi.returncode == 0 else ""
+                is_static = ("statically linked" in finfo)
+                arch_ok = ("x86-64" in finfo or "x86_64" in finfo)
+                if not is_static or not arch_ok:
+                    print(f"[DEBUG] Host gdbserver may be incompatible (static={is_static} arch_ok={arch_ok}); skipping userspace attach")
+                    return False
+            except Exception:
+                pass
+            # Upload to /usr/local/bin/gdbserver
+            scp_cmd = [
+                "scp", "-o", "StrictHostKeyChecking=no",
+                "-P", str(self.config.ssh_port),
+            ]
+            if self.config.ssh_key:
+                scp_cmd.extend(["-i", self.config.ssh_key])
+            scp_cmd.extend([host_path, f"{self.config.ssh_user}@127.0.0.1:/usr/local/bin/gdbserver"])
+            up = subprocess.run(scp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if up.returncode != 0:
+                print(f"[DEBUG] scp upload failed: rc={up.returncode} stderr={up.stderr}")
+                return False
+            # chmod +x
+            subprocess.run(ssh_base + ["chmod +x /usr/local/bin/gdbserver"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Verify again
+            chk2 = subprocess.run(ssh_base + ["command -v gdbserver || true"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            ok = (chk2.returncode == 0 and "gdbserver" in (chk2.stdout or ""))
+            print(f"[DEBUG] gdbserver upload verification: {ok}")
+            return ok
+        except Exception as e:
+            print(f"[DEBUG] _ensure_guest_gdbserver error: {e}")
+            return False
         
     def generate_gdb_script(self, repro_path: str, parsed_crash: Dict[str, Any]) -> str:
         """Generate GDB Python script based on crash analysis."""
@@ -250,16 +337,16 @@ access_size = {self.config.access_size}
 _enable_alloc_track = {str(self.config.enable_alloc_tracking)}
 _enable_kasan_check = {str(self.config.enable_kasan_checks)}
 reproducer_path = "{repro_path}"
-    monitor_mode = {str(getattr(self.config, 'kernel_monitor_all', False))}
+monitor_mode = {str(getattr(self.config, 'kernel_monitor_all', False))}
 
 # Override convenience variables
 if fault_addr is not None:
-    gdb.execute(f"set $fault_addr = {fault_addr}")
+    gdb.execute(f"set $fault_addr = {{fault_addr}}")
 if fault_insn is not None:
-    gdb.execute(f"set $fault_insn = {fault_insn}")
-gdb.execute(f"set $access_type = \\"{access_type}\\"")
-gdb.execute(f"set $poc_entry = \\"{poc_entry}\\"")
-gdb.execute(f"set $reproducer_path = \"{repro_path}\"")
+    gdb.execute(f"set $fault_insn = {{fault_insn}}")
+gdb.execute(f'set $access_type = "{{access_type}}"')
+gdb.execute(f'set $poc_entry = "{{poc_entry}}"')
+gdb.execute(f'set $reproducer_path = "{{reproducer_path}}"')
 
 """
         
@@ -307,7 +394,10 @@ class ExportResultsCmd(gdb.Command):
 ExportResultsCmd()
 
 # Auto-continue and run
-gdb.execute("continue")
+try:
+    gdb.execute("continue")
+except gdb.error as e:
+    gdb.write(f"[WARN] continue failed: {e}\n", gdb.STDERR)
 """
         
         modified_script += output_section
@@ -585,17 +675,25 @@ gdb.execute("continue")
                 gdb_kernel_cmd.extend(allocator_addrs_cmds)
             # Connect and configure
             gdb_kernel_cmd.extend([
-                "-ex", f"target remote :{self.config.gdb_port}",
-                "-ex", "set pagination off",
-                "-ex", "set confirm off",
-                "-ex", "set non-stop on",
-                "-ex", "set breakpoint pending on",
+                # Configure logging and behavior first
                 "-ex", f"set logging file {kernel_log}",
                 "-ex", "set logging overwrite on",
                 "-ex", "set logging enabled on",
-                "-ex", f"source {script_path}",
-                # Continue kernel execution; later interrupt to export results
+                "-ex", "set pagination off",
+                "-ex", "set confirm off",
+                # Ensure non-stop is off (QEMU stub often lacks support)
+                "-ex", "set non-stop off",
+                "-ex", "set breakpoint pending on",
+                # Attach to QEMU gdbstub
+                "-ex", "set tcp connect-timeout 30",
+                "-ex", f"target remote :{self.config.gdb_port}",
+                # Let the kernel boot so virtual memory is set up
                 "-ex", "continue",
+                "-ex", "python import time; time.sleep(5)",
+                "-ex", "interrupt",
+                # Source instrumentation script and resume
+                "-ex", f"source {script_path}",
+                "-ex", "python import time; time.sleep(%d)" % int(getattr(self.config, 'continue_delay', 10)),
                 "-ex", "interrupt",
                 "-ex", f"export_results {results_file_kernel}",
                 "-ex", "quit"
@@ -612,6 +710,28 @@ gdb.execute("continue")
                 # add key if provided
                 if self.config.ssh_key:
                     ssh_cmd.extend(["-i", self.config.ssh_key])
+                # Ensure gdbserver exists in guest, try upload if missing
+                if not self._ensure_guest_gdbserver():
+                    print("[DEBUG] Userspace gdbserver unavailable; skipping userspace attach")
+                else:
+                    # start gdbserver in the guest
+                    remote = f"gdbserver :{self.config.userspace_gdb_port} {self.config.repro_remote_path}"
+                    print(f"[DEBUG] Launching guest gdbserver: {remote}")
+                    try:
+                        self._guest_gdbserver_proc = subprocess.Popen(
+                            ssh_cmd + [remote], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                        )
+                        # Wait for userspace gdbserver port to be reachable via hostfwd
+                        print(f"[DEBUG] Waiting for userspace gdbserver on 127.0.0.1:{self.config.userspace_gdb_port}...")
+                        deadline = time.time() + 30
+                        while time.time() < deadline:
+                            try:
+                                with socket.create_connection(("127.0.0.1", self.config.userspace_gdb_port), timeout=1):
+                                    break
+                            except Exception:
+                                time.sleep(0.5)
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to launch guest gdbserver: {e}")
                 # start gdbserver in the guest
                 remote = f"gdbserver :{self.config.userspace_gdb_port} {self.config.repro_remote_path}"
                 print(f"[DEBUG] Launching guest gdbserver: {remote}")
@@ -620,7 +740,16 @@ gdb.execute("continue")
                         ssh_cmd + [remote], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
                     )
                     # Give it a moment to start before attaching
-                    time.sleep(3)
+                    # Wait for userspace gdbserver port to be reachable via hostfwd
+                    print(f"[DEBUG] Waiting for userspace gdbserver on 127.0.0.1:{self.config.userspace_gdb_port}...")
+                    # Reuse a lightweight wait loop
+                    deadline = time.time() + 30
+                    while time.time() < deadline:
+                        try:
+                            with socket.create_connection(("127.0.0.1", self.config.userspace_gdb_port), timeout=1):
+                                break
+                        except Exception:
+                            time.sleep(0.5)
                 except Exception as e:
                     print(f"[DEBUG] Failed to launch guest gdbserver: {e}")
 
@@ -636,6 +765,7 @@ gdb.execute("continue")
                     f"source {userspace_py}",
                     f"us_init {us_init_args}",
                     "break main" if not us_monitor else "",
+                    "python import time; time.sleep(1)",
                     "continue",
                     "us_export_results",
                 ]))
@@ -644,12 +774,14 @@ gdb.execute("continue")
                 'gdb',
                 '-q',
                 repro_binary,
-                '-ex', f'target remote :{self.config.userspace_gdb_port}',
                 '-ex', f'set logging file {userspace_log}',
                 '-ex', 'set logging overwrite on',
                 '-ex', 'set logging enabled on',
+                '-ex', 'set pagination off',
+                '-ex', 'set confirm off',
+                '-ex', 'set non-stop off',
+                '-ex', f'target remote :{self.config.userspace_gdb_port}',
                 '-ex', f'source {userspace_script_path}',
-                '-ex', 'continue',
                 '-ex', f'us_export_results {results_file_userspace}',
                 '-ex', 'quit'
             ]
@@ -657,7 +789,10 @@ gdb.execute("continue")
 
             # Launch both GDBs as separate processes
             kernel_proc = subprocess.Popen(gdb_kernel_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            userspace_proc = subprocess.Popen(gdb_userspace_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Only run userspace GDB if we launched or expect a gdbserver
+            userspace_proc = None
+            if self.config.userspace_auto_launch:
+                userspace_proc = subprocess.Popen(gdb_userspace_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
                 k_stdout, k_stderr = kernel_proc.communicate(timeout=self.config.timeout)
             except subprocess.TimeoutExpired:
@@ -669,18 +804,23 @@ gdb.execute("continue")
                     kernel_proc.kill()
                     k_stdout, k_stderr = "", ""
             try:
-                u_stdout, u_stderr = userspace_proc.communicate(timeout=self.config.timeout)
+                if userspace_proc:
+                    u_stdout, u_stderr = userspace_proc.communicate(timeout=self.config.timeout)
+                else:
+                    u_stdout, u_stderr = "", ""
             except subprocess.TimeoutExpired:
                 print(f"[DEBUG] Userspace GDB timeout after {self.config.timeout}s; terminating")
-                userspace_proc.terminate()
+                if userspace_proc:
+                    userspace_proc.terminate()
                 try:
-                    u_stdout, u_stderr = userspace_proc.communicate(timeout=5)
+                    u_stdout, u_stderr = userspace_proc.communicate(timeout=5) if userspace_proc else ("", "")
                 except subprocess.TimeoutExpired:
-                    userspace_proc.kill()
+                    if userspace_proc:
+                        userspace_proc.kill()
                     u_stdout, u_stderr = "", ""
 
             print(f"[DEBUG] Kernel GDB exited: {kernel_proc.returncode}")
-            print(f"[DEBUG] Userspace GDB exited: {userspace_proc.returncode}")
+            print(f"[DEBUG] Userspace GDB exited: {userspace_proc.returncode if userspace_proc else 'skipped'}")
             result.raw_gdb_output = (k_stdout or '') + "\n" + (k_stderr or '') + "\n--- USERSPACE ---\n" + (u_stdout or '') + "\n" + (u_stderr or '')
 
             # Parse results file
@@ -707,7 +847,7 @@ gdb.execute("continue")
                     print(f"[DEBUG] Parsing {len(frees)} frees")
                     result.frees = [int(addr, 16) for addr in frees]
                 kernel_data = data
-            if os.path.exists(results_file_userspace):
+            if userspace_proc and os.path.exists(results_file_userspace):
                 print(f"[DEBUG] Userspace results file found, parsing...")
                 with open(results_file_userspace, 'r') as f:
                     userspace_data = json.load(f)
@@ -745,7 +885,10 @@ gdb.execute("continue")
                         for d in candidates:
                             if bug_id in d:
                                 target_dir = os.path.join(cwd, d)
-                                break
+                    try:
+                        gdb.execute("continue")
+                    except gdb.error as e:
+                        gdb.write(f"[WARN] continue failed: {e}\\n", gdb.STDERR)
                     # Fallback: use first analysis_* directory
                     if not target_dir and candidates:
                         target_dir = os.path.join(cwd, candidates[0])

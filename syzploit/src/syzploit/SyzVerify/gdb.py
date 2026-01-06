@@ -221,6 +221,13 @@ class RipBreakpoint(gdb.Breakpoint):
 # ---------------- Install all checks ----------------
 def install_kasan_watch():
     try:
+        # Prefer hardware breakpoint if available
+        try:
+            gdb.execute("hbreak kasan_report", to_string=True)
+            gdb.write("[syz_trace] set HARDWARE breakpoint on kasan_report\n", gdb.STDERR)
+            return
+        except Exception:
+            pass
         bp = gdb.Breakpoint("kasan_report", gdb.BP_BREAKPOINT)
         bp.silent = True
         gdb.write("[syz_trace] set breakpoint on kasan_report\n", gdb.STDERR)
@@ -258,12 +265,16 @@ def install_checks():
             try:
                 if monitor_mode:
                     # In monitor mode, avoid placing breakpoints; rely on awatch/stop hooks
-                    pass
-                else:
+                    continue
+                # Try hardware breakpoint first to avoid memory writes when pages unmapped
+                try:
+                    gdb.execute("hbreak %s" % sym, to_string=True)
+                    gdb.write("[syz_trace] installed HARDWARE bp on %s\n" % sym, gdb.STDERR)
+                except Exception:
                     AllocBp(sym, is_alloc=(sym not in ("kfree", "vfree")))
                     gdb.write("[syz_trace] installed alloc/free bp on %s\n" % sym, gdb.STDERR)
-            except Exception:
-                pass
+            except Exception as e:
+                gdb.write("[syz_trace] failed to set bp on %s: %s\n" % (sym, e), gdb.STDERR)
 
     if _enable_kasan_check:
         if not monitor_mode:
