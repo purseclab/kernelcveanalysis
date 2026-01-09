@@ -12,6 +12,15 @@ CrosVM actually seems to have a gdb server option, which it will use if you spec
 ### Qemu and Cuttlefish Debugging
 If you specify the `-gdb_port=<port_number>` argument, cuttlefish should start qemu with gdb server listening on the given port (based on source code). However I was not able to get qemu to run with cuttlefish due to some issues with audio drivers on cuttlefish.
 
+NOTE: debug on aarch64 may have issue where gdb jumps to `__bp_harden_el1_vectors` after hitting breakpoint and running si command. The solution is to disable interrupts (when you return form syscall kernel will reenable interrrupts).
+An easy way to do this is to use a stop-hook to disable them every time a breakpoint is hit:
+```
+define hook-stop
+    # Mask IRQ + FIQ again automatically
+    set $cpsr = $cpsr | 0xc0
+end
+```
+
 # kgdb
 Cuttlefish actually supports making a kgdb console, by setting the `-kgdb=true` cli argument. Cuttlefish will then make the necessary serial console. The `-gdb_port=<port_number>` field controls the port number which cuttlefish will host gdb server on and communicate with kgdb. One issue I found is specifying `-gdb_port=<port_number>` for kgdb also turns on CrosVM's gdb mode, which will cause an assertion error if you need more than 1 cpu for the exploit. We will probably have to patch cuttlefish if we want to use this feature then, which looks fairly simple to do.
 

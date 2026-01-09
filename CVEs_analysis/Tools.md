@@ -6,6 +6,9 @@ Random list of tools that are useful
 - libslub: GDB plugin for debugging kmalloc clabs: https://github.com/nccgroup/libslub
 - Working with qcow2 disks:
 	- 7zip can extract them
+- kernel exploitation dashboard: https://github.com/google/security-research/tree/master/analysis/kernel
+	- can view things like available objects
+- cpio:
 
 ### CLI Tools in Android ADB Shell
 - am: activity manager
