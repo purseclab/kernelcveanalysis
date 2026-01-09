@@ -14,6 +14,9 @@ echo $CC
 
 cd "$(dirname $0)"
 
-nix-shell -p pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc --run "python gen_constants.py $1 $2"
-$CC -static -fno-pie dirtypipe.c -o dirtypipe
+# CC=gcc
+# $CC exp_cuttlefish.c -o bad_io_uring.so -llog -shared -fpic
+$CC exp_cuttlefish.c -o bad_io_uring -static
+
+# nix-shell -p glibc.static --run "gcc -static exp_cuttlefish.c -o bad_io_uring"
 

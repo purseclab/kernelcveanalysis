@@ -25,6 +25,7 @@ CCFLAGS += -Wno-unused-function
 CCFLAGS += -DTEST_VULN=$(TEST_VULN)
 CCFLAGS += -DVERBOSE=$(VERBOSE)
 CCFLAGS += -I$(LIBSEPOL_DIR)/include
+CCFLAGS += $(shell ../../common/payload-flags --shared --listening-shell --port 1340)
 
 OBJ += exploit.o
 OBJ += vuln.o
