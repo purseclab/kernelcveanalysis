@@ -63,9 +63,12 @@ def _enable_logging_to_file(path: str) -> None:
     try:
         gdb.execute(f"set logging file {path}")
         gdb.execute("set logging overwrite on")
-        gdb.execute("set logging on")
+        gdb.execute("set logging enabled on")
         gdb.execute("set pagination off")
-        gdb.execute("set timestamps on")
+        try:
+            gdb.execute("set timestamps on")
+        except gdb.error:
+            pass
         gdb.write(f"[userspace_gdb] GDB console logging -> {path}\n")
     except gdb.error as e:
         gdb.write(f"[userspace_gdb] Failed to enable logging: {e}\n")
@@ -168,13 +171,9 @@ class UsInitCmd(gdb.Command):
         _monitor_mode = (mode.lower() == "monitor")
 
         if _monitor_mode:
-            # Monitor mode: avoid breakpoints, configure non-stop async and auto-continue
+            # Monitor mode: avoid breakpoints; keep non-stop off for remote compatibility
             try:
-                gdb.execute("set non-stop on")
-            except gdb.error:
-                pass
-            try:
-                gdb.execute("set target-async on")
+                gdb.execute("set non-stop off")
             except gdb.error:
                 pass
             gdb.write("[userspace_gdb] Monitor mode enabled (no explicit breakpoints).\n")

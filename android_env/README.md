@@ -1,6 +1,7 @@
-# Android Env
+# Android Environment Analyzer
 
-Scripts to analyze things about the environment of an Android device over adb. Contains basic features we have needed over time, such as dumping seccomp policies, selinux policies, reachable services, etc. Other miscaleanous features that just require scripting on an android device were included, such as expandin dynamicly linked binaries for exploit chaining.
+Scripts to dynamically analyze different aspects about the exploit mitigations in place in a given Android environment
+It contains basic features, such as dumping SECCOMP policies, SELinuc policies, reachable services, etc. Other miscaleanous features that just require scripting on an Android device were included, such as expanding dynamicly linked binaries for exploit chaining.
 
 ## Setup
 
@@ -9,14 +10,15 @@ Setup ssh port forwarding for adb on local machine running aenv:
 ssh -L localhost:5037:localhost:5037 cuttlefish-user@cuttlefish-host
 ```
 
-Required dependencies are provided in the `shell.nix`, so just run `nix-shell`, and aenv scripts can be used.
+Required dependencies are provided in the `shell.nix`.
+Just run `nix-shell` before using aenv scripts.
 
 
 ## Available Commands
 
 - `uv run aenv seccomp <output.json>`: save allowed syscalls by seccomp filters in `output.json` file
 - `uv run aenv selinux dump <setype>`: dump information about the given selinux type
-- `uv run aenv selinux diff <setype1> <setype2>`: diff information about the permissions for the 2 different selinux types
+- `uv run aenv selinux diff <setype1> <setype2>`: diff information about the permissions for the 2 different SELinux types
 
 
 ## Example Output and Policies
