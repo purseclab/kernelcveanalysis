@@ -75,6 +75,22 @@ RUN mkdir -p /workspace/android_sdk && \
     cd /workspace/android_sdk/cmdline-tools/latest/ && \
     yes | ./bin/sdkmanager --install "ndk;25.2.9519653"
 
+RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+
+# Enable Nix flakes and nix-command globally and for kuser
+RUN mkdir -p /etc/nix && \
+    printf "experimental-features = nix-command flakes\n" > /etc/nix/nix.conf && \
+    mkdir -p /home/kuser/.config/nix && \
+    printf "experimental-features = nix-command flakes\n" > /home/kuser/.config/nix/nix.conf && \
+    chown -R kuser:kuser /home/kuser/.config/nix
+
+# Make Nix available in all shells and non-interactive sessions
+# Source Nix profile for bash and set PATH explicitly for safety
+RUN echo ". /nix/var/nix/profiles/default/etc/profile.d/nix.sh || true" >> /etc/bash.bashrc && \
+    echo ". /nix/var/nix/profiles/default/etc/profile.d/nix.sh || true" >> /home/kuser/.bashrc && \
+    chown kuser:kuser /home/kuser/.bashrc
+ENV PATH="/nix/var/nix/profiles/default/bin:/home/kuser/.nix-profile/bin:${PATH}"
+
 # Clone and build syzkaller for syz-prog2c
 RUN wget https://dl.google.com/go/go1.23.6.linux-amd64.tar.gz && \
     tar -xf go1.23.6.linux-amd64.tar.gz && \
