@@ -198,6 +198,42 @@ class UsExportResultsCmd(gdb.Command):
             gdb.write(s + "\n")
 
 
+class UsMaybeContinueCmd(gdb.Command):
+    """
+    us_maybe_continue
+    Attempt to continue execution; ignore errors if the program is not running.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("us_maybe_continue", gdb.COMMAND_USER)
+
+    def invoke(self, arg: str, from_tty: bool) -> None:
+        try:
+            gdb.execute("continue")
+        except gdb.error as e:
+            gdb.write(f"[userspace_gdb] continue skipped: {e}\n")
+
+
+class UsTryBreakCmd(gdb.Command):
+    """
+    us_try_break <spec>
+    Try to set a breakpoint; ignore errors if symbol not found or target not ready.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("us_try_break", gdb.COMMAND_USER)
+
+    def invoke(self, arg: str, from_tty: bool) -> None:
+        spec = arg.strip()
+        if not spec:
+            gdb.write("[userspace_gdb] usage: us_try_break <spec>\n")
+            return
+        try:
+            _ = gdb.Breakpoint(spec, internal=False)
+        except gdb.error as e:
+            gdb.write(f"[userspace_gdb] break '{spec}' skipped: {e}\n")
+
+
 def _on_stop_handler(event: Any) -> None:
     # Generic stop logger that auto-continues
     info = _frame_info()
@@ -213,4 +249,6 @@ def _on_stop_handler(event: Any) -> None:
 # Register commands on import
 UsInitCmd()
 UsExportResultsCmd()
+UsMaybeContinueCmd()
+UsTryBreakCmd()
 gdb.events.stop.connect(_on_stop_handler)

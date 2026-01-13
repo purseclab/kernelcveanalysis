@@ -36,6 +36,7 @@ class DynamicAnalysisConfig:
     enable_kasan_checks: bool = True
     fault_addr: Optional[int] = None
     fault_insn: Optional[int] = None
+    gdbserver_path: str = "/workspace/syzploit/gdbserver_x86_64"  # path to gdbserver in guest
     access_type: str = "any"  # read, write, any
     access_size: int = 0
     poc_entry: Optional[str] = None
@@ -45,7 +46,7 @@ class DynamicAnalysisConfig:
     vmlinux_path: Optional[str] = None
     system_map: Optional[str] = None  # Optional: system map file for symbol resolution
     # Optional: auto-interrupt delay after continue (seconds)
-    continue_delay: int = 10
+    continue_delay: int = 60
     # Userspace instrumentation config
     userspace_gdb_port: int = 2345
     userspace_auto_launch: bool = True
@@ -54,7 +55,7 @@ class DynamicAnalysisConfig:
     ssh_key: Optional[str] = None  # path to private key; None uses agent/default
     repro_remote_path: str = "/root/repro"  # path inside guest to run under gdbserver
     # Host-side path to a gdbserver binary to upload if missing in guest
-    host_gdbserver_path: Optional[str] = None
+    host_gdbserver_path: Optional[str] = "/workspace/syzploit/gdbserver_x86_64"
     # Monitor-mode toggles
     kernel_monitor_all: bool = True
     userspace_monitor_all: bool = True
@@ -216,6 +217,104 @@ class GDBAnalyzer:
         self.config = config
         self.gdb_script = None
         self.gdb_output = ""
+        # Preferred gdbserver path in guest (set by _ensure_guest_gdbserver)
+        self._guest_gdbserver_path = "gdbserver"
+
+    def _get_guest_time(self, attempts: int = 240, delay: float = 0.5, cmd_timeout: int = 5) -> Optional[float]:
+        """Return guest wall-clock time via SSH `date +%s.%N` with retries.
+        Attempts up to `attempts` times, waiting `delay` seconds between tries.
+        """
+        ssh_cmd = [
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=2",
+            "-p", str(self.config.ssh_port),
+            f"{self.config.ssh_user}@127.0.0.1",
+        ]
+        if self.config.ssh_key:
+            ssh_cmd.extend(["-i", self.config.ssh_key])
+        for _ in range(max(1, attempts)):
+            try:
+                # Quick port readiness check to avoid long SSH delays
+                try:
+                    with socket.create_connection(("127.0.0.1", self.config.ssh_port), timeout=1):
+                        pass
+                except Exception:
+                    time.sleep(delay)
+                    continue
+                proc = subprocess.run(ssh_cmd + ["date +%s.%N"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=cmd_timeout)
+                if proc.returncode == 0:
+                    out = (proc.stdout or "").strip()
+                    try:
+                        return float(out)
+                    except Exception:
+                        # Some shells may not support %N; fall back to seconds only
+                        try:
+                            sec_only = subprocess.run(ssh_cmd + ["date +%s"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=cmd_timeout)
+                            if sec_only.returncode == 0:
+                                return float((sec_only.stdout or "").strip())
+                        except Exception:
+                            pass
+                # Retry on failure
+            except Exception:
+                pass
+            time.sleep(delay)
+        return None
+
+    def _repo_root(self) -> Path:
+        """Best-effort to locate the workspace root (repo root)."""
+        # dynamic.py -> .../src/syzploit/SyzVerify/dynamic.py
+        # Repo root is parents[3] of this file path
+        p = Path(__file__).resolve()
+        # Guard against shallow paths
+        return p.parents[3] if len(p.parents) >= 4 else p.parents[-1]
+
+    def _detect_guest_arch(self, ssh_base: List[str]) -> Optional[str]:
+        """Return guest architecture via `uname -m` (e.g., x86_64, aarch64)."""
+        try:
+            proc = subprocess.run(ssh_base + ["uname -m"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            if proc.returncode == 0:
+                arch = (proc.stdout or "").strip()
+                return arch if arch else None
+        except Exception:
+            pass
+        return None
+
+    def _find_bundled_gdbserver(self, guest_arch: str) -> Optional[str]:
+        """Find a bundled gdbserver binary in the repo for the given arch.
+        Returns an absolute path or None if not found.
+        """
+        root = self._repo_root()
+        candidates: List[Path] = []
+        # Common naming patterns in repo root
+        if guest_arch in ("x86_64", "amd64"):
+            candidates += [
+                root / "gdbserver_x86_64",
+                root / "gdbserver-amd64",
+                root / "gdbserver_amd64",
+            ]
+        if guest_arch in ("aarch64", "arm64"):
+            candidates += [
+                root / "gdbserver_arm64",
+                root / "gdbserver-aarch64",
+                root / "gdbserver_aarch64",
+            ]
+        # Also check a common folder if present
+        extra_dir = root / "gdb-static"
+        if extra_dir.exists():
+            if guest_arch in ("x86_64", "amd64"):
+                candidates += list(extra_dir.glob("*x86_64*"))
+            if guest_arch in ("aarch64", "arm64"):
+                candidates += list(extra_dir.glob("*aarch64*")) + list(extra_dir.glob("*arm64*"))
+
+        for c in candidates:
+            try:
+                if c.exists() and c.is_file():
+                    return str(c)
+            except Exception:
+                continue
+        return None
 
     def _ensure_guest_gdbserver(self) -> bool:
         """Ensure gdbserver exists in the guest; upload via scp if missing.
@@ -240,47 +339,73 @@ class GDBAnalyzer:
                         time.sleep(1)
             except Exception:
                 pass
-            # Check presence
-            chk = subprocess.run(ssh_base + ["command -v gdbserver || true"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
-            present = (chk.returncode == 0 and "gdbserver" in (chk.stdout or ""))
-            if present:
-                print("[DEBUG] gdbserver already present in guest")
+            # Check presence: either in PATH or at /root/gdbserver
+            chk = subprocess.run(ssh_base + ["command -v gdbserver || true"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+            in_path = (chk.returncode == 0 and "gdbserver" in (chk.stdout or ""))
+            if in_path:
+                self._guest_gdbserver_path = "gdbserver"
+                print("[DEBUG] gdbserver already present in guest PATH")
+                return True
+            # Alternatively check uploaded location
+            chk_alt = subprocess.run(ssh_base + ["test -x /root/gdbserver && echo OK || true"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+            if "OK" in (chk_alt.stdout or ""):
+                self._guest_gdbserver_path = "/root/gdbserver"
+                print("[DEBUG] Found existing /root/gdbserver in guest")
                 return True
             print("[DEBUG] gdbserver not found in guest; attempting upload via scp")
-            # Determine host gdbserver path
-            host_path = self.config.host_gdbserver_path or shutil.which("gdbserver")
+            # Detect guest arch to select the appropriate bundled gdbserver
+            guest_arch = self._detect_guest_arch(ssh_base) or "x86_64"
+            print(f"[DEBUG] Detected guest arch: {guest_arch}")
+            # Determine host gdbserver path (priority: explicit -> bundled -> system which)
+            host_path: Optional[str] = self.config.host_gdbserver_path
+            if not host_path:
+                host_path = self._find_bundled_gdbserver(guest_arch)
+            if not host_path:
+                host_path = shutil.which("gdbserver")
             if not host_path or not os.path.exists(host_path):
                 print("[DEBUG] Host gdbserver not found; install gdbserver on host or provide host_gdbserver_path")
                 return False
-            # Prefer statically linked and matching arch
+            # Prefer statically linked and matching arch; warn if not static but still proceed
             try:
                 fi = subprocess.run(["file", host_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 finfo = fi.stdout.lower() if fi.returncode == 0 else ""
                 is_static = ("statically linked" in finfo)
-                arch_ok = ("x86-64" in finfo or "x86_64" in finfo)
-                if not is_static or not arch_ok:
-                    print(f"[DEBUG] Host gdbserver may be incompatible (static={is_static} arch_ok={arch_ok}); skipping userspace attach")
+                arch_ok = False
+                if guest_arch in ("x86_64", "amd64"):
+                    arch_ok = ("x86-64" in finfo or "x86_64" in finfo)
+                elif guest_arch in ("aarch64", "arm64"):
+                    arch_ok = ("aarch64" in finfo or "arm aarch64" in finfo or "arm64" in finfo)
+                if not arch_ok:
+                    print(f"[DEBUG] Host gdbserver architecture mismatch for guest={guest_arch}; skipping userspace attach")
                     return False
+                if not is_static:
+                    print("[WARN] Host gdbserver is dynamically linked; proceeding but may fail if libs missing in guest")
             except Exception:
                 pass
-            # Upload to /usr/local/bin/gdbserver
+            # Upload to /root/gdbserver
             scp_cmd = [
                 "scp", "-o", "StrictHostKeyChecking=no",
+                "-o", "PasswordAuthentication=no",
+                "-o", "PreferredAuthentications=publickey",
                 "-P", str(self.config.ssh_port),
             ]
             if self.config.ssh_key:
                 scp_cmd.extend(["-i", self.config.ssh_key])
-            scp_cmd.extend([host_path, f"{self.config.ssh_user}@127.0.0.1:/usr/local/bin/gdbserver"])
-            up = subprocess.run(scp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            scp_cmd.extend([host_path, f"{self.config.ssh_user}@127.0.0.1:/root/gdbserver"])
+            # Ensure destination directory exists
+            # subprocess.run(ssh_base, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            up = subprocess.run(scp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
             if up.returncode != 0:
                 print(f"[DEBUG] scp upload failed: rc={up.returncode} stderr={up.stderr}")
                 return False
             # chmod +x
-            subprocess.run(ssh_base + ["chmod +x /usr/local/bin/gdbserver"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            # Verify again
-            chk2 = subprocess.run(ssh_base + ["command -v gdbserver || true"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
-            ok = (chk2.returncode == 0 and "gdbserver" in (chk2.stdout or ""))
-            print(f"[DEBUG] gdbserver upload verification: {ok}")
+            subprocess.run(ssh_base + ["chmod +x /root/gdbserver"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Verify uploaded binary exists and is executable
+            chk2 = subprocess.run(ssh_base + ["test -x /root/gdbserver && echo OK || true"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+            ok = ("OK" in (chk2.stdout or ""))
+            if ok:
+                self._guest_gdbserver_path = "/root/gdbserver"
+            print(f"[DEBUG] gdbserver upload verification (/root/gdbserver): {ok}")
             return ok
         except Exception as e:
             print(f"[DEBUG] _ensure_guest_gdbserver error: {e}")
@@ -339,6 +464,11 @@ _enable_kasan_check = {str(self.config.enable_kasan_checks)}
 reproducer_path = "{repro_path}"
 monitor_mode = {str(getattr(self.config, 'kernel_monitor_all', False))}
 
+# Guest SSH config for guest-clock timestamping from GDB side
+guest_ssh_port = {int(self.config.ssh_port)}
+guest_ssh_user = "{self.config.ssh_user}"
+guest_ssh_key = {f'"{self.config.ssh_key}"' if self.config.ssh_key else 'None'}
+
 # Override convenience variables
 if fault_addr is not None:
     gdb.execute(f"set $fault_addr = {{fault_addr}}")
@@ -347,6 +477,8 @@ if fault_insn is not None:
 gdb.execute(f'set $access_type = "{{access_type}}"')
 gdb.execute(f'set $poc_entry = "{{poc_entry}}"')
 gdb.execute(f'set $reproducer_path = "{{reproducer_path}}"')
+gdb.execute(f'set $guest_ssh_port = {{guest_ssh_port}}')
+gdb.execute(f'set $guest_ssh_user = "{{guest_ssh_user}}"')
 
 """
         
@@ -389,7 +521,7 @@ class ExportResultsCmd(gdb.Command):
         
         with open(filename, 'w') as f:
             json.dump(results, f, indent=2)
-        gdb.write(f"Results exported to {filename}\\n", gdb.STDERR)
+        gdb.write("Results exported to %s\\n" % filename, gdb.STDERR)
 
 ExportResultsCmd()
 
@@ -397,7 +529,7 @@ ExportResultsCmd()
 try:
     gdb.execute("continue")
 except gdb.error as e:
-    gdb.write(f"[WARN] continue failed: {e}\n", gdb.STDERR)
+    gdb.write("[WARN] continue failed: %s\\n" % e, gdb.STDERR)
 """
         
         modified_script += output_section
@@ -608,6 +740,48 @@ except gdb.error as e:
         results_file_userspace = os.path.join(local_tmp, 'userspace_results.json')
         print(f"[DEBUG] Kernel results -> {results_file_kernel}")
         print(f"[DEBUG] Userspace results -> {results_file_userspace}")
+
+        # Prepare kernel GDB config JSON for late variable setting
+        kernel_conf_path = os.path.join(local_tmp, 'kernel_gdb_config.json')
+        try:
+            # Resolve fault_addr/fault_insn/access_type similarly to generate_gdb_script
+            fault_addr_val = self.config.fault_addr
+            fault_insn_val = self.config.fault_insn
+            access_type_val = self.config.access_type
+            # If not explicitly set, try to extract from crash
+            if not fault_addr_val and parsed_crash.get('access'):
+                addr_str = parsed_crash['access'].get('address')
+                if addr_str:
+                    try:
+                        fault_addr_val = int(addr_str, 16) if addr_str.startswith('0x') else int(addr_str)
+                    except Exception:
+                        pass
+            if not fault_insn_val:
+                for frame in parsed_crash.get('frames', []):
+                    if frame.get('ip'):
+                        try:
+                            ip = frame['ip']
+                            fault_insn_val = int(ip, 16) if isinstance(ip, str) and ip.startswith('0x') else int(ip)
+                            break
+                        except Exception:
+                            continue
+            cfg = {
+                "poc_entry": self.config.poc_entry or "syz_executor",
+                "fault_addr": fault_addr_val if fault_addr_val is not None else None,
+                "fault_insn": fault_insn_val if fault_insn_val is not None else None,
+                "access_type": access_type_val,
+                "access_size": int(self.config.access_size or 0),
+                "monitor_mode": bool(getattr(self.config, 'kernel_monitor_all', False)),
+                "reproducer_path": str(repro_binary),
+                "guest_ssh_port": int(self.config.ssh_port),
+                "guest_ssh_user": str(self.config.ssh_user),
+                "guest_ssh_key": str(self.config.ssh_key) if self.config.ssh_key else None,
+            }
+            with open(kernel_conf_path, 'w') as cf:
+                json.dump(cfg, cf, indent=2)
+            print(f"[DEBUG] Wrote kernel GDB config JSON: {kernel_conf_path}")
+        except Exception as e:
+            print(f"[DEBUG] Failed to write kernel GDB config JSON: {e}")
         
         try:
             # Prepare Kernel GDB command (attaches to QEMU's gdbserver)
@@ -684,74 +858,45 @@ except gdb.error as e:
                 # Ensure non-stop is off (QEMU stub often lacks support)
                 "-ex", "set non-stop off",
                 "-ex", "set breakpoint pending on",
+                # Pre-bind convenience variables (doesn't require target to be stopped)
+                "-ex", f"set $poc_entry = \"{self.config.poc_entry or 'syz_executor'}\"",
+                "-ex", f"set $access_type = \"{access_type_val}\"",
+                "-ex", f"set $access_size = {int(self.config.access_size or 0)}",
+                "-ex", f"set $reproducer_path = \"{repro_binary}\"",
+                "-ex", f"set $export_path = \"{results_file_kernel}\"",
                 # Attach to QEMU gdbstub
                 "-ex", "set tcp connect-timeout 30",
                 "-ex", f"target remote :{self.config.gdb_port}",
-                # Let the kernel boot so virtual memory is set up
-                "-ex", "continue",
-                "-ex", "python import time; time.sleep(5)",
+                # Ensure a clean stop before sourcing
                 "-ex", "interrupt",
-                # Source instrumentation script and resume
+                "-ex", "python import time; time.sleep(1)",
+                # Source instrumentation script before letting kernel run, so commands available
                 "-ex", f"source {script_path}",
-                "-ex", "python import time; time.sleep(%d)" % int(getattr(self.config, 'continue_delay', 10)),
-                "-ex", "interrupt",
-                "-ex", f"export_results {results_file_kernel}",
-                "-ex", "quit"
+                # Late variable binding from JSON after script is sourced
+                "-ex", f"syz_load_config {kernel_conf_path}",
+                # Also directly set numeric convenience vars in case JSON failed
+                "-ex", (f"set $fault_addr = {fault_addr_val}" if fault_addr_val is not None else "python pass"),
+                "-ex", (f"set $fault_insn = {fault_insn_val}" if fault_insn_val is not None else "python pass"),
+                # Let the kernel boot so virtual memory is set up with instrumentation active
+                                "-ex", "continue"
             ])
             print(f"[DEBUG] Kernel GDB command: {' '.join(gdb_kernel_cmd)}")
 
-            # Optionally launch gdbserver inside guest to run repro
-            if self.config.userspace_auto_launch:
-                ssh_cmd = [
-                    "ssh", "-o", "StrictHostKeyChecking=no",
-                    "-p", str(self.config.ssh_port),
-                    f"{self.config.ssh_user}@127.0.0.1",
-                ]
-                # add key if provided
-                if self.config.ssh_key:
-                    ssh_cmd.extend(["-i", self.config.ssh_key])
-                # Ensure gdbserver exists in guest, try upload if missing
-                if not self._ensure_guest_gdbserver():
-                    print("[DEBUG] Userspace gdbserver unavailable; skipping userspace attach")
-                else:
-                    # start gdbserver in the guest
-                    remote = f"gdbserver :{self.config.userspace_gdb_port} {self.config.repro_remote_path}"
-                    print(f"[DEBUG] Launching guest gdbserver: {remote}")
-                    try:
-                        self._guest_gdbserver_proc = subprocess.Popen(
-                            ssh_cmd + [remote], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                        )
-                        # Wait for userspace gdbserver port to be reachable via hostfwd
-                        print(f"[DEBUG] Waiting for userspace gdbserver on 127.0.0.1:{self.config.userspace_gdb_port}...")
-                        deadline = time.time() + 30
-                        while time.time() < deadline:
-                            try:
-                                with socket.create_connection(("127.0.0.1", self.config.userspace_gdb_port), timeout=1):
-                                    break
-                            except Exception:
-                                time.sleep(0.5)
-                    except Exception as e:
-                        print(f"[DEBUG] Failed to launch guest gdbserver: {e}")
-                # start gdbserver in the guest
-                remote = f"gdbserver :{self.config.userspace_gdb_port} {self.config.repro_remote_path}"
-                print(f"[DEBUG] Launching guest gdbserver: {remote}")
-                try:
-                    self._guest_gdbserver_proc = subprocess.Popen(
-                        ssh_cmd + [remote], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                    )
-                    # Give it a moment to start before attaching
-                    # Wait for userspace gdbserver port to be reachable via hostfwd
-                    print(f"[DEBUG] Waiting for userspace gdbserver on 127.0.0.1:{self.config.userspace_gdb_port}...")
-                    # Reuse a lightweight wait loop
-                    deadline = time.time() + 30
-                    while time.time() < deadline:
-                        try:
-                            with socket.create_connection(("127.0.0.1", self.config.userspace_gdb_port), timeout=1):
-                                break
-                        except Exception:
-                            time.sleep(0.5)
-                except Exception as e:
-                    print(f"[DEBUG] Failed to launch guest gdbserver: {e}")
+            # Removed ad-hoc scp copy; rely on _ensure_guest_gdbserver() for provisioning
+
+
+            # Prepare guest userspace gdbserver launch, but start it AFTER kernel instrumentation begins
+            ssh_cmd = [
+                "ssh", "-o", "StrictHostKeyChecking=no",
+                "-p", str(self.config.ssh_port),
+                f"{self.config.ssh_user}@127.0.0.1",
+            ]
+            if self.config.ssh_key:
+                ssh_cmd.extend(["-i", self.config.ssh_key])
+            remote_cmd = f"{self._guest_gdbserver_path} :{self.config.userspace_gdb_port} {self.config.repro_remote_path}"
+            userspace_ready = False
+            primitive_ran = False
+            primitive_stdout, primitive_stderr = "", ""
 
             # Prepare Userspace GDB command (sources userspace_gdb.py)
             userspace_py = os.path.join(os.path.dirname(__file__), "userspace_gdb.py")
@@ -764,9 +909,9 @@ except gdb.error as e:
                 uf.write("\n".join([
                     f"source {userspace_py}",
                     f"us_init {us_init_args}",
-                    "break main" if not us_monitor else "",
+                    "us_try_break main" if not us_monitor else "",
                     "python import time; time.sleep(1)",
-                    "continue",
+                    "us_maybe_continue",
                     "us_export_results",
                 ]))
             userspace_log = os.path.join(local_tmp, 'userspace-gdb.log')
@@ -787,41 +932,177 @@ except gdb.error as e:
             ]
             print(f"[DEBUG] Userspace GDB command: {' '.join(gdb_userspace_cmd)}")
 
-            # Launch both GDBs as separate processes
-            kernel_proc = subprocess.Popen(gdb_kernel_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            # Only run userspace GDB if we launched or expect a gdbserver
-            userspace_proc = None
+            # Launch kernel GDB first to install instrumentation (async)
+            kernel_proc = subprocess.Popen(
+                gdb_kernel_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True
+            )
+            # Wait a short period to allow kernel GDB to execute initial commands (source script)
+            time.sleep(3)
+            # Optionally launch gdbserver inside guest to run repro
+            primitive_start_ts = None
             if self.config.userspace_auto_launch:
-                userspace_proc = subprocess.Popen(gdb_userspace_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            try:
-                k_stdout, k_stderr = kernel_proc.communicate(timeout=self.config.timeout)
-            except subprocess.TimeoutExpired:
-                print(f"[DEBUG] Kernel GDB timeout after {self.config.timeout}s; terminating")
-                kernel_proc.terminate()
-                try:
-                    k_stdout, k_stderr = kernel_proc.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    kernel_proc.kill()
-                    k_stdout, k_stderr = "", ""
-            try:
-                if userspace_proc:
-                    u_stdout, u_stderr = userspace_proc.communicate(timeout=self.config.timeout)
+                if not self._ensure_guest_gdbserver():
+                    print("[DEBUG] Userspace gdbserver unavailable; executing primitive directly")
+                    try:
+                        # Capture start just before launching primitive directly
+                        primitive_start_ts = self._get_guest_time()
+                        prim = subprocess.Popen(
+                            ssh_cmd + [self.config.repro_remote_path],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+                        primitive_stdout, primitive_stderr = prim.communicate(timeout=self.config.timeout)
+                        primitive_ran = True
+                    except subprocess.TimeoutExpired:
+                        print(f"[DEBUG] Primitive execution timeout after {self.config.timeout}s; terminating")
+                        try:
+                            prim.terminate()
+                            primitive_stdout, primitive_stderr = prim.communicate(timeout=5)
+                        except Exception:
+                            try:
+                                prim.kill()
+                            except Exception:
+                                pass
+                            primitive_stdout, primitive_stderr = "", ""
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to execute primitive directly: {e}")
                 else:
-                    u_stdout, u_stderr = "", ""
-            except subprocess.TimeoutExpired:
-                print(f"[DEBUG] Userspace GDB timeout after {self.config.timeout}s; terminating")
-                if userspace_proc:
-                    userspace_proc.terminate()
+                    print(f"[DEBUG] Launching guest gdbserver: {remote_cmd}")
+                    try:
+                        # Capture start just before launching gdbserver
+                        primitive_start_ts = self._get_guest_time()
+                        self._guest_gdbserver_proc = subprocess.Popen(
+                            ssh_cmd + [remote_cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                        )
+                        print(f"[DEBUG] Waiting for userspace gdbserver on 127.0.0.1:{self.config.userspace_gdb_port}...")
+                        deadline = time.time() + 60
+                        while time.time() < deadline:
+                            try:
+                                with socket.create_connection(("127.0.0.1", self.config.userspace_gdb_port), timeout=1):
+                                    userspace_ready = True
+                                    break
+                            except Exception:
+                                time.sleep(0.5)
+                        # Fallback: run primitive if gdbserver port didn't open
+                        if not userspace_ready:
+                            print("[DEBUG] gdbserver port not ready; executing primitive directly")
+                            try:
+                                # Re-capture start for direct exec to tighten window
+                                primitive_start_ts = self._get_guest_time()
+                                prim = subprocess.Popen(
+                                    ssh_cmd + [self.config.repro_remote_path],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    text=True
+                                )
+                                primitive_stdout, primitive_stderr = prim.communicate(timeout=self.config.timeout)
+                                primitive_ran = True
+                            except subprocess.TimeoutExpired:
+                                print(f"[DEBUG] Primitive execution timeout after {self.config.timeout}s; terminating")
+                                try:
+                                    prim.terminate()
+                                    primitive_stdout, primitive_stderr = prim.communicate(timeout=5)
+                                except Exception:
+                                    try:
+                                        prim.kill()
+                                    except Exception:
+                                        pass
+                                    primitive_stdout, primitive_stderr = "", ""
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to execute primitive directly: {e}")
+
+            # Only run userspace GDB if gdbserver became ready
+            userspace_proc = None
+            if self.config.userspace_auto_launch and userspace_ready:
+                userspace_proc = subprocess.Popen(gdb_userspace_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Run userspace synchronously; finalize kernel afterwards
+            u_stdout, u_stderr = "", ""
+            if userspace_proc:
                 try:
-                    u_stdout, u_stderr = userspace_proc.communicate(timeout=5) if userspace_proc else ("", "")
+                    u_stdout, u_stderr = userspace_proc.communicate(timeout=self.config.timeout)
                 except subprocess.TimeoutExpired:
-                    if userspace_proc:
+                    print(f"[DEBUG] Userspace GDB timeout after {self.config.timeout}s; terminating")
+                    userspace_proc.terminate()
+                    try:
+                        u_stdout, u_stderr = userspace_proc.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
                         userspace_proc.kill()
-                    u_stdout, u_stderr = "", ""
+                        u_stdout, u_stderr = "", ""
+
+            # Capture primitive end time from guest clock using robust retrieval
+            primitive_end_ts = self._get_guest_time()
+            if primitive_start_ts is None:
+                print("[DEBUG] primitive_start_ts is None (failed to retrieve guest time)")
+            if primitive_end_ts is None:
+                print("[DEBUG] primitive_end_ts is None (failed to retrieve guest time)")
+            if primitive_start_ts is not None and primitive_end_ts is not None:
+                print(f"[DEBUG] primitive window: start={primitive_start_ts:.9f}, end={primitive_end_ts:.9f}")
+
+            # Finalize kernel: interrupt, ensure stopped, export results, quit
+            if kernel_proc and kernel_proc.poll() is None:
+                try:
+                    finalize = (
+                        "interrupt\n"
+                        "python exec(\"import gdb, time\\n"
+                        "def _is_running():\\n"
+                        "    try:\\n"
+                        "        out = gdb.execute('info program', to_string=True)\\n"
+                        "        return 'It stopped' not in out\\n"
+                        "    except Exception:\\n"
+                        "        return True\\n"
+                        "for _ in range(20):\\n"
+                        "    if not _is_running():\\n"
+                        "        break\\n"
+                        "    try:\\n"
+                        "        gdb.execute('interrupt', to_string=True)\\n"
+                        "    except Exception:\\n"
+                        "        pass\\n"
+                        "    time.sleep(0.5)\\n\")\n"
+                        f"export_results {results_file_kernel}\n"
+                        "quit\n"
+                    )
+                    if kernel_proc.stdin:
+                        kernel_proc.stdin.write(finalize)
+                        kernel_proc.stdin.flush()
+                    # Wait for kernel GDB to exit
+                    kernel_proc.wait(timeout=self.config.timeout)
+                except subprocess.TimeoutExpired:
+                    print(f"[DEBUG] Kernel GDB finalize timeout after {self.config.timeout}s; terminating")
+                    kernel_proc.terminate()
+                    try:
+                        kernel_proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        kernel_proc.kill()
 
             print(f"[DEBUG] Kernel GDB exited: {kernel_proc.returncode}")
             print(f"[DEBUG] Userspace GDB exited: {userspace_proc.returncode if userspace_proc else 'skipped'}")
-            result.raw_gdb_output = (k_stdout or '') + "\n" + (k_stderr or '') + "\n--- USERSPACE ---\n" + (u_stdout or '') + "\n" + (u_stderr or '')
+            # Read logs instead of stdout/stderr (since kernel runs async)
+            k_log_text = ""
+            try:
+                if os.path.exists(kernel_log):
+                    with open(kernel_log, 'r', encoding='utf-8', errors='ignore') as lf:
+                        k_log_text = lf.read()
+            except Exception:
+                k_log_text = ""
+            u_log_text = ""
+            try:
+                if os.path.exists(userspace_log):
+                    with open(userspace_log, 'r', encoding='utf-8', errors='ignore') as uf:
+                        u_log_text = uf.read()
+            except Exception:
+                u_log_text = ""
+            # Compose raw output including primitive fallback if used
+            user_out = (u_stdout or '')
+            user_err = (u_stderr or '')
+            if primitive_ran:
+                user_out = (primitive_stdout or '')
+                user_err = (primitive_stderr or '')
+            result.raw_gdb_output = (k_log_text or '') + "\n--- USERSPACE ---\n" + user_out + "\n" + user_err + "\n" + (u_log_text or '')
 
             # Parse results file
             print(f"[DEBUG] Checking for kernel results file: {results_file_kernel}")
@@ -832,8 +1113,18 @@ except gdb.error as e:
                 print(f"[DEBUG] Kernel results file found, parsing...")
                 with open(results_file_kernel, 'r') as f:
                     data = json.load(f)
-                    result.events = data.get('events', [])
+                    # Sort events by time for readability
+                    ev = data.get('events', [])
+                    if isinstance(ev, list):
+                        ev.sort(key=lambda e: e.get('time', 0))
+                    result.events = ev
                     print(f"[DEBUG] Parsed {len(result.events)} events")
+
+                    # Merge UAF watch hits into events for downstream analysis
+                    uaf_hits = data.get('uaf_watch_hits', [])
+                    if isinstance(uaf_hits, list) and uaf_hits:
+                        result.events.extend(uaf_hits)
+                        print(f"[DEBUG] Merged {len(uaf_hits)} UAF watch hits into events")
 
                     # Parse allocations
                     allocs = data.get('allocations', {})
@@ -847,7 +1138,7 @@ except gdb.error as e:
                     print(f"[DEBUG] Parsing {len(frees)} frees")
                     result.frees = [int(addr, 16) for addr in frees]
                 kernel_data = data
-            if userspace_proc and os.path.exists(results_file_userspace):
+            if userspace_proc is not None and os.path.exists(results_file_userspace):
                 print(f"[DEBUG] Userspace results file found, parsing...")
                 with open(results_file_userspace, 'r') as f:
                     userspace_data = json.load(f)
@@ -899,16 +1190,49 @@ except gdb.error as e:
                         print(f"[DEBUG] Wrote combined results to deterministic path: {det_path}")
                 except Exception as e:
                     print(f"[DEBUG] Deterministic path write skipped: {e}")
-                result.success = True
-                print("[DEBUG] Dynamic analysis completed successfully")
+            result.success = True
+            print("[DEBUG] Dynamic analysis completed successfully")
+            # else:
+            #     result.error = "GDB results file not created"
+            #     print(f"[DEBUG] ERROR: {result.error}")
+            #     print(f"[DEBUG] Kernel GDB stdout:\n{k_stdout}")
+            #     print(f"[DEBUG] Kernel GDB stderr:\n{k_stderr}")
+            #     print(f"[DEBUG] Userspace GDB stdout:\n{u_stdout}")
+            #     print(f"[DEBUG] Userspace GDB stderr:\n{u_stderr}")
+            if primitive_start_ts is not None and primitive_end_ts is not None and isinstance(kernel_data, dict):
+                window_events = [e for e in kernel_data.get('events', []) if isinstance(e, dict) and isinstance(e.get('time'), (int, float)) and primitive_start_ts <= e.get('time') <= primitive_end_ts]
+                # allocations_detailed may contain timestamps
+                allocs_det = kernel_data.get('allocations_detailed', {}) or {}
+                window_allocs = {}
+                for k, v in allocs_det.items():
+                    try:
+                        ts = v.get('time')
+                        if ts is not None and primitive_start_ts <= ts <= primitive_end_ts:
+                            window_allocs[k] = v
+                    except Exception:
+                        pass
+                frees_det = kernel_data.get('frees_detailed', []) or []
+                window_frees = [ev for ev in frees_det if isinstance(ev.get('time'), (int, float)) and primitive_start_ts <= ev.get('time') <= primitive_end_ts]
+                windowed = {
+                    'primitive_start': primitive_start_ts,
+                    'primitive_end': primitive_end_ts,
+                    'events': window_events,
+                    'allocations_detailed': window_allocs,
+                    'frees_detailed': window_frees,
+                }
+                base_dir = os.path.dirname(results_file_kernel)
+                window_file = os.path.join(local_tmp, 'kernel_results_windowed.json')
+                with open(window_file, 'w') as wf:
+                    json.dump(windowed, wf, indent=2)
+                print(f"[DEBUG] Wrote windowed kernel results to: {window_file}")
             else:
-                result.error = "GDB results file not created"
-                print(f"[DEBUG] ERROR: {result.error}")
-                print(f"[DEBUG] Kernel GDB stdout:\n{k_stdout}")
-                print(f"[DEBUG] Kernel GDB stderr:\n{k_stderr}")
-                print(f"[DEBUG] Userspace GDB stdout:\n{u_stdout}")
-                print(f"[DEBUG] Userspace GDB stderr:\n{u_stderr}")
-
+                # print what is missing
+                if primitive_start_ts is None:
+                    print("[DEBUG] primitive_start_ts is None")
+                if primitive_end_ts is None:
+                    print("[DEBUG] primitive_end_ts is None")
+                
+            
         except Exception as e:
             result.error = f"GDB execution error: {e}"
                 
@@ -928,10 +1252,17 @@ def analyze_dynamic_results(result: DynamicAnalysisResult,
     
     # Check for Use-After-Free
     for event in result.events:
-        if event.get('type') == 'watch':
+        t = event.get('type')
+        if t == 'uaf_watch':
+            analysis['uaf_detected'] = True
+            analysis['vulnerabilities'].append({
+                "type": "use-after-free",
+                "address": hex(event.get('ptr')) if isinstance(event.get('ptr'), int) else event.get('ptr'),
+                "rip": hex(event.get('rip')) if event.get('rip') else None,
+                "backtrace": event.get('bt', [])
+            })
+        elif t == 'watch':
             rip = event.get('rip')
-            # Check if access is to freed memory
-            # This is simplified - real implementation would check address ranges
             analysis['vulnerabilities'].append({
                 "type": "memory_access",
                 "rip": hex(rip) if rip else None,
@@ -957,6 +1288,33 @@ def analyze_dynamic_results(result: DynamicAnalysisResult,
                     "size": size,
                     "allocation_trace": bt
                 })
+
+    # Double-free detection
+    try:
+        seen = {}
+        for ptr in result.frees:
+            seen[ptr] = seen.get(ptr, 0) + 1
+        for ptr, count in seen.items():
+            if count > 1:
+                analysis['vulnerabilities'].append({
+                    "type": "double-free",
+                    "address": hex(ptr),
+                    "count": count
+                })
+    except Exception:
+        pass
+
+    # Invalid-free detection (free of unallocated pointer)
+    try:
+        alloc_ptrs = set(result.allocations.keys())
+        for ptr in result.frees:
+            if ptr not in alloc_ptrs:
+                analysis['vulnerabilities'].append({
+                    "type": "invalid-free",
+                    "address": hex(ptr)
+                })
+    except Exception:
+        pass
                 
     # Detect OOB accesses
     for event in result.events:

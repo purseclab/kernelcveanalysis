@@ -10,29 +10,53 @@ class ChainReactor:
     def available(self) -> bool:
         return bool(self.repo_path and os.path.isdir(self.repo_path))
 
-    def synthesize(self, spec_path: str, goal: str, outdir: str) -> Dict[str, Any]:
-        """Call ChainReactor with a given spec (JSON/YAML) to produce exploit artifacts.
-        This is a placeholder; expects chainreactor CLI to support a synth command.
+    def solve_with_pddl(self, domain_path: str, problem_path: str, outdir: str) -> Dict[str, Any]:
+        """Run ChainReactor's planner with domain/problem PDDL using solve_problem.py.
+        Requires the external planner `powerlifted` to be available on PATH.
         """
         if not self.available():
             return {"success": False, "error": "ChainReactor repo not available"}
         try:
-            # Prefer invoking the submodule's solve_problem.py if present
             solve_py = Path(self.repo_path) / 'solve_problem.py'
-            if solve_py.exists():
-                cmd = ['python3', str(solve_py), '--goal', goal, '--spec', spec_path, '--out', outdir]
-            else:
-                # Fallback to module invocation if package is importable
-                cmd = ['python3', '-m', 'chainreactor', '--goal', goal, '--spec', spec_path, '--out', outdir]
+            if not solve_py.exists():
+                return {"success": False, "error": "solve_problem.py not found in ChainReactor repo"}
+            cmd = ['python3', str(solve_py.resolve()), '-d', domain_path, '-p', problem_path]
             env = os.environ.copy()
-            # Ensure the submodule is importable when using -m
-            env['PYTHONPATH'] = os.pathsep.join([self.repo_path, env.get('PYTHONPATH', '')])
+            # Proactively detect missing external planner
+            try:
+                import shutil
+                if shutil.which('powerlifted') is None:
+                    return {
+                        "success": False,
+                        "error": "External planner 'powerlifted' not found on PATH",
+                        "hint": "Install powerlifted or add it to PATH. See chainreactor README or IPC2023 docs.",
+                        "command": "powerlifted --iteration alt-bfws1,rff,yannakakis,476 ...",
+                        "domain": domain_path,
+                        "problem": problem_path,
+                    }
+            except Exception:
+                pass
+            # Run without changing cwd to avoid path duplication bugs
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            # collect generated plan files in repo_path (plan.*)
+            plans = []
+            try:
+                for p in Path(self.repo_path).glob('plan*'):
+                    plans.append(str(p))
+                    # copy plan into outdir for convenient re-run
+                    try:
+                        import shutil
+                        shutil.copy2(str(p), outdir)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return {
                 "success": proc.returncode == 0,
                 "stdout": proc.stdout,
                 "stderr": proc.stderr,
                 "outdir": outdir,
+                "plans": plans,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

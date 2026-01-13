@@ -12,17 +12,15 @@ class KernelResearchAdapter:
 
     def list_primitives(self, registry: PrimitiveRegistry) -> List[Primitive]:
         prims: List[Primitive] = []
-        # Heuristic: expose common ROP actions as primitives
-        actions = [
-            "commit_creds_prepare_kernel_cred",
-            "switch_task_namespaces",
-            "write_what_where_64",
-            "fork",
-            "telefork",
-            "ret_to_user",
-        ]
-        for a in actions:
-            p = Primitive(name=f"xdk_{a}", description=f"kernelXDK action {a}")
+        # Map common XDK actions to ChainReactor capabilities (heuristic)
+        mappings = {
+            "commit_creds_prepare_kernel_cred": {"cap": "CAP_command"},
+            "switch_task_namespaces": {"cap": "CAP_command"},
+            "write_what_where_64": {"cap": "CAP_CVE_write_any_file"},
+            "ret_to_user": {"cap": "CAP_command"},
+        }
+        for a, meta in mappings.items():
+            p = Primitive(name=f"xdk_{a}", description=f"kernelXDK action {a}", provides={"cap": meta.get("cap")})
             registry.add(p)
             prims.append(p)
         return prims

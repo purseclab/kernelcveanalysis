@@ -3601,6 +3601,7 @@ def analyze(crash_text: str, repro_path: str, source_root: Optional[str] = None,
     # Build a more detailed exploitability summary using parsed frames, snippets and evidence
     exploitability = analyze_exploitability(parsed, snippets, evidence)
     repro = ""
+    result = None
 
     try:
         llm_res = llm_analyze_traces(crash_text, snippets.get('links', {}), dynamic_results)

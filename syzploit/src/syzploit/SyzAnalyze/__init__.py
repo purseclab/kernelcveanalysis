@@ -20,6 +20,7 @@ import sys
 import traceback
 import time
 from . import crash_analyzer as analyzer
+from ..SyzVerify.dynamic import DynamicAnalysisConfig, run_dynamic_analysis as verify_run_da
 from ..SyzVerify.bug_db import SyzkallBugDatabase
 import json as _json
 
@@ -27,7 +28,8 @@ __all__ = ["analyze", "parse_crash_log", "stronger_heuristics"]
 
 
 def analyze_bug(bug_id: str, kernel_name: str, qemu: bool, source_image: Path, source_disk: Path, 
-                dynamic_analysis: bool, gdb_port: int, arch: str, output_dir: Path = None):
+                dynamic_analysis: bool, gdb_port: int, arch: str, output_dir: Path = None,
+                skip_static: bool = False, ignore_exploitability: bool = False, reuse_dir: Path = None):
     """
     Comprehensive analysis of a single bug with both static and optional dynamic analysis.
     
@@ -61,73 +63,193 @@ def analyze_bug(bug_id: str, kernel_name: str, qemu: bool, source_image: Path, s
     console.print(f"Description: {metadata.description}")
     console.print(f"Output directory: {output_dir}")
     
-    # Step 1: Static Analysis
-    console.print("\n[bold yellow]Step 1: Static Analysis[/bold yellow]")
+    # Prepare reproducer artifacts (download/generate C, compile binary)
+    c_repro_src = None
     try:
-        static_result = analyzer.analyze(
-            metadata.crash_report, 
-            metadata.artifact_path(f'repro_{arch}.c'),
-            None,
-            dynamic_analysis=False,
-            kernel_image=str(source_image) if source_image else None
-        )
-        
-        static_output = output_dir / "static_analysis.json"
-        with open(static_output, 'w') as f:
-            _json.dump(static_result, f, indent=2)
-        console.print(f"[green]✓[/green] Static analysis complete: {static_output}")
-        
-        # Print key findings
-        if 'overview' in static_result.get("llm_analysis", {}).get('openai_llm', {}).get('parsed', {}):
-            pc = static_result.get("llm_analysis", {}).get('openai_llm', {}).get('parsed', {}).get('overview', {})
-            console.print(f"  Exploitability: {pc.get('exploitability', 'unknown')}")
-            console.print(f"  Rationale: {pc.get('rationale', 'unknown')}")
-            console.print(f"  Primitive Capabilities: {pc.get('primitive_capabilities', 'unknown')}")
-        if 'postconditions' in static_result.get("llm_analysis", {}).get('openai_llm', {}).get('parsed', {}):
-            pc = static_result.get("llm_analysis", {}).get('openai_llm', {}).get('parsed', {}).get('postconditions', {})
-            console.print(f"  Kernel Impact: {pc.get('kernel_impact', 'unknown')}")
-    except Exception as e:
-        console.print(f"[red]✗[/red] Static analysis failed: {e}")
-        traceback.print_exc()
-        static_result = None
+        # Prefer provided C reproducer URL
+        if getattr(metadata, 'c_repro_url', None):
+            p = metadata.save_c_repro()
+            if p and Path(p).exists():
+                c_repro_src = str(p)
+        # Fallback: generate from syz if available
+        if not c_repro_src and getattr(metadata, 'syz_repro_url', None):
+            p = metadata.generate_c_repro(arch)
+            if p and Path(p).exists():
+                c_repro_src = str(p)
+    except Exception:
+        # Non-fatal; static/dynamic can still proceed if other data exists
+        c_repro_src = None
+
+    # Step 1: Static Analysis
+    static_result = None
+    if skip_static:
+        console.print("\n[bold yellow]Step 1: Static Analysis (skipped; reusing prior results)[/bold yellow]")
+        # Try to load prior static results from output_dir or reuse_dir
+        src_dir = Path(reuse_dir) if reuse_dir else output_dir
+        try:
+            static_path = Path(src_dir) / "static_analysis.json"
+            if static_path.exists():
+                with static_path.open('r') as f:
+                    static_result = _json.load(f)
+                console.print(f"[green]✓[/green] Loaded prior static results: {static_path}")
+            else:
+                console.print(f"[yellow]No static_analysis.json in {src_dir}; proceeding without static context[/yellow]")
+        except Exception as e:
+            console.print(f"[yellow]Failed to load prior static results: {e}[/yellow]")
+    else:
+        console.print("\n[bold yellow]Step 1: Static Analysis[/bold yellow]")
+        try:
+            # Use prepared C reproducer if present; otherwise pass expected path (may not exist)
+            repro_src_for_static = c_repro_src or str(metadata.artifact_path(f'repro_{arch}.c'))
+            static_result = analyzer.analyze(
+                metadata.crash_report,
+                repro_src_for_static,
+                None,
+                None
+            )
+            
+            static_output = output_dir / "static_analysis.json"
+            with open(static_output, 'w') as f:
+                _json.dump(static_result, f, indent=2)
+            console.print(f"[green]✓[/green] Static analysis complete: {static_output}")
+            
+            # Print key findings (robust to list/dict formats)
+            parsed_llm = (static_result.get("llm_analysis", {}) or {}).get('openai_llm', {})
+            parsed_llm = (parsed_llm.get('parsed', {}) if isinstance(parsed_llm, dict) else {})
+            # Overview block
+            if isinstance(parsed_llm, dict) and 'overview' in parsed_llm:
+                ov = parsed_llm.get('overview')
+                if isinstance(ov, list) and ov:
+                    ov = ov[0]
+                if isinstance(ov, dict):
+                    console.print(f"  Exploitability: {ov.get('exploitability', 'unknown')}")
+                    console.print(f"  Rationale: {ov.get('rationale', 'unknown')}")
+                    console.print(f"  Primitive Capabilities: {ov.get('primitive_capabilities', 'unknown')}")
+            # Postconditions block
+            if isinstance(parsed_llm, dict) and 'postconditions' in parsed_llm:
+                pc = parsed_llm.get('postconditions')
+                if isinstance(pc, list):
+                    # try to print kernel impact from first element if dict
+                    ki = None
+                    if pc and isinstance(pc[0], dict):
+                        ki = pc[0].get('kernel_impact')
+                    console.print(f"  Kernel Impact: {ki if ki is not None else 'unknown'}")
+                elif isinstance(pc, dict):
+                    console.print(f"  Kernel Impact: {pc.get('kernel_impact', 'unknown')}")
+        except Exception as e:
+            console.print(f"[red]✗[/red] Static analysis failed: {e}")
+            traceback.print_exc()
+            static_result = None
     
     # Step 2: test the reproducer with syzverify reproducer
     console.print("\n[bold yellow]Step 2: Test Reproducer[/bold yellow]")
+    # Try to compile the reproducer for dynamic runs
+    repro_binary_path = None
+    try:
+        if c_repro_src and Path(c_repro_src).exists():
+            repro_binary_path = str(metadata.compile_repro(arch))
+            if repro_binary_path and Path(repro_binary_path).exists():
+                console.print(f"[green]✓[/green] Reproducer compiled: {repro_binary_path}")
+    except Exception as e:
+        console.print(f"[yellow]Failed to compile reproducer: {e}[/yellow]")
     
     
-    # Step 3: Dynamic Analysis (if enabled)
-    generic_repro_path = static_result.get("reproducer", {}).get('source_path', {})
+    # Step 3: Dynamic Analysis (gated by exploitability rating)
+    # Guard against None static_result and use fallback path if available
+    generic_repro_path = None
+    if static_result and isinstance(static_result, dict):
+        try:
+            generic_repro_path = (static_result.get("reproducer", {}) or {}).get('source_path')
+        except Exception:
+            generic_repro_path = None
+    if not generic_repro_path:
+        fallback = Path(c_repro_src) if c_repro_src else metadata.artifact_path(f'repro_{arch}.c')
+        if fallback and fallback.exists():
+            generic_repro_path = str(fallback)
+
+    # Extract exploitability rating from static_result (LLM overview) robustly
+    exploitability = None
+    try:
+        if isinstance(static_result, dict):
+            parsed_llm = (static_result.get("llm_analysis", {}) or {}).get('openai_llm', {})
+            parsed_llm = (parsed_llm.get('parsed', {}) if isinstance(parsed_llm, dict) else {})
+            ov = parsed_llm.get('overview') if isinstance(parsed_llm, dict) else None
+            if isinstance(ov, list) and ov:
+                ov = ov[0]
+            if isinstance(ov, dict):
+                val = ov.get('exploitability')
+                if isinstance(val, str):
+                    exploitability = val.strip().lower()
+    except Exception:
+        exploitability = None
+
     dynamic_result = None
-    if dynamic_analysis:
+    should_run_dynamic = bool(dynamic_analysis) and ((exploitability in {"medium", "high"}) or bool(ignore_exploitability))
+    if should_run_dynamic:
         console.print("\n[bold yellow]Step 2: Dynamic Analysis with GDB[/bold yellow]")
         print(f"[DEBUG] dynamic_analysis enabled: {dynamic_analysis}")
         print(f"[DEBUG] qemu: {qemu}, source_image: {source_image}, source_disk: {source_disk}, arch: {arch}")
-        try:
-            dynamic_result = analyzer.analyze(
-                metadata.crash_report,
-                generic_repro_path,
-                None,
-                dynamic_analysis=True,
-                gdb_port=gdb_port,
-                kernel_image=str(source_image) if source_image else None
-            )
-            
-            dynamic_output = output_dir / "dynamic_analysis.json"
-            with open(dynamic_output, 'w') as f:
-                _json.dump(dynamic_result, f, indent=2)
-            console.print(f"[green]✓[/green] Dynamic analysis complete: {dynamic_output}")
-            
-            # Print key findings
-            if 'dynamic_analysis' in dynamic_result and dynamic_result['dynamic_analysis']:
-                dyn = dynamic_result['dynamic_analysis']
+        if not generic_repro_path:
+            console.print("[yellow]Skipping dynamic analysis: no reproducer source path available[/yellow]")
+        else:
+            try:
+                # Run SyzVerify dynamic analysis to produce instrumentation results
+                vm_type = 'qemu' if qemu else 'cuttlefish'
+                da_config = DynamicAnalysisConfig(
+                    vm_type=vm_type,
+                    kernel_image=str(source_image) if source_image else None,
+                    kernel_disk=str(source_disk) if source_disk else None,
+                    bzimage_path=str(source_image) if source_image else None,
+                    gdb_port=gdb_port,
+                    timeout=360
+                )
+                # Ensure we have a compiled binary
+                repro_binary = repro_binary_path or str(metadata.artifact_path('repro'))
+                if not Path(repro_binary).exists() and c_repro_src and Path(c_repro_src).exists():
+                    try:
+                        repro_binary = str(metadata.compile_repro(arch))
+                    except Exception:
+                        pass
+                parsed_crash = analyzer.parse_crash_log(metadata.crash_report)
+                da_result = verify_run_da(str(repro_binary), parsed_crash, da_config)
+
+                # Integrate dynamic results into analyzer output
+                dynamic_result = analyzer.analyze(
+                    metadata.crash_report,
+                    generic_repro_path,
+                    None,
+                    dynamic_results=da_result
+                )
+
+                dynamic_output = output_dir / "dynamic_analysis.json"
+                with open(dynamic_output, 'w') as f:
+                    _json.dump(dynamic_result, f, indent=2)
+                console.print(f"[green]✓[/green] Dynamic analysis complete: {dynamic_output}")
+
+                # Optional robust post-processing for vulnerability signals
+                try:
+                    from ..SyzVerify import post_process as _pp
+                    pp_out = dynamic_output.with_name(dynamic_output.stem + "_post.json")
+                    pp_res = _pp.analyze(str(dynamic_output), str(pp_out))
+                    console.print(f"  Post-processing summary: confidence={pp_res.get('confidence', 0)} uaf={pp_res.get('summary', {}).get('uaf', 0)} invalid-access={pp_res.get('summary', {}).get('invalid-access', 0)} double-free={pp_res.get('summary', {}).get('double_free_count', 0)}")
+                    console.print(f"  Post-processed results: {pp_out}")
+                except Exception as e:
+                    console.print(f"[yellow]Post-processing failed: {e}[/yellow]")
+
+                # Print key findings if present
+                dyn = dynamic_result.get('dynamic_analysis') if isinstance(dynamic_result, dict) else None
                 if isinstance(dyn, dict):
                     console.print(f"  Events detected: {len(dyn.get('events', []))}")
                     console.print(f"  Allocations tracked: {len(dyn.get('allocations', {}))}")
                     console.print(f"  Vulnerabilities: {len(dyn.get('vulnerabilities_detected', []))}")
-        except Exception as e:
-            console.print(f"[red]✗[/red] Dynamic analysis failed: {e}")
-            traceback.print_exc()
-            dynamic_result = None
+            except Exception as e:
+                console.print(f"[red]✗[/red] Dynamic analysis failed: {e}")
+                traceback.print_exc()
+                dynamic_result = None
+    else:
+        if dynamic_analysis:
+            console.print("[yellow]Skipping dynamic analysis due to low exploitability rating[/yellow]")
+            console.print(f"  Exploitability: {exploitability or 'unknown'} (required: medium/high)")
     
     # Step 4: Generate enhanced C trigger with LLM
     # console.print("\n[bold yellow]Step 4: Generate Enhanced C Trigger[/bold yellow]")

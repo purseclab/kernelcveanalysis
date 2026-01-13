@@ -6,6 +6,7 @@ from .core import PrimitiveRegistry, ExploitPlan, Primitive
 from .adapters.syzanalyze_adapter import load_from_analysis
 from .adapters.kernelresearch_adapter import KernelResearchAdapter
 from .chainreactor_integration import ChainReactor
+from .pddl_generator import PDDLGenerator
 
 
 def synthesize(bug_id: str, goal: str, kernel_research_path: Optional[str] = None,
@@ -69,13 +70,26 @@ def synthesize(bug_id: str, goal: str, kernel_research_path: Optional[str] = Non
             "steps": plan.steps,
         }, f, indent=2)
 
-    # If ChainReactor is available, invoke it
+    # If ChainReactor is available, generate PDDL and invoke solver
     cr = ChainReactor(chainreactor_path)
-    if cr.available():
-        outdir = os.path.join(analysis_dir, 'synth_output')
-        os.makedirs(outdir, exist_ok=True)
-        result = cr.synthesize(spec_path, goal, outdir)
-        return {"plan": plan.__dict__, "chainreactor": result}
+    if cr.available() and chainreactor_path:
+        # Emit PDDL into a dedicated folder for re-runs
+        pddl_dir = os.path.join(analysis_dir, 'pddl')
+        os.makedirs(pddl_dir, exist_ok=True)
+        # Generate problem PDDL from primitives
+        gen = PDDLGenerator(chainreactor_path, analysis_dir=analysis_dir)
+        domain_src = gen.domain_path()
+        problem_path = gen.generate_problem(f"{bug_id}-goal", plan.primitives, os.path.join(pddl_dir, 'problem.pddl'), goal)
+        # Copy domain to analysis dir for convenience
+        try:
+            import shutil
+            domain_path = os.path.join(pddl_dir, 'domain.pddl')
+            shutil.copyfile(domain_src, domain_path)
+        except Exception:
+            domain_path = domain_src
+        # Run solver and copy plans back into the PDDL dir
+        result = cr.solve_with_pddl(domain_path, problem_path, pddl_dir)
+        return {"plan": plan.__dict__, "chainreactor": result, "pddl": {"domain": domain_path, "problem": problem_path}}
 
     # Else, minimal custom stitching placeholder
     outdir = os.path.join(analysis_dir, 'synth_output')
