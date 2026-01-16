@@ -113,20 +113,30 @@ def analyze(
 @app.command()
 def synthesize(
     bug_id: Annotated[str, typer.Argument(help='Bug ID to synthesize exploit for')],
-    goal: Annotated[str, typer.Option(help='Desired exploit goal (e.g., privilege_escalation, shell)')] = 'privilege_escalation',
+    goal: Annotated[str, typer.Option(help='Desired exploit goal (e.g., privilege_escalation, root_shell, container_escape)')] = 'privilege_escalation',
+    platform: Annotated[Optional[str], typer.Option(help='Target platform: linux, android, or generic (auto-detect if not set)')] = None,
     kernel_research_path: Annotated[Optional[Path], typer.Option(help='Path to google/kernel-research repo')] = None,
-    chainreactor_path: Annotated[Optional[Path], typer.Option(help='Path to ucsb-seclab/chainreactor repo')] = None,
     analysis_dir: Annotated[Optional[Path], typer.Option(help='Path to analysis_<bug_id> directory')] = None,
     vmlinux_path: Annotated[Optional[Path], typer.Option(help='Path to vmlinux for gadget analysis')] = None,
+    verbose: Annotated[bool, typer.Option(help='Print planner output')] = False,
+    debug: Annotated[bool, typer.Option(help='Enable debug output')] = False,
+    time_limit: Annotated[int, typer.Option(help='Planner time limit in seconds')] = 300,
 ):
-    """Synthesize an exploit plan using SyzAnalyze + kernelXDK primitives, optionally via ChainReactor."""
+    """Synthesize an exploit plan using SyzAnalyze + kernelXDK primitives.
+    
+    Supports Linux kernel and Android kernel exploitation. Platform is auto-detected
+    from analysis data if not specified.
+    """
     res = Synthesizer.synthesize(
         bug_id=str(bug_id),
         goal=str(goal),
         kernel_research_path=str(kernel_research_path) if kernel_research_path else None,
-        chainreactor_path=str(chainreactor_path) if chainreactor_path else None,
         analysis_dir=str(analysis_dir) if analysis_dir else None,
         vmlinux_path=str(vmlinux_path) if vmlinux_path else None,
+        platform=platform,
+        verbose=verbose,
+        debug=debug,
+        time_limit=time_limit,
     )
     # Save a summary in the analysis directory
     try:
@@ -188,6 +198,7 @@ def chainreactor_run(
     except Exception as e:
         typer.echo(f"[!] chainreactor_run failed: {e}")
 
+
 @app.command()
 def pipeline(
     bug_id: Annotated[str, typer.Argument(help='Bug ID for end-to-end pipeline')],
@@ -201,6 +212,9 @@ def pipeline(
     dynamic_analysis: Annotated[bool, typer.Option(help='Enable GDB-based dynamic analysis during analysis')] = True,
     gdb_port: Annotated[int, typer.Option(help='GDB port for dynamic analysis')] = 1234,
     goal: Annotated[str, typer.Option(help='Exploit goal for synthesis')] = 'privilege_escalation',
+    platform: Annotated[Optional[str], typer.Option(help='Target platform: linux, android, or generic')] = None,
+    debug: Annotated[bool, typer.Option(help='Enable debug output')] = False,
+    verbose: Annotated[bool, typer.Option(help='Print planner output')] = False,
 ):
     """Run the full pipeline: verify crash with SyzVerify, analyze with SyzAnalyze,
     test generated primitive, run Synthesizer, and finally verify the generated exploit.
@@ -331,9 +345,11 @@ def pipeline(
             bug_id=bug_id,
             goal=goal,
             kernel_research_path=None,
-            chainreactor_path=None,
             analysis_dir=str(analysis_dir),
             vmlinux_path=None,
+            platform=platform,  # Can be None for auto-detect
+            debug=debug,
+            verbose=verbose,
         )
         summary["steps"]["synthesis"] = {"result": synth_res}
         typer.echo("[✓] Synthesis completed")
