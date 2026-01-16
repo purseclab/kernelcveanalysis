@@ -35,11 +35,17 @@ RUN apt-get update && apt-get install -y \
     clang-format \
     qemu-system-x86 \
     gdb \
-    sudo
+    sudo \
+    ca-certificates \
+    python3-dev \
+    autotools-dev \
+    libboost-all-dev=1.74.0.3ubuntu7 \
+    libboost-program-options1.74-dev
 
-# Install jdk 21
+# Install JDK 21
 RUN cd /opt && \
-    wget "https://release-assets.githubusercontent.com/github-production-release-asset/602574963/3aef38ae-ccf5-4599-9459-d2d6cdc3cce7?sp=r&sv=2018-11-09&sr=b&spr=https&se=2025-07-23T07:51:56Z&rscd=attachment; filename=OpenJDK21U-jdk_x64_linux_hotspot_21.0.8_9.tar.gz&rsct=application/octet-stream&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2025-07-23T06:51:11Z&ske=2025-07-23T07:51:56Z&sks=b&skv=2018-11-09&sig=lqqxf6fpaT70stZ32Oj7i0Tm/d/VYCn0wLCZqAcEw+w=&jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc1MzI1NDYxOSwibmJmIjoxNzUzMjU0MzE5LCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.rxOBnCWOWiCkWhhUsWV7bSLqWYxAeY0IITk5hdBfcMI&response-content-disposition=attachment; filename=OpenJDK21U-jdk_x64_linux_hotspot_21.0.8_9.tar.gz&response-content-type=application/octet-stream" -O openjdk21.tar.gz && \
+    wget -O openjdk21.tar.gz \
+      https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8+9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.8_9.tar.gz && \
     tar -xvaf openjdk21.tar.gz && \
     mv jdk-21* openjdk-21 && \
     rm openjdk21.tar.gz
@@ -48,15 +54,15 @@ ENV PATH="/opt/openjdk-21/bin:$PATH"
 # Install GHIDRA
 RUN wget https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4_build/ghidra_11.4_PUBLIC_20250620.zip && \
     unzip ghidra_11.4_PUBLIC_20250620.zip -d /workspace && \
-    rm ghidra_11.4_PUBLIC_20250620.zip 
+    rm ghidra_11.4_PUBLIC_20250620.zip
 
 # Install uv
-RUN pip install uv rich pyyaml
+RUN pip install --no-cache-dir uv rich pyyaml
 
 # Clone and build vmlinux-to-elf
 RUN git clone https://github.com/marin-m/vmlinux-to-elf.git /workspace/vmlinux-to-elf && \
     pip3 install --upgrade lz4 zstandard git+https://github.com/clubby789/python-lzo@b4e39df && \
-    pip3 install --upgrade git+https://github.com/marin-m/vmlinux-to-elf 
+    pip3 install --upgrade git+https://github.com/marin-m/vmlinux-to-elf
 
 # Create workspace
 RUN mkdir -p /workspace && chown -R kuser:kuser /workspace
@@ -64,50 +70,45 @@ WORKDIR /workspace
 
 # Install Android SDK & NDK
 RUN mkdir -p /workspace/android_sdk && \
-    wget https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -O /workspace/commandlinetools-linux-13114758_latest.zip && \
+    wget https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip \
+        -O /workspace/commandlinetools-linux-13114758_latest.zip && \
     unzip /workspace/commandlinetools-linux-13114758_latest.zip -d /workspace/android_sdk && \
     cd /workspace/android_sdk/cmdline-tools && \
     mkdir latest && \
-    mv /workspace/android_sdk/cmdline-tools/bin /workspace/android_sdk/cmdline-tools/latest && \
-    mv /workspace/android_sdk/cmdline-tools/lib /workspace/android_sdk/cmdline-tools/latest && \
-    mv /workspace/android_sdk/cmdline-tools/NOTICE.txt /workspace/android_sdk/cmdline-tools/latest && \
-    mv /workspace/android_sdk/cmdline-tools/source.properties /workspace/android_sdk/cmdline-tools/latest && \
-    cd /workspace/android_sdk/cmdline-tools/latest/ && \
+    mv bin lib NOTICE.txt source.properties latest/ && \
+    cd latest && \
     yes | ./bin/sdkmanager --install "ndk;25.2.9519653"
 
-RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
 
-# Enable Nix flakes and nix-command globally and for kuser
-RUN mkdir -p /etc/nix && \
-    printf "experimental-features = nix-command flakes\n" > /etc/nix/nix.conf && \
-    mkdir -p /home/kuser/.config/nix && \
-    printf "experimental-features = nix-command flakes\n" > /home/kuser/.config/nix/nix.conf && \
-    chown -R kuser:kuser /home/kuser/.config/nix
-
-# Make Nix available in all shells and non-interactive sessions
-# Source Nix profile for bash and set PATH explicitly for safety
-RUN echo ". /nix/var/nix/profiles/default/etc/profile.d/nix.sh || true" >> /etc/bash.bashrc && \
-    echo ". /nix/var/nix/profiles/default/etc/profile.d/nix.sh || true" >> /home/kuser/.bashrc && \
-    chown kuser:kuser /home/kuser/.bashrc
-ENV PATH="/nix/var/nix/profiles/default/bin:/home/kuser/.nix-profile/bin:${PATH}"
-
-# Clone and build syzkaller for syz-prog2c
+# Build syzkaller
 RUN wget https://dl.google.com/go/go1.23.6.linux-amd64.tar.gz && \
     tar -xf go1.23.6.linux-amd64.tar.gz && \
-    export GOROOT=`pwd`/go && \
+    export GOROOT=/workspace/go && \
     export PATH=$GOROOT/bin:$PATH && \
     git clone https://github.com/google/syzkaller && \
     cd syzkaller && \
     make
 
-# Copy project (before switching user)
+# Copy project WITHOUT .git (expected)
 COPY --chown=kuser:kuser ./ /workspace/syzploit
 
-ENV PATH="/workspace/syzkaller/bin:$PATH"
+ENV CPDDL_BIN=/workspace/syzploit/src/cpddl/bin
+
+ENV POWERLIFTED=/workspace/syzploit/src/powerlifted
+
+ENV PATH="/workspace/syzkaller/bin:$POWERLIFTED:$PATH"
+
 ENV SYZBOT_REPRO_DATA_DIR="/workspace/syzploit/syzploit_data/"
 
 # Switch to non-root user
 USER kuser
 
-# pull all python packages in the uv project
-RUN cd syzploit && uv sync
+# Pull python deps
+RUN cd /workspace/syzploit && uv sync
+
+WORKDIR /workspace/syzploit
+
+RUN /workspace/syzploit/build_submodules
+
+# # on entry we need to build powerlifted and cpddl
+# ENTRYPOINT ["./build_submodules", "&&", "/bin/bash"]

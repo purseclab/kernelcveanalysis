@@ -1,14 +1,9 @@
 #!/bin/bash
 
-docker run -it -d --name syzploit\
+docker run -it -d --name syzploit \
   -u 1000:1000 \
   --network=host \
   --device=/dev/kvm \
   --group-add $(getent group kvm | cut -d: -f3) \
-  -e NIX_CONFIG="experimental-features = nix-command flakes" \
   -v "$(pwd):/workspace/syzploit" \
   syzploit-env
-
-# Ensure Nix daemon is running so non-root user can use Nix
-# Start as root inside the container and detach so it keeps running
-docker exec -d -u 0 syzploit /nix/var/nix/profiles/default/bin/nix-daemon
