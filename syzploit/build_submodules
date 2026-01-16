@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cd /workspace/syzploit/src/powerlifted && python3 build.py && strip --strip-all /workspace/syzploit/src/powerlifted/builds/release/search/search
+cd /workspace/syzploit/src/cpddl && cp Makefile.config.tpl Makefile.config && make && make bin
