@@ -27,7 +27,6 @@ from .stitcher import (
     StitcherConfig,
     stitch_from_plan,
     ACTION_TO_LIBRARY,
-    HAS_LITELLM,
 )
 
 __all__ = [
@@ -46,5 +45,4 @@ __all__ = [
     'StitcherConfig',
     'stitch_from_plan',
     'ACTION_TO_LIBRARY',
-    'HAS_LITELLM',
 ]

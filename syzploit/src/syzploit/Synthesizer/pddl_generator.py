@@ -279,7 +279,8 @@ class PDDLGenerator:
     
     def generate_problem(self, problem_name: str, primitives: List[Primitive],
                          output_path: str, goal: str,
-                         debug: bool = False) -> str:
+                         debug: bool = False,
+                         analysis_data: Optional[Dict[str, Any]] = None) -> str:
         """
         Generate a PDDL problem file from primitives.
         
@@ -288,6 +289,7 @@ class PDDLGenerator:
             primitives: List of exploit primitives
             output_path: Path to write the problem file
             goal: Goal description (e.g., "privilege escalation")
+            analysis_data: Optional analysis data with reproducer info
             debug: Enable debug output
             
         Returns:
@@ -390,6 +392,16 @@ class PDDLGenerator:
             if '(in_untrusted_app)' not in added_predicates:
                 lines.append("    (in_untrusted_app)")
                 added_predicates.add('(in_untrusted_app)')
+        
+        # Add syzbot reproducer predicate if reproducer is available
+        if analysis_data:
+            reproducer = analysis_data.get('reproducer', {})
+            # Check for reproducer source code or path
+            if reproducer.get('source') or reproducer.get('path') or reproducer.get('c_source'):
+                lines.append("    ; Syzbot reproducer available")
+                lines.append("    (has_syzbot_reproducer)")
+                added_predicates.add('(has_syzbot_reproducer)')
+                _debug("  Added (has_syzbot_reproducer) predicate")
         
         lines.append("  )")
         
