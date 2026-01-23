@@ -202,16 +202,39 @@ class UsMaybeContinueCmd(gdb.Command):
     """
     us_maybe_continue
     Attempt to continue execution; ignore errors if the program is not running.
+    Will disable failing breakpoints and retry if needed.
     """
 
     def __init__(self) -> None:
         super().__init__("us_maybe_continue", gdb.COMMAND_USER)
 
     def invoke(self, arg: str, from_tty: bool) -> None:
-        try:
-            gdb.execute("continue")
-        except gdb.error as e:
-            gdb.write(f"[userspace_gdb] continue skipped: {e}\n")
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                gdb.execute("continue")
+                return  # Success
+            except gdb.error as e:
+                err_msg = str(e)
+                if 'Cannot insert breakpoint' in err_msg or 'Cannot access memory' in err_msg or 'Command aborted' in err_msg:
+                    gdb.write(f"[userspace_gdb] continue attempt {attempt+1}/{max_retries} failed: {err_msg}\n")
+                    # Disable all breakpoints and retry
+                    disabled = 0
+                    try:
+                        for bp in gdb.breakpoints():
+                            try:
+                                if bp.enabled:
+                                    bp.enabled = False
+                                    disabled += 1
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    gdb.write(f"[userspace_gdb] disabled {disabled} breakpoints, retrying...\n")
+                else:
+                    gdb.write(f"[userspace_gdb] continue skipped: {err_msg}\n")
+                    return
+        gdb.write("[userspace_gdb] continue failed after max retries\n")
 
 
 class UsTryBreakCmd(gdb.Command):
@@ -240,9 +263,28 @@ def _on_stop_handler(event: Any) -> None:
     _log.add("stop", **info)
     # Auto-continue in monitor mode to avoid interactive halts
     if _monitor_mode:
+        def _do_continue():
+            try:
+                gdb.execute("continue")
+            except gdb.error as e:
+                err_msg = str(e)
+                if 'Cannot insert breakpoint' in err_msg or 'Cannot access memory' in err_msg:
+                    # Disable failing breakpoints and retry
+                    try:
+                        for bp in gdb.breakpoints():
+                            try:
+                                bp.enabled = False
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    try:
+                        gdb.execute("continue")
+                    except gdb.error:
+                        pass
         try:
-            gdb.execute("continue")
-        except gdb.error:
+            gdb.post_event(_do_continue)
+        except Exception:
             pass
 
 
