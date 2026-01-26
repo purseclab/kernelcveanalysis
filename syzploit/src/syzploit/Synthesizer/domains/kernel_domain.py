@@ -113,11 +113,14 @@ class KernelDomain:
   )
 
   ; ============== VULNERABILITY TRIGGERING ==============
+  ; These trigger actions execute the syzbot reproducer code.
+  ; The reproducer IS the trigger implementation.
   
   (:action trigger_uaf
     :parameters ()
     :precondition (and
       (has_vulnerability UAF)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered UAF))
     )
     :effect (and
@@ -130,6 +133,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability OOB_READ)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered OOB_READ))
     )
     :effect (and
@@ -142,6 +146,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability OOB_WRITE)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered OOB_WRITE))
     )
     :effect (and
@@ -154,6 +159,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability RACE)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered RACE))
     )
     :effect (and
@@ -319,6 +325,9 @@ class KernelDomain:
     (vulnerability_triggered ?v - vuln_primitive)
     (vulnerability_object_size ?v - vuln_primitive ?size - object)
     
+    ; Syzbot reproducer (original vulnerability trigger code)
+    (has_syzbot_reproducer)
+    
     ; Capability state
     (has_capability ?c - capability)
     (capability_stable ?c - capability)
@@ -353,11 +362,14 @@ class KernelDomain:
   )
 
   ; ============== VULNERABILITY TRIGGERING ==============
-  
+  ; These trigger actions execute the syzbot reproducer code.
+  ; The reproducer IS the trigger implementation.
+
   (:action trigger_uaf
     :parameters ()
     :precondition (and
       (has_vulnerability UAF)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered UAF))
     )
     :effect (and
@@ -370,6 +382,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability OOB_READ)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered OOB_READ))
     )
     :effect (and
@@ -382,6 +395,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability OOB_WRITE)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered OOB_WRITE))
     )
     :effect (and
@@ -394,6 +408,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability RACE)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered RACE))
     )
     :effect (and
@@ -406,6 +421,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability DOUBLE_FREE)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered DOUBLE_FREE))
     )
     :effect (and
@@ -676,6 +692,9 @@ class KernelDomain:
     (has_vulnerability ?v - vuln_primitive)
     (vulnerability_triggered ?v - vuln_primitive)
     
+    ; Syzbot reproducer (original vulnerability trigger code)
+    (has_syzbot_reproducer)
+    
     ; Capability state
     (has_capability ?c - capability)
     (capability_stable ?c - capability)
@@ -729,11 +748,14 @@ class KernelDomain:
   )
 
   ; ============== VULNERABILITY TRIGGERING ==============
-  
+  ; These trigger actions execute the syzbot reproducer code.
+  ; The reproducer IS the trigger implementation.
+
   (:action trigger_uaf
     :parameters ()
     :precondition (and
       (has_vulnerability UAF)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered UAF))
     )
     :effect (and
@@ -746,6 +768,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability BINDER_BUG)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered BINDER_BUG))
     )
     :effect (and
@@ -758,6 +781,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability OOB_READ)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered OOB_READ))
     )
     :effect (and
@@ -770,6 +794,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability OOB_WRITE)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered OOB_WRITE))
     )
     :effect (and
@@ -782,6 +807,7 @@ class KernelDomain:
     :parameters ()
     :precondition (and
       (has_vulnerability RACE)
+      (has_syzbot_reproducer)
       (not (vulnerability_triggered RACE))
     )
     :effect (and

@@ -66,6 +66,8 @@ class DynamicAnalysisConfig:
     ssh_user: str = "root"
     ssh_key: Optional[str] = None  # path to private key; None uses agent/default
     repro_remote_path: str = "/root/repro"  # path inside guest to run under gdbserver
+    # Preferred local scope directory for tmp outputs (e.g., analysis_<bug_id>)
+    tmp_scope_dir: Optional[str] = None
 
 
 @dataclass
@@ -499,39 +501,19 @@ gdb.execute(f'set $guest_ssh_user = "{{guest_ssh_user}}"')
                 
         modified_script = config_header + '\n'.join(filtered_lines)
         
-        # Add JSON output at the end
+        # Do not inject a duplicate ExportResultsCmd; gdb.py already defines it with detailed fields.
+        # Auto-continue and run using safe continue to handle breakpoint insertion errors
         output_section = """
-
-# Export results to JSON for Python analyzer
-class ExportResultsCmd(gdb.Command):
-    '''export_results <filename> -- export collected events to JSON'''
-    def __init__(self):
-        super(ExportResultsCmd, self).__init__("export_results", gdb.COMMAND_USER)
-        
-    def invoke(self, arg, from_tty):
-        import json
-        filename = arg.strip() or "/tmp/gdb_analysis.json"
-        
-        results = {
-            "events": hit_events,
-            "allocations": {hex(k): {"size": v[0], "backtrace": v[1]} 
-                          for k, v in alloc_map.items()},
-            "frees": [hex(addr) for addr in free_set],
-        }
-        
-        with open(filename, 'w') as f:
-            json.dump(results, f, indent=2)
-        gdb.write("Results exported to %s\\n" % filename, gdb.STDERR)
-
-ExportResultsCmd()
-
-# Auto-continue and run
+# Use syz_safe_continue command if available, otherwise fallback to regular continue with error handling
 try:
-    gdb.execute("continue")
+    gdb.execute("syz_safe_continue")
 except gdb.error as e:
-    gdb.write("[WARN] continue failed: %s\\n" % e, gdb.STDERR)
+    # Fallback: syz_safe_continue might not exist yet on first source
+    try:
+        gdb.execute("continue")
+    except gdb.error as e2:
+        gdb.write("[WARN] continue failed: %s\\n" % e2, gdb.STDERR)
 """
-        
         modified_script += output_section
         return modified_script
 
@@ -687,14 +669,16 @@ except gdb.error as e:
         result = DynamicAnalysisResult()
 
         # Prepare a workspace-local tmp directory for outputs (avoid /tmp)
-        cwd = os.getcwd()
-        # Try to scope tmp under an existing analysis_* or syzkall_crashes dir
-        scope_dir = cwd
-        for candidate in ("analysis_", "syzkall_crashes"):
-            matches = [d for d in os.listdir(cwd) if d.startswith(candidate)] if candidate.endswith("_") else [candidate] if os.path.isdir(os.path.join(cwd, candidate)) else []
-            if matches:
-                scope_dir = os.path.join(cwd, matches[0]) if not candidate.endswith("_") else os.path.join(cwd, matches[0])
-                break
+        # Prefer a caller-provided scope directory (analysis_<bug_id>)
+        scope_dir = self.config.tmp_scope_dir or os.getcwd()
+        # If not provided, try to scope under an existing analysis_* or syzkall_crashes dir
+        if not self.config.tmp_scope_dir:
+            cwd = os.getcwd()
+            for candidate in ("analysis_", "syzkall_crashes"):
+                matches = [d for d in os.listdir(cwd) if d.startswith(candidate)] if candidate.endswith("_") else [candidate] if os.path.isdir(os.path.join(cwd, candidate)) else []
+                if matches:
+                    scope_dir = os.path.join(cwd, matches[0]) if not candidate.endswith("_") else os.path.join(cwd, matches[0])
+                    break
         local_tmp = os.path.join(scope_dir, "tmp_dynamic")
         os.makedirs(local_tmp, exist_ok=True)
         print(f"[DEBUG] Using local tmp dir: {local_tmp}")
@@ -872,13 +856,14 @@ except gdb.error as e:
                 "-ex", "python import time; time.sleep(1)",
                 # Source instrumentation script before letting kernel run, so commands available
                 "-ex", f"source {script_path}",
-                # Late variable binding from JSON after script is sourced
+                # Late variable binding from JSON after script is sourced (skips if file doesn't exist)
                 "-ex", f"syz_load_config {kernel_conf_path}",
                 # Also directly set numeric convenience vars in case JSON failed
                 "-ex", (f"set $fault_addr = {fault_addr_val}" if fault_addr_val is not None else "python pass"),
                 "-ex", (f"set $fault_insn = {fault_insn_val}" if fault_insn_val is not None else "python pass"),
                 # Let the kernel boot so virtual memory is set up with instrumentation active
-                                "-ex", "continue"
+                # Use syz_safe_continue to handle breakpoint insertion errors gracefully
+                "-ex", "syz_safe_continue"
             ])
             print(f"[DEBUG] Kernel GDB command: {' '.join(gdb_kernel_cmd)}")
 
@@ -1176,10 +1161,6 @@ except gdb.error as e:
                         for d in candidates:
                             if bug_id in d:
                                 target_dir = os.path.join(cwd, d)
-                    try:
-                        gdb.execute("continue")
-                    except gdb.error as e:
-                        gdb.write(f"[WARN] continue failed: {e}\\n", gdb.STDERR)
                     # Fallback: use first analysis_* directory
                     if not target_dir and candidates:
                         target_dir = os.path.join(cwd, candidates[0])

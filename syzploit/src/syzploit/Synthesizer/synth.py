@@ -26,7 +26,6 @@ from .stitcher import (
     CodeTemplateRegistry,
     LLMExploitStitcher,
     StitcherConfig,
-    HAS_LITELLM,
 )
 
 
@@ -340,6 +339,16 @@ def synthesize(bug_id: str, goal: str,
     domain_path = gen.domain_path(pddl_dir)
     _debug(f"  domain_path: {domain_path}", debug)
     
+    # Load analysis data if available (needed for reproducer info)
+    analysis_data = None
+    static_path = Path(analysis_dir) / 'static_analysis.json'
+    if static_path.exists():
+        try:
+            analysis_data = json.loads(static_path.read_text())
+            _debug(f"  Loaded static_analysis.json", debug)
+        except Exception as e:
+            _debug(f"  Failed to load static_analysis.json: {e}", debug)
+    
     # Generate problem PDDL
     _debug("Generating problem PDDL...", debug)
     problem_path = gen.generate_problem(
@@ -347,7 +356,8 @@ def synthesize(bug_id: str, goal: str,
         plan.primitives, 
         os.path.join(pddl_dir, 'problem.pddl'), 
         goal,
-        debug=debug
+        debug=debug,
+        analysis_data=analysis_data
     )
     _debug(f"  problem_path: {problem_path}", debug)
 
@@ -398,14 +408,7 @@ def synthesize(bug_id: str, goal: str,
                 stitch_platform = "linux"
                 stitch_arch = "x86_64"
             
-            # Load analysis data if available
-            analysis_data = None
-            static_path = Path(analysis_dir) / 'static_analysis.json'
-            if static_path.exists():
-                try:
-                    analysis_data = json.loads(static_path.read_text())
-                except Exception:
-                    pass
+            # analysis_data was already loaded earlier for PDDL generation
             
             # Create stitcher config
             stitch_config = StitcherConfig(
@@ -417,19 +420,18 @@ def synthesize(bug_id: str, goal: str,
             )
             
             # Use LLM stitcher if available, otherwise fall back to template stitcher
-            if HAS_LITELLM:
-                _debug("Using LLM-powered stitcher with library code mapping", debug)
-                stitcher = LLMExploitStitcher(stitch_config)
-            else:
-                _debug("LiteLLM not available, using template-based stitcher", debug)
-                from .stitcher.stitcher import StitcherConfig as TemplateConfig
-                template_config = TemplateConfig(
-                    platform=stitch_platform,
-                    arch=stitch_arch,
-                    include_debug=debug,
-                    output_dir=analysis_dir,
-                )
-                stitcher = ExploitStitcher(template_config)
+            _debug("Using LLM-powered stitcher with library code mapping", debug)
+            stitcher = LLMExploitStitcher(stitch_config)
+            # else:
+            #     _debug("LiteLLM not available, using template-based stitcher", debug)
+            #     from .stitcher.stitcher import StitcherConfig as TemplateConfig
+            #     template_config = TemplateConfig(
+            #         platform=stitch_platform,
+            #         arch=stitch_arch,
+            #         include_debug=debug,
+            #         output_dir=analysis_dir,
+            #     )
+            #     stitcher = ExploitStitcher(template_config)
             
             # Stitch each plan into an exploit
             for i, parsed_plan in enumerate(all_parsed_plans):

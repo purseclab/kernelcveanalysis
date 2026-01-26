@@ -17,7 +17,6 @@ from .llm_stitcher import (
     stitch_from_plan,
     ACTION_TO_LIBRARY,
     LibraryCodeMapping,
-    HAS_LITELLM,
 )
 
 __all__ = [
@@ -28,5 +27,4 @@ __all__ = [
     'stitch_from_plan',
     'ACTION_TO_LIBRARY',
     'LibraryCodeMapping',
-    'HAS_LITELLM',
 ]

@@ -201,7 +201,8 @@ def analyze_bug(bug_id: str, kernel_name: str, qemu: bool, source_image: Path, s
                     kernel_disk=str(source_disk) if source_disk else None,
                     bzimage_path=str(source_image) if source_image else None,
                     gdb_port=gdb_port,
-                    timeout=360
+                    timeout=360,
+                    tmp_scope_dir=str(output_dir)
                 )
                 # Ensure we have a compiled binary
                 repro_binary = repro_binary_path or str(metadata.artifact_path('repro'))

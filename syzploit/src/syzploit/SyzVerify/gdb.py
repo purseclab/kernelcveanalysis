@@ -1,23 +1,17 @@
+import atexit
 # syz_trace.py (patched to only monitor after poc_entry)
-
 import gdb
 import re
 import time
+import atexit
 
 # Monitor mode toggle injected by dynamic.py as `monitor_mode` in config header
 try:
     from typing import Any
 except Exception:
     pass
-try:
-    monitor_mode = bool(int(gdb.parse_and_eval('$monitor_mode')))
-except Exception:
-    monitor_mode = False
-try:
-    monitor_always = bool(int(gdb.parse_and_eval('$monitor_always')))
-except Exception:
-    # Default to always monitor to handle cases without userspace gating
-    monitor_always = True
+monitor_mode = True
+monitor_always = True
 
 # ---------- configuration helpers ----------
 def conv_u64(v):
@@ -35,7 +29,6 @@ def gvar(name):
     except Exception:
         return None
 
-_poc_entry_v = gvar("$poc_entry")
 _fault_addr_v = gvar("$fault_addr")
 _access_type_v = gvar("$access_type")
 _access_size_v = gvar("$access_size")
@@ -43,7 +36,6 @@ _fault_insn_v = gvar("$fault_insn")
 _enable_alloc_track = True
 _enable_kasan_check = True
 
-poc_entry = str(_poc_entry_v) if _poc_entry_v is not None else None
 fault_addr = None
 if _fault_addr_v is not None:
     try:
@@ -132,7 +124,6 @@ alloc_addrs = set([a for a in (kmalloc_addr,) if a])
 free_addrs = set([a for a in (kfree_addr, vfree_addr) if a])
 
 gdb.write("syz_trace: configuration\n", gdb.STDERR)
-gdb.write("  poc_entry = %s\n" % (poc_entry,), gdb.STDERR)
 gdb.write("  fault_addr = %s\n" % (hex(fault_addr) if fault_addr else "None"), gdb.STDERR)
 gdb.write("  access_type = %s\n" % (access_type,), gdb.STDERR)
 gdb.write("  access_size = %s\n" % (access_size if access_size else "any"), gdb.STDERR)
@@ -206,9 +197,18 @@ _system_map_path_v = gvar('$system_map_path')
 _system_map_path = str(_system_map_path_v) if _system_map_path_v is not None else None
 _system_map = None
 
+# Cap hardware breakpoints/watchpoints to avoid DR limitations (typically 4 on x86)
+_installed_hw_bps_count = 0
+_max_hw_bps = 4
+
 def _load_system_map(path):
     global _system_map
     try:
+        import os
+        # Ignore invalid placeholders like 'void' or non-existent paths
+        if (not path) or (str(path).strip().lower() in ("void", "none")) or (not os.path.isfile(str(path))):
+            _system_map = {}
+            return
         m = {}
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
@@ -239,7 +239,11 @@ def _resolve_addr(sym):
 
 def _set_hw_bp_addr(addr, label=None):
     try:
+        global _installed_hw_bps_count
+        if _installed_hw_bps_count >= _max_hw_bps:
+            return False
         gdb.execute("hbreak *0x%x" % int(addr), to_string=True)
+        _installed_hw_bps_count += 1
         if label:
             gdb.write("[syz_trace] installed HARDWARE bp at %s 0x%x\n" % (label, int(addr)), gdb.STDERR)
         else:
@@ -256,9 +260,6 @@ def _set_hw_bp_for_symbol(sym):
     except Exception:
         pass
     return False
-
-# New global toggle: monitor immediately if monitor_always, monitor_mode, or no poc_entry provided
-poc_reached = bool(monitor_always or monitor_mode or (poc_entry is None))
 
 def _bt(max_frames=10):
     frames = []
@@ -325,18 +326,6 @@ def _parse_expr_addr(expr):
         pass
     return None
 
-# ---------------- NEW: poc_entry gating breakpoint ----------------
-class PocEntryBreakpoint(gdb.Breakpoint):
-    def __init__(self, spec):
-        super().__init__(spec, gdb.BP_BREAKPOINT, internal=False)
-        self.silent = True
-
-    def stop(self):
-        global poc_reached
-        poc_reached = True
-        gdb.write("[syz_trace] poc_entry reached, enabling instrumentation\n", gdb.STDERR)
-        return False
-
 
 # ---------------- Breakpoints patched with gating ----------------
 class AllocBp(gdb.Breakpoint):
@@ -345,8 +334,6 @@ class AllocBp(gdb.Breakpoint):
         self.is_alloc = is_alloc
         self.silent = True
     def stop(self):
-        if not poc_reached:
-            return False
         try:
             if self.is_alloc:
                 size = None
@@ -390,8 +377,6 @@ class AllocRetBp(gdb.FinishBreakpoint):
         self.size = size
         self.frames = frames
     def stop(self):
-        if not poc_reached:
-            return False
         try:
             p = int(gdb.parse_and_eval("((unsigned long)$rax)"))
             alloc_map[p] = (self.size, self.frames)
@@ -414,8 +399,6 @@ class AccessWatchpoint(gdb.Breakpoint):
         except Exception as e:
             gdb.write("[syz_trace] awatch failed for %s: %s\n" % (expr, e), gdb.STDERR)
     def stop(self):
-        if not poc_reached:
-            return False
         try:
             rip = int(gdb.parse_and_eval("$rip"))
         except Exception:
@@ -436,8 +419,6 @@ class RipBreakpoint(gdb.Breakpoint):
         super().__init__(str(addr), gdb.BP_BREAKPOINT, internal=False)
         self.silent = True
     def stop(self):
-        if not poc_reached:
-            return False
         rip = int(gdb.parse_and_eval("$rip"))
         gdb.write("[syz_trace] breakpoint at fault RIP %s reached\n" % hex(rip), gdb.STDERR)
         regs = dump_regs()
@@ -489,8 +470,6 @@ class FreePtrWatchpoint(gdb.Breakpoint):
         except Exception:
             pass
     def stop(self):
-        if not poc_reached:
-            return False
         try:
             rip = int(gdb.parse_and_eval("$rip"))
         except Exception:
@@ -511,8 +490,6 @@ class FuncBreakpoint(gdb.Breakpoint):
         self.sym = sym
         self.arg_names = arg_names or []
     def stop(self):
-        if not poc_reached:
-            return False
         rip = None
         try:
             rip = int(gdb.parse_and_eval('$rip'))
@@ -727,6 +704,11 @@ def install_kasan_watch():
         gdb.write("[syz_trace] kasan_report symbol not found\n", gdb.STDERR)
 
 def install_checks():
+    # Allow unresolved symbols to be set as pending breakpoints
+    try:
+        gdb.execute("set breakpoint pending on", to_string=True)
+    except Exception:
+        pass
     if fault_addr:
         expr = "*((char *)%d)" % fault_addr
         try:
@@ -741,41 +723,51 @@ def install_checks():
         except Exception as e:
             gdb.write("[syz_trace] could not place breakpoint at fault_insn: %s\n" % e, gdb.STDERR)
 
-    if poc_entry and not monitor_mode:
-        try:
-            PocEntryBreakpoint(poc_entry)
-            gdb.write("[syz_trace] breakpoint placed at poc_entry %s\n" % poc_entry, gdb.STDERR)
-        except Exception:
-            try:
-                PocEntryBreakpoint("*%s" % poc_entry)
-                gdb.write("[syz_trace] breakpoint placed at poc_entry %s (addr)\n" % poc_entry, gdb.STDERR)
-            except Exception as e:
-                gdb.write("[syz_trace] could not place poc_entry BP: %s\n" % e, gdb.STDERR)
 
     if _enable_alloc_track:
-        # Try symbols first; if unavailable, hardware breakpoints on provided addresses still work.
-        for sym in ("__kmalloc", "kmalloc", "kfree", "vfree"):
+        # Symbols to monitor
+        alloc_syms = (
+            "__kmalloc",
+            "kmalloc",
+            "kmalloc_node",
+            "kmem_cache_alloc",
+            "kmem_cache_alloc_trace",
+        )
+        free_syms = (
+            "kfree",
+            "vfree",
+            "kmem_cache_free",
+            "kfree_rcu",
+            "kvfree",
+            "vfree_atomic",
+        )
+        # Prefer hardware for critical minimal set; use software bp for the rest
+        critical_hw = ("__kmalloc", "kfree")
+        for sym in alloc_syms + free_syms:
+            is_alloc = (sym in alloc_syms)
             try:
-                # Prefer address from System.map
-                if not _set_hw_bp_for_symbol(sym):
-                    try:
-                        gdb.execute("hbreak %s" % sym, to_string=True)
-                        gdb.write("[syz_trace] installed HARDWARE bp on %s\n" % sym, gdb.STDERR)
-                    except Exception:
-                        AllocBp(sym, is_alloc=(sym not in ("kfree", "vfree")))
-                        gdb.write("[syz_trace] installed alloc/free bp on %s\n" % sym, gdb.STDERR)
+                if sym in critical_hw and _set_hw_bp_for_symbol(sym):
+                    continue
+                # Software breakpoint fallback
+                try:
+                    bp = gdb.Breakpoint(sym, gdb.BP_BREAKPOINT)
+                    bp.silent = True
+                    gdb.write("[syz_trace] installed bp on %s\n" % sym, gdb.STDERR)
+                except Exception:
+                    # Last resort: Python handler breakpoint
+                    AllocBp(sym, is_alloc=is_alloc)
+                    gdb.write("[syz_trace] installed alloc/free bp on %s\n" % sym, gdb.STDERR)
             except Exception as e:
                 gdb.write("[syz_trace] failed to set bp on %s: %s\n" % (sym, e), gdb.STDERR)
 
         # Populate alloc/free address sets from System.map for stop handler correlation
         try:
-            km_addr = _resolve_addr('__kmalloc') or _resolve_addr('kmalloc')
-            kf_addr = _resolve_addr('kfree')
-            vf_addr = _resolve_addr('vfree')
-            for a in [km_addr]:
+            for s in alloc_syms:
+                a = _resolve_addr(s)
                 if a:
                     alloc_addrs.add(int(a))
-            for a in [kf_addr, vf_addr]:
+            for s in free_syms:
+                a = _resolve_addr(s)
                 if a:
                     free_addrs.add(int(a))
         except Exception:
@@ -853,7 +845,58 @@ def _touch_export():
 
 _touch_export()
 
+# Helper to force export now (used on GDB exit via atexit)
+def _export_now():
+    try:
+        # Determine export path
+        try:
+            p = gdb.parse_and_eval('$export_path')
+            s = str(p)
+            if s.startswith('"') and s.endswith('"'):
+                s = s[1:-1]
+            path = s if s else None
+        except Exception:
+            path = None
+        if not path:
+            path = "/tmp/gdb_analysis.json"
+        # Use the command to serialize current in-memory results
+        try:
+            gdb.execute(f"export_results {path}", to_string=True)
+            gdb.write(f"[syz_trace] atexit export -> {path}\n", gdb.STDERR)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+try:
+    atexit.register(_export_now)
+except Exception:
+    pass
+
 # Monitor mode: hook stop events to log and auto-continue
+_continue_retry_count = 0
+_max_continue_retries = 3
+
+def _disable_failing_breakpoints():
+    """Disable breakpoints that fail to insert due to memory access issues."""
+    disabled_count = 0
+    try:
+        for bp in gdb.breakpoints():
+            try:
+                # Check if breakpoint is valid but not inserted
+                # We can't directly check this, so we just disable pending breakpoints
+                # that are at kernel addresses (high addresses starting with 0xffffffff)
+                if bp.location:
+                    loc = str(bp.location)
+                    if '*0xffffffff' in loc or loc.startswith('0xffffffff'):
+                        bp.enabled = False
+                        disabled_count += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return disabled_count
+
 def _on_stop(event):
     try:
         rip = int(gdb.parse_and_eval('$rip'))
@@ -866,50 +909,73 @@ def _on_stop(event):
 
     # Hardware breakpoint tracking when symbols are not loaded
     try:
-        if poc_reached or monitor_mode:
-            if rip and rip in alloc_addrs:
-                # allocation: capture size from rdi/rsi and install finish bp to get return ptr
-                size = None
+        if rip and rip in alloc_addrs:
+            # allocation: capture size from rdi/rsi and install finish bp to get return ptr
+            size = None
+            try:
+                size = int(gdb.parse_and_eval('((unsigned long)$rdi)'))
+            except Exception:
                 try:
-                    size = int(gdb.parse_and_eval('((unsigned long)$rdi)'))
+                    size = int(gdb.parse_and_eval('((unsigned long)$rsi)'))
                 except Exception:
-                    try:
-                        size = int(gdb.parse_and_eval('((unsigned long)$rsi)'))
-                    except Exception:
-                        size = None
+                    size = None
+            try:
+                AllocRetBp(gdb.newest_frame(), size, frames)
+            except Exception:
+                pass
+        elif rip and rip in free_addrs:
+            # free: capture pointer from rdi
+            try:
+                p = int(gdb.parse_and_eval('((unsigned long)$rdi)'))
+            except Exception:
+                p = None
+            if p:
+                free_set.add(p)
+                free_events.append({"ptr": p, "time": ts})
                 try:
-                    AllocRetBp(gdb.newest_frame(), size, frames)
+                    if len(_installed_free_watches) < _max_free_watchpoints and p not in _installed_free_watches:
+                        _installed_free_watches.add(p)
+                        FreePtrWatchpoint(p)
                 except Exception:
                     pass
-            elif rip and rip in free_addrs:
-                # free: capture pointer from rdi
-                try:
-                    p = int(gdb.parse_and_eval('((unsigned long)$rdi)'))
-                except Exception:
-                    p = None
-                if p:
-                    free_set.add(p)
-                    free_events.append({"ptr": p, "time": ts})
-                    try:
-                        if len(_installed_free_watches) < _max_free_watchpoints and p not in _installed_free_watches:
-                            _installed_free_watches.add(p)
-                            FreePtrWatchpoint(p)
-                    except Exception:
-                        pass
     except Exception:
         pass
 
-    if monitor_mode:
-        # Defer continue to avoid recursive re-entry and RecursionError
-        def _resume():
-            try:
-                gdb.execute('continue')
-            except Exception:
-                pass
+    def _resume():
+        global _continue_retry_count
         try:
-            gdb.post_event(_resume)
-        except Exception:
-            pass
+            gdb.execute('continue')
+            _continue_retry_count = 0  # Reset on successful continue
+        except gdb.error as e:
+            err_msg = str(e)
+            if 'Cannot insert breakpoint' in err_msg or 'Cannot access memory' in err_msg or 'Command aborted' in err_msg:
+                _continue_retry_count += 1
+                if _continue_retry_count <= _max_continue_retries:
+                    gdb.write(f"[WARN] continue failed: {err_msg}. Disabling failing breakpoints and retrying ({_continue_retry_count}/{_max_continue_retries})...\n", gdb.STDERR)
+                    # Disable all breakpoints and try again
+                    try:
+                        for bp in gdb.breakpoints():
+                            try:
+                                bp.enabled = False
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    # Post another resume attempt
+                    try:
+                        gdb.post_event(_resume)
+                    except Exception:
+                        pass
+                else:
+                    gdb.write(f"[ERROR] continue failed after {_max_continue_retries} retries: {err_msg}. Giving up.\n", gdb.STDERR)
+            else:
+                gdb.write(f"[WARN] continue failed: {err_msg}\n", gdb.STDERR)
+        except Exception as e:
+            gdb.write(f"[WARN] continue failed: {e}\n", gdb.STDERR)
+    try:
+        gdb.post_event(_resume)
+    except Exception:
+        pass
 
     # Path verifier monitors from crash log/static analysis
     try:
@@ -971,6 +1037,45 @@ class SyzTraceSummaryCmd(gdb.Command):
 SyzTraceSummaryCmd()
 
 
+class SyzSafeContinueCmd(gdb.Command):
+    """syz_safe_continue -- continue execution, disabling failing breakpoints if needed."""
+    def __init__(self):
+        super(SyzSafeContinueCmd, self).__init__("syz_safe_continue", gdb.COMMAND_USER)
+
+    def invoke(self, arg, from_tty):
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                gdb.execute('continue', to_string=True)
+                return  # Success
+            except gdb.error as e:
+                err_msg = str(e)
+                if 'Cannot insert breakpoint' in err_msg or 'Cannot access memory' in err_msg or 'Command aborted' in err_msg:
+                    gdb.write(f"[syz_safe_continue] attempt {attempt+1}/{max_retries} failed: {err_msg}\n", gdb.STDERR)
+                    # Disable all breakpoints and retry
+                    disabled = 0
+                    try:
+                        for bp in gdb.breakpoints():
+                            try:
+                                if bp.enabled:
+                                    bp.enabled = False
+                                    disabled += 1
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    gdb.write(f"[syz_safe_continue] disabled {disabled} breakpoints, retrying...\n", gdb.STDERR)
+                else:
+                    gdb.write(f"[syz_safe_continue] failed: {err_msg}\n", gdb.STDERR)
+                    return
+            except Exception as e:
+                gdb.write(f"[syz_safe_continue] error: {e}\n", gdb.STDERR)
+                return
+        gdb.write("[syz_safe_continue] giving up after max retries\n", gdb.STDERR)
+
+SyzSafeContinueCmd()
+
+
 class ExportResultsCmd(gdb.Command):
     def __init__(self):
         super(ExportResultsCmd, self).__init__("export_results", gdb.COMMAND_USER)
@@ -1015,10 +1120,12 @@ class SyzLoadConfigCmd(gdb.Command):
     """syz_load_config <json_path> -- set convenience variables from JSON.
 
     JSON keys supported:
-      poc_entry (str), fault_addr (int), fault_insn (int),
+      fault_addr (int), fault_insn (int),
       access_type (str), access_size (int),
       kmalloc_addr (int), kfree_addr (int), vfree_addr (int),
       monitor_mode (bool), reproducer_path (str)
+
+    If the config file does not exist, this command does nothing (no error).
     """
     def __init__(self):
         super(SyzLoadConfigCmd, self).__init__("syz_load_config", gdb.COMMAND_USER)
@@ -1035,9 +1142,14 @@ class SyzLoadConfigCmd(gdb.Command):
             pass
 
     def invoke(self, arg, from_tty):
+        import os
         path = arg.strip()
         if not path:
             gdb.write("[syz_load_config] usage: syz_load_config <json_path>\n", gdb.STDERR)
+            return
+        # Skip silently if config file does not exist
+        if not os.path.isfile(path):
+            gdb.write(f"[syz_load_config] config file not found, skipping: {path}\n", gdb.STDERR)
             return
         try:
             import json
@@ -1045,7 +1157,6 @@ class SyzLoadConfigCmd(gdb.Command):
                 cfg = json.load(f)
             # Map known keys to convenience vars
             mapping = {
-                "poc_entry": "poc_entry",
                 "fault_addr": "fault_addr",
                 "fault_insn": "fault_insn",
                 "access_type": "access_type",
@@ -1090,263 +1201,3 @@ class SyzLoadSystemMapCmd(gdb.Command):
             gdb.write(f"[syz_load_system_map] failed: {e}\n", gdb.STDERR)
 
 SyzLoadSystemMapCmd()
-# syz_trace.py (patched for logging + poc_entry=main + thread IDs)
-
-# import gdb
-# import time
-# import traceback
-
-# # -------------------------------------------------------------------
-# # Logging subsystem
-# # -------------------------------------------------------------------
-
-# def _get_log_path():
-#     """Returns path to the log output file."""
-#     try:
-#         v = gdb.parse_and_eval("$syz_trace_log")
-#         s = str(v)
-#         if s.startswith('"') and s.endswith('"'):
-#             s = s[1:-1]
-#         if len(s) > 0:
-#             return s
-#     except Exception:
-#         pass
-#     return "/tmp/syz_trace.log"
-
-# LOG_PATH = "/tmp/syz_trace.log"
-
-# def _thread_id():
-#     """Returns a string describing the current thread, ex: (1234.5678)."""
-#     try:
-#         t = gdb.selected_thread()
-#         if not t:
-#             return "(tid=unknown)"
-#         ptid = t.ptid
-#         if isinstance(ptid, tuple) and len(ptid) >= 2:
-#             return "(%s.%s)" % (ptid[0], ptid[1])
-#         return "(tid=%s)" % str(ptid)
-#     except Exception:
-#         return "(tid=unknown)"
-
-# def log(msg):
-#     """Append log message to external trace log with timestamp + thread ID."""
-#     try:
-#         ts = time.strftime("%Y-%m-%d %H:%M:%S")
-#         tid = _thread_id()
-#         with open(LOG_PATH, "a", encoding="utf-8") as f:
-#             f.write("[%s] %s %s\n" % (ts, tid, msg))
-#     except Exception as e:
-#         gdb.write("[syz_trace logging error] %s\n" % e, gdb.STDERR)
-
-# log("=== syz_trace started ===")
-# log("Log file: %s" % LOG_PATH)
-
-
-# # -------------------------------------------------------------------
-# # poc_entry hardcoded to main
-# # -------------------------------------------------------------------
-
-# POC_ENTRY = "main"      # Always start tracing AFTER main() in repro.c
-# log("poc_entry forced to: main")
-
-# poc_reached = False
-
-
-# # -------------------------------------------------------------------
-# # Helpers
-# # -------------------------------------------------------------------
-
-# def dump_regs():
-#     regs = {}
-#     for r in ["rip","rsp","rbp","rax","rbx","rcx","rdx","rsi","rdi",
-#               "r8","r9","r10","r11","r12","r13","r14","r15"]:
-#         try:
-#             regs[r] = gdb.parse_and_eval("$" + r)
-#         except Exception:
-#             regs[r] = "<na>"
-#     return regs
-
-# def bt(max_frames=12):
-#     out = []
-#     f = gdb.newest_frame()
-#     i = 0
-#     while f and i < max_frames:
-#         try:
-#             name = f.name() or "<unknown>"
-#         except Exception:
-#             name = "<unknown>"
-
-#         sal = f.find_sal()
-#         if sal and sal.symtab:
-#             loc = "%s:%d" % (sal.symtab.filename, sal.line)
-#         else:
-#             loc = ""
-
-#         out.append("%s %s" % (name, loc))
-#         f = f.older()
-#         i += 1
-#     return out
-
-
-# # -------------------------------------------------------------------
-# # Breakpoint: poc_entry (main)
-# # -------------------------------------------------------------------
-
-# class PocEntryBP(gdb.Breakpoint):
-#     def __init__(self):
-#         super().__init__(POC_ENTRY, gdb.BP_BREAKPOINT, internal=False)
-#         self.silent = True
-
-#     def stop(self):
-#         global poc_reached
-#         poc_reached = True
-#         msg = "poc_entry reached (main). instrumentation enabled"
-#         log(msg)
-#         gdb.write("[syz_trace] %s\n" % msg, gdb.STDERR)
-#         return False
-
-
-# # -------------------------------------------------------------------
-# # Allocation / free breakpoints
-# # -------------------------------------------------------------------
-
-# class AllocBP(gdb.Breakpoint):
-#     def __init__(self, sym, is_alloc):
-#         super().__init__(sym, gdb.BP_BREAKPOINT, internal=False)
-#         self.silent = True
-#         self.sym = sym
-#         self.is_alloc = is_alloc
-
-#     def stop(self):
-#         if not poc_reached:
-#             return False
-
-#         try:
-#             if self.is_alloc:
-#                 try:
-#                     size = int(gdb.parse_and_eval("$rdi"))
-#                 except Exception:
-#                     size = None
-#                 log("alloc: %s size=%s" % (self.sym, size))
-#                 return False
-#             else:
-#                 try:
-#                     p = int(gdb.parse_and_eval("$rdi"))
-#                 except Exception:
-#                     p = None
-#                 log("free: %s ptr=%s" % (self.sym, hex(p) if p else "??"))
-#                 return False
-
-#         except Exception as e:
-#             log("AllocBP error: %s" % e)
-#             return False
-
-
-# # -------------------------------------------------------------------
-# # Fault instruction BP
-# # -------------------------------------------------------------------
-
-# class RipBP(gdb.Breakpoint):
-#     def __init__(self, addr):
-#         super().__init__(addr, gdb.BP_BREAKPOINT, internal=False)
-#         self.silent = True
-
-#     def stop(self):
-#         if not poc_reached:
-#             return False
-
-#         rip = int(gdb.parse_and_eval("$rip"))
-#         log("fault_rip hit at %x" % rip)
-#         for line in bt():
-#             log("  bt: %s" % line)
-#         return False
-
-
-# # -------------------------------------------------------------------
-# # Watchpoint wrapper
-# # -------------------------------------------------------------------
-
-# class AccessWatchBP(gdb.Breakpoint):
-#     def __init__(self, expr):
-#         super().__init__(spec=None, type=gdb.BP_BREAKPOINT, internal=True)
-#         self.expr = expr
-#         self.silent = True
-#         try:
-#             gdb.execute("awatch %s" % expr, to_string=True)
-#             log("installed awatch %s" % expr)
-#         except Exception as e:
-#             log("awatch failed for %s: %s" % (expr, e))
-
-#     def stop(self):
-#         if not poc_reached:
-#             return False
-
-#         try:
-#             rip = int(gdb.parse_and_eval("$rip"))
-#         except Exception:
-#             rip = None
-
-#         log("watchpoint hit RIP=%s expr=%s" %
-#             (hex(rip) if rip else "?", self.expr))
-
-#         for frame in bt():
-#             log("  bt: %s" % frame)
-
-#         return False
-
-
-# class ExportResultsCmd(gdb.Command):
-#     def __init__(self):
-#         super(ExportResultsCmd, self).__init__("export_results", gdb.COMMAND_USER)
-#     def invoke(self, arg, from_tty):
-#         path = arg.strip()
-#         if not path:
-#             gdb.write("[export_results] usage: export_results <output_path>\n", gdb.STDERR)
-#             return
-#         try:
-#             import json
-#             with open(path, "w", encoding="utf-8") as f:
-#                 json.dump({
-#                     "events": hit_events,
-#                     "allocations": {hex(k): v for k, v in alloc_map.items()},
-#                     "frees": [hex(x) for x in list(free_set)],
-#                 }, f, indent=2)
-#             gdb.write(f"[export_results] wrote results to {path}\n", gdb.STDERR)
-#         except Exception as e:
-#             gdb.write(f"[export_results] failed: {e}\n", gdb.STDERR)
-
-# ExportResultsCmd()
-
-# # -------------------------------------------------------------------
-# # Instrumentation installation
-# # -------------------------------------------------------------------
-
-# def install():
-#     PocEntryBP()
-
-#     # Alloc/free instrumentation
-#     for sym, is_alloc in [
-#         ("__kmalloc", True),
-#         ("kmalloc", True),
-#         ("kfree", False),
-#         ("vfree", False)
-#     ]:
-#         try:
-#             AllocBP(sym, is_alloc)
-#             log("installed alloc/free bp: %s" % sym)
-#         except Exception:
-#             pass
-
-#     # kasan_report if present
-#     try:
-#         bp = gdb.Breakpoint("kasan_report", gdb.BP_BREAKPOINT)
-#         bp.silent = True
-#         log("installed kasan_report bp")
-#     except Exception:
-#         log("kasan_report symbol unavailable")
-
-
-# install()
-
-# gdb.write("[syz_trace] instrumentation installed. log: %s\n" % LOG_PATH, gdb.STDERR)
-# log("instrumentation installed; waiting for main()")
