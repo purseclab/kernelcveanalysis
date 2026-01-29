@@ -35,6 +35,7 @@ RUN apt-get update && apt-get install -y \
     clang-format \
     qemu-system-x86 \
     gdb \
+    gdb-multiarch \
     sudo \
     ca-certificates \
     python3-dev \
@@ -56,13 +57,14 @@ RUN wget https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghid
     unzip ghidra_11.4_PUBLIC_20250620.zip -d /workspace && \
     rm ghidra_11.4_PUBLIC_20250620.zip
 
-# Install uv
-RUN pip install --no-cache-dir uv rich pyyaml
+# Install uv (both the CLI and as pip-accessible build backend)
+RUN pip install --no-cache-dir uv uv-build rich pyyaml && \
+    pip3 install --no-cache-dir uv uv-build
 
 # Clone and build vmlinux-to-elf
 RUN git clone https://github.com/marin-m/vmlinux-to-elf.git /workspace/vmlinux-to-elf && \
     pip3 install --upgrade lz4 zstandard git+https://github.com/clubby789/python-lzo@b4e39df && \
-    pip3 install --upgrade git+https://github.com/marin-m/vmlinux-to-elf
+    cd /workspace/vmlinux-to-elf && pip3 install --upgrade .
 
 # Create workspace
 RUN mkdir -p /workspace && chown -R kuser:kuser /workspace

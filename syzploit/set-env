@@ -6,4 +6,6 @@ docker run -it -d --name syzploit \
   --device=/dev/kvm \
   --group-add $(getent group kvm | cut -d: -f3) \
   -v "$(pwd):/workspace/syzploit" \
+  -v "$HOME/.ssh:/home/kuser/.ssh:ro" \
+  -v "/etc/hosts:/etc/hosts:ro" \
   syzploit-env
