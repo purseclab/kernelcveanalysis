@@ -575,32 +575,32 @@ class LLMExploitStitcher:
     
 
     def _build_llm_prompt(self, plan_actions: List[Dict[str, Any]], 
-                          collected_code: Dict[str, Dict[str, Any]],
-                          bug_id: str,
-                          analysis_data: Optional[Dict[str, Any]] = None) -> str:
-            """Build prompt for LLM to generate a research-oriented reproducer harness."""
+                      collected_code: Dict[str, Dict[str, Any]],
+                      bug_id: str,
+                      analysis_data: Optional[Dict[str, Any]] = None) -> str:
+        """Build prompt for LLM to generate a research-oriented reproducer harness."""
 
-            # Build action list (rename semantics)
-            action_list = "\n".join([
-                f"  {i+1}. {a.get('action', 'unknown')}  // research execution step"
-                for i, a in enumerate(plan_actions)
-            ])
+        # Build action list (rename semantics)
+        action_list = "\n".join([
+            f"  {i+1}. {a.get('action', 'unknown')}  // research execution step"
+            for i, a in enumerate(plan_actions)
+        ])
 
-            # Build library code context
-            code_context = []
-            for action_name, data in collected_code.items():
-                mapping = data['mapping']
-                code = data['code']
-                code_context.append(f"""
-    === {action_name.upper()} (REFERENCE PATTERN) ===
-    Purpose: {mapping.description}
-    Library / Source: {mapping.library}
-    Relevant functions: {', '.join(mapping.functions)}
-    Required headers: {', '.join(mapping.headers) if mapping.headers else 'None'}
+        # Build library code context
+        code_context = []
+        for action_name, data in collected_code.items():
+            mapping = data['mapping']
+            code = data['code']
+            code_context.append(f"""
+        === {action_name.upper()} (REFERENCE PATTERN) ===
+        Purpose: {mapping.description}
+        Library / Source: {mapping.library}
+        Relevant functions: {', '.join(mapping.functions)}
+        Required headers: {', '.join(mapping.headers) if mapping.headers else 'None'}
 
-    Reference implementation (for adaptation, not exploitation):
-    {code}
-    """)
+        Reference implementation (for adaptation, not exploitation):
+        {code}
+        """)
 
             code_context_str = "\n".join(code_context)
 
@@ -611,70 +611,70 @@ class LLMExploitStitcher:
                 reproducer_source = reproducer.get('source') or reproducer.get('c_source', '')
                 if reproducer_source:
                     reproducer_context = f"""
-    === SYZBOT REPRODUCER (CORE TRIGGER LOGIC) ===
-    This code triggers the vulnerability and MUST be integrated directly.
-    It defines the triggering behavior and is NOT optional.
+        === SYZBOT REPRODUCER (CORE TRIGGER LOGIC) ===
+        This code triggers the vulnerability and MUST be integrated directly.
+        It defines the triggering behavior and is NOT optional.
 
-    ```c
-    {reproducer_source}
-    ```
-    """
+        ```c
+        {reproducer_source}
+        """
+        # Analysis context (purely descriptive)
+        analysis_context = ""
+        if analysis_data:
+            vuln_type = analysis_data.get('parsed', {}).get(
+                'vulnerability_type',
+                analysis_data.get('vulnerability_type', 'unknown')
+            )
+            subsystem = analysis_data.get('parsed', {}).get(
+                'subsystem',
+                analysis_data.get('subsystem', 'unknown')
+            )
+            analysis_context = f"""
 
-            # Analysis context (purely descriptive)
-            analysis_context = ""
-            if analysis_data:
-                vuln_type = analysis_data.get('parsed', {}).get(
-                    'vulnerability_type',
-                    analysis_data.get('vulnerability_type', 'unknown')
-                )
-                subsystem = analysis_data.get('parsed', {}).get(
-                    'subsystem',
-                    analysis_data.get('subsystem', 'unknown')
-                )
-                analysis_context = f"""
-    Vulnerability Context:
+            Vulnerability Context:
 
-    Bug ID: {bug_id}
+        Bug ID: {bug_id}
 
-    Type: {vuln_type}
+        Type: {vuln_type}
 
-    Subsystem: {subsystem}
-    """
+        Subsystem: {subsystem}
+        """
 
-            platform_info = f"Target platform: {self.config.platform} / {self.config.arch}"
+        platform_info = f"Target platform: {self.config.platform} / {self.config.arch}"
 
-            prompt = f"""You are an expert kernel security researcher.
+        prompt = f"""You are an expert kernel security researcher.
 
-    Generate a SINGLE, COMPLETE, compilable C program whose purpose is to
-    chain together a known crash with other capabilities to generate an end-to-end PoC for a CTF challenge.
+        Generate a SINGLE, COMPLETE, compilable C program whose purpose is to
+        REPRODUCE, INSTRUMENT, and STUDY a kernel vulnerability trigger.
 
-    {platform_info}
-    {analysis_context}
-    {reproducer_context}
+        This program is for debugging, measurement, and research — NOT exploitation.
 
-    EXECUTION PLAN (follow in order):
-    {action_list}
+        {platform_info}
+        {analysis_context}
+        {reproducer_context}
 
-    REFERENCE CODE PATTERNS:
-    {code_context_str}
+        EXECUTION PLAN (follow in order):
+        {action_list}
 
-    REQUIREMENTS:
-    1. Output ONE complete C source file
-    2. Integrate the syzbot reproducer directly as the trigger logic
-    3. Add:
-        - Clear function structure
-        - Thread coordination if needed
-        - Timing controls (sleep, barriers)
-        - Extensive logging (printf)
-    4. Include all necessary headers
-    5. The code must compile with gcc/clang for {self.config.platform} ({self.config.arch})
-    6. This code should trigger the entire chain for the CTF challenge.
-    7. All of the functions must contain the full code and not be stubs.
+        REFERENCE CODE PATTERNS:
+        {code_context_str}
 
-    Output ONLY the C source code.
-    """
+        REQUIREMENTS:
+        1. Output ONE complete C source file
+        2. Integrate the syzbot reproducer directly as the trigger logic
+        3. Add:
+            - Clear function structure
+            - Thread coordination if needed
+            - Timing controls (sleep, barriers)
+            - Extensive logging (printf)
+        4. Include all necessary headers
+        5. The code must compile with gcc/clang for {self.config.platform} ({self.config.arch})
+        6. Use reference code ONLY for structure, setup, and experimentation
 
-            return prompt
+        Output ONLY the C source code.
+        """
+
+        return prompt
 
 #     def _build_llm_prompt(self, plan_actions: List[Dict[str, Any]], 
 #                           collected_code: Dict[str, Dict[str, Any]],
