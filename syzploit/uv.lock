@@ -1715,6 +1715,21 @@ wheels = [
 ]
 
 [[package]]
+name = "sockio"
+version = "0.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/77/ffddcf26ec43832c576549c7d4ed933aedae0a851c50b39b159035e042ac/sockio-0.15.0.tar.gz", hash = "sha256:32eba7eaa0d402bb6fa27188ed7b0e476e49e4aba6276161c1773e37e7070353", size = 25366, upload-time = "2021-05-23T18:49:09.983Z" }
+
+[[package]]
+name = "socksio"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/5c/48a7d9495be3d1c651198fd99dbb6ce190e2274d0f28b9051307bdec6b85/socksio-1.0.0.tar.gz", hash = "sha256:f88beb3da5b5c38b9890469de67d0cb0f9d494b78b106ca1845f96c10b91c4ac", size = 19055, upload-time = "2020-04-17T15:50:34.664Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/c3/6eeb6034408dac0fa653d126c9204ade96b819c936e136c5e8a6897eee9c/socksio-1.0.0-py3-none-any.whl", hash = "sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3", size = 12763, upload-time = "2020-04-17T15:50:31.878Z" },
+]
+
+[[package]]
 name = "sortedcontainers"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1752,6 +1767,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "capstone" },
     { name = "dotenv" },
+    { name = "httpx" },
     { name = "keystone-engine" },
     { name = "litellm" },
     { name = "mypy" },
@@ -1765,6 +1781,8 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
     { name = "rich" },
+    { name = "sockio" },
+    { name = "socksio" },
     { name = "torch" },
     { name = "transformers" },
     { name = "typer" },
@@ -1775,6 +1793,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.13.4" },
     { name = "capstone", specifier = ">=5.0.6" },
     { name = "dotenv", specifier = ">=0.9.9" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "keystone-engine", specifier = ">=0.9.2" },
     { name = "litellm", specifier = ">=1.80.9" },
     { name = "mypy", specifier = ">=1.16.1" },
@@ -1789,6 +1808,8 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "rich", specifier = ">=14.0.0" },
+    { name = "sockio", specifier = ">=0.15.0" },
+    { name = "socksio", specifier = ">=1.0.0" },
     { name = "torch", specifier = ">=2.9.0" },
     { name = "transformers", specifier = ">=4.57.1" },
     { name = "typer", specifier = ">=0.16.0" },

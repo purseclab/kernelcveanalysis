@@ -58,6 +58,28 @@ ssh -L localhost:5037:localhost:5037 cuttlefish-user@cuttlefish-host
 
 `uv run syzploit test <bug_id>` can now be used to test syzkaller bugs.
 
+### Remote Cuttlefish with Automatic Start/Stop
+
+For testing on remote Cuttlefish servers where you want automatic instance management, use the `test-cuttlefish` command:
+
+```sh
+# Test on remote Cuttlefish with automatic start/stop (non-persistent mode)
+uv run syzploit test-cuttlefish <bug_id> --syzkall-kernel upstream \
+    --ssh-host cuttlefish-server --ssh-user myuser \
+    --setup-tunnels --no-persistent \
+    --start-cmd "cd ~/cf && ./gdb_run.sh 5" \
+    --stop-cmd "cd ~/cf && ./stop.sh 5"
+
+# Test on already-running remote Cuttlefish (persistent mode)
+uv run syzploit test-cuttlefish <bug_id> --syzkall-kernel upstream \
+    --ssh-host cuttlefish-server --ssh-user myuser \
+    --setup-tunnels --persistent --already-running
+```
+
+The `--setup-tunnels` option automatically sets up SSH port forwarding for:
+- **ADB server** (local 5037 → remote 5037): Allows local `adb` commands to work
+- **GDB** (local 1234 → remote 1234): Allows kernel GDB attachment to crosvm
+
 ## Running
 
 Run `uv run syzploit` to run syzploit. There are various commands and subcommands that can be run (see `uv run syzploit --help`).
@@ -66,7 +88,7 @@ Run `uv run syzploit` to run syzploit. There are various commands and subcommand
   - `main.py` — CLI entry and command routing
   - `SyzVerify/` — validation and dynamic analysis
     - `dynamic.py` — orchestrates QEMU/Cuttlefish, kernel GDB, and userspace `gdbserver`; collects events and writes JSON
-    - `gdb.py` — helpers for generating GDB scripts/commands
+    - `gdb.py` — **automated kernel GDB tracing script**; tracks allocs/frees, auto-installs breakpoints on boot, supports aarch64 and x86_64
     - `userspace_gdb.py` — userspace tracing via gdbserver; monitor-only mode supported
     - `run_bug.py` — VM boot + repro execution + artifact management
     - `bug_db.py` — local metadata for syzbot bugs
@@ -89,6 +111,77 @@ SyzVerify automates dynamic analysis of kernel bugs by orchestrating VM executio
 - Userspace tracing: optional `gdbserver` attach to the repro process; records watchpoints and RIP events without pausing (monitor-only).
 - KASLR-aware resolution: uses `System.map` and KASLR slide to compute runtime addresses when symbols are stripped; defers address breakpoints until memory is accessible.
 - Unified outputs: exports `events`, `allocations`, and `frees` as JSON, plus raw logs.
+
+### Automated GDB Kernel Tracing (`gdb.py`)
+
+The GDB tracing script provides **fully automated** kernel memory tracing for vulnerability analysis. It tracks all `kmalloc`/`kfree` operations and crash stack functions without manual intervention.
+
+#### Supported Platforms
+- **aarch64** (Cuttlefish/Android emulator)
+- **x86_64** (QEMU)
+
+#### How It Works
+
+1. **Script loads** → Sets up a boot watcher breakpoint on `start_kernel`
+2. **User runs `continue`** → Kernel boots normally
+3. **Kernel hits `start_kernel`** → Boot watcher auto-installs all tracing breakpoints
+4. **Tracing active** → All alloc/free events logged, execution continues automatically
+5. **On exit** → Results exported to JSON
+
+#### GDB Commands
+
+| Command | Description |
+|---------|-------------|
+| `syz_status` | Show current tracing status (events captured, breakpoints installed) |
+| `syz_export [path]` | Export results to JSON file |
+| `syz_install_breakpoints` | Manually install breakpoints (if boot watcher didn't trigger) |
+| `syz_load_config <path>` | Load crash stack functions from JSON config |
+| `syz_trace_summary` | Show last 50 recorded events |
+
+#### GDB Convenience Variables
+
+Set these before loading the script:
+
+```gdb
+# Required: Path to System.map for symbol resolution
+set $system_map_path = "path/to/System.map"
+
+# Required: Output path for JSON results
+set $export_path = "path/to/results.json"
+
+# Optional: Kernel function addresses (auto-resolved from System.map if not set)
+set $kmalloc_addr = 0xffffffff812345678
+set $kfree_addr = 0xffffffff812345abc
+```
+
+#### Example Usage
+
+```sh
+# Connect GDB to remote kernel (Cuttlefish or QEMU)
+gdb -ex "set architecture aarch64" \
+    -ex "target remote localhost:1234" \
+    -ex 'set $system_map_path = "./System.map"' \
+    -ex 'set $export_path = "./trace_results.json"' \
+    -x src/syzploit/SyzVerify/gdb.py
+
+# In GDB, just continue - everything is automated
+(gdb) continue
+
+# Check status anytime
+(gdb) syz_status
+
+# Export results
+(gdb) syz_export
+```
+
+#### Output Format
+
+The script exports JSON with:
+- `events` — All captured events (allocs, frees, function hits, test hits)
+- `allocations` — Currently allocated objects (ptr → size, backtrace, timestamp)
+- `frees` — Set of freed pointers
+- `func_hits` — Function hit counts
+- `summary` — Event type counts
 
 ### Usage
 - `uv run syzploit pull`: pull exploits from syzkaller website and save locally
@@ -218,7 +311,7 @@ SyzAnalyze processes crash logs and correlates them with dynamic analysis events
 
 ## Synthesizer: Exploit Code Generation
 
-The Synthesizer module takes vulnerability analysis from SyzAnalyze and generates working C exploit code. It uses a PDDL-based planning approach with LLM-powered code generation.
+The Synthesizer module takes vulnerability analysis from SyzAnalyze and generates working C exploit code. It uses a PDDL-based planning approach with LLM-powered code generation, **incorporating the original syzbot reproducer as the vulnerability trigger**.
 
 ### How It Works
 
@@ -226,6 +319,7 @@ The Synthesizer module takes vulnerability analysis from SyzAnalyze and generate
    - Vulnerability type (UAF, OOB, race condition, etc.)
    - Access capabilities (arbitrary read/write)
    - Exploitability rating
+   - **Original syzbot reproducer code**
 
 2. **Platform Detection**: Auto-detects target platform (Linux or Android kernel) from analysis data or accepts explicit specification.
 
@@ -238,8 +332,11 @@ The Synthesizer module takes vulnerability analysis from SyzAnalyze and generate
    - **LLM Stitcher** (preferred): Uses GPT-4o with reference code from `kernel-research/libxdk` and `kernel_PoCs` to generate exploit-specific code
    - **Template Stitcher** (fallback): Uses predefined C code templates
 
+5. **Reproducer Integration**: The generated exploit **incorporates the original syzbot reproducer code** as the vulnerability trigger function, ensuring the exploit uses the exact syscall sequence that triggers the bug.
+
 ### Key Features
 
+- **Original reproducer integration**: The synthesized exploit uses the original syzbot primitive/reproducer as the vulnerability trigger, not a placeholder
 - **Multi-platform support**: Linux (x86_64) and Android (arm64) kernels
 - **Library code mapping**: Maps PDDL actions to actual exploit code patterns from:
   - `kernel-research/libxdk/` - ROP chain builders, stack pivots, KASLR bypass

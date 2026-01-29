@@ -8,7 +8,8 @@ from . import SyzVerify
 from . import SyzAnalyze
 from . import Synthesizer
 from .SyzVerify.bug_db import SyzkallBugDatabase
-from .SyzVerify.run_bug import test_repro_crashes, test_repro_crashes_qemu
+from .SyzVerify.run_bug import test_repro_crashes, test_repro_crashes_qemu, test_repro_with_cuttlefish_controller
+from .SyzVerify.cuttlefish import CuttlefishConfig, create_config_from_args
 import json
 import os
 
@@ -22,6 +23,40 @@ def pull(
 ):
     """Pull bugs from syzbot for a given kernel version"""
     SyzVerify.pull(syzkall_kernel)
+
+
+@app.command()
+def pull_bug(
+    bug_id: Annotated[str, typer.Argument(help='Bug ID to pull from syzbot')],
+    syzkall_kernel: Annotated[str, typer.Option(help='Kernel name for database')] = 'android-5-10',
+    force: Annotated[bool, typer.Option(help='Re-download even if already in database')] = False,
+):
+    """
+    Pull a single bug directly from syzbot by its ID.
+    
+    This is faster than pulling all bugs when you only need one specific bug.
+    The bug ID is the hex string from the syzbot URL (e.g., 283ce5a46486d6acdbaf).
+    
+    Examples:
+        syzploit pull-bug 283ce5a46486d6acdbaf
+        syzploit pull-bug 283ce5a46486d6acdbaf --force
+    """
+    from .SyzVerify.scrape import pull_single_bug
+    
+    db = SyzkallBugDatabase(syzkall_kernel)
+    metadata = pull_single_bug(db, bug_id, force=force)
+    
+    if metadata:
+        typer.echo(f"[✓] Bug pulled successfully:")
+        typer.echo(f"    ID: {metadata.bug_id}")
+        typer.echo(f"    Title: {metadata.title}")
+        typer.echo(f"    Kernel: {metadata.kernel_name}")
+        typer.echo(f"    C Repro: {'Yes' if metadata.c_repro_url else 'No'}")
+        typer.echo(f"    Syz Repro: {'Yes' if metadata.syz_repro_url else 'No'}")
+    else:
+        typer.echo(f"[!] Failed to pull bug {bug_id}")
+        raise typer.Exit(code=1)
+
 
 # Probably temprorary command
 @app.command()
@@ -76,6 +111,166 @@ def collectstats(
     """ Collect stats on bugs from syzbot """
     SyzVerify.collect_stats(syzkall_kernel, outfile)
 
+
+@app.command()
+def test_cuttlefish(
+    bug_id: Annotated[str, typer.Argument(help='Bug ID to test')],
+    syzkall_kernel: Annotated[str, typer.Option(help='Kernel name for bug')] = 'android-5-10',
+    arch: Annotated[str, typer.Option(help='Architecture (arm64/x86_64)')] = 'arm64',
+    root: Annotated[bool, typer.Option(help='Run reproducer as root')] = True,
+    # Cuttlefish instance settings
+    ssh_host: Annotated[str, typer.Option(help='SSH host for Cuttlefish (can be a ~/.ssh/config alias)')] = 'localhost',
+    ssh_port: Annotated[int, typer.Option(help='SSH port for Cuttlefish')] = 22,
+    ssh_user: Annotated[Optional[str], typer.Option(help='SSH user (optional, uses ssh config if not set)')] = None,
+    ssh_key: Annotated[Optional[str], typer.Option(help='SSH key path (optional, uses ssh config if not set)')] = None,
+    ssh_password: Annotated[Optional[str], typer.Option(help='SSH password (if no key)')] = None,
+    # Persistence mode
+    persistent: Annotated[bool, typer.Option(help='Persistent mode (keep Cuttlefish running)')] = True,
+    already_running: Annotated[bool, typer.Option(help='Cuttlefish is already running')] = True,
+    start_cmd: Annotated[Optional[str], typer.Option(help='Command to start Cuttlefish (non-persistent)')] = None,
+    stop_cmd: Annotated[Optional[str], typer.Option(help='Command to stop Cuttlefish (non-persistent)')] = None,
+    # Connection settings
+    instance: Annotated[Optional[int], typer.Option(help='Cuttlefish instance number (auto-calculates ADB port: 6520 + instance - 1)')] = None,
+    gdb_port: Annotated[int, typer.Option(help='Crosvm kernel GDB port')] = 1234,
+    adb_port: Annotated[int, typer.Option(help='ADB port for Cuttlefish device (overridden by --instance)')] = 6520,
+    dynamic_analysis: Annotated[bool, typer.Option(help='Enable GDB-based dynamic analysis (alias for --enable-gdb)')] = True,
+    setup_tunnels: Annotated[bool, typer.Option(help='Set up SSH tunnels for remote ADB/GDB access')] = False,
+    # Cuttlefish runtime logs
+    runtime_logs_dir: Annotated[Optional[str], typer.Option(help='Path to cuttlefish runtime logs dir (e.g., ~/cuttlefish/cuttlefish_runtime.5/logs). If not set, inferred from start command')] = None,
+    # Kernel symbol extraction options
+    kernel_image: Annotated[Optional[str], typer.Option(help='Path to kernel Image file (local or remote). Used to extract vmlinux with symbols via vmlinux-to-elf')] = None,
+    vmlinux_path: Annotated[Optional[str], typer.Option(help='Path to vmlinux with debug symbols (local). If not set and --kernel-image is provided, vmlinux will be auto-extracted')] = None,
+    system_map: Annotated[Optional[str], typer.Option(help='Path to System.map for symbol resolution. Use this if you have a pre-generated System.map (e.g., from /proc/kallsyms)')] = None,
+    remote_vmlinux_path: Annotated[Optional[str], typer.Option(help='DEPRECATED: Path to vmlinux on remote server (GDB now runs locally via tunnel)')] = None,
+    extract_symbols: Annotated[bool, typer.Option(help='Auto-extract vmlinux from kernel Image using vmlinux-to-elf')] = True,
+    # Other options
+    timeout: Annotated[int, typer.Option(help='Test timeout in seconds')] = 120,
+    output_dir: Annotated[Optional[Path], typer.Option(help='Output directory for logs')] = None,
+):
+    """
+    Test a bug reproducer on Cuttlefish with support for persistent and non-persistent modes.
+    
+    PERSISTENT MODE (default):
+    - Use when Cuttlefish is already running or should stay up between tests
+    - Set --persistent --already-running for an already-booted instance
+    - Set --persistent --no-already-running with --start-cmd to boot once and keep running
+    
+    NON-PERSISTENT MODE:
+    - Use when Cuttlefish should start/stop for each test
+    - Set --no-persistent with --start-cmd and --stop-cmd
+    
+    SYMBOL EXTRACTION:
+    - Provide --kernel-image to auto-extract vmlinux with symbols using vmlinux-to-elf
+    - This enables proper symbol resolution for GDB breakpoints and backtraces
+    - The kernel Image can be local or remote (downloaded via SSH if remote)
+    - Alternatively, provide --vmlinux-path directly if you already have vmlinux
+    
+    Examples:
+        # Test on already-running local Cuttlefish with auto symbol extraction
+        syzploit test-cuttlefish abc123 --persistent --already-running --gdb-port 1234 \\
+            --kernel-image ./package/kernel/Image
+        
+        # Test on remote Cuttlefish via SSH with symbol extraction
+        syzploit test-cuttlefish abc123 --ssh-host cuttlefish2 --setup-tunnels \\
+            --instance 5 --kernel-image /home/user/cuttlefish/package/kernel/Image \\
+            --start-cmd "cd ~/cuttlefish && ./gdb_run.sh 5" \\
+            --stop-cmd "cd ~/cuttlefish && ./stop.sh 5"
+        
+        # Test with pre-extracted vmlinux
+        syzploit test-cuttlefish abc123 --persistent --already-running \\
+            --vmlinux-path ./symbols/vmlinux
+    """
+    from .SyzVerify.scrape import pull_single_bug
+    
+    # Initialize DB and get bug metadata
+    db = SyzkallBugDatabase(syzkall_kernel)
+    md = db.get_bug_metadata(bug_id)
+    if md is None:
+        typer.echo(f"[+] Bug {bug_id} not in local database, pulling from syzbot...")
+        md = pull_single_bug(db, bug_id)
+        if md is None:
+            typer.echo(f"[!] Failed to pull bug {bug_id} from syzbot")
+            raise typer.Exit(code=1)
+        typer.echo(f"[+] Successfully pulled: {md.title}")
+    
+    # Compile reproducer
+    typer.echo(f"[+] Compiling reproducer for {arch}...")
+    repro_bin = md.compile_repro(arch)
+    typer.echo(f"[+] Reproducer binary: {repro_bin}")
+    
+    # Calculate ADB port from instance number if provided
+    # Cuttlefish instance ports: base 6520 + (instance - 1)
+    # Instance 1 -> 6520, Instance 5 -> 6524
+    actual_adb_port = adb_port
+    if instance is not None:
+        actual_adb_port = 6520 + (instance - 1)
+        typer.echo(f"[+] Instance {instance}: using ADB port {actual_adb_port}")
+    
+    # Create Cuttlefish configuration
+    config = CuttlefishConfig(
+        ssh_host=ssh_host,
+        ssh_port=ssh_port,
+        ssh_user=ssh_user,
+        ssh_password=ssh_password,
+        ssh_key_path=ssh_key,
+        persistent=persistent,
+        already_running=already_running,
+        start_command=start_cmd,
+        stop_command=stop_cmd,
+        gdb_port=gdb_port,
+        adb_port=actual_adb_port,
+        enable_gdb=dynamic_analysis,
+        setup_tunnels=setup_tunnels,
+        # Cuttlefish runtime logs directory
+        cuttlefish_runtime_logs=runtime_logs_dir,
+        # Kernel symbol extraction
+        kernel_image_path=kernel_image,
+        vmlinux_path=vmlinux_path,
+        system_map_path=system_map,
+        extract_symbols=extract_symbols,
+    )
+    
+    # Determine output directory
+    log_dir = str(output_dir) if output_dir else f"cuttlefish_test_{bug_id}"
+    
+    # Get parsed crash info if available (optional attribute)
+    parsed_crash = None
+    if hasattr(md, 'crash_parser_results') and md.crash_parser_results:
+        parsed_crash = md.crash_parser_results
+    
+    # Run test
+    typer.echo(f"[+] Running test with Cuttlefish controller...")
+    typer.echo(f"[+] Mode: {'persistent' if persistent else 'non-persistent'}")
+    typer.echo(f"[+] Dynamic analysis (GDB): {'enabled' if dynamic_analysis else 'disabled'}")
+    typer.echo(f"[+] SSH tunnels: {'enabled' if setup_tunnels else 'disabled'}")
+    if kernel_image:
+        typer.echo(f"[+] Kernel Image: {kernel_image}")
+    if vmlinux_path:
+        typer.echo(f"[+] vmlinux: {vmlinux_path}")
+    if system_map:
+        typer.echo(f"[+] System.map: {system_map}")
+    
+    crashed, crash_type, results = test_repro_with_cuttlefish_controller(
+        repro_path=str(repro_bin),
+        bug_id=bug_id,
+        cuttlefish_config=config,
+        parsed_crash=parsed_crash,
+        log_dir=log_dir,
+        root=root,
+        timeout=timeout,
+        arch=arch,
+        vmlinux_path=vmlinux_path,
+        remote_vmlinux_path=remote_vmlinux_path,
+    )
+    
+    # Report results
+    if crashed:
+        typer.echo(f"[✓] CRASH DETECTED (type: {crash_type})")
+    else:
+        typer.echo(f"[!] No crash detected")
+    
+    typer.echo(f"[+] Results saved to: {log_dir}")
+
 @app.command()
 def analyze(
     bug_id: Annotated[str, typer.Argument(help='Bug ID to analyze')],
@@ -109,6 +304,282 @@ def analyze(
         ignore_exploitability=ignore_exploitability,
         reuse_dir=output_dir,
     )
+
+
+@app.command()
+def pipeline_cuttlefish(
+    bug_id: Annotated[str, typer.Argument(help='Bug ID for end-to-end pipeline')],
+    syzkall_kernel: Annotated[str, typer.Option(help='Kernel name for bug')] = 'android-5-10',
+    arch: Annotated[str, typer.Option(help='Architecture (arm64/x86_64)')] = 'arm64',
+    root: Annotated[bool, typer.Option(help='Run reproducer as root')] = True,
+    # Cuttlefish instance settings
+    ssh_host: Annotated[str, typer.Option(help='SSH host for Cuttlefish (can be a ~/.ssh/config alias)')] = 'localhost',
+    ssh_port: Annotated[int, typer.Option(help='SSH port for Cuttlefish')] = 22,
+    ssh_user: Annotated[Optional[str], typer.Option(help='SSH user (optional, uses ssh config if not set)')] = None,
+    ssh_key: Annotated[Optional[str], typer.Option(help='SSH key path (optional, uses ssh config if not set)')] = None,
+    ssh_password: Annotated[Optional[str], typer.Option(help='SSH password (if no key)')] = None,
+    # Persistence mode
+    persistent: Annotated[bool, typer.Option(help='Persistent mode (keep Cuttlefish running)')] = True,
+    already_running: Annotated[bool, typer.Option(help='Cuttlefish is already running')] = True,
+    start_cmd: Annotated[Optional[str], typer.Option(help='Command to start Cuttlefish (non-persistent)')] = None,
+    stop_cmd: Annotated[Optional[str], typer.Option(help='Command to stop Cuttlefish (non-persistent)')] = None,
+    # Connection settings
+    instance: Annotated[Optional[int], typer.Option(help='Cuttlefish instance number (auto-calculates ADB port: 6520 + instance - 1)')] = None,
+    gdb_port: Annotated[int, typer.Option(help='Crosvm kernel GDB port')] = 1234,
+    adb_port: Annotated[int, typer.Option(help='ADB port for Cuttlefish device (overridden by --instance)')] = 6520,
+    dynamic_analysis: Annotated[bool, typer.Option(help='Enable GDB-based dynamic analysis')] = True,
+    setup_tunnels: Annotated[bool, typer.Option(help='Set up SSH tunnels for remote ADB/GDB access')] = False,
+    # Cuttlefish runtime logs
+    runtime_logs_dir: Annotated[Optional[str], typer.Option(help='Path to cuttlefish runtime logs dir')] = None,
+    # Kernel symbol extraction options
+    kernel_image: Annotated[Optional[str], typer.Option(help='Path to kernel Image file (local or remote)')] = None,
+    vmlinux_path: Annotated[Optional[str], typer.Option(help='Path to vmlinux with debug symbols')] = None,
+    system_map: Annotated[Optional[str], typer.Option(help='Path to System.map for symbol resolution')] = None,
+    extract_symbols: Annotated[bool, typer.Option(help='Auto-extract vmlinux from kernel Image')] = True,
+    # Pipeline options
+    skip_static: Annotated[bool, typer.Option(help='Skip static analysis')] = False,
+    ignore_exploitability: Annotated[bool, typer.Option(help='Run dynamic even if exploitability is low')] = False,
+    goal: Annotated[str, typer.Option(help='Exploit goal for synthesis')] = 'privilege_escalation',
+    platform: Annotated[Optional[str], typer.Option(help='Target platform: linux, android, or generic')] = None,
+    timeout: Annotated[int, typer.Option(help='Test timeout in seconds')] = 120,
+    output_dir: Annotated[Optional[Path], typer.Option(help='Output directory for logs')] = None,
+):
+    """
+    Full pipeline with Cuttlefish: analyze crash, run dynamic analysis, and synthesize exploit.
+    
+    Combines the functionality of test_cuttlefish + analyze + synthesize into a single command
+    that properly passes crash stack trace information from static analysis to dynamic analysis.
+    
+    Steps:
+    1) Static analysis (LLM-based crash analysis)
+    2) Parse crash log to extract stack trace functions
+    3) Run reproducer with GDB breakpoints on stack trace functions
+    4) Collect alloc/free events and function hits
+    5) Post-process for UAF/OOB detection
+    6) Synthesize exploit plan (optional)
+    
+    Example:
+        syzploit pipeline-cuttlefish abc123 --ssh-host cuttlefish2 --setup-tunnels \\
+            --instance 5 --kernel-image /home/user/cuttlefish/package/kernel/Image
+    """
+    from .SyzAnalyze import crash_analyzer as analyzer
+    from .SyzVerify.scrape import pull_single_bug
+    
+    # Initialize DB and get bug metadata
+    db = SyzkallBugDatabase(syzkall_kernel)
+    md = db.get_bug_metadata(bug_id)
+    if md is None:
+        typer.echo(f"[+] Bug {bug_id} not in local database, pulling from syzbot...")
+        md = pull_single_bug(db, bug_id)
+        if md is None:
+            typer.echo(f"[!] Failed to pull bug {bug_id} from syzbot")
+            raise typer.Exit(code=1)
+        typer.echo(f"[+] Successfully pulled: {md.title}")
+    
+    # Setup output directory
+    if output_dir is None:
+        output_dir = Path(f"analysis_{bug_id}")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    typer.echo(f"[+] Pipeline for Bug {bug_id}")
+    typer.echo(f"[+] Output directory: {output_dir}")
+    
+    summary = {"bug_id": bug_id, "steps": {}}
+    
+    # Step 1: Static Analysis to get crash info
+    typer.echo("\n[STEP 1] Static Analysis...")
+    parsed_crash = None
+    static_result = None
+    
+    if not skip_static:
+        try:
+            # Parse crash log to get frames
+            parsed_crash = analyzer.parse_crash_log(md.crash_report)
+            
+            # Get crash stack functions
+            crash_stack_funcs = []
+            if parsed_crash:
+                seen = set()
+                for frame in parsed_crash.get('frames', [])[:10]:
+                    func = frame.get('func', '')
+                    if func:
+                        base_func = func.split('+')[0].split('.')[0].strip()
+                        if base_func and base_func not in seen:
+                            seen.add(base_func)
+                            crash_stack_funcs.append(base_func)
+            
+            typer.echo(f"[+] Parsed {len(parsed_crash.get('frames', []))} stack frames")
+            typer.echo(f"[+] Crash stack functions: {crash_stack_funcs[:5]}...")
+            
+            # Prepare reproducer
+            c_repro_src = None
+            if getattr(md, 'c_repro_url', None):
+                p = md.save_c_repro()
+                if p and Path(p).exists():
+                    c_repro_src = str(p)
+            if not c_repro_src and getattr(md, 'syz_repro_url', None):
+                p = md.generate_c_repro(arch)
+                if p and Path(p).exists():
+                    c_repro_src = str(p)
+            
+            # Run static analysis
+            if c_repro_src:
+                static_result = analyzer.analyze(md.crash_report, c_repro_src, None, None)
+                static_output = output_dir / "static_analysis.json"
+                import json
+                with open(static_output, 'w') as f:
+                    json.dump(static_result, f, indent=2)
+                typer.echo(f"[+] Static analysis saved: {static_output}")
+                summary["steps"]["static"] = {"success": True, "frames": len(crash_stack_funcs)}
+            else:
+                typer.echo("[!] No reproducer source available for static analysis")
+                summary["steps"]["static"] = {"success": False, "error": "no reproducer"}
+        except Exception as e:
+            typer.echo(f"[!] Static analysis failed: {e}")
+            summary["steps"]["static"] = {"success": False, "error": str(e)}
+    else:
+        typer.echo("[+] Skipping static analysis (--skip-static)")
+        # Try to load prior results
+        static_path = output_dir / "static_analysis.json"
+        if static_path.exists():
+            import json
+            with open(static_path) as f:
+                static_result = json.load(f)
+            parsed_crash = static_result  # May contain frames
+            typer.echo(f"[+] Loaded prior static results: {static_path}")
+    
+    # Ensure we have parsed_crash for dynamic analysis
+    if parsed_crash is None:
+        try:
+            parsed_crash = analyzer.parse_crash_log(md.crash_report)
+        except Exception:
+            parsed_crash = {}
+    
+    # Step 2: Compile reproducer
+    typer.echo("\n[STEP 2] Compiling reproducer...")
+    try:
+        repro_bin = md.compile_repro(arch)
+        typer.echo(f"[+] Reproducer binary: {repro_bin}")
+        summary["steps"]["compile"] = {"success": True, "binary": str(repro_bin)}
+    except Exception as e:
+        typer.echo(f"[!] Failed to compile reproducer: {e}")
+        summary["steps"]["compile"] = {"success": False, "error": str(e)}
+        raise typer.Exit(code=1)
+    
+    # Step 3: Dynamic analysis with Cuttlefish
+    typer.echo("\n[STEP 3] Dynamic Analysis with Cuttlefish...")
+    
+    # Calculate ADB port from instance number if provided
+    actual_adb_port = adb_port
+    if instance is not None:
+        actual_adb_port = 6520 + (instance - 1)
+        typer.echo(f"[+] Instance {instance}: using ADB port {actual_adb_port}")
+    
+    # Create Cuttlefish configuration
+    config = CuttlefishConfig(
+        ssh_host=ssh_host,
+        ssh_port=ssh_port,
+        ssh_user=ssh_user,
+        ssh_password=ssh_password,
+        ssh_key_path=ssh_key,
+        persistent=persistent,
+        already_running=already_running,
+        start_command=start_cmd,
+        stop_command=stop_cmd,
+        gdb_port=gdb_port,
+        adb_port=actual_adb_port,
+        enable_gdb=dynamic_analysis,
+        setup_tunnels=setup_tunnels,
+        cuttlefish_runtime_logs=runtime_logs_dir,
+        kernel_image_path=kernel_image,
+        vmlinux_path=vmlinux_path,
+        system_map_path=system_map,
+        extract_symbols=extract_symbols,
+    )
+    
+    log_dir = str(output_dir)
+    
+    typer.echo(f"[+] Mode: {'persistent' if persistent else 'non-persistent'}")
+    typer.echo(f"[+] Dynamic analysis (GDB): {'enabled' if dynamic_analysis else 'disabled'}")
+    typer.echo(f"[+] SSH tunnels: {'enabled' if setup_tunnels else 'disabled'}")
+    if kernel_image:
+        typer.echo(f"[+] Kernel Image: {kernel_image}")
+    if system_map:
+        typer.echo(f"[+] System.map: {system_map}")
+    
+    try:
+        crashed, crash_type, results = test_repro_with_cuttlefish_controller(
+            repro_path=str(repro_bin),
+            bug_id=bug_id,
+            cuttlefish_config=config,
+            parsed_crash=parsed_crash,
+            log_dir=log_dir,
+            root=root,
+            timeout=timeout,
+            arch=arch,
+            vmlinux_path=vmlinux_path,
+        )
+        
+        if crashed:
+            typer.echo(f"[✓] CRASH DETECTED (type: {crash_type})")
+        else:
+            typer.echo(f"[!] No crash detected")
+        
+        summary["steps"]["dynamic"] = {
+            "success": True,
+            "crashed": crashed,
+            "crash_type": crash_type,
+        }
+    except Exception as e:
+        typer.echo(f"[!] Dynamic analysis failed: {e}")
+        summary["steps"]["dynamic"] = {"success": False, "error": str(e)}
+    
+    # Step 4: Post-process results
+    typer.echo("\n[STEP 4] Post-processing results...")
+    try:
+        from .SyzVerify import post_process as pp
+        dynamic_json = output_dir / "dynamic_analysis.json"
+        if dynamic_json.exists():
+            pp_out = output_dir / "dynamic_analysis_post.json"
+            pp_res = pp.analyze(str(dynamic_json), str(pp_out))
+            typer.echo(f"[+] Post-processing: confidence={pp_res.get('confidence', 0)}")
+            typer.echo(f"[+] UAF={pp_res.get('summary', {}).get('uaf', 0)} OOB={pp_res.get('summary', {}).get('invalid-access', 0)}")
+            summary["steps"]["post_process"] = {"success": True, "confidence": pp_res.get('confidence', 0)}
+        else:
+            typer.echo("[!] No dynamic_analysis.json found to post-process")
+            summary["steps"]["post_process"] = {"success": False, "error": "no dynamic results"}
+    except Exception as e:
+        typer.echo(f"[!] Post-processing failed: {e}")
+        summary["steps"]["post_process"] = {"success": False, "error": str(e)}
+    
+    # Step 5: Synthesize (optional)
+    if goal:
+        typer.echo("\n[STEP 5] Synthesizing exploit plan...")
+        try:
+            res = Synthesizer.synthesize(
+                bug_id=str(bug_id),
+                goal=str(goal),
+                analysis_dir=str(output_dir),
+                vmlinux_path=str(vmlinux_path) if vmlinux_path else None,
+                platform=platform or "android",
+                verbose=False,
+                debug=False,
+            )
+            typer.echo(f"[+] Synthesis completed")
+            summary["steps"]["synthesize"] = {"success": True}
+        except Exception as e:
+            typer.echo(f"[!] Synthesis failed: {e}")
+            summary["steps"]["synthesize"] = {"success": False, "error": str(e)}
+    
+    # Save pipeline summary
+    import json
+    summary_path = output_dir / "pipeline_summary.json"
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f, indent=2)
+    typer.echo(f"\n[+] Pipeline summary saved: {summary_path}")
+    typer.echo(f"[+] Results in: {output_dir}")
+
 
 @app.command()
 def synthesize(

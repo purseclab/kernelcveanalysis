@@ -195,6 +195,20 @@ def analyze_bug(bug_id: str, kernel_name: str, qemu: bool, source_image: Path, s
             try:
                 # Run SyzVerify dynamic analysis to produce instrumentation results
                 vm_type = 'qemu' if qemu else 'cuttlefish'
+                
+                # Extract crash stack functions from parsed crash
+                crash_stack_funcs = []
+                if parsed_crash:
+                    seen = set()
+                    for frame in parsed_crash.get('frames', parsed_crash.get('stack_frames', []))[:10]:
+                        func = frame.get('func', frame.get('function', ''))
+                        if func:
+                            base_func = func.split('+')[0].split('.')[0].strip()
+                            if base_func and base_func not in seen:
+                                seen.add(base_func)
+                                crash_stack_funcs.append(base_func)
+                    console.print(f"  Crash stack functions: {crash_stack_funcs[:5]}...")
+                
                 da_config = DynamicAnalysisConfig(
                     vm_type=vm_type,
                     kernel_image=str(source_image) if source_image else None,
@@ -202,7 +216,8 @@ def analyze_bug(bug_id: str, kernel_name: str, qemu: bool, source_image: Path, s
                     bzimage_path=str(source_image) if source_image else None,
                     gdb_port=gdb_port,
                     timeout=360,
-                    tmp_scope_dir=str(output_dir)
+                    tmp_scope_dir=str(output_dir),
+                    crash_stack_funcs=crash_stack_funcs,
                 )
                 # Ensure we have a compiled binary
                 repro_binary = repro_binary_path or str(metadata.artifact_path('repro'))
