@@ -15,7 +15,14 @@ import time
 
 from .bug_db import SyzkallBugDatabase
 from .scrape import pull_bugs
-from .run_bug import test_repro_crashes, wait_for_connection, test_repro_crashes_qemu
+from .run_bug import (
+    test_repro_crashes,
+    wait_for_connection,
+    test_repro_crashes_qemu,
+    test_repro_crashes_cuttlefish_gdb,
+    test_repro_crashes_cuttlefish_kernel_gdb,
+    CUTTLEFISH_KERNEL_GDB_PORT,
+)
 from .dynamic import DynamicAnalysisConfig, run_dynamic_analysis as verify_run_da
 import json as _json
 
@@ -110,8 +117,26 @@ def collect_stats(kernel_name: str, outfile: Path):
     console.print(f"  [bold]{outfile_json_name}[/bold]")
 
 
-
-def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, source_image: Path, source_disk: Path, source: bool, outdir_name: str, dynamic_analysis: bool = False, gdb_port: int = 1234):
+def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, source_image: Path, source_disk: Path, source: bool, outdir_name: str, dynamic_analysis: bool = False, gdb_port: int = 1234, kernel_gdb: bool = False, vmlinux_path: str = None, kernel_gdb_port: int = 1234):
+    """
+    Test all bugs in the database.
+    
+    Args:
+        local: Whether to run locally
+        arch: Target architecture (arm64, x86_64)
+        kernel_name: Name of the kernel in the database
+        qemu: Whether to use QEMU instead of Cuttlefish
+        root: Whether to run as root
+        source_image: Path to kernel image
+        source_disk: Path to disk image
+        source: Whether to download source assets
+        outdir_name: Output directory name
+        dynamic_analysis: Enable userspace GDB analysis
+        gdb_port: Port for userspace gdbserver
+        kernel_gdb: Enable kernel-side GDB analysis (requires Cuttlefish with --gdb_port)
+        vmlinux_path: Path to vmlinux file for kernel symbols
+        kernel_gdb_port: Port for kernel GDB stub (default: 1234)
+    """
     db = SyzkallBugDatabase(kernel_name)
     console = Console()
     table = Table(title="Syzkaller Bug Test Results")
@@ -224,7 +249,41 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
                                 used_assets = "yes"
                         v, t = test_repro_crashes_qemu(repro_path, local, bug.bug_id, log_dir, root, source_image, source_disk)
                     else:
-                        v, t = test_repro_crashes(repro_path, local, bug.bug_id, log_dir, root)
+                        # Parse crash for GDB instrumentation
+                        parsed_crash = parse_crash_log(metadata.crash_report) if metadata.crash_report else None
+                        
+                        # Use kernel GDB if enabled (takes precedence)
+                        if kernel_gdb:
+                            v, t, gdb_results = test_repro_crashes_cuttlefish_kernel_gdb(
+                                repro_path=repro_path,
+                                bug_id=bug.bug_id,
+                                vmlinux_path=vmlinux_path,
+                                kernel_gdb_port=kernel_gdb_port,
+                                parsed_crash=parsed_crash,
+                                log_dir=log_dir,
+                                root=root,
+                                arch=arch
+                            )
+                            # Save kernel GDB results
+                            if gdb_results:
+                                gdb_out = os.path.join(log_dir, f"kernel_gdb_analysis_{bug.bug_id}.json")
+                                with open(gdb_out, 'w', encoding='utf-8') as gf:
+                                    json.dump(gdb_results, gf, indent=2)
+                        # Use userspace GDB analysis if dynamic_analysis is enabled
+                        elif dynamic_analysis:
+                            v, t, gdb_results = test_repro_crashes_cuttlefish_gdb(
+                                repro_path, local, bug.bug_id, log_dir, root,
+                                parsed_crash=parsed_crash,
+                                gdb_port=gdb_port,
+                                arch=arch
+                            )
+                            # Save GDB results alongside other outputs
+                            if gdb_results:
+                                gdb_out = os.path.join(log_dir, f"gdb_analysis_{bug.bug_id}.json")
+                                with open(gdb_out, 'w', encoding='utf-8') as gf:
+                                    json.dump(gdb_results, gf, indent=2)
+                        else:
+                            v, t = test_repro_crashes(repro_path, local, bug.bug_id, log_dir, root)
                     if v and (t==1 or t==3):
                         crashed = "💥"+str(t)
                         if root:
@@ -563,7 +622,26 @@ def extract_crash_locations(log_text: str):
 
     return crashing_file, crashing_line, crash_type
 
-def test(id: str, local: bool, arch: str, root: bool, kernel_name: str, qemu: bool, source_disk: Path, source_image: Path, outdir_name: str, dynamic_analysis: bool = False, gdb_port: int = 1234):
+def test(id: str, local: bool, arch: str, root: bool, kernel_name: str, qemu: bool, source_disk: Path, source_image: Path, outdir_name: str, dynamic_analysis: bool = False, gdb_port: int = 1234, kernel_gdb: bool = False, vmlinux_path: str = None, kernel_gdb_port: int = 1234):
+    """
+    Test a single bug.
+    
+    Args:
+        id: Bug ID to test
+        local: Whether to run locally
+        arch: Target architecture (arm64, x86_64)
+        root: Whether to run as root
+        kernel_name: Name of the kernel in the database
+        qemu: Whether to use QEMU instead of Cuttlefish
+        source_disk: Path to disk image
+        source_image: Path to kernel image
+        outdir_name: Output directory name
+        dynamic_analysis: Enable userspace GDB analysis
+        gdb_port: Port for userspace gdbserver
+        kernel_gdb: Enable kernel-side GDB analysis (requires Cuttlefish with --gdb_port)
+        vmlinux_path: Path to vmlinux file for kernel symbols
+        kernel_gdb_port: Port for kernel GDB stub (default: 1234)
+    """
     db = SyzkallBugDatabase(kernel_name)
     metadata = db.get_bug_metadata(id)
     if metadata is None:
@@ -575,7 +653,45 @@ def test(id: str, local: bool, arch: str, root: bool, kernel_name: str, qemu: bo
     if qemu:
         v, t = test_repro_crashes_qemu(repro_path, local, id, outdir_name, root, source_image, source_disk)
     else:
-        v, t = test_repro_crashes(repro_path, local, id, outdir_name, root)
+        # Parse crash for GDB instrumentation
+        parsed_crash = parse_crash_log(metadata.crash_report) if metadata.crash_report else None
+        
+        # Use kernel GDB if enabled (takes precedence)
+        if kernel_gdb:
+            v, t, gdb_results = test_repro_crashes_cuttlefish_kernel_gdb(
+                repro_path=repro_path,
+                bug_id=id,
+                vmlinux_path=vmlinux_path,
+                kernel_gdb_port=kernel_gdb_port,
+                parsed_crash=parsed_crash,
+                log_dir=outdir_name,
+                root=root,
+                arch=arch
+            )
+            # Save kernel GDB results
+            if gdb_results:
+                gdb_out = os.path.join(outdir_name, f"kernel_gdb_analysis_{id}.json")
+                os.makedirs(os.path.dirname(gdb_out) if os.path.dirname(gdb_out) else '.', exist_ok=True)
+                with open(gdb_out, 'w', encoding='utf-8') as gf:
+                    json.dump(gdb_results, gf, indent=2)
+                print(f"[+] Kernel GDB analysis saved to: {gdb_out}")
+        # Use userspace GDB analysis if dynamic_analysis is enabled
+        elif dynamic_analysis:
+            v, t, gdb_results = test_repro_crashes_cuttlefish_gdb(
+                repro_path, local, id, outdir_name, root,
+                parsed_crash=parsed_crash,
+                gdb_port=gdb_port,
+                arch=arch
+            )
+            # Save GDB results
+            if gdb_results:
+                gdb_out = os.path.join(outdir_name, f"gdb_analysis_{id}.json")
+                os.makedirs(os.path.dirname(gdb_out) if os.path.dirname(gdb_out) else '.', exist_ok=True)
+                with open(gdb_out, 'w', encoding='utf-8') as gf:
+                    json.dump(gdb_results, gf, indent=2)
+                print(f"[+] GDB analysis saved to: {gdb_out}")
+        else:
+            v, t = test_repro_crashes(repro_path, local, id, outdir_name, root)
     if v:
         print('Crash occured')
     else:
