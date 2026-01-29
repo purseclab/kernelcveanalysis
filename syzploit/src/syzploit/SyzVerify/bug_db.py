@@ -128,6 +128,21 @@ class BugMetadata:
 
     # FIXME: don't use str for arch
     def generate_c_repro(self, arch: str) -> Path:
+        # First, try to use the pre-generated C repro from syzkaller if available
+        # This is more reliable as it doesn't require syz-prog2c to support all syscalls
+        if self.c_repro_url:
+            try:
+                c_repro_path = self.save_c_repro()
+                # Copy to arch-specific path for consistency
+                c_code_path = self.artifact_path(f'repro_{arch}.c')
+                if c_repro_path != c_code_path:
+                    import shutil
+                    shutil.copy(c_repro_path, c_code_path)
+                return c_code_path
+            except Exception as e:
+                print(f"Failed to download C repro, falling back to syz-prog2c: {e}")
+        
+        # Fall back to converting from syz repro using syz-prog2c
         syz_repro = self.save_syz_repro()
         with open(syz_repro, 'r') as f:
             syz_data = f.read()
@@ -135,11 +150,36 @@ class BugMetadata:
         options_start = syz_data.find('#{')
         options_end = syz_data.find('}\n')
         assert options_start != -1 and options_end != -1
-        # options = json.loads(syz_data[options_start + 1:options_end + 1])
-        options = yaml.safe_load(syz_data[options_start + 1 : options_end + 1])
+        
+        options_raw = syz_data[options_start + 1 : options_end + 1]
+        
+        # Known valid option keys in syzkaller repros (lowercase for comparison)
+        valid_option_keys = {
+            'threaded', 'collide', 'repeat', 'procs', 'sandbox', 'fault', 
+            'faultcall', 'faultnth', 'enabletun', 'usetmpdir', 'handlesegv',
+            'waitrepeat', 'debug', 'repro', 'slowdown', 'leak', 'netinjection',
+            'netdevices', 'resetnet', 'usb', 'vhci', 'wifi', 'ieee802154',
+            'sysctl', 'cgroups', 'binfmt_misc', 'close_fds', 'devlinkpci',
+            'nicvf', 'swap', 'csuminet'
+        }
+        
+        # Try YAML first (newer format), validate the result has valid keys
+        options = None
+        try:
+            parsed = yaml.safe_load(options_raw)
+            if isinstance(parsed, dict):
+                # Check if at least some known keys are present (lowercase comparison)
+                parsed_keys_lower = {k.lower() for k in parsed.keys()}
+                if parsed_keys_lower & valid_option_keys:
+                    options = parsed
+        except Exception:
+            pass
+        
+        # Fall back to parsing old-style format: Key:value Key2:value2 ...
+        if options is None:
+            options = self.parse_syzkaller_options(options_raw)
+        
         options['arch'] = arch
-        # options = self.parse_syzkaller_options(syz_data[options_start + 1:options_end + 1])
-        # options['arch'] = arch
 
         c_code = syz_to_c(syz_repro, options)
         c_code_path = self.artifact_path(f'repro_{arch}.c')
@@ -166,13 +206,51 @@ class BugMetadata:
             kernel_path = kernel_path[:-3] if kernel_path else None
         return disk_path, kernel_path
 
-    def compile_repro(self, arch: str) -> Path:
+    def compile_repro(self, arch: str, use_llm_fix: bool = True) -> Path:
+        """
+        Compile the reproducer for the target architecture.
+        
+        If compilation fails due to arch-specific syscall issues (e.g., __NR_epoll_create 
+        missing on ARM64), this will attempt to fix the C code using quick fixes and 
+        optionally LLM-based fixes.
+        
+        Args:
+            arch: Target architecture ('arm64', 'x86_64')
+            use_llm_fix: Whether to use LLM to fix compilation errors
+            
+        Returns:
+            Path to the compiled binary
+        """
         c_repro_path = self.generate_c_repro(arch)
         repro_bin_path = self.artifact_path('repro')
-        # FIXME: this is hack for making compiling easier
-        # don't hardcode random script name used for compilation
-        os.system(f'./compile_{arch}.sh "{c_repro_path.absolute()}" "{repro_bin_path.absolute()}"')
-        assert repro_bin_path.exists()
+        
+        # Try normal compilation first
+        compile_result = os.system(f'./compile_{arch}.sh "{c_repro_path.absolute()}" "{repro_bin_path.absolute()}"')
+        
+        if compile_result == 0 and repro_bin_path.exists():
+            return repro_bin_path
+        
+        # If compilation failed, try to fix syscall compatibility issues
+        print(f"[INFO] Initial compilation failed for {arch}, attempting fixes...")
+        
+        try:
+            from .syscall_fixer import compile_with_fix
+            success = compile_with_fix(
+                c_repro_path, 
+                repro_bin_path, 
+                arch, 
+                use_llm=use_llm_fix
+            )
+            if success and repro_bin_path.exists():
+                print(f"[INFO] Compilation succeeded after applying fixes")
+                return repro_bin_path
+        except ImportError:
+            print("[WARN] syscall_fixer module not available, cannot auto-fix")
+        except Exception as e:
+            print(f"[WARN] Auto-fix failed: {e}")
+        
+        # Final assertion - compilation must succeed
+        assert repro_bin_path.exists(), f"Failed to compile reproducer for {arch}"
         return repro_bin_path
     
     def run_repro(self, arch: str):

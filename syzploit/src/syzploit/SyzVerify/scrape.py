@@ -83,11 +83,226 @@ def filter_bugs(data: list[dict[str, Tag]]) -> list[dict[str, Tag]]:
 def bug_id_from_url(url_path: str) -> str:
     return url_path.split('=')[1].strip()
 
+
+def download_bug_by_id(bug_id: str) -> Optional[BugMetadata]:
+    """
+    Download a single bug directly by its ID from syzbot.
+    
+    This fetches the bug page directly without needing to scrape the full bug list.
+    
+    Args:
+        bug_id: The syzbot bug ID (e.g., '283ce5a46486d6acdbaf')
+    
+    Returns:
+        BugMetadata if successful, None otherwise
+    """
+    try:
+        # Construct the direct bug URL
+        bug_url = f"bug?extid={bug_id}"
+        bug_page = get_syzkall_html(bug_url)
+        
+        # Check if bug exists (look for error message or valid content)
+        if bug_page.find(string=lambda text: text and 'not found' in text.lower()):
+            print(f"Bug {bug_id} not found on syzbot")
+            return None
+        
+        # Get the bug title from the page
+        title_elem = bug_page.find('b')
+        if title_elem is None:
+            print(f"Could not find title for bug {bug_id}")
+            return None
+        title = get_tag_string(title_elem).replace('\n', ' ')
+        
+        # Extract subsystems from title spans
+        subsystems = []
+        if title_elem.parent:
+            subsystems = [get_tag_string(span) for span in title_elem.parent.find_all(name='span', attrs={'class': 'bug-label'})]
+        
+        # Find crashes table
+        crashes_table = find_table_by_name(bug_page, 'crashes')
+        if crashes_table is None:
+            print(f"No crashes table found for bug {bug_id}")
+            return None
+        
+        table = parse_table(crashes_table)
+        
+        # Look for a crash with C reproducer
+        for c_repro_row in table:
+            if get_tag_string(c_repro_row['c_repro']) != 'C':
+                continue
+            
+            # Get assets
+            assets = c_repro_row['assets']
+            
+            disk_image_str = assets.find(string='disk image')
+            disk_image_non_bootable = assets.find(string='disk image (non-bootable)')
+            
+            disk_image_is_bootable = True
+            if disk_image_str is None and disk_image_non_bootable is not None:
+                disk_image_str = disk_image_non_bootable
+                disk_image_is_bootable = False
+            
+            vmlinux_str = assets.find(string='vmlinux')
+            kernel_image_str = assets.find(string='kernel image')
+            
+            disk_image_path = None if disk_image_str is None else disk_image_str.parent['href']
+            vmlinux_path = None if vmlinux_str is None else vmlinux_str.parent['href']
+            kernel_image_path = None if kernel_image_str is None else kernel_image_str.parent['href']
+            
+            # Get syz repro
+            syz_repro_a = c_repro_row['syz_repro'].find(name='a', string='syz')
+            if syz_repro_a is None:
+                continue
+            
+            c_repro_path = path_to_syzkall_url(c_repro_row['c_repro'].a['href'])
+            
+            # Kernel commit URL
+            kernel_commit_a = c_repro_row['commit'].a
+            kernel_commit_url = None if kernel_commit_a is None else kernel_commit_a['href']
+            
+            # Kernel config URL
+            kernel_config_a = c_repro_row['config'].a
+            kernel_config_url = None if kernel_config_a is None else path_to_syzkall_url(kernel_config_a['href'])
+            
+            # Get crash report from page
+            crash_report = get_tag_string(bug_page.pre) if bug_page.pre else ""
+            
+            # Parse crash time
+            crash_time_string = get_tag_string(c_repro_row['time'])
+            try:
+                crash_time = datetime.strptime(crash_time_string, '%Y/%m/%d %H:%M')
+            except ValueError:
+                crash_time = datetime.now()
+            
+            return BugMetadata(
+                bug_id=bug_id,
+                title=title,
+                description=get_tag_string(c_repro_row['title']),
+                subsystems=subsystems,
+                crash_time=crash_time,
+                kernel_name=get_tag_string(c_repro_row['kernel']),
+                kernel_url=kernel_commit_url,
+                kernel_config_url=kernel_config_url,
+                crash_report=crash_report,
+                syz_repro_url=path_to_syzkall_url(syz_repro_a['href']),
+                c_repro_url=c_repro_path,
+                disk_image_url=disk_image_path,
+                disk_image_is_bootable=disk_image_is_bootable,
+                kernel_image_url=kernel_image_path,
+                vmlinux_url=vmlinux_path,
+            )
+        
+        # No C repro found, try with syz repro
+        for syz_repro_row in table:
+            syz_repro_a = syz_repro_row['syz_repro'].find(name='a', string='syz')
+            if syz_repro_a is None:
+                continue
+            
+            assets = syz_repro_row['assets']
+            
+            disk_image_str = assets.find(string='disk image')
+            disk_image_non_bootable = assets.find(string='disk image (non-bootable)')
+            
+            disk_image_is_bootable = True
+            if disk_image_str is None and disk_image_non_bootable is not None:
+                disk_image_str = disk_image_non_bootable
+                disk_image_is_bootable = False
+            
+            vmlinux_str = assets.find(string='vmlinux')
+            kernel_image_str = assets.find(string='kernel image')
+            
+            disk_image_path = None if disk_image_str is None else disk_image_str.parent['href']
+            vmlinux_path = None if vmlinux_str is None else vmlinux_str.parent['href']
+            kernel_image_path = None if kernel_image_str is None else kernel_image_str.parent['href']
+            
+            # C repro URL (may not exist)
+            c_repro_url = None
+            if syz_repro_row['c_repro'].a:
+                c_repro_url = path_to_syzkall_url(syz_repro_row['c_repro'].a['href'])
+            
+            kernel_commit_a = syz_repro_row['commit'].a
+            kernel_commit_url = None if kernel_commit_a is None else kernel_commit_a['href']
+            
+            kernel_config_a = syz_repro_row['config'].a
+            kernel_config_url = None if kernel_config_a is None else path_to_syzkall_url(kernel_config_a['href'])
+            
+            crash_report = get_tag_string(bug_page.pre) if bug_page.pre else ""
+            
+            crash_time_string = get_tag_string(syz_repro_row['time'])
+            try:
+                crash_time = datetime.strptime(crash_time_string, '%Y/%m/%d %H:%M')
+            except ValueError:
+                crash_time = datetime.now()
+            
+            return BugMetadata(
+                bug_id=bug_id,
+                title=title,
+                description=get_tag_string(syz_repro_row['title']),
+                subsystems=subsystems,
+                crash_time=crash_time,
+                kernel_name=get_tag_string(syz_repro_row['kernel']),
+                kernel_url=kernel_commit_url,
+                kernel_config_url=kernel_config_url,
+                crash_report=crash_report,
+                syz_repro_url=path_to_syzkall_url(syz_repro_a['href']),
+                c_repro_url=c_repro_url,
+                disk_image_url=disk_image_path,
+                disk_image_is_bootable=disk_image_is_bootable,
+                kernel_image_url=kernel_image_path,
+                vmlinux_url=vmlinux_path,
+            )
+        
+        print(f"No reproducer found for bug {bug_id}")
+        return None
+        
+    except Exception as e:
+        import traceback
+        print(f"Error downloading bug {bug_id}: {e}")
+        traceback.print_exc()
+        return None
+
+
+def pull_single_bug(db: SyzkallBugDatabase, bug_id: str, force: bool = False) -> Optional[BugMetadata]:
+    """
+    Pull a single bug by ID and save to database.
+    
+    Args:
+        db: The bug database
+        bug_id: The syzbot bug ID
+        force: If True, re-download even if already in database
+    
+    Returns:
+        BugMetadata if successful, None otherwise
+    """
+    # Check if already exists
+    existing = db.get_bug_metadata(bug_id)
+    if existing is not None and not force:
+        print(f"Bug {bug_id} already in database (use force=True to re-download)")
+        return existing
+    
+    print(f"Pulling bug {bug_id} from syzbot...")
+    metadata = download_bug_by_id(bug_id)
+    
+    if metadata is None:
+        print(f"Failed to download bug {bug_id}")
+        return None
+    
+    db.save_bug_metadata(metadata)
+    print(f"Successfully saved bug {bug_id}: {metadata.title}")
+    return metadata
+
+
 def download_bug_metadata(bug: dict[str, Tag]) -> Optional[BugMetadata]:
     try:
         url = bug['title'].a['href']
         bug_page = get_syzkall_html(url)
-        table = parse_table(find_table_by_name(bug_page, 'crashes'))
+        crashes_table = find_table_by_name(bug_page, 'crashes')
+        
+        if crashes_table is None:
+            print(f"No crashes table found for bug: {get_tag_string(bug['title']).replace(chr(10), ' ')}")
+            return None
+        
+        table = parse_table(crashes_table)
         
         # Collect all crash reports first
         crash_reports = []
@@ -181,8 +396,14 @@ def download_bug_metadata(bug: dict[str, Tag]) -> Optional[BugMetadata]:
                 kernel_image_url=kernel_image_path,
                 vmlinux_url=vmlinux_path,
             )
+        
+        # No suitable crash with C repro found
+        print(f"No crash with C repro found for bug: {get_tag_string(bug['title']).replace(chr(10), ' ')}")
+        return None
     except Exception as e:
-        print(f"Error processing bug {bug['title']}: {e}")
+        import traceback
+        print(f"Error processing bug {get_tag_string(bug['title']).replace(chr(10), ' ')}: {e}")
+        traceback.print_exc()
     return None
 
 # kernel_name is upstream for default linux
@@ -191,8 +412,8 @@ def get_bugs_for_kernel(kernel_name: str) -> tuple[list[dict[str, Tag]], list[di
     open_bugs_table = find_table_by_name(get_syzkall_html(kernel_name), 'open')
     fixed_bugs_table = get_syzkall_html(f'{kernel_name}/fixed').find_all(name='table')[1]
 
-    bugs_open = filter_bugs(parse_table(open_bugs_table))
-    bugs_fixed = filter_bugs(parse_table(fixed_bugs_table))
+    bugs_open = filter_bugs(parse_table(open_bugs_table)) if open_bugs_table else []
+    bugs_fixed = filter_bugs(parse_table(fixed_bugs_table)) if fixed_bugs_table else []
 
     return bugs_open, bugs_fixed
 
