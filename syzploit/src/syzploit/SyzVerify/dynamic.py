@@ -68,6 +68,8 @@ class DynamicAnalysisConfig:
     repro_remote_path: str = "/root/repro"  # path inside guest to run under gdbserver
     # Preferred local scope directory for tmp outputs (e.g., analysis_<bug_id>)
     tmp_scope_dir: Optional[str] = None
+    # Crash stack functions from parsed crash (for GDB breakpoints)
+    crash_stack_funcs: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -749,6 +751,34 @@ except gdb.error as e:
                             break
                         except Exception:
                             continue
+            # Extract crash stack function names from parsed_crash
+            crash_stack_funcs = list(self.config.crash_stack_funcs) if self.config.crash_stack_funcs else []
+            if not crash_stack_funcs and parsed_crash:
+                seen = set()
+                for frame in parsed_crash.get('frames', parsed_crash.get('stack_frames', []))[:10]:
+                    func = frame.get('func', frame.get('function', ''))
+                    if func:
+                        base_func = func.split('+')[0].split('.')[0].strip()
+                        if base_func and base_func not in seen:
+                            seen.add(base_func)
+                            crash_stack_funcs.append(base_func)
+            
+            # Look up addresses from System.map if available
+            crash_stack_addrs = {}
+            if crash_stack_funcs and self.config.system_map and os.path.exists(self.config.system_map):
+                try:
+                    symbol_map = {}
+                    with open(self.config.system_map, 'r') as sf:
+                        for line in sf:
+                            parts = line.strip().split()
+                            if len(parts) >= 3:
+                                symbol_map[parts[2]] = int(parts[0], 16)
+                    for fn in crash_stack_funcs:
+                        if fn in symbol_map:
+                            crash_stack_addrs[fn] = f"0x{symbol_map[fn]:x}"
+                except Exception as e:
+                    print(f"[DEBUG] Failed to resolve crash stack addrs: {e}")
+            
             cfg = {
                 "poc_entry": self.config.poc_entry or "syz_executor",
                 "fault_addr": fault_addr_val if fault_addr_val is not None else None,
@@ -760,6 +790,8 @@ except gdb.error as e:
                 "guest_ssh_port": int(self.config.ssh_port),
                 "guest_ssh_user": str(self.config.ssh_user),
                 "guest_ssh_key": str(self.config.ssh_key) if self.config.ssh_key else None,
+                "crash_stack_funcs": crash_stack_funcs,
+                "crash_stack_addrs": crash_stack_addrs,
             }
             with open(kernel_conf_path, 'w') as cf:
                 json.dump(cfg, cf, indent=2)
