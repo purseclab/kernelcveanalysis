@@ -150,12 +150,32 @@ static struct device_config {
         // TODO: see if name needs to be set to anything specific or if its just used for user information
         .name = "Cuttlefish arm64 phone",
         .model = "Cuttlefish arm64 phone",
+        // getprop ro.build.version.release
         .android_version = 13,
         // I don't know exactly why these happen to be old
         // cuttlefish version I downloaded is latest
         .android_security_patch.year = 2022,
         .android_security_patch.month = 8,
         .kernel_version = KERNEL_VERSION(5, 10, 234),
+        // I think this essentially takes an offset in kernel and maps it to virtual (linear) addres?
+        // Im not to sure though
+        .kimg_to_lm = cuttlefish_kimg_to_lm,
+        // determines how to get kASLR leak after leaking `pipe_buffer`
+        //.find_kbase = noop_kbase,
+        .find_kbase = offset_kbase,
+    },
+    {
+        // Device name, model, and security patch version can be gotten with `getprop` command in adb shell
+        // See exploit.c `find_dev_config()` to see which properties are checked
+        // TODO: see if name needs to be set to anything specific or if its just used for user information
+        .name = "Cuttlefish arm64 phone 64-bit only",
+        .model = "Cuttlefish arm64 phone 64-bit only",
+        .android_version = 13,
+        // I don't know exactly why these happen to be old
+        // cuttlefish version I downloaded is latest
+        .android_security_patch.year = 2022,
+        .android_security_patch.month = 8,
+        .kernel_version = KERNEL_VERSION(5, 10, 107),
         // I think this essentially takes an offset in kernel and maps it to virtual (linear) addres?
         // Im not to sure though
         .kimg_to_lm = cuttlefish_kimg_to_lm,
