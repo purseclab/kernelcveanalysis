@@ -640,7 +640,7 @@ class SelinuxContext:
 
                     component_types = self.file_info.types_for_path_components(file.get_matching_file())
                     if component_types is None:
-                        print(f'warning: parent folder with no selinux types for {file.name}')
+                        # print(f'warning: parent folder with no selinux types for {file.name}')
                         continue
 
                     nonsearch_index = [i for i, type in enumerate(component_types.dir_components()) if type not in searchable_dirs]

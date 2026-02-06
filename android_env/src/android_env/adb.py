@@ -10,7 +10,7 @@ def run_adb_command(command: str, root: bool = False) -> Optional[str]:
     try:
         command = f'su root {command}' if root else command
         result = subprocess.run(
-            f"adb shell \"{command}\" 2>&1",
+            f"adb -s 0.0.0.0:6532 shell \"{command}\" 2>&1",
             shell=True,
             capture_output=True,
             text=True,
@@ -26,7 +26,7 @@ def run_adb_command(command: str, root: bool = False) -> Optional[str]:
 
 def upload_file(src_path: Path, dst_path: Path, executable: bool = False):
     subprocess.run(
-        ['adb', 'push', str(src_path), str(dst_path)],
+        ['adb', '-s', '0.0.0.0:6532', 'push', str(src_path), str(dst_path)],
         check=True,
     )
 
@@ -35,7 +35,7 @@ def upload_file(src_path: Path, dst_path: Path, executable: bool = False):
 
 def install_app(app: Path):
     subprocess.run(
-        ['adb', 'install', str(app)],
+        ['adb', '-s', '0.0.0.0:6532', 'install', str(app)],
         check=True,
     )
 
@@ -156,7 +156,7 @@ class AdbProcess:
 
         launch_command = f'su root {command}' if root else command
         self.popen = subprocess.Popen(
-            ["adb", "shell", launch_command],
+            ["adb", "-s", "0.0.0.0:6532", "shell", launch_command],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True

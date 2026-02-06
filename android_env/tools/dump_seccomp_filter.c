@@ -203,7 +203,7 @@ int trace_process(pid_t pid) {
             // fprintf(stderr, "restart signal: %d\n", sig);
 
             if (ptrace(PTRACE_SYSCALL, traced, NULL, sig) == -1) {
-                perror("PTRACE_SYSCALL");
+                // perror("PTRACE_SYSCALL");
                 break;
             }
         }

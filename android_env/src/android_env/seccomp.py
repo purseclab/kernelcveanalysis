@@ -20,6 +20,7 @@ class SeccompDumper:
         if len(output) == 0:
             return None
         else:
+            print(output)
             return bytes.fromhex(output)
 
 

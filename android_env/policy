@@ -1,0 +1,6 @@
+A = arch
+if (A != ARCH_AARCH64) goto 0004
+A = sys_number
+if (A != setresgid) goto 0005
+0004: return KILL
+0005: return ALLOW
