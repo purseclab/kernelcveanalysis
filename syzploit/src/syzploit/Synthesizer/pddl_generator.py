@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 
 from .core import Primitive
 from .domains import KernelDomain, TargetPlatform
+from ..utils.debug import debug_print
 
 
 # Module-level debug flag
@@ -26,10 +27,9 @@ def set_debug(enabled: bool):
     _DEBUG_ENABLED = enabled
 
 
-def _debug(msg: str):
+def pddl_debug(msg: str):
     """Print debug message if debug is enabled."""
-    if _DEBUG_ENABLED:
-        print(f"[DEBUG:PDDLGenerator] {msg}", file=sys.stderr)
+    debug_print("PDDLGenerator", msg, _DEBUG_ENABLED)
 
 
 class PDDLGenerator:
@@ -274,7 +274,7 @@ class PDDLGenerator:
             output_path = Path('/tmp') / f'{self.platform.value}_domain.pddl'
         
         self.kernel_domain.generate_domain(str(output_path))
-        _debug(f"Generated domain at: {output_path}")
+        pddl_debug(f"Generated domain at: {output_path}")
         return str(output_path)
     
     def generate_problem(self, problem_name: str, primitives: List[Primitive],
@@ -298,10 +298,10 @@ class PDDLGenerator:
         if debug:
             set_debug(True)
         
-        _debug(f"Generating problem: {problem_name}")
-        _debug(f"  platform: {self.platform}")
-        _debug(f"  primitives: {len(primitives)}")
-        _debug(f"  goal: {goal}")
+        pddl_debug(f"Generating problem: {problem_name}")
+        pddl_debug(f"  platform: {self.platform}")
+        pddl_debug(f"  primitives: {len(primitives)}")
+        pddl_debug(f"  goal: {goal}")
         
         lines = []
         
@@ -329,7 +329,7 @@ class PDDLGenerator:
                 if match:
                     self._found_vulnerabilities.add(match.group(1))
         
-        _debug(f"  found vulnerabilities: {self._found_vulnerabilities}")
+        pddl_debug(f"  found vulnerabilities: {self._found_vulnerabilities}")
         
         # Add vulnerability predicates from primitives
         added_predicates: Set[str] = set()
@@ -401,7 +401,7 @@ class PDDLGenerator:
                 lines.append("    ; Syzbot reproducer available")
                 lines.append("    (has_syzbot_reproducer)")
                 added_predicates.add('(has_syzbot_reproducer)')
-                _debug("  Added (has_syzbot_reproducer) predicate")
+                pddl_debug("  Added (has_syzbot_reproducer) predicate")
         
         lines.append("  )")
         
@@ -414,7 +414,7 @@ class PDDLGenerator:
         # Write to file
         content = '\n'.join(lines)
         Path(output_path).write_text(content)
-        _debug(f"Generated problem at: {output_path}")
+        pddl_debug(f"Generated problem at: {output_path}")
         
         return output_path
     
@@ -544,7 +544,7 @@ class PDDLGenerator:
                 predicates.append('(heap_controlled)')
             
         except Exception as e:
-            _debug(f"Error reading static analysis: {e}")
+            pddl_debug(f"Error reading static analysis: {e}")
         
         return predicates
     
@@ -579,7 +579,7 @@ class PDDLGenerator:
         Returns:
             Path to the generated problem file
         """
-        _debug(f"Generating problem from facts: {problem_name}")
+        pddl_debug(f"Generating problem from facts: {problem_name}")
         
         lines = []
         
@@ -660,6 +660,6 @@ class PDDLGenerator:
         
         content = '\n'.join(lines)
         Path(output_path).write_text(content)
-        _debug(f"Generated problem at: {output_path}")
+        pddl_debug(f"Generated problem at: {output_path}")
         
         return output_path
