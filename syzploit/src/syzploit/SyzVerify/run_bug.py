@@ -1,4 +1,4 @@
-from typing import Any, Tuple
+from typing import Any, Tuple, Optional, Dict, List
 from pathlib import Path
 import subprocess
 import os
@@ -10,6 +10,14 @@ import threading
 import json
 import tempfile
 import socket
+
+# Import runtime symbols module for kallsyms extraction
+from .runtime_symbols import (
+    extract_runtime_symbols,
+    RuntimeSymbols,
+    disable_kptr_restrict_adb,
+    disable_kptr_restrict_ssh,
+)
 
 
 VM_HOST = "127.0.0.1"
@@ -49,6 +57,98 @@ def wait_for_vm(host, port, timeout=60):
         except (ConnectionRefusedError, OSError):
             time.sleep(2)
     return False
+
+
+def extract_and_save_runtime_symbols(
+    output_dir: str,
+    vm_type: str = "cuttlefish",
+    crash_stack_funcs: Optional[List[str]] = None,
+    adb_exe: str = "adb",
+    adb_target: Optional[str] = None,
+    ssh_host: Optional[str] = None,
+    ssh_user: Optional[str] = None,
+    ssh_port: int = 22,
+) -> Optional[str]:
+    """
+    Extract runtime symbols from a running VM and save as GDB config JSON.
+    
+    This function:
+    1. Disables kptr_restrict on the VM
+    2. Dumps /proc/kallsyms to get current symbol addresses
+    3. Generates a JSON config file for the GDB script
+    
+    Args:
+        output_dir: Directory to save symbol files
+        vm_type: "cuttlefish" or "qemu"
+        crash_stack_funcs: List of crash stack function names to include
+        adb_exe: Path to adb executable (for Cuttlefish)
+        adb_target: ADB device target (for Cuttlefish)
+        ssh_host: SSH host (for QEMU)
+        ssh_user: SSH username (for QEMU)
+        ssh_port: SSH port (for QEMU)
+    
+    Returns:
+        Path to the generated GDB config JSON, or None if extraction failed
+    """
+    print(f"[SYMBOLS] Extracting runtime symbols from {vm_type}...")
+    
+    # Extract symbols
+    runtime_symbols = extract_runtime_symbols(
+        output_dir=output_dir,
+        vm_type=vm_type,
+        adb_exe=adb_exe,
+        adb_target=adb_target,
+        ssh_host=ssh_host,
+        ssh_user=ssh_user,
+        ssh_port=ssh_port,
+    )
+    
+    if not runtime_symbols:
+        print("[SYMBOLS] WARNING: Failed to extract runtime symbols")
+        return None
+    
+    print(f"[SYMBOLS] Extracted {len(runtime_symbols.symbols)} symbols")
+    print(f"[SYMBOLS] System.map: {runtime_symbols.system_map_path}")
+    
+    # Get alloc/free addresses
+    alloc_free = runtime_symbols.get_alloc_free_addresses()
+    print(f"[SYMBOLS] Found {len(alloc_free)} alloc/free functions:")
+    for name, addr in list(alloc_free.items())[:4]:
+        print(f"          {name}: 0x{addr:x}")
+    
+    # Get crash stack addresses
+    crash_addrs = {}
+    if crash_stack_funcs:
+        crash_addrs = runtime_symbols.get_crash_stack_addresses(crash_stack_funcs)
+        print(f"[SYMBOLS] Found {len(crash_addrs)}/{len(crash_stack_funcs)} crash stack functions")
+    
+    # Separate alloc and free addresses
+    alloc_addrs = {}
+    free_addrs = {}
+    for name, addr in alloc_free.items():
+        if "free" in name.lower():
+            free_addrs[name] = f"0x{addr:x}"
+        else:
+            alloc_addrs[name] = f"0x{addr:x}"
+    
+    # Generate GDB config JSON
+    gdb_config = {
+        "system_map_path": runtime_symbols.system_map_path,
+        "alloc_addrs": alloc_addrs,
+        "free_addrs": free_addrs,
+        "crash_stack_addrs": {name: f"0x{addr:x}" for name, addr in crash_addrs.items()},
+        "crash_stack_funcs": crash_stack_funcs or [],
+        "extraction_method": runtime_symbols.extraction_method,
+        "kptr_restrict_disabled": runtime_symbols.kptr_restrict_disabled,
+    }
+    
+    config_path = os.path.join(output_dir, "runtime_symbols_config.json")
+    with open(config_path, 'w') as f:
+        json.dump(gdb_config, f, indent=2)
+    
+    print(f"[SYMBOLS] Saved GDB config to: {config_path}")
+    return config_path
+
 
 def upload_and_run(repro_path: Path, root):
     ssh = paramiko.SSHClient()
@@ -391,6 +491,269 @@ def get_uptime() -> float:
         return float(output.strip().split()[0])
     except subprocess.CalledProcessError:
         return 0.0
+
+
+def ensure_device_ready(
+    max_wait: int = 60,
+    ssh_host: str = None,
+    stop_cmd: str = None,
+    start_cmd: str = None,
+    verbose: bool = True,
+    instance: int = None,
+    adb_port: int = 6520,
+) -> bool:
+    """
+    Ensure the device is connected and ready before running a test.
+    
+    This function:
+    1. Checks if device is connected and in 'device' state
+    2. If offline/disconnected, waits up to max_wait seconds
+    3. If still offline after waiting, offers to restart the device
+    
+    For remote Cuttlefish (ssh_host provided), checks connectivity via SSH
+    by running ADB commands on the remote host.
+    
+    Args:
+        max_wait: Maximum seconds to wait for device to come online (default: 60)
+        ssh_host: SSH host for remote Cuttlefish (if remote)
+        stop_cmd: Command to stop Cuttlefish (optional)
+        start_cmd: Command to start Cuttlefish (optional)
+        verbose: Whether to print status messages
+        instance: Cuttlefish instance number (for calculating ADB port)
+        adb_port: Base ADB port (default: 6520)
+        
+    Returns:
+        True if device is ready, False if user chose to skip/abort
+    """
+    # Calculate actual ADB port from instance
+    actual_adb_port = adb_port
+    if instance is not None:
+        actual_adb_port = 6520 + (instance - 1)
+    
+    # Determine if this is a remote check
+    is_remote = ssh_host and ssh_host not in ('localhost', '127.0.0.1')
+    
+    if verbose:
+        print()
+        print("-" * 60)
+        print("[PRE-CHECK] Verifying device connectivity...")
+        print("-" * 60)
+        if is_remote:
+            print(f"[PRE-CHECK] Remote host: {ssh_host}, ADB port: {actual_adb_port}")
+    
+    def check_device() -> bool:
+        """Check if device is connected - locally or via SSH."""
+        if is_remote:
+            return _check_remote_device(ssh_host, actual_adb_port, verbose=False)
+        else:
+            return is_device_connected()
+    
+    # First check - is device connected?
+    if check_device():
+        if verbose:
+            print(f"[OK] Device is connected and ready")
+        return True
+    
+    # Device is not in good state - wait for it
+    if verbose:
+        print(f"[WAIT] Device is offline or disconnected, waiting up to {max_wait}s...")
+    
+    start_time = time.time()
+    check_interval = 5  # Check every 5 seconds
+    
+    while (time.time() - start_time) < max_wait:
+        time.sleep(check_interval)
+        elapsed = int(time.time() - start_time)
+        
+        if check_device():
+            if verbose:
+                print(f"[OK] Device came online after {elapsed}s")
+                # Wait a bit more for system stability
+                print("[WAIT] Waiting 10s for system stability...")
+                time.sleep(10)
+            return True
+        
+        if verbose and elapsed % 15 == 0:
+            print(f"[WAIT] Still waiting... ({elapsed}s / {max_wait}s)")
+    
+    # Timeout - device still not ready
+    if verbose:
+        print(f"[TIMEOUT] Device did not come online after {max_wait}s")
+    
+    # If we have restart commands, offer to use them
+    if stop_cmd and start_cmd:
+        print()
+        print("=" * 60)
+        print("RESTARTING DEVICE")
+        print("=" * 60)
+        print()
+        
+        _restart_device(ssh_host, stop_cmd, start_cmd, verbose, instance, adb_port)
+    else:
+        # No restart commands - just offer manual intervention
+        print()
+        print("[MANUAL] No restart commands configured.")
+        print("[MANUAL] Please start the device manually, then press Enter (or Ctrl+C to abort)...")
+        try:
+            input()
+        except (EOFError, KeyboardInterrupt):
+            print("\n[ABORT] User cancelled")
+            return False
+        
+        if check_device():
+            print("[OK] Device is now connected")
+            return True
+        else:
+            print("[ERROR] Device still not connected")
+            return False
+
+
+def _check_remote_device(ssh_host: str, adb_port: int, verbose: bool = True) -> bool:
+    """
+    Check if a Cuttlefish device is connected on a remote host via SSH.
+    
+    Runs 'adb -s 0.0.0.0:<port> shell echo ok' on the remote host to check
+    if the device is responsive.
+    
+    Args:
+        ssh_host: SSH host to connect to
+        adb_port: ADB port on the remote host
+        verbose: Print status messages
+        
+    Returns:
+        True if device responds, False otherwise
+    """
+    try:
+        # Run adb command on remote host to check device status
+        adb_target = f"0.0.0.0:{adb_port}"
+        check_cmd = f"adb -s {adb_target} shell echo ok 2>/dev/null"
+        
+        result = subprocess.run(
+            ['ssh', ssh_host, check_cmd],
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+        
+        if result.returncode == 0 and 'ok' in result.stdout:
+            if verbose:
+                print(f"[SSH] Device at {ssh_host}:{adb_port} is responsive")
+            return True
+        else:
+            if verbose:
+                print(f"[SSH] Device at {ssh_host}:{adb_port} not responding")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        if verbose:
+            print(f"[SSH] Timeout checking device at {ssh_host}:{adb_port}")
+        return False
+    except Exception as e:
+        if verbose:
+            print(f"[SSH] Error checking device: {e}")
+        return False
+
+
+def _restart_device(
+    ssh_host: str = None,
+    stop_cmd: str = None,
+    start_cmd: str = None,
+    verbose: bool = True,
+    instance: int = None,
+    adb_port: int = 6520,
+) -> bool:
+    """
+    Restart the Cuttlefish device using provided commands.
+    
+    Returns True if device comes online after restart, False otherwise.
+    """
+    # Calculate actual ADB port
+    actual_adb_port = adb_port
+    if instance is not None:
+        actual_adb_port = 6520 + (instance - 1)
+    
+    is_remote = ssh_host and ssh_host not in ('localhost', '127.0.0.1')
+    
+    if verbose:
+        print("[RESTART] Attempting to restart device...")
+    
+    try:
+        # Stop the device
+        if stop_cmd:
+            if verbose:
+                print(f"[STOP] Running: {stop_cmd}")
+            if ssh_host and ssh_host != 'localhost':
+                result = subprocess.run(
+                    ['ssh', ssh_host, stop_cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+            else:
+                result = subprocess.run(
+                    stop_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+            if verbose:
+                print(f"[STOP] Exit code: {result.returncode}")
+            time.sleep(5)  # Wait for clean shutdown
+        
+        # Start the device
+        if start_cmd:
+            if verbose:
+                print(f"[START] Running: {start_cmd}")
+            if ssh_host and ssh_host != 'localhost':
+                result = subprocess.run(
+                    ['ssh', ssh_host, start_cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 min for boot
+                )
+            else:
+                result = subprocess.run(
+                    start_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+            if verbose:
+                print(f"[START] Exit code: {result.returncode}")
+            
+            # Wait for device to boot
+            print("[BOOT] Waiting for device to boot (up to 120s)...")
+            for i in range(24):  # 24 * 5 = 120 seconds
+                time.sleep(5)
+                # Check device - use remote check if remote host
+                if is_remote:
+                    device_ready = _check_remote_device(ssh_host, actual_adb_port, verbose=False)
+                else:
+                    device_ready = is_device_connected()
+                    
+                if device_ready:
+                    print(f"[OK] Device came online after restart ({(i+1)*5}s)")
+                    print("[WAIT] Waiting 30s for system to fully boot...")
+                    time.sleep(30)
+                    return True
+                if verbose and (i+1) % 4 == 0:
+                    print(f"[BOOT] Still waiting... ({(i+1)*5}s)")
+            
+            print("[ERROR] Device did not come online after restart")
+            return False
+        else:
+            print("[ERROR] No start command provided")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print("[ERROR] Command timed out")
+        return False
+    except Exception as e:
+        print(f"[ERROR] Restart failed: {e}")
+        return False
+
 
 # Path of repro in android VM
 REPRO_PATH = '/data/local/tmp/repro'
@@ -1124,7 +1487,8 @@ def test_repro_crashes_cuttlefish_kernel_gdb(
     log_dir: str = ".",
     root: bool = True,
     timeout: int = 120,
-    arch: str = "arm64"
+    arch: str = "arm64",
+    demo: bool = False,
 ) -> Tuple[bool, int, dict]:
     """
     Perform kernel-side GDB debugging on a Cuttlefish instance.
@@ -1149,6 +1513,7 @@ def test_repro_crashes_cuttlefish_kernel_gdb(
         root: Whether to run as root
         timeout: Timeout for GDB execution
         arch: Target architecture (arm64 or x86_64)
+        demo: Demo mode - generate sample data if real tracing fails
     
     Returns:
         Tuple of (crash_occurred, crash_type, dynamic_results)
@@ -1164,6 +1529,7 @@ def test_repro_crashes_cuttlefish_kernel_gdb(
     print(f"[CONFIG] Target Device: {ADB_TARGET_DEVICE}")
     print(f"[CONFIG] Architecture: {arch}")
     print(f"[CONFIG] Log Directory: {log_dir}")
+    print(f"[CONFIG] Demo Mode: {demo}")
     print()
     
     # Step 1: Check GDB port connectivity
@@ -1752,19 +2118,18 @@ def test_repro_with_cuttlefish_controller(
     arch: str = "arm64",
     vmlinux_path: str = None,
     remote_vmlinux_path: str = None,
+    demo: bool = False,
 ) -> Tuple[bool, int, dict]:
     """
     Test a reproducer using the CuttlefishController with support for
     persistent and non-persistent modes.
     
-    This function orchestrates:
-    1. Starting Cuttlefish (if not already running/persistent)
-    2. Uploading the reproducer via ADB
-    3. Optionally attaching kernel GDB via crosvm
-       - For remote Cuttlefish: GDB runs on remote server, results transferred back
-       - For local Cuttlefish: GDB runs locally
-    4. Running the reproducer and monitoring for crashes
-    5. Stopping Cuttlefish (if non-persistent mode)
+    TWO-PHASE APPROACH (when extract_runtime_symbols is enabled):
+    Phase 1: Boot VM (minimal GDB, just continue) -> Extract kallsyms -> Stop
+    Phase 2: Generate GDB script with real addresses -> Restart -> Run reproducer
+    
+    This ensures we have accurate symbol addresses for hardware breakpoints
+    since KASLR randomizes addresses on each boot.
     
     Args:
         repro_path: Path to the compiled reproducer binary
@@ -1777,40 +2142,20 @@ def test_repro_with_cuttlefish_controller(
         arch: Target architecture (arm64/x86_64)
         vmlinux_path: Path to vmlinux with debug symbols (local, optional)
         remote_vmlinux_path: Path to vmlinux on remote server (for remote GDB)
+        demo: Demo mode - generate sample data if GDB tracing fails
     
     Returns:
         Tuple of (crash_occurred, crash_type, dynamic_results)
-    
-    Example usage:
-        from syzploit.SyzVerify.cuttlefish import CuttlefishConfig
-        
-        # Persistent mode - Cuttlefish already running
-        config = CuttlefishConfig(
-            persistent=True,
-            already_running=True,
-            gdb_port=1234,
-            adb_port=6520,
-        )
-        
-        # Non-persistent mode - start/stop for each test
-        config = CuttlefishConfig(
-            persistent=False,
-            start_command="cd ~/cf && HOME=$PWD ./bin/launch_cvd --daemon",
-            stop_command="cd ~/cf && HOME=$PWD ./bin/stop_cvd",
-            gdb_port=1234,
-            adb_port=6520,
-        )
-        
-        crashed, crash_type, results = test_repro_with_cuttlefish_controller(
-            repro_path="./repro",
-            bug_id="bug123",
-            cuttlefish_config=config,
-        )
     """
     from .cuttlefish import CuttlefishController, CuttlefishConfig
     
-    controller = CuttlefishController(cuttlefish_config)
+    # Create log directory and set log_file path in config
+    # This ensures GDB logs and other controller logs go to the right place
     os.makedirs(log_dir, exist_ok=True)
+    if not cuttlefish_config.log_file:
+        cuttlefish_config.log_file = os.path.join(log_dir, "cuttlefish_controller.log")
+    
+    controller = CuttlefishController(cuttlefish_config)
     
     dynamic_results = {
         "bug_id": bug_id,
@@ -1820,13 +2165,27 @@ def test_repro_with_cuttlefish_controller(
         "arch": arch,
         "events": [],
         "crash_detected": False,
+        # GDB log paths
+        "gdb_session_log": os.path.join(log_dir, "gdb_session.log"),
+        "gdb_stdout_log": os.path.join(log_dir, "gdb_stdout.log"),
+        "gdb_stderr_log": os.path.join(log_dir, "gdb_stderr.log"),
     }
     
     crash_occurred = False
     crash_type = 0
+    runtime_symbols = None
+    runtime_config_path = None
+    
+    # Store original ADB settings to restore later
+    global ADB_TARGET_DEVICE, ADB_EXE_PATH
+    old_adb_target = ADB_TARGET_DEVICE
+    old_adb_exe = ADB_EXE_PATH
+    
+    # Check if we should do two-phase symbol extraction
+    do_runtime_extraction = getattr(cuttlefish_config, 'extract_runtime_symbols', True)
     
     try:
-        # Step 1: Start/connect to Cuttlefish
+        # Print header
         print()
         print("=" * 80)
         print("  CUTTLEFISH CONTROLLER TEST")
@@ -1838,107 +2197,210 @@ def test_repro_with_cuttlefish_controller(
         print(f"[CONFIG] GDB enabled: {cuttlefish_config.enable_gdb}")
         print(f"[CONFIG] GDB port: {cuttlefish_config.gdb_port}")
         print(f"[CONFIG] ADB: {cuttlefish_config.adb_host}:{cuttlefish_config.adb_port}")
+        print(f"[CONFIG] Runtime symbol extraction: {do_runtime_extraction}")
         print(f"[CONFIG] Log file: {controller.get_log_file_path()}")
         print()
         
+        # ============================================================
+        # PHASE 1: Boot VM and extract runtime symbols
+        # ============================================================
+        if do_runtime_extraction and cuttlefish_config.enable_gdb:
+            print("=" * 60)
+            print("  PHASE 1: Symbol Extraction")
+            print("=" * 60)
+            print()
+            
+            print("-" * 60)
+            print("[PHASE 1.1] Starting Cuttlefish for symbol extraction...")
+            print("-" * 60)
+            
+            # Use run_command (non-GDB, e.g. run.sh) for symbol extraction if available
+            # This avoids the GDB stub pausing the kernel during a symbols-only boot
+            phase1_cmd = cuttlefish_config.run_command or cuttlefish_config.start_command
+            original_start = cuttlefish_config.start_command
+            original_enable_gdb = cuttlefish_config.enable_gdb
+            if phase1_cmd and phase1_cmd != cuttlefish_config.start_command:
+                print(f"[INFO] Using non-GDB command for symbol extraction: {phase1_cmd}")
+                cuttlefish_config.start_command = phase1_cmd
+                cuttlefish_config.enable_gdb = False
+            else:
+                print("[INFO] GDB will just continue (no breakpoints yet)")
+            
+            # Start without GDB script - just boot and extract symbols
+            if not controller.start(gdb_script_path=None, vmlinux_path=None, gdb_continue_only=True):
+                print("[ERROR] Failed to start Cuttlefish for symbol extraction")
+                dynamic_results["error"] = "Failed to start Cuttlefish (phase 1)"
+                return False, 0, dynamic_results
+            
+            print("[OK] Cuttlefish booted for symbol extraction")
+            print()
+            
+            # Configure ADB for phase 1
+            ADB_TARGET_DEVICE = controller.get_adb_target()
+            ADB_EXE_PATH = cuttlefish_config.adb_exe
+            
+            print(f"[CONFIG] Using ADB target: {ADB_TARGET_DEVICE}")
+            print(f"[CONFIG] Using ADB executable: {ADB_EXE_PATH}")
+            
+            # Connect via SSH tunnel if needed
+            if cuttlefish_config.setup_tunnels:
+                print(f"[CONFIG] SSH tunnels enabled - connecting via tunneled ADB server")
+                subprocess.run(
+                    [ADB_EXE_PATH, "connect", ADB_TARGET_DEVICE],
+                    capture_output=True, text=True, timeout=10
+                )
+            
+            print("-" * 60)
+            print("[PHASE 1.2] Extracting runtime symbols from running VM...")
+            print("-" * 60)
+            
+            # Extract crash stack functions
+            crash_stack_funcs = []
+            if parsed_crash:
+                frames_list = parsed_crash.get("stack_frames", parsed_crash.get("frames", []))
+                for frame in frames_list:
+                    func = frame.get("function", frame.get("func", ""))
+                    if func and func not in crash_stack_funcs:
+                        crash_stack_funcs.append(func)
+                if parsed_crash.get("corrupted_function"):
+                    crash_stack_funcs.insert(0, parsed_crash["corrupted_function"])
+            
+            runtime_config_path = extract_and_save_runtime_symbols(
+                output_dir=log_dir,
+                vm_type="cuttlefish",
+                crash_stack_funcs=crash_stack_funcs,
+                adb_exe=ADB_EXE_PATH,
+                adb_target=ADB_TARGET_DEVICE,
+            )
+            
+            if runtime_config_path:
+                dynamic_results["runtime_symbols_config"] = runtime_config_path
+                dynamic_results["symbols_source"] = "runtime_kallsyms"
+                print(f"[OK] Runtime symbols extracted: {runtime_config_path}")
+            else:
+                print("[WARNING] Failed to extract runtime symbols")
+                dynamic_results["symbols_source"] = "none"
+            
+            print()
+            print("-" * 60)
+            print("[PHASE 1.3] Stopping Cuttlefish instance...")
+            print("-" * 60)
+            
+            # Restore ADB settings before stopping
+            ADB_TARGET_DEVICE = old_adb_target
+            ADB_EXE_PATH = old_adb_exe
+            
+            # Restore original start command for Phase 2 (GDB-enabled)
+            cuttlefish_config.start_command = original_start
+            cuttlefish_config.enable_gdb = original_enable_gdb
+            
+            # Stop the instance
+            controller.stop()
+            print("[OK] Instance stopped")
+            print()
+            
+            # Wait for clean shutdown
+            time.sleep(5)
+            
+            print("=" * 60)
+            print("  PHASE 2: Run with GDB Breakpoints")
+            print("=" * 60)
+            print()
+        
+        # ============================================================
+        # PHASE 2: Generate GDB script with extracted symbols and run
+        # ============================================================
+        
         print("-" * 60)
-        print("[STEP 1] Starting/connecting to Cuttlefish...")
+        print("[PHASE 2.1] Generating GDB script with runtime symbols...")
         print("-" * 60)
         
-        # If GDB is enabled, generate the GDB script BEFORE starting
-        # so that it can be loaded during kernel boot
         gdb_script_path = None
         kernel_gdb = None
         
         if cuttlefish_config.enable_gdb:
             from .cuttlefish import CuttlefishKernelGDB
             
-            # Determine if this is a remote Cuttlefish instance
-            is_remote = cuttlefish_config.ssh_host != "localhost" or cuttlefish_config.ssh_port != 22
-            
-            print("[GDB] Generating kernel GDB analysis script...")
             kernel_gdb = CuttlefishKernelGDB(controller, log_dir)
             
-            # Log symbol extraction results
-            if kernel_gdb.vmlinux_path:
-                print(f"[GDB] Using vmlinux with symbols: {kernel_gdb.vmlinux_path}")
-            if kernel_gdb.system_map_path:
-                print(f"[GDB] Using System.map: {kernel_gdb.system_map_path}")
+            # Log parsed crash info
+            if parsed_crash:
+                print(f"[GDB] Parsed crash info available:")
+                print(f"      - frames: {len(parsed_crash.get('frames', []))}")
+                print(f"      - stack_frames: {len(parsed_crash.get('stack_frames', []))}")
+                print(f"      - access: {parsed_crash.get('access', 'N/A')}")
+                print(f"      - kind: {parsed_crash.get('kind', 'N/A')}")
+            else:
+                print(f"[GDB] WARNING: No parsed crash info available!")
             
-            # Generate breakpoints from parsed crash info
+            # Build breakpoints from parsed crash info
             breakpoints = []
             if parsed_crash:
                 if "corrupted_function" in parsed_crash:
                     breakpoints.append({"function": parsed_crash["corrupted_function"]})
-                if "stack_frames" in parsed_crash:
-                    for frame in parsed_crash["stack_frames"][:5]:
-                        if "function" in frame:
-                            breakpoints.append({"function": frame["function"]})
+                frames_list = parsed_crash.get("stack_frames", parsed_crash.get("frames", []))
+                for frame in frames_list[:5]:
+                    func = frame.get("function", frame.get("func", ""))
+                    if func:
+                        breakpoints.append({"function": func})
+                if breakpoints:
+                    print(f"[GDB] Passing {len(breakpoints)} breakpoint hints to script generator")
             
-            # Use auto-extracted vmlinux from kernel_gdb, or fallback to provided paths
-            effective_vmlinux = kernel_gdb.vmlinux_path or (remote_vmlinux_path if is_remote else vmlinux_path)
+            # Use runtime symbols config if we extracted it
+            effective_vmlinux = kernel_gdb.vmlinux_path or vmlinux_path
             
             gdb_script_path = kernel_gdb.generate_kernel_gdb_script(
                 bug_id=bug_id,
                 breakpoints=breakpoints,
                 vmlinux_path=effective_vmlinux,
+                parsed_crash=parsed_crash,
+                demo_mode=demo,
+                runtime_symbols_config=runtime_config_path,  # Pass the extracted symbols
             )
             print(f"[GDB] Script generated: {gdb_script_path}")
-        else:
-            effective_vmlinux = vmlinux_path
+            if runtime_config_path:
+                print(f"[GDB] Using runtime symbols from: {runtime_config_path}")
+            if demo:
+                print(f"[GDB] DEMO MODE ENABLED - will generate sample data if tracing fails")
         
-        if not controller.start(gdb_script_path=gdb_script_path, vmlinux_path=effective_vmlinux if cuttlefish_config.enable_gdb else None):
-            print("[ERROR] Failed to start Cuttlefish")
-            print(f"[INFO] Check detailed log: {controller.get_log_file_path()}")
-            dynamic_results["error"] = "Failed to start Cuttlefish"
-            dynamic_results["log_file"] = controller.get_log_file_path()
+        print()
+        print("-" * 60)
+        print("[PHASE 2.2] Starting Cuttlefish with GDB breakpoints...")
+        print("-" * 60)
+        
+        # For phase 2, we may need to reset the controller state for non-persistent mode
+        if not cuttlefish_config.persistent:
+            # Create a fresh controller for the second boot
+            controller = CuttlefishController(cuttlefish_config)
+        
+        if not controller.start(gdb_script_path=gdb_script_path, vmlinux_path=vmlinux_path if cuttlefish_config.enable_gdb else None):
+            print("[ERROR] Failed to start Cuttlefish with GDB")
+            dynamic_results["error"] = "Failed to start Cuttlefish (phase 2)"
             return False, 0, dynamic_results
         
         dynamic_results["cuttlefish_started"] = True
         dynamic_results["log_file"] = controller.get_log_file_path()
-        print("[OK] Cuttlefish is ready")
+        print("[OK] Cuttlefish is ready with GDB breakpoints")
         print()
         
-        # Step 2: Configure ADB to use the controller's settings
-        global ADB_TARGET_DEVICE, ADB_EXE_PATH
-        old_adb_target = ADB_TARGET_DEVICE
-        old_adb_exe = ADB_EXE_PATH
+        # Configure ADB again for phase 2
         ADB_TARGET_DEVICE = controller.get_adb_target()
-        
-        # Use system adb (not ./adb) for controller-based tests
         ADB_EXE_PATH = cuttlefish_config.adb_exe
         
         print(f"[CONFIG] Using ADB target: {ADB_TARGET_DEVICE}")
         print(f"[CONFIG] Using ADB executable: {ADB_EXE_PATH}")
         
-        # If using SSH tunnels, we need to connect to the device through the tunneled ADB server
         if cuttlefish_config.setup_tunnels:
             print(f"[CONFIG] SSH tunnels enabled - connecting via tunneled ADB server")
-            # The tunnel forwards local 5037 to remote 5037
-            # Device is at localhost:adb_port on the remote, accessible via tunneled server
             connect_result = subprocess.run(
                 [ADB_EXE_PATH, "connect", ADB_TARGET_DEVICE],
-                capture_output=True,
-                text=True,
-                timeout=10
+                capture_output=True, text=True, timeout=10
             )
             print(f"[ADB] Connect result: {connect_result.stdout.strip()}")
         
-        # Step 2.5: Extract kallsyms if vmlinux-to-elf failed
-        if kernel_gdb and not kernel_gdb.system_map_path:
-            print("[SYMBOLS] vmlinux extraction failed, trying kallsyms from running system...")
-            if kernel_gdb.extract_kallsyms_after_boot(adb_target=ADB_TARGET_DEVICE):
-                print(f"[SYMBOLS] Successfully extracted kallsyms: {kernel_gdb.system_map_path}")
-                dynamic_results["symbols_source"] = "kallsyms"
-            else:
-                print("[SYMBOLS] Failed to extract kallsyms - debugging without symbols")
-                dynamic_results["symbols_source"] = "none"
-        elif kernel_gdb and kernel_gdb.system_map_path:
-            dynamic_results["symbols_source"] = "vmlinux"
-        
-        # Step 3: Get device info
+        # Get device info
         print("-" * 60)
-        print("[STEP 2] Getting device information...")
+        print("[PHASE 2.3] Getting device information...")
         print("-" * 60)
         
         wait_for_connection()
@@ -1959,9 +2421,9 @@ def test_repro_with_cuttlefish_controller(
         dynamic_results["kernel_version"] = kernel_version
         print()
         
-        # Step 4: Upload reproducer
+        # Upload reproducer
         print("-" * 60)
-        print("[STEP 3] Uploading reproducer...")
+        print("[PHASE 2.4] Uploading reproducer...")
         print("-" * 60)
         
         adb_upload_file(repro_path, Path(REPRO_PATH))
@@ -1973,16 +2435,13 @@ def test_repro_with_cuttlefish_controller(
         t0 = get_uptime()
         print(f"[DEVICE] Uptime before test: {t0:.2f}s")
         
-        # Step 5: Run with GDB if enabled
+        # Run reproducer
         if cuttlefish_config.enable_gdb:
             print("-" * 60)
-            print("[STEP 4] Running reproducer (GDB script loaded at boot)...")
+            print("[PHASE 2.5] Running reproducer with GDB monitoring...")
             print("-" * 60)
             
-            # GDB script was already loaded during boot (via controller.start())
-            # Now we just run the reproducer and let the breakpoints trigger
-            
-            print("[GDB] GDB script was loaded during kernel boot")
+            print("[GDB] GDB script loaded with runtime symbol addresses")
             print(f"[GDB] Script path: {gdb_script_path}")
             
             # Start reproducer in background
@@ -1994,13 +2453,11 @@ def test_repro_with_cuttlefish_controller(
             _adb_shell(repro_cmd)
             time.sleep(1)
             
-            # Wait for the timeout period to let the reproducer run
-            # GDB is already attached and monitoring from boot
+            # Wait for execution
             print(f"[GDB] Waiting {timeout}s for reproducer execution...")
-            time.sleep(min(timeout, 30))  # Wait a bit for reproducer to trigger
+            time.sleep(min(timeout, 30))
             
-            # Check if there are results from the GDB session
-            # The script should have saved results to a JSON file
+            # Check for results
             if kernel_gdb:
                 results_file = Path(log_dir) / f"{bug_id}_kernel_gdb_results.json"
                 if results_file.exists():
@@ -2015,13 +2472,11 @@ def test_repro_with_cuttlefish_controller(
                     print("[GDB] No results file found (GDB may still be running)")
                     dynamic_results["analysis_mode"] = "kernel_gdb_in_progress"
                 
-                # Clean up remote resources if needed
                 kernel_gdb.cleanup()
-        
         else:
             # Direct execution without GDB
             print("-" * 60)
-            print("[STEP 4] Running reproducer directly (no GDB)...")
+            print("[PHASE 2.5] Running reproducer directly (no GDB)...")
             print("-" * 60)
             
             dynamic_results["analysis_mode"] = "direct"
@@ -2044,9 +2499,9 @@ def test_repro_with_cuttlefish_controller(
         print("[CLEANUP] Stopping reproducer process...")
         _adb_shell('killall repro 2>/dev/null')
         
-        # Step 6: Check for crash
+        # Check for crash
         print("-" * 60)
-        print("[STEP 5] Checking device state...")
+        print("[PHASE 2.6] Checking device state...")
         print("-" * 60)
         
         time.sleep(2)
@@ -2090,10 +2545,10 @@ def test_repro_with_cuttlefish_controller(
         dynamic_results["error"] = str(e)
         
     finally:
-        # Step 7: Cleanup Cuttlefish
+        # Cleanup
         print()
         print("-" * 60)
-        print("[STEP 6] Cleaning up...")
+        print("[CLEANUP] Cleaning up...")
         print("-" * 60)
         controller.cleanup()
         print("[OK] Cleanup complete")
@@ -2111,8 +2566,1129 @@ def test_repro_with_cuttlefish_controller(
     print(f"[RESULTS] Crash detected: {crash_occurred}")
     print(f"[RESULTS] Crash type: {crash_type}")
     print(f"[RESULTS] Mode: {dynamic_results['analysis_mode']}")
+    print(f"[RESULTS] Symbols source: {dynamic_results.get('symbols_source', 'unknown')}")
     print(f"[RESULTS] Detailed log: {controller.get_log_file_path()}")
+    if cuttlefish_config.enable_gdb:
+        print(f"[RESULTS] GDB session log: {dynamic_results.get('gdb_session_log')}")
     print("=" * 80)
     print()
     
     return crash_occurred, crash_type, dynamic_results
+
+
+def verify_exploit_with_cuttlefish_controller(
+    exploit_path: str,
+    cuttlefish_config: 'CuttlefishConfig',
+    log_dir: str = ".",
+    timeout: int = 120,
+    demo: bool = False,
+) -> Dict[str, Any]:
+    """
+    Verify an exploit achieves privilege escalation using CuttlefishController.
+    
+    This mirrors the approach used in test_repro_with_cuttlefish_controller but
+    is specifically designed for exploit verification:
+    1. Push exploit to device
+    2. Run exploit as non-root user (shell)
+    3. Check if privilege escalation to root was achieved
+    
+    Args:
+        exploit_path: Path to the compiled exploit binary
+        cuttlefish_config: CuttlefishConfig instance with connection settings
+        log_dir: Directory for output logs
+        timeout: Execution timeout in seconds
+        demo: Demo mode - simulate success for testing pipeline
+        
+    Returns:
+        Dictionary with verification results
+    """
+    from .cuttlefish import CuttlefishController, CuttlefishConfig
+    
+    os.makedirs(log_dir, exist_ok=True)
+    if not cuttlefish_config.log_file:
+        cuttlefish_config.log_file = os.path.join(log_dir, "exploit_verification.log")
+    
+    controller = CuttlefishController(cuttlefish_config)
+    
+    result = {
+        "exploit_path": exploit_path,
+        "success": False,
+        "initial_uid": None,
+        "final_uid": None,
+        "privilege_escalated": False,
+        "crash_occurred": False,
+        "error": None,
+        "logs": [],
+        "device_stable": True,
+    }
+    
+    # Store original ADB settings to restore later
+    global ADB_TARGET_DEVICE, ADB_EXE_PATH
+    old_adb_target = ADB_TARGET_DEVICE
+    old_adb_exe = ADB_EXE_PATH
+    
+    def log(msg: str):
+        print(msg)
+        result["logs"].append(msg)
+    
+    try:
+        print()
+        print("=" * 80)
+        print("  EXPLOIT PRIVILEGE ESCALATION VERIFICATION")
+        print("  (Using CuttlefishController)")
+        print("=" * 80)
+        print()
+        
+        log(f"[CONFIG] Exploit: {exploit_path}")
+        log(f"[CONFIG] Mode: {'persistent' if cuttlefish_config.persistent else 'non-persistent'}")
+        log(f"[CONFIG] Already running: {cuttlefish_config.already_running}")
+        log(f"[CONFIG] SSH: {cuttlefish_config.ssh_host}:{cuttlefish_config.ssh_port}")
+        log(f"[CONFIG] ADB: {cuttlefish_config.adb_host}:{cuttlefish_config.adb_port}")
+        print()
+        
+        # Check exploit exists
+        if not os.path.exists(exploit_path):
+            result["error"] = f"Exploit binary not found: {exploit_path}"
+            log(f"[ERROR] {result['error']}")
+            return result
+        
+        # Step 1: Start Cuttlefish (if not already running)
+        log("-" * 60)
+        log("[STEP 1] Starting Cuttlefish instance...")
+        log("-" * 60)
+        
+        # For exploit verification, we don't need GDB - just boot and run
+        if not controller.start(gdb_script_path=None, vmlinux_path=None, gdb_continue_only=True):
+            result["error"] = "Failed to start Cuttlefish instance"
+            log(f"[ERROR] {result['error']}")
+            return result
+        
+        log("[OK] Cuttlefish is ready")
+        print()
+        
+        # Configure ADB
+        ADB_TARGET_DEVICE = controller.get_adb_target()
+        ADB_EXE_PATH = cuttlefish_config.adb_exe
+        
+        log(f"[CONFIG] Using ADB target: {ADB_TARGET_DEVICE}")
+        log(f"[CONFIG] Using ADB executable: {ADB_EXE_PATH}")
+        
+        if cuttlefish_config.setup_tunnels:
+            log("[CONFIG] Connecting via SSH tunneled ADB...")
+            subprocess.run(
+                [ADB_EXE_PATH, "connect", ADB_TARGET_DEVICE],
+                capture_output=True, text=True, timeout=10
+            )
+        
+        # Wait for device
+        log("-" * 60)
+        log("[STEP 2] Waiting for device connection...")
+        log("-" * 60)
+        
+        wait_for_connection()
+        log("[OK] Device connected")
+        
+        # Get device info
+        success, device_info, _ = _adb_shell('getprop ro.product.model')
+        device_model = device_info.strip() if success else "Unknown"
+        log(f"[DEVICE] Model: {device_model}")
+        
+        # Record uptime before test
+        t0 = get_uptime()
+        log(f"[DEVICE] Uptime: {t0:.2f}s")
+        print()
+        
+        # Step 3: Push exploit
+        log("-" * 60)
+        log("[STEP 3] Pushing exploit to device...")
+        log("-" * 60)
+        
+        remote_exploit_path = "/data/local/tmp/exploit"
+        adb_upload_file(exploit_path, Path(remote_exploit_path))
+        log(f"[OK] Exploit pushed to {remote_exploit_path}")
+        print()
+        
+        # Step 4: Check initial UID (as shell user)
+        log("-" * 60)
+        log("[STEP 4] Checking initial UID (as shell user)...")
+        log("-" * 60)
+        
+        success, uid_output, _ = _adb_shell('id -u')
+        if success:
+            initial_uid = uid_output.strip()
+            result["initial_uid"] = initial_uid
+            log(f"[OK] Initial UID: {initial_uid} (should be non-zero)")
+        else:
+            log("[WARNING] Could not get initial UID")
+            result["initial_uid"] = "unknown"
+        print()
+        
+        # Step 5: Run exploit as shell user (non-root)
+        log("-" * 60)
+        log("[STEP 5] Running exploit as non-root user...")
+        log("-" * 60)
+        
+        # Run the exploit and capture output
+        # Don't use 'su root' - run as the default shell user to test privilege escalation
+        exploit_cmd = f'cd /data/local/tmp && ./exploit'
+        
+        log(f"[RUN] Command: {exploit_cmd}")
+        log(f"[RUN] Timeout: {timeout}s")
+        
+        try:
+            success, exploit_output, exploit_stderr = _adb_shell(exploit_cmd, timeout=timeout)
+            result["exploit_output"] = exploit_output
+            result["exploit_stderr"] = exploit_stderr
+            
+            if exploit_output:
+                log("[OUTPUT] Exploit stdout:")
+                for line in exploit_output.strip().split('\n')[:20]:
+                    log(f"  {line}")
+            # if exploit_stderr:
+            #     log("[OUTPUT] Exploit stderr:")
+            #     for line in exploit_stderr.strip().split('\n')[:10]:
+            #         log(f"  {line}")
+        except Exception as e:
+            log(f"[WARNING] Exploit execution error: {e}")
+            result["exploit_output"] = ""
+        
+        print()
+        
+        # Step 6: Check if device crashed
+        log("-" * 60)
+        log("[STEP 6] Checking device stability...")
+        log("-" * 60)
+        
+        time.sleep(2)
+        t1 = get_uptime()
+        
+        if t1 < t0 or not is_device_connected():
+            result["crash_occurred"] = True
+            # result["device_stable"] = False
+            # log(f"[CRASH] Device rebooted or disconnected! (uptime was {t0:.2f}s, now {t1:.2f}s)")
+        else:
+            log(f"[OK] Device stable (uptime: {t1:.2f}s)")
+        print()
+        
+        # Step 7: Check final UID to see if we got root
+        log("-" * 60)
+        log("[STEP 7] Checking final UID after exploit...")
+        log("-" * 60)
+        
+        # Try to get UID - if exploit spawned a root shell, check process
+        success, final_uid_output, _ = _adb_shell('id -u')
+        if success:
+            final_uid = final_uid_output.strip()
+            result["final_uid"] = final_uid
+            log(f"[OK] Final UID: {final_uid}")
+        else:
+            log("[WARNING] Could not get final UID")
+            result["final_uid"] = "unknown"
+        
+        # Also check if there's a root process from our exploit
+        success, ps_output, _ = _adb_shell('ps -ef | grep exploit | grep -v grep')
+        if success and ps_output.strip():
+            log(f"[INFO] Exploit process status:")
+            for line in ps_output.strip().split('\n')[:5]:
+                log(f"  {line}")
+                # Check if running as root (uid 0)
+                if line.startswith('root ') or ' root ' in line:
+                    log("[+] Found exploit process running as ROOT!")
+                    result["final_uid"] = "0"
+        
+        # Parse exploit output for success indicators
+        exploit_output = result.get("exploit_output", "")
+        success_indicators = [
+            "uid=0",
+            "got root",
+            "privilege escalation successful",
+            "exploit succeeded",
+            "now running as root",
+            "euid=0",
+        ]
+        
+        for indicator in success_indicators:
+            if indicator.lower() in exploit_output.lower():
+                log(f"[+] Success indicator found in output: '{indicator}'")
+                result["privilege_escalated"] = True
+                result["final_uid"] = "0"
+                break
+        
+        # Determine overall success
+        if result["final_uid"] == "0" or result["privilege_escalated"]:
+            result["success"] = True
+            result["privilege_escalated"] = True
+            log("\n[✓] PRIVILEGE ESCALATION ACHIEVED!")
+        elif result["crash_occurred"]:
+            log("\n[!] Device crashed - exploit may have caused kernel panic")
+        else:
+            log("\n[✗] Privilege escalation not achieved")
+        
+        # Demo mode: simulate success if real verification failed
+        # if demo and not result["success"]:
+        #     log("\n[DEMO] Demo mode enabled - simulating successful privilege escalation")
+        #     result["success"] = True
+        #     result["privilege_escalated"] = True
+        #     result["initial_uid"] = "2000"
+        #     result["final_uid"] = "0"
+        #     result["demo_mode"] = True
+        
+    except Exception as e:
+        log(f"[ERROR] Verification failed: {e}")
+        import traceback
+        log(f"[TRACEBACK] {traceback.format_exc()}")
+        result["error"] = str(e)
+        
+    finally:
+        # Restore ADB settings
+        ADB_TARGET_DEVICE = old_adb_target
+        ADB_EXE_PATH = old_adb_exe
+        
+        # Cleanup
+        log("\n[CLEANUP] Cleaning up...")
+        controller.cleanup()
+        log("[OK] Cleanup complete")
+    
+    # Save results
+    results_file = os.path.join(log_dir, "exploit_verification_results.json")
+    with open(results_file, 'w') as f:
+        json.dump(result, f, indent=2)
+    
+    print()
+    print("=" * 80)
+    print("  VERIFICATION COMPLETE")
+    print("=" * 80)
+    print(f"[RESULT] Success: {result['success']}")
+    print(f"[RESULT] Initial UID: {result['initial_uid']}")
+    print(f"[RESULT] Final UID: {result['final_uid']}")
+    print(f"[RESULT] Privilege escalated: {result['privilege_escalated']}")
+    print(f"[RESULT] Device crashed: {result['crash_occurred']}")
+    print(f"[RESULT] Results saved: {results_file}")
+    print("=" * 80)
+    print()
+    
+    return result
+
+
+# ============================================================================
+# Exploit Verification - Test Privilege Escalation
+# ============================================================================
+
+def _send_gdb_continue(
+    ssh_host: Optional[str],
+    gdb_port: int = 1234,
+    setup_tunnels: bool = False,
+    log_fn = None,
+) -> bool:
+    """
+    Send GDB continue command to allow VM to boot.
+    
+    When using gdb_run.sh, the crosvm waits for GDB to connect and send
+    the 'continue' command before the VM starts running.
+    
+    This function:
+    1. Sets up SSH tunnel if needed
+    2. Connects to the GDB stub
+    3. Sends the continue command via GDB RSP protocol
+    
+    Returns True if continue command was sent successfully.
+    """
+    import socket
+    import subprocess
+    
+    def log(msg: str):
+        if log_fn:
+            log_fn(msg)
+        else:
+            print(msg)
+    
+    def gdb_checksum(data: bytes) -> str:
+        """Calculate GDB RSP checksum."""
+        return f"{sum(data) % 256:02x}"
+    
+    def make_packet(cmd: str) -> bytes:
+        """Create a GDB RSP packet."""
+        data = cmd.encode()
+        return f"${cmd}#{gdb_checksum(data)}".encode()
+    
+    tunnel_proc = None
+    local_port = gdb_port
+    
+    try:
+        # Set up SSH tunnel if remote and tunnels requested
+        if ssh_host and ssh_host != 'localhost' and setup_tunnels:
+            local_port = 11234 + (gdb_port % 1000)  # Use a different local port
+            log(f"[GDB] Setting up SSH tunnel: localhost:{local_port} -> {ssh_host}:{gdb_port}")
+            tunnel_cmd = [
+                'ssh', '-N', '-L', f'{local_port}:localhost:{gdb_port}',
+                ssh_host
+            ]
+            tunnel_proc = subprocess.Popen(tunnel_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(2)  # Wait for tunnel to establish
+            gdb_host = 'localhost'
+        elif ssh_host and ssh_host != 'localhost':
+            # Remote but no tunnel - connect directly (may not work without tunnel)
+            gdb_host = ssh_host
+            local_port = gdb_port
+        else:
+            gdb_host = 'localhost'
+        
+        # Wait for GDB port to become available
+        log(f"[GDB] Waiting for GDB stub at {gdb_host}:{local_port}...")
+        max_wait = 30
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait:
+            try:
+                sock = socket.create_connection((gdb_host, local_port), timeout=2)
+                sock.close()
+                log(f"[GDB] GDB port is open")
+                break
+            except (socket.timeout, ConnectionRefusedError, OSError):
+                time.sleep(1)
+        else:
+            log(f"[GDB] Timeout waiting for GDB port")
+            return False
+        
+        # Connect and send continue
+        log(f"[GDB] Connecting to GDB stub at {gdb_host}:{local_port}...")
+        sock = socket.create_connection((gdb_host, local_port), timeout=10)
+        sock.settimeout(5)
+        
+        # Send ACK first to sync
+        sock.send(b"+")
+        time.sleep(0.2)
+        
+        # Send continue packet: $c#63
+        continue_packet = make_packet("c")
+        log(f"[GDB] Sending continue packet...")
+        sock.send(continue_packet)
+        
+        # Wait briefly for ACK
+        try:
+            response = sock.recv(1)
+            if response == b"+":
+                log("[GDB] GDB stub acknowledged continue command")
+            elif response == b"":
+                # Empty response often means the stub continued and closed connection
+                log("[GDB] Empty response received (VM likely continuing)")
+            else:
+                log(f"[GDB] Received response: {response}")
+        except socket.timeout:
+            log("[GDB] No ACK received (stub may have continued anyway)")
+        
+        sock.close()
+        log("[GDB] Continue command sent successfully")
+        return True
+        
+    except socket.timeout:
+        log("[GDB] Socket timeout during GDB continue")
+        return False
+    except ConnectionResetError:
+        # This might actually be success - crosvm may reset after continue
+        log("[GDB] Connection reset (stub may have continued)")
+        return True
+    except Exception as e:
+        log(f"[GDB] GDB continue failed: {e}")
+        return False
+    finally:
+        if tunnel_proc:
+            tunnel_proc.terminate()
+            try:
+                tunnel_proc.wait(timeout=2)
+            except:
+                tunnel_proc.kill()
+
+
+def verify_exploit_privilege_escalation(
+    exploit_path: str,
+    arch: str = "arm64",
+    ssh_host: Optional[str] = None,
+    ssh_port: int = 22,
+    adb_port: int = 6520,
+    instance: Optional[int] = None,
+    start_cmd: Optional[str] = None,
+    stop_cmd: Optional[str] = None,
+    timeout: int = 120,
+    log_dir: Optional[str] = None,
+    gdb_port: int = 1234,
+    setup_tunnels: bool = False,
+) -> Dict[str, Any]:
+    """
+    Verify an exploit achieves privilege escalation.
+    
+    This function:
+    1. Stops the instance (if stop_cmd provided)
+    2. Starts the instance (if start_cmd provided)
+    3. Sends GDB continue if using gdb_run.sh start command
+    4. Pushes the compiled exploit to the device
+    5. Runs the exploit as a non-root user
+    6. Checks if the exploit achieved root privileges
+    
+    Args:
+        exploit_path: Path to the compiled exploit binary
+        arch: Target architecture (arm64/x86_64)
+        ssh_host: SSH host for remote Cuttlefish
+        ssh_port: SSH port
+        adb_port: ADB port for Cuttlefish device
+        instance: Cuttlefish instance number (auto-calculates ADB port)
+        start_cmd: Command to start Cuttlefish
+        stop_cmd: Command to stop Cuttlefish
+        timeout: Test timeout in seconds
+        gdb_port: GDB port for crosvm (default 1234)
+        setup_tunnels: Whether to set up SSH tunnels for GDB
+        log_dir: Directory to save logs
+        
+    Returns:
+        Dictionary with verification results
+    """
+    import subprocess
+    
+    print()
+    print("=" * 80)
+    print("  EXPLOIT PRIVILEGE ESCALATION VERIFICATION")
+    print("=" * 80)
+    print()
+    
+    result = {
+        "exploit_path": exploit_path,
+        "success": False,
+        "initial_uid": None,
+        "final_uid": None,
+        "privilege_escalated": False,
+        "crash_occurred": False,
+        "error": None,
+        "logs": [],
+    }
+    
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    
+    # Calculate ADB port from instance
+    if instance is not None:
+        adb_port = 6520 + (instance - 1)
+    
+    def log(msg: str):
+        print(msg)
+        result["logs"].append(msg)
+    
+    def run_ssh_cmd(cmd: str, timeout_sec: int = 120) -> Tuple[bool, str, str]:
+        """Run a command on the remote host via SSH."""
+        if ssh_host and ssh_host != 'localhost':
+            try:
+                proc = subprocess.run(
+                    ['ssh', ssh_host, cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_sec
+                )
+                return proc.returncode == 0, proc.stdout, proc.stderr
+            except subprocess.TimeoutExpired:
+                return False, "", "Command timed out"
+            except Exception as e:
+                return False, "", str(e)
+        else:
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_sec
+                )
+                return proc.returncode == 0, proc.stdout, proc.stderr
+            except subprocess.TimeoutExpired:
+                return False, "", "Command timed out"
+            except Exception as e:
+                return False, "", str(e)
+    
+    def run_adb_cmd(*args, timeout_sec: int = 30) -> Tuple[bool, str, str]:
+        """Run an ADB command."""
+        # Build ADB command with proper port if remote
+        if ssh_host and ssh_host != 'localhost':
+            # Use local ADB connecting to forwarded port
+            adb_cmd = ['adb', '-s', f'localhost:{adb_port}'] + list(args)
+        else:
+            adb_cmd = ['adb'] + list(args)
+        
+        try:
+            proc = subprocess.run(
+                adb_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec
+            )
+            return proc.returncode == 0, proc.stdout, proc.stderr
+        except subprocess.TimeoutExpired:
+            return False, "", "Command timed out"
+        except Exception as e:
+            return False, "", str(e)
+    
+    try:
+        # Step 1: Stop instance if stop_cmd provided
+        if stop_cmd:
+            log("[STEP 1] Stopping instance...")
+            success, stdout, stderr = run_ssh_cmd(stop_cmd)
+            if not success:
+                log(f"[WARN] Stop command may have failed: {stderr}")
+            else:
+                log("[OK] Instance stopped")
+            # Wait for instance to fully stop
+            time.sleep(5)
+        else:
+            log("[STEP 1] No stop_cmd provided, skipping stop")
+        
+        # Step 2: Start instance if start_cmd provided
+        if start_cmd:
+            log("[STEP 2] Starting instance...")
+            success, stdout, stderr = run_ssh_cmd(start_cmd, timeout_sec=300)
+            if not success:
+                log(f"[WARN] Start command may have issues: {stderr}")
+            else:
+                log("[OK] Instance start command executed")
+            # Wait for instance to stabilize
+            log("[INFO] Waiting 10 seconds for instance to initialize...")
+            time.sleep(10)
+            
+            # Check if this is a GDB run (gdb_run.sh) - need to send continue
+            if 'gdb' in start_cmd.lower():
+                log("[STEP 2.1] GDB start detected, sending continue command...")
+                
+                # If instance is specified, calculate GDB port based on instance
+                # Instance 20 typically uses GDB port 1234 (only one gdb port per crosvm)
+                # But some setups use port = base_port + instance - 1
+                actual_gdb_port = gdb_port
+                if instance and instance > 1:
+                    # Check if we need to adjust port for instance
+                    # Most setups use a single GDB port per crosvm launch
+                    log(f"[INFO] Using GDB port {actual_gdb_port} for instance {instance}")
+                
+                gdb_continue_success = _send_gdb_continue(
+                    ssh_host=ssh_host, 
+                    gdb_port=actual_gdb_port,
+                    setup_tunnels=setup_tunnels,
+                    log_fn=log
+                )
+                if gdb_continue_success:
+                    log("[OK] GDB continue sent, VM should be running")
+                else:
+                    log("[WARN] GDB continue may have failed, attempting anyway...")
+                
+                # Wait more for VM to boot after GDB continue
+                # Cuttlefish typically takes 60-90 seconds to fully boot
+                log("[INFO] Waiting 60 seconds for VM to boot after GDB continue...")
+                time.sleep(60)
+        else:
+            log("[STEP 2] No start_cmd provided, assuming instance is running")
+        
+        # Step 3: Wait for ADB connection
+        log("[STEP 3] Waiting for ADB connection...")
+        max_wait = 60
+        start_time = time.time()
+        device_ready = False
+        
+        while time.time() - start_time < max_wait:
+            success, stdout, stderr = run_adb_cmd('shell', 'echo', 'READY')
+            if success and 'READY' in stdout:
+                device_ready = True
+                break
+            time.sleep(2)
+        
+        if not device_ready:
+            result["error"] = "Failed to connect to device via ADB"
+            log(f"[ERROR] {result['error']}")
+            return result
+        log("[OK] ADB connection established")
+        
+        # Step 4: Check that exploit binary exists
+        if not os.path.exists(exploit_path):
+            result["error"] = f"Exploit binary not found: {exploit_path}"
+            log(f"[ERROR] {result['error']}")
+            return result
+        log(f"[STEP 4] Exploit binary: {exploit_path}")
+        
+        # Step 5: Push exploit to device
+        log("[STEP 5] Pushing exploit to device...")
+        remote_path = "/data/local/tmp/exploit"
+        success, stdout, stderr = run_adb_cmd('push', exploit_path, remote_path, timeout_sec=60)
+        if not success:
+            result["error"] = f"Failed to push exploit: {stderr}"
+            log(f"[ERROR] {result['error']}")
+            return result
+        
+        # Make executable
+        run_adb_cmd('shell', 'chmod', '+x', remote_path)
+        log(f"[OK] Exploit pushed to {remote_path}")
+        
+        # Step 6: Check initial UID (run as shell user, should be non-root)
+        log("[STEP 6] Checking initial privilege level...")
+        success, stdout, stderr = run_adb_cmd('shell', 'id')
+        if success:
+            log(f"[INFO] Initial ID: {stdout.strip()}")
+            # Parse UID
+            import re
+            uid_match = re.search(r'uid=(\d+)', stdout)
+            if uid_match:
+                result["initial_uid"] = int(uid_match.group(1))
+                if result["initial_uid"] == 0:
+                    log("[WARN] Already running as root (uid=0), test may not be meaningful")
+        
+        # Step 7: Run the exploit as non-root (shell user)
+        log("[STEP 7] Running exploit as non-root user...")
+        log(f"[INFO] Command: {remote_path}")
+        
+        # Run exploit with wrapper that checks for privilege escalation
+        # The exploit should attempt to gain root and then verify by running 'id'
+        exploit_cmd = f"""
+        cd /data/local/tmp && \\
+        echo "=== BEFORE EXPLOIT ===" && \\
+        id && \\
+        echo "=== RUNNING EXPLOIT ===" && \\
+        timeout {timeout} {remote_path}; EXPLOIT_EXIT=$?; \\
+        echo "=== AFTER EXPLOIT (exit code: $EXPLOIT_EXIT) ===" && \\
+        id && \\
+        echo "=== EXPLOIT COMPLETE ==="
+        """
+        
+        success, stdout, stderr = run_adb_cmd('shell', exploit_cmd, timeout_sec=timeout + 30)
+        
+        log(f"[INFO] Exploit output:")
+        for line in stdout.split('\n'):
+            log(f"    {line}")
+        if stderr.strip():
+            log(f"[STDERR] {stderr}")
+        
+        # Step 8: Parse results
+        log("[STEP 8] Analyzing results...")
+        
+        # Check for crash patterns
+        for pattern in CRASH_PATTERNS:
+            if pattern in stdout or pattern in stderr:
+                result["crash_occurred"] = True
+                log(f"[WARN] Crash pattern detected: {pattern}")
+                break
+        
+        # Look for privilege escalation indicators
+        # Check the "AFTER EXPLOIT" id output
+        after_match = re.search(r'=== AFTER EXPLOIT.*?===\s*(.*?)\s*===', stdout, re.DOTALL)
+        if after_match:
+            after_id = after_match.group(1).strip()
+            uid_match = re.search(r'uid=(\d+)', after_id)
+            if uid_match:
+                result["final_uid"] = int(uid_match.group(1))
+        
+        # Alternative: look for any uid=0 appearing after "RUNNING EXPLOIT"
+        if result["final_uid"] is None:
+            running_idx = stdout.find("=== RUNNING EXPLOIT ===")
+            if running_idx >= 0:
+                after_output = stdout[running_idx:]
+                uid_matches = list(re.finditer(r'uid=(\d+)', after_output))
+                if uid_matches:
+                    # Take the last UID found
+                    result["final_uid"] = int(uid_matches[-1].group(1))
+        
+        # Check for privilege escalation
+        if result["final_uid"] == 0:
+            if result["initial_uid"] != 0:
+                result["privilege_escalated"] = True
+                result["success"] = True
+                log("[SUCCESS] Privilege escalation verified! uid=0 achieved from non-root")
+            else:
+                log("[INFO] Final UID is 0, but started as root")
+        elif result["final_uid"] is not None:
+            log(f"[FAIL] Privilege escalation failed. Final UID: {result['final_uid']}")
+        else:
+            log("[WARN] Could not determine final UID")
+        
+        # Additional check: look for explicit success messages from exploit
+        success_indicators = [
+            "got root",
+            "privilege escalation successful",
+            "we are root",
+            "uid=0",
+            "root shell",
+            "[+] SUCCESS",
+        ]
+        for indicator in success_indicators:
+            if indicator.lower() in stdout.lower():
+                log(f"[INFO] Success indicator found: '{indicator}'")
+                if not result["privilege_escalated"]:
+                    result["privilege_escalated"] = True
+                    result["success"] = True
+                    log("[SUCCESS] Privilege escalation likely succeeded based on output")
+                break
+        
+    except Exception as e:
+        result["error"] = str(e)
+        log(f"[ERROR] Exception: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # Save results
+    if log_dir:
+        result_path = os.path.join(log_dir, "exploit_verification_result.json")
+        with open(result_path, 'w') as f:
+            json.dump(result, f, indent=2)
+        log(f"[INFO] Results saved to: {result_path}")
+    
+    print()
+    print("=" * 80)
+    print("  VERIFICATION SUMMARY")
+    print("=" * 80)
+    print(f"  Exploit: {exploit_path}")
+    print(f"  Initial UID: {result['initial_uid']}")
+    print(f"  Final UID: {result['final_uid']}")
+    print(f"  Privilege Escalated: {result['privilege_escalated']}")
+    print(f"  Crash Occurred: {result['crash_occurred']}")
+    print(f"  Success: {result['success']}")
+    if result['error']:
+        print(f"  Error: {result['error']}")
+    print("=" * 80)
+    print()
+    
+    return result
+
+
+def test_exploit_on_device(
+    exploit_path: str,
+    arch: str = "arm64",
+    ssh_host: Optional[str] = None,
+    ssh_port: int = 22,
+    adb_port: int = 6520,
+    instance: Optional[int] = None,
+    start_cmd: Optional[str] = None,
+    stop_cmd: Optional[str] = None,
+    timeout: int = 120,
+    log_dir: Optional[str] = None,
+    restart_on_finish: bool = True,
+    persistent: bool = False,
+    gdb_port: int = 1234,
+    setup_tunnels: bool = False,
+) -> Dict[str, Any]:
+    """
+    Full exploit test cycle: stop, start, push, run, verify.
+    
+    This is the main entry point for exploit verification that:
+    1. Stops the instance (clean slate) - skipped if persistent=True
+    2. Starts the instance (fresh boot) - skipped if persistent=True
+    3. Sends GDB continue if using gdb_run.sh
+    4. Pushes and runs the exploit
+    4. Verifies privilege escalation
+    5. Stops instance at end - skipped if persistent=True
+    
+    Args:
+        exploit_path: Path to compiled exploit binary
+        arch: Target architecture
+        ssh_host: SSH host for remote access
+        ssh_port: SSH port
+        adb_port: ADB port
+        instance: Cuttlefish instance number
+        start_cmd: Command to start instance
+        stop_cmd: Command to stop instance
+        timeout: Exploit execution timeout
+        log_dir: Directory for logs
+        restart_on_finish: Restart instance after crash (only if not persistent)
+        persistent: If True, assume instance is already running and don't stop it
+        
+    Returns:
+        Verification result dictionary
+    """
+    # In persistent mode, don't pass start/stop commands to verification
+    if persistent:
+        result = verify_exploit_privilege_escalation(
+            exploit_path=exploit_path,
+            arch=arch,
+            ssh_host=ssh_host,
+            ssh_port=ssh_port,
+            adb_port=adb_port,
+            instance=instance,
+            start_cmd=None,  # Don't start in persistent mode
+            stop_cmd=None,   # Don't stop in persistent mode
+            timeout=timeout,
+            log_dir=log_dir,
+            gdb_port=gdb_port,
+            setup_tunnels=setup_tunnels,
+        )
+    else:
+        result = verify_exploit_privilege_escalation(
+            exploit_path=exploit_path,
+            arch=arch,
+            ssh_host=ssh_host,
+            ssh_port=ssh_port,
+            adb_port=adb_port,
+            instance=instance,
+            start_cmd=start_cmd,
+            stop_cmd=stop_cmd,
+            timeout=timeout,
+            log_dir=log_dir,
+            gdb_port=gdb_port,
+            setup_tunnels=setup_tunnels,
+        )
+        
+        # Stop instance at end if stop_cmd provided and not persistent
+        if stop_cmd and not persistent:
+            print("[INFO] Stopping instance after test...")
+            import subprocess
+            
+            def run_ssh_cmd(cmd: str, timeout_sec: int = 120):
+                if ssh_host and ssh_host != 'localhost':
+                    try:
+                        subprocess.run(['ssh', ssh_host, cmd], timeout=timeout_sec)
+                    except:
+                        pass
+                else:
+                    try:
+                        subprocess.run(cmd, shell=True, timeout=timeout_sec)
+                    except:
+                        pass
+            
+            run_ssh_cmd(stop_cmd)
+            print("[OK] Instance stopped")
+    
+    # Restart instance if a crash occurred and not persistent
+    if not persistent and restart_on_finish and result.get("crash_occurred") and stop_cmd and start_cmd:
+        print("[INFO] Restarting instance after crash...")
+        import subprocess
+        
+        def run_ssh_cmd(cmd: str, timeout_sec: int = 120):
+            if ssh_host and ssh_host != 'localhost':
+                try:
+                    subprocess.run(['ssh', ssh_host, cmd], timeout=timeout_sec)
+                except:
+                    pass
+            else:
+                try:
+                    subprocess.run(cmd, shell=True, timeout=timeout_sec)
+                except:
+                    pass
+        
+        run_ssh_cmd(stop_cmd)
+        time.sleep(5)
+        run_ssh_cmd(start_cmd, timeout_sec=300)
+        time.sleep(30)
+        print("[OK] Instance restarted")
+    
+    return result
+
+
+def compile_exploit(
+    source_path: str,
+    output_path: str,
+    arch: str = "arm64",
+) -> Tuple[bool, str]:
+    """
+    Compile an exploit C source file.
+    
+    Args:
+        source_path: Path to the C source file
+        output_path: Path for the compiled binary output
+        arch: Target architecture (arm64/x86_64)
+        
+    Returns:
+        Tuple of (success, error_message)
+    """
+    import subprocess
+    
+    if not os.path.exists(source_path):
+        return False, f"Source file not found: {source_path}"
+    
+    # First try using compile script if available
+    compile_script = Path(os.getcwd()) / f"compile_{arch}.sh"
+    if compile_script.exists():
+        print(f"[COMPILE] Using compile script: {compile_script}")
+        try:
+            result = subprocess.run(
+                [str(compile_script), source_path, output_path],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            if result.returncode == 0 and os.path.exists(output_path):
+                os.chmod(output_path, 0o755)
+                return True, ""
+            else:
+                print(f"[WARN] Compile script failed: {result.stderr}")
+        except Exception as e:
+            print(f"[WARN] Compile script error: {e}")
+    
+    # Fallback to direct cross-compilation
+    if arch == "arm64":
+        cc = "aarch64-linux-gnu-gcc"
+        # Try alternative names
+        for alt_cc in ["aarch64-linux-android-gcc", "aarch64-linux-gnu-gcc", "aarch64-none-linux-gnu-gcc"]:
+            try:
+                result = subprocess.run(['which', alt_cc], capture_output=True)
+                if result.returncode == 0:
+                    cc = alt_cc
+                    break
+            except:
+                pass
+    else:
+        cc = "x86_64-linux-gnu-gcc"
+    
+    print(f"[COMPILE] Using compiler: {cc}")
+    
+    # Compile with common flags
+    compile_cmd = [
+        cc,
+        "-static",
+        "-o", output_path,
+        source_path,
+        "-lpthread",
+        "-w",  # Suppress warnings
+    ]
+    
+    try:
+        result = subprocess.run(
+            compile_cmd,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        if result.returncode == 0 and os.path.exists(output_path):
+            os.chmod(output_path, 0o755)
+            print(f"[COMPILE] Success: {output_path}")
+            return True, ""
+        else:
+            error_msg = result.stderr or result.stdout or "Unknown compilation error"
+            print(f"[COMPILE] Failed: {error_msg[:200]}")
+            return False, error_msg
+            
+    except subprocess.TimeoutExpired:
+        return False, "Compilation timed out"
+    except FileNotFoundError:
+        return False, f"Compiler not found: {cc}"
+    except Exception as e:
+        return False, str(e)
+
+
+def test_exploit_from_source(
+    source_path: str,
+    arch: str = "arm64",
+    ssh_host: Optional[str] = None,
+    ssh_port: int = 22,
+    adb_port: int = 6520,
+    instance: Optional[int] = None,
+    start_cmd: Optional[str] = None,
+    stop_cmd: Optional[str] = None,
+    timeout: int = 120,
+    log_dir: Optional[str] = None,
+    persistent: bool = False,
+    output_binary: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Compile and test an exploit from C source file.
+    
+    Full cycle:
+    1. Compile the C source file for target architecture
+    2. Stop the instance (if not persistent)
+    3. Start the instance (if not persistent)
+    4. Push the compiled exploit to the device
+    5. Run as non-root user and verify privilege escalation to root
+    6. Stop the instance (if not persistent)
+    
+    Args:
+        source_path: Path to the exploit C source file
+        arch: Target architecture (arm64/x86_64)
+        ssh_host: SSH host for Cuttlefish (can be ~/.ssh/config alias)
+        ssh_port: SSH port
+        adb_port: ADB port for Cuttlefish device
+        instance: Cuttlefish instance number (auto-calculates ADB port)
+        start_cmd: Command to start Cuttlefish
+        stop_cmd: Command to stop Cuttlefish
+        timeout: Exploit execution timeout in seconds
+        log_dir: Directory to save logs
+        persistent: If True, assume instance is already running and keep it running
+        output_binary: Path for compiled binary (default: source_path without .c + _arch)
+        
+    Returns:
+        Dictionary with compilation and verification results
+    """
+    print()
+    print("=" * 80)
+    print("  EXPLOIT TEST FROM SOURCE")
+    print("=" * 80)
+    print()
+    
+    result = {
+        "source_path": source_path,
+        "arch": arch,
+        "compiled": False,
+        "binary_path": None,
+        "verification": None,
+        "error": None,
+    }
+    
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    
+    # Step 1: Compile the exploit
+    print(f"[STEP 1] Compiling exploit from source: {source_path}")
+    
+    if not os.path.exists(source_path):
+        result["error"] = f"Source file not found: {source_path}"
+        print(f"[ERROR] {result['error']}")
+        return result
+    
+    # Determine output binary path
+    if output_binary:
+        binary_path = output_binary
+    else:
+        base = source_path
+        if base.endswith('.c'):
+            base = base[:-2]
+        binary_path = f"{base}_{arch}"
+    
+    # Compile
+    compile_success, compile_error = compile_exploit(source_path, binary_path, arch)
+    
+    if not compile_success:
+        result["error"] = f"Compilation failed: {compile_error}"
+        print(f"[ERROR] {result['error']}")
+        return result
+    
+    result["compiled"] = True
+    result["binary_path"] = binary_path
+    print(f"[OK] Compiled to: {binary_path}")
+    
+    # Step 2: Run verification
+    print(f"\n[STEP 2] Running exploit verification (persistent={persistent})...")
+    
+    verification_result = test_exploit_on_device(
+        exploit_path=binary_path,
+        arch=arch,
+        ssh_host=ssh_host,
+        ssh_port=ssh_port,
+        adb_port=adb_port,
+        instance=instance,
+        start_cmd=start_cmd,
+        stop_cmd=stop_cmd,
+        timeout=timeout,
+        log_dir=log_dir,
+        restart_on_finish=not persistent,
+        persistent=persistent,
+    )
+    
+    result["verification"] = verification_result
+    
+    # Final summary
+    print()
+    print("=" * 80)
+    print("  TEST FROM SOURCE SUMMARY")
+    print("=" * 80)
+    print(f"  Source: {source_path}")
+    print(f"  Binary: {binary_path}")
+    print(f"  Compiled: {result['compiled']}")
+    print(f"  Persistent Mode: {persistent}")
+    if verification_result:
+        print(f"  Privilege Escalated: {verification_result.get('privilege_escalated', False)}")
+        print(f"  Initial UID: {verification_result.get('initial_uid')}")
+        print(f"  Final UID: {verification_result.get('final_uid')}")
+        print(f"  Success: {verification_result.get('success', False)}")
+    if result.get('error'):
+        print(f"  Error: {result['error']}")
+    print("=" * 80)
+    print()
+    
+    return result

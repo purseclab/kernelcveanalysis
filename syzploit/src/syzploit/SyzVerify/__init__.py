@@ -22,6 +22,10 @@ from .run_bug import (
     test_repro_crashes_cuttlefish_gdb,
     test_repro_crashes_cuttlefish_kernel_gdb,
     CUTTLEFISH_KERNEL_GDB_PORT,
+    verify_exploit_privilege_escalation,
+    test_exploit_on_device,
+    test_exploit_from_source,
+    compile_exploit,
 )
 from .dynamic import DynamicAnalysisConfig, run_dynamic_analysis as verify_run_da
 import json as _json
@@ -31,11 +35,11 @@ import json as _json
 # installed in the environment.
 from ..SyzAnalyze import crash_analyzer as precondition_analyzer
 
-def pull(kernel_name: str):
+def pull(kernel_name: str, apply_filter: bool = True):
     db = SyzkallBugDatabase(kernel_name)
 
     try:
-        pull_bugs(db, kernel_name)
+        pull_bugs(db, kernel_name, apply_filter=apply_filter)
     finally:
         db.close()
 
@@ -117,7 +121,43 @@ def collect_stats(kernel_name: str, outfile: Path):
     console.print(f"  [bold]{outfile_json_name}[/bold]")
 
 
-def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, source_image: Path, source_disk: Path, source: bool, outdir_name: str, dynamic_analysis: bool = False, gdb_port: int = 1234, kernel_gdb: bool = False, vmlinux_path: str = None, kernel_gdb_port: int = 1234):
+def test_all(
+    local: bool, 
+    arch: str, 
+    kernel_name: str, 
+    qemu: bool, 
+    root: bool, 
+    source_image: Path, 
+    source_disk: Path, 
+    source: bool, 
+    outdir_name: str, 
+    dynamic_analysis: bool = False, 
+    gdb_port: int = 1234, 
+    kernel_gdb: bool = False, 
+    vmlinux_path: str = None, 
+    kernel_gdb_port: int = 1234,
+    # New Cuttlefish-specific options
+    use_cuttlefish_controller: bool = False,
+    ssh_host: str = "localhost",
+    ssh_port: int = 22,
+    ssh_user: str = None,
+    ssh_key: str = None,
+    adb_port: int = 6520,
+    instance: int = None,
+    persistent: bool = True,
+    already_running: bool = True,
+    setup_tunnels: bool = False,
+    extract_runtime_symbols: bool = True,
+    demo: bool = False,
+    start_cmd: str = None,
+    stop_cmd: str = None,
+    runtime_logs_dir: str = None,
+    # Connectivity check options
+    pre_check_device: bool = True,
+    pre_check_wait: int = 60,
+    # LLM fix options
+    use_llm_fix: bool = True,
+):
     """
     Test all bugs in the database.
     
@@ -136,16 +176,107 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
         kernel_gdb: Enable kernel-side GDB analysis (requires Cuttlefish with --gdb_port)
         vmlinux_path: Path to vmlinux file for kernel symbols
         kernel_gdb_port: Port for kernel GDB stub (default: 1234)
+        
+        # Cuttlefish Controller Options:
+        use_cuttlefish_controller: Use CuttlefishController for testing
+        ssh_host: SSH host for Cuttlefish (can be ~/.ssh/config alias)
+        ssh_port: SSH port
+        ssh_user: SSH user (optional, uses ssh config if not set)
+        ssh_key: SSH key path (optional, uses ssh config if not set)
+        adb_port: ADB port for Cuttlefish device
+        instance: Cuttlefish instance number (auto-calculates ADB port)
+        persistent: Keep Cuttlefish running between tests
+        already_running: Cuttlefish is already running
+        setup_tunnels: Set up SSH tunnels for remote access
+        extract_runtime_symbols: Extract kallsyms from running VM for accurate breakpoints
+        demo: Demo mode - generate sample data if GDB tracing fails
+        start_cmd: Command to start Cuttlefish (run once at beginning if not already_running)
+        stop_cmd: Command to stop Cuttlefish (run once at end)
+        runtime_logs_dir: Path to cuttlefish runtime logs directory
+        
+        # Connectivity check options:
+        pre_check_device: Check device connectivity before each test (default: True)
+        pre_check_wait: Max seconds to wait if device offline (default: 60)
     """
+    from .cuttlefish import CuttlefishConfig
+    from .run_bug import test_repro_with_cuttlefish_controller, extract_and_save_runtime_symbols, ensure_device_ready
     db = SyzkallBugDatabase(kernel_name)
     console = Console()
-    table = Table(title="Syzkaller Bug Test Results")
-    table.add_column("Bug ID", style="cyan", no_wrap=True)
-    table.add_column("Description", style="magenta")
-    table.add_column("Compiled", justify="center")
-    table.add_column("Crash Occurred", justify="center", style="red")
-    table.add_column("Non-Root", justify="center", style="red")
-    table.add_column("Used Assets", justify="center", style="red")
+
+    # Helper function to restart the instance after a crash
+    def restart_instance():
+        """Stop and restart the instance after a crash."""
+        if not stop_cmd or not start_cmd:
+            console.print("[yellow]No stop_cmd/start_cmd provided, cannot restart instance[/yellow]")
+            return False
+        
+        console.print(f"[yellow]Restarting instance due to crash...[/yellow]")
+        import subprocess
+        
+        # Stop the instance
+        console.print(f"[yellow]Stopping instance with command:[/yellow] {stop_cmd}")
+        try:
+            if ssh_host and ssh_host != 'localhost':
+                stop_result = subprocess.run(
+                    ['ssh', ssh_host, stop_cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+            else:
+                stop_result = subprocess.run(
+                    stop_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+            if stop_result.returncode != 0:
+                console.print(f"[red]Warning: Stop command exited with code {stop_result.returncode}[/red]")
+            else:
+                console.print(f"[green]Instance stopped successfully[/green]")
+        except subprocess.TimeoutExpired:
+            console.print("[red]Stop command timed out after 2 minutes[/red]")
+        except Exception as e:
+            console.print(f"[red]Failed to stop instance: {e}[/red]")
+        
+        # Wait a bit before restarting
+        console.print("[yellow]Waiting 5 seconds before restart...[/yellow]")
+        time.sleep(5)
+        
+        # Start the instance
+        console.print(f"[yellow]Starting instance with command:[/yellow] {start_cmd}")
+        try:
+            if ssh_host and ssh_host != 'localhost':
+                start_result = subprocess.run(
+                    ['ssh', ssh_host, start_cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+            else:
+                start_result = subprocess.run(
+                    start_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+            if start_result.returncode != 0:
+                console.print(f"[red]Warning: Start command exited with code {start_result.returncode}[/red]")
+            else:
+                console.print(f"[green]Instance started successfully[/green]")
+        except subprocess.TimeoutExpired:
+            console.print("[red]Start command timed out after 5 minutes[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]Failed to start instance: {e}[/red]")
+            return False
+        
+        # Wait for stabilization
+        console.print("[yellow]Waiting 30 seconds for instance to stabilize...[/yellow]")
+        time.sleep(30)
+        return True
 
     bugs = db.get_all_bugs()
     if not bugs:
@@ -192,6 +323,41 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
     previous_source_disk = None
     download_succeeded = True
     used_assets = "no"
+    
+    # Start Cuttlefish if start_cmd is provided and not already running
+    if start_cmd and not already_running:
+        console.print(f"[yellow]Starting Cuttlefish with command:[/yellow] {start_cmd}")
+        import subprocess
+        try:
+            if ssh_host and ssh_host != 'localhost':
+                # Run start command on remote host
+                start_result = subprocess.run(
+                    ['ssh', ssh_host, start_cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 min timeout for boot
+                )
+            else:
+                # Run start command locally
+                start_result = subprocess.run(
+                    start_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+            if start_result.returncode != 0:
+                console.print(f"[red]Warning: Start command exited with code {start_result.returncode}[/red]")
+                console.print(f"  stderr: {start_result.stderr[:500]}")
+            else:
+                console.print(f"[green]Cuttlefish started successfully[/green]")
+            # Wait for Cuttlefish to stabilize
+            console.print("[yellow]Waiting 30 seconds for Cuttlefish to stabilize...[/yellow]")
+            time.sleep(30)
+        except subprocess.TimeoutExpired:
+            console.print("[red]Start command timed out after 5 minutes[/red]")
+        except Exception as e:
+            console.print(f"[red]Failed to start Cuttlefish: {e}[/red]")
 
     with Progress(
         SpinnerColumn(),
@@ -204,22 +370,21 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
         task = progress.add_task("Testing bugs...", total=len(bugs))
 
         for idx, bug in enumerate(bugs, 1):
+            # Update progress bar once at start of each bug
+            progress.update(task, description=f"[{idx}/{len(bugs)}] Bug {bug.bug_id[:12]}")
+            
             metadata = db.get_bug_metadata(bug.bug_id)
             if metadata is None:
                 row = [str(bug.bug_id), "Invalid ID", "❌", "N/A", "yes" if not root else "no", "N/A"]
-                table.add_row(*row)
                 results.append(row)
+                console.print(f"  [{idx}/{len(bugs)}] Bug {bug.bug_id}: [red]Invalid ID[/red]")
                 progress.advance(task)
                 continue
 
             description = metadata.description
-            progress.update(
-                task,
-                description=f"[{idx}/{len(bugs)}] Testing Bug ID {bug.bug_id}: {description[:50]} {last_run}"
-            )
 
             try:
-                repro_path = metadata.compile_repro(arch)
+                repro_path = metadata.compile_repro(arch, use_llm_fix=use_llm_fix)
                 compiled = "✅"
                 compiled_count += 1
             except Exception as e:
@@ -229,11 +394,33 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
 
             crashed = "❌"
             crash_log_path = None
+            gdb_results = None
+            uaf_detected = False
+            oob_detected = False
+            
+            # Pre-check device connectivity before running this bug's reproducer
+            if pre_check_device and repro_path and not qemu:
+                try:
+                    device_ready = ensure_device_ready(
+                        max_wait=pre_check_wait,
+                        ssh_host=ssh_host if ssh_host != 'localhost' else None,
+                        stop_cmd=stop_cmd,
+                        start_cmd=start_cmd,
+                        verbose=True,
+                        instance=instance,
+                        adb_port=adb_port,
+                    )
+                    if not device_ready:
+                        console.print(f"  [{idx}/{len(bugs)}] Bug {bug.bug_id}: [yellow]SKIPPED - device not ready[/yellow]")
+                        row = [str(bug.bug_id), description[:40], compiled, "SKIPPED", "yes" if not root else "no", "N/A"]
+                        results.append(row)
+                        progress.advance(task)
+                        continue
+                except KeyboardInterrupt:
+                    console.print("[red]Test run aborted by user[/red]")
+                    break
+            
             if repro_path:
-                progress.update(
-                    task,
-                    description=f"[{idx}/{len(bugs)}] Running repro for Bug ID {bug.bug_id}: {description[:50]}"
-                )
                 try:
                     if qemu:
                         if source:
@@ -248,6 +435,57 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
                                 download_succeeded = True
                                 used_assets = "yes"
                         v, t = test_repro_crashes_qemu(repro_path, local, bug.bug_id, log_dir, root, source_image, source_disk)
+                    elif use_cuttlefish_controller:
+                        # Use CuttlefishController with runtime symbol extraction
+                        parsed_crash = parse_crash_log(metadata.crash_report) if metadata.crash_report else None
+                        
+                        # Calculate ADB port from instance number
+                        actual_adb_port = adb_port
+                        if instance is not None:
+                            actual_adb_port = 6520 + (instance - 1)
+                        
+                        # Create Cuttlefish configuration
+                        cf_config = CuttlefishConfig(
+                            ssh_host=ssh_host,
+                            ssh_port=ssh_port,
+                            ssh_user=ssh_user,
+                            ssh_key_path=ssh_key,
+                            persistent=persistent,
+                            already_running=already_running,
+                            gdb_port=kernel_gdb_port,
+                            adb_port=actual_adb_port,
+                            enable_gdb=kernel_gdb or dynamic_analysis,
+                            setup_tunnels=setup_tunnels,
+                            vmlinux_path=vmlinux_path,
+                            extract_symbols=extract_runtime_symbols,
+                        )
+                        
+                        v, t, gdb_results = test_repro_with_cuttlefish_controller(
+                            repro_path=str(repro_path),
+                            bug_id=bug.bug_id,
+                            cuttlefish_config=cf_config,
+                            parsed_crash=parsed_crash,
+                            log_dir=log_dir,
+                            root=root,
+                            timeout=120,
+                            arch=arch,
+                            vmlinux_path=vmlinux_path,
+                            demo=demo,
+                        )
+                        
+                        # Check for UAF/OOB in GDB results
+                        if gdb_results:
+                            events = gdb_results.get("events", [])
+                            for event in events:
+                                if event.get("type") == "uaf_detected" or "use-after-free" in str(event).lower():
+                                    uaf_detected = True
+                                if event.get("type") == "oob_detected" or "out-of-bounds" in str(event).lower():
+                                    oob_detected = True
+                            
+                            # Save GDB results
+                            gdb_out = os.path.join(log_dir, f"cuttlefish_gdb_{bug.bug_id}.json")
+                            with open(gdb_out, 'w', encoding='utf-8') as gf:
+                                json.dump(gdb_results, gf, indent=2)
                     else:
                         # Parse crash for GDB instrumentation
                         parsed_crash = parse_crash_log(metadata.crash_report) if metadata.crash_report else None
@@ -294,6 +532,7 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
                         os.makedirs(crash_subdir, exist_ok=True)
 
                         os.system(f'cp {os.path.dirname(repro_path)}/* {crash_subdir}')
+                        
                         try:
                             crashing_file, crashing_line, crash_type = extract_crash_locations(metadata.crash_report)
                         except Exception as e:
@@ -305,6 +544,44 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
                             all_syscalls, last_syscall = extract_last_syscall(os.path.join(os.path.dirname(repro_path),"repro.syz"))
                         except:
                             last_syscall = "unknown"
+                        
+                        # Create README with bug info (after extracting crash details)
+                        syzbot_link = f"https://syzkaller.appspot.com/bug?extid={bug.bug_id}"
+                        readme_content = f"""# Bug {bug.bug_id}
+
+## Description
+{description}
+
+## Syzbot Link
+{syzbot_link}
+
+## Bug ID
+{bug.bug_id}
+
+## Architecture
+{arch}
+
+## Crash Type
+{crash_type}
+
+## Crash Location
+- **File:** {crashing_file}
+- **Line:** {crashing_line}
+
+## Triggering Syscall
+{last_syscall}
+
+## Reproducer
+The compiled reproducer for {arch} is included in this folder.
+
+## Files
+- `repro.syz` - Syzkaller reproducer script
+- `repro.c` - C reproducer source  
+- `repro_{arch}` - Compiled reproducer binary
+"""
+                        readme_path = os.path.join(crash_subdir, "README.md")
+                        with open(readme_path, 'w', encoding='utf-8') as rf:
+                            rf.write(readme_content)
 
                         crash_type_summary[crash_type] = crash_type_summary.get(crash_type, 0) + 1
                         syscall_summary[last_syscall] = syscall_summary.get(last_syscall, 0) + 1
@@ -319,7 +596,10 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
                             "crash_type": crash_type,
                             "rooted": root,
                             "syscall": last_syscall,
-                            "used_assets": used_assets
+                            "used_assets": used_assets,
+                            "uaf_detected": uaf_detected,
+                            "oob_detected": oob_detected,
+                            "gdb_results": gdb_results,
                         })
                         # Attempt to run precondition analysis (non-fatal)
                         try:
@@ -364,10 +644,14 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
                             except Exception as e:
                                 exceptions.append(f"dynamic analysis failed for {bug.bug_id}: {e}")
 
-                        print("crashed happened, waiting for connection...")
-                        if not qemu:
+                        # Restart instance after crash if stop_cmd and start_cmd are provided
+                        console.print(f"  [{idx}/{len(bugs)}] Bug {bug.bug_id}: [red]💥 CRASHED[/red] ({crash_type})")
+                        if not qemu and stop_cmd and start_cmd:
+                            restart_instance()
+                        elif not qemu:
+                            print("crashed happened, waiting for connection...")
                             wait_for_connection()
-                        print("crashed happened, done")
+                            print("crashed happened, done")
                     elif not v and t==2:
                         crashed = "⚠️"+str(t)
                         print("WARNING: No crash, but repro may not work as expected",  bug.bug_id, crashed)
@@ -421,15 +705,20 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
                 previous_source_disk = source_disk
                 previous_source_image = source_image
             row = [str(bug.bug_id), description, compiled, crashed, "yes" if not root else "no", used_assets]
-            table.add_row(*row)
             results.append(row)
+            # Log progress for non-crash cases (crashes already logged above)
+            if "💥" not in crashed and "SKIPPED" not in str(crashed):
+                status_icon = "✅" if compiled == "✅" else "❌"
+                console.print(f"  [{idx}/{len(bugs)}] Bug {bug.bug_id}: {status_icon} compiled={compiled} crashed={crashed}")
             progress.advance(task)
-
-    console.print(table)
 
 
     end_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     run_time = time.mktime(time.strptime(end_time, "%Y-%m-%d %H:%M:%S")) - time.mktime(time.strptime(start_time, "%Y-%m-%d %H:%M:%S"))
+
+    # Calculate UAF/OOB counts from crashing bugs
+    uaf_count = sum(1 for bug in crashing_bugs if bug.get("uaf_detected", False))
+    oob_count = sum(1 for bug in crashing_bugs if bug.get("oob_detected", False))
 
     # === WRITE CRASH ANALYSIS ===
     crash_summary = {
@@ -440,6 +729,8 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
         "crashed_unroot_count": crashed_unroot_count,
         "unique_outcomes_root_count": unique_outcomes_root_count,
         "unique_outcomes_unroot_count": unique_outcomes_unroot_count,
+        "uaf_detected_count": uaf_count,
+        "oob_detected_count": oob_count,
         "runtime": run_time,
         "crash_type_summary": crash_type_summary,
         "syscall_summary": syscall_summary
@@ -476,13 +767,101 @@ def test_all(local: bool, arch: str, kernel_name: str, qemu: bool, root: bool, s
     with open(json_path, mode="w", encoding="utf-8") as f:
         json.dump(json_data, f, indent=2)
 
-    console.print(f"[green]Results saved to:[/green]")
+    # === PRINT SUMMARY ===
+    console.print("\n" + "=" * 60)
+    console.print("[bold cyan]=== TEST RUN SUMMARY ===[/bold cyan]")
+    console.print("=" * 60)
+    console.print(f"  [bold]Kernel:[/bold] {kernel_name}")
+    console.print(f"  [bold]Mode:[/bold] {'root' if root else 'non-root'}")
+    console.print(f"  [bold]Total bugs tested:[/bold] {len(results)}")
+    console.print(f"  [bold]Compiled successfully:[/bold] {compiled_count}")
+    if root:
+        console.print(f"  [bold red]Crashes (root):[/bold red] {crashed_root_count}")
+    else:
+        console.print(f"  [bold red]Crashes (non-root):[/bold red] {crashed_unroot_count}")
+    console.print(f"  [bold]Runtime:[/bold] {run_time:.1f} seconds")
+    
+    # Print crash type breakdown
+    if crash_type_summary:
+        console.print(f"\n[bold yellow]Crash Types:[/bold yellow]")
+        for crash_type, count in sorted(crash_type_summary.items(), key=lambda x: -x[1]):
+            console.print(f"    {crash_type}: {count}")
+    
+    # Print syscall breakdown
+    if syscall_summary:
+        console.print(f"\n[bold yellow]Triggering Syscalls:[/bold yellow]")
+        for syscall, count in sorted(syscall_summary.items(), key=lambda x: -x[1]):
+            console.print(f"    {syscall}: {count}")
+    
+    # List crashing bugs
+    if crashing_bugs:
+        console.print(f"\n[bold red]Crashing Bugs ({len(crashing_bugs)}):[/bold red]")
+        for bug in crashing_bugs:
+            console.print(f"    - {bug['bug_id']}: {bug['description'][:50]}... ({bug.get('crash_type', 'unknown')})")
+    
+    # Print UAF/OOB detection summary
+    if uaf_count > 0 or oob_count > 0:
+        console.print(f"\n[bold yellow]=== GDB Memory Analysis Summary ===[/bold yellow]")
+        console.print(f"  [red]UAF (Use-After-Free) detected:[/red] {uaf_count}")
+        console.print(f"  [red]OOB (Out-of-Bounds) detected:[/red] {oob_count}")
+        
+        # List bugs with UAF/OOB
+        uaf_bugs = [bug for bug in crashing_bugs if bug.get("uaf_detected", False)]
+        oob_bugs = [bug for bug in crashing_bugs if bug.get("oob_detected", False)]
+        
+        if uaf_bugs:
+            console.print(f"\n[bold red]Bugs with UAF detected:[/bold red]")
+            for bug in uaf_bugs:
+                console.print(f"    - {bug['bug_id']}: {bug['description'][:60]}...")
+        
+        if oob_bugs:
+            console.print(f"\n[bold red]Bugs with OOB detected:[/bold red]")
+            for bug in oob_bugs:
+                console.print(f"    - {bug['bug_id']}: {bug['description'][:60]}...")
+    
+    console.print(f"\n[green]Results saved to:[/green]")
     console.print(f"  [bold]{csv_path}[/bold]")
     console.print(f"  [bold]{json_path}[/bold]")
     console.print(f"  [bold]{crash_summary_path}[/bold]")
     console.print(f"  [bold]{crash_report_path}[/bold]")
-    console.print(f'[green]Runtime: {run_time} seconds[/green]')
-    print(exceptions)
+    console.print("=" * 60)
+    
+    if exceptions:
+        console.print(f"\n[yellow]Exceptions encountered ({len(exceptions)}):[/yellow]")
+        for exc in exceptions[:10]:  # Limit to first 10
+            console.print(f"  - {exc}")
+    
+    # Stop Cuttlefish if stop_cmd is provided
+    if stop_cmd:
+        console.print(f"[yellow]Stopping Cuttlefish with command:[/yellow] {stop_cmd}")
+        import subprocess
+        try:
+            if ssh_host and ssh_host != 'localhost':
+                # Run stop command on remote host
+                stop_result = subprocess.run(
+                    ['ssh', ssh_host, stop_cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=120  # 2 min timeout for stop
+                )
+            else:
+                # Run stop command locally
+                stop_result = subprocess.run(
+                    stop_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+            if stop_result.returncode != 0:
+                console.print(f"[red]Warning: Stop command exited with code {stop_result.returncode}[/red]")
+                console.print(f"  stderr: {stop_result.stderr[:500]}")
+            else:
+                console.print(f"[green]Cuttlefish stopped successfully[/green]")
+        except subprocess.TimeoutExpired:
+            console.print("[red]Stop command timed out after 2 minutes[/red]")
+        except Exception as e:
+            console.print(f"[red]Failed to stop Cuttlefish: {e}[/red]")
 
 
 
@@ -622,7 +1001,7 @@ def extract_crash_locations(log_text: str):
 
     return crashing_file, crashing_line, crash_type
 
-def test(id: str, local: bool, arch: str, root: bool, kernel_name: str, qemu: bool, source_disk: Path, source_image: Path, outdir_name: str, dynamic_analysis: bool = False, gdb_port: int = 1234, kernel_gdb: bool = False, vmlinux_path: str = None, kernel_gdb_port: int = 1234):
+def test(id: str, local: bool, arch: str, root: bool, kernel_name: str, qemu: bool, source_disk: Path, source_image: Path, outdir_name: str, dynamic_analysis: bool = False, gdb_port: int = 1234, kernel_gdb: bool = False, vmlinux_path: str = None, kernel_gdb_port: int = 1234, demo: bool = False):
     """
     Test a single bug.
     
@@ -641,6 +1020,7 @@ def test(id: str, local: bool, arch: str, root: bool, kernel_name: str, qemu: bo
         kernel_gdb: Enable kernel-side GDB analysis (requires Cuttlefish with --gdb_port)
         vmlinux_path: Path to vmlinux file for kernel symbols
         kernel_gdb_port: Port for kernel GDB stub (default: 1234)
+        demo: Demo mode - generate sample data if real GDB tracing fails
     """
     db = SyzkallBugDatabase(kernel_name)
     metadata = db.get_bug_metadata(id)

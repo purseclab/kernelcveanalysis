@@ -408,34 +408,124 @@ def download_bug_metadata(bug: dict[str, Tag]) -> Optional[BugMetadata]:
 
 # kernel_name is upstream for default linux
 # can also be android
-def get_bugs_for_kernel(kernel_name: str) -> tuple[list[dict[str, Tag]], list[dict[str, Tag]]]:
-    open_bugs_table = find_table_by_name(get_syzkall_html(kernel_name), 'open')
-    fixed_bugs_table = get_syzkall_html(f'{kernel_name}/fixed').find_all(name='table')[1]
-
-    bugs_open = filter_bugs(parse_table(open_bugs_table)) if open_bugs_table else []
-    bugs_fixed = filter_bugs(parse_table(fixed_bugs_table)) if fixed_bugs_table else []
+def get_bugs_for_kernel(kernel_name: str, apply_filter: bool = True, verbose: bool = True) -> tuple[list[dict[str, Tag]], list[dict[str, Tag]]]:
+    """
+    Fetch bugs for a kernel from syzbot.
+    
+    Args:
+        kernel_name: Kernel name (e.g., 'android-5-10', 'upstream')
+        apply_filter: If True, filter for memory unsafety bugs with reproducers
+        verbose: If True, print summary statistics
+    
+    Returns:
+        Tuple of (open_bugs, fixed_bugs) lists
+    """
+    main_page = get_syzkall_html(kernel_name)
+    fixed_page = get_syzkall_html(f'{kernel_name}/fixed')
+    
+    # Fetch all tables - syzbot page structure:
+    # Main page: Table 0 = position, Table 1 = instances, Table 2 = open bugs, Table 3 = premoderation
+    # Fixed page: Table 0 = position, Table 1 = fixed bugs
+    main_tables = main_page.find_all(name='table', class_='list_table')
+    fixed_tables = fixed_page.find_all(name='table', class_='list_table')
+    
+    # The bug tables have headers like 'Title', 'Repro', etc.
+    def is_bug_table(table):
+        thead = table.find('thead')
+        if not thead:
+            return False
+        headers = ' '.join(thead.get_text().lower().split())
+        return 'title' in headers and 'repro' in headers
+    
+    bug_tables_main = [t for t in main_tables if is_bug_table(t)]
+    bug_tables_fixed = [t for t in fixed_tables if is_bug_table(t)]
+    
+    # Parse raw tables
+    bugs_open_raw = parse_table(bug_tables_main[0]) if len(bug_tables_main) > 0 else []
+    bugs_premod_raw = parse_table(bug_tables_main[1]) if len(bug_tables_main) > 1 else []
+    bugs_fixed_raw = parse_table(bug_tables_fixed[0]) if len(bug_tables_fixed) > 0 else []
+    
+    # Combine open and premoderation for "open" bugs
+    bugs_all_open_raw = bugs_open_raw + bugs_premod_raw
+    
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"Syzbot Bug Summary for: {kernel_name}")
+        print(f"{'='*60}")
+        print(f"\nRAW BUG COUNTS (before filtering):")
+        print(f"  Open table:          {len(bugs_open_raw):>4} bugs")
+        print(f"  Premoderation table: {len(bugs_premod_raw):>4} bugs")
+        print(f"  Fixed table:         {len(bugs_fixed_raw):>4} bugs")
+        print(f"  ────────────────────────────")
+        print(f"  Total:               {len(bugs_all_open_raw) + len(bugs_fixed_raw):>4} bugs")
+    
+    if apply_filter:
+        bugs_open = filter_bugs(bugs_all_open_raw)
+        bugs_fixed = filter_bugs(bugs_fixed_raw)
+        
+        if verbose:
+            print(f"\nFILTERED BUG COUNTS (memory unsafety + has reproducer):")
+            print(f"  Open + Premod:       {len(bugs_open):>4} bugs")
+            print(f"  Fixed:               {len(bugs_fixed):>4} bugs")
+            print(f"  ────────────────────────────")
+            print(f"  Total to pull:       {len(bugs_open) + len(bugs_fixed):>4} bugs")
+            print(f"{'='*60}\n")
+    else:
+        bugs_open = bugs_all_open_raw
+        bugs_fixed = bugs_fixed_raw
+        if verbose:
+            print(f"\nNo filter applied - pulling all {len(bugs_open) + len(bugs_fixed)} bugs")
+            print(f"{'='*60}\n")
 
     return bugs_open, bugs_fixed
 
-def pull_bugs(db: SyzkallBugDatabase, kernel_name: str):
-    bugs_open, bugs_fixed = get_bugs_for_kernel(kernel_name)
+def pull_bugs(db: SyzkallBugDatabase, kernel_name: str, apply_filter: bool = True):
+    """
+    Pull bugs from syzbot and save to database.
+    
+    Args:
+        db: The bug database
+        kernel_name: Kernel name to pull bugs for
+        apply_filter: If True, only pull memory unsafety bugs with reproducers
+    """
+    bugs_open, bugs_fixed = get_bugs_for_kernel(kernel_name, apply_filter=apply_filter, verbose=True)
     bugs_combined = bugs_open + bugs_fixed
+    
+    # Track statistics
+    stats = {
+        'total': len(bugs_combined),
+        'already_downloaded': 0,
+        'newly_downloaded': 0,
+        'failed': 0
+    }
 
-    for bug in bugs_combined:
-        print('Pulling:')
-        print(get_tag_string(bug['title']).replace('\n', ' '))
+    for i, bug in enumerate(bugs_combined, 1):
+        title = get_tag_string(bug['title']).replace('\n', ' ')
+        print(f'\n[{i}/{len(bugs_combined)}] {title[:70]}...' if len(title) > 70 else f'\n[{i}/{len(bugs_combined)}] {title}')
 
         url = bug['title'].a['href']
         id = bug_id_from_url(url)
         if db.get_bug_metadata(id) is not None:
-            print('already downloaded')
+            print('  → Already in database, skipping')
+            stats['already_downloaded'] += 1
             continue
 
         bug_metadata = download_bug_metadata(bug)
         time.sleep(5)
         if bug_metadata is None:
-            print('Failed to parse')
+            print('  → Failed to parse')
+            stats['failed'] += 1
             continue
         db.save_bug_metadata(bug_metadata)
-    print('Downloaded')
-    print(f'Have {len(bugs_combined)} bugs in database')
+        print('  → Downloaded successfully')
+        stats['newly_downloaded'] += 1
+    
+    # Print final summary
+    print(f"\n{'='*60}")
+    print(f"PULL COMPLETE")
+    print(f"{'='*60}")
+    print(f"  Total bugs processed:    {stats['total']}")
+    print(f"  Already in database:     {stats['already_downloaded']}")
+    print(f"  Newly downloaded:        {stats['newly_downloaded']}")
+    print(f"  Failed to parse:         {stats['failed']}")
+    print(f"{'='*60}")
