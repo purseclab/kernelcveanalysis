@@ -7,6 +7,7 @@ needing to manipulate sys.path at runtime.
 """
 
 from .crash_analyzer import *  # re-export core functions (analyze, etc.)
+from .crash_analyzer import filter_important_stack_functions, UNIMPORTANT_STACK_FUNCTIONS
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
