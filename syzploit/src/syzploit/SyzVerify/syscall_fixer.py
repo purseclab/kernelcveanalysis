@@ -19,6 +19,23 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load from local .env file in SyzVerify directory
+    env_path = Path(__file__).parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+    else:
+        # Fallback to SyzAnalyze/.env
+        env_path = Path(__file__).parent.parent / 'SyzAnalyze' / '.env'
+        if env_path.exists():
+            load_dotenv(env_path)
+        else:
+            load_dotenv()  # Default search
+except ImportError:
+    pass
+
 # Import LLM utilities from crash_analyzer
 try:
     from ..SyzAnalyze.crash_analyzer import get_openai_response
@@ -242,10 +259,16 @@ def fix_with_llm(c_code: str, errors: List[CompilationError], target_arch: str) 
         print("[WARN] LLM module not available, cannot fix with LLM")
         return None
     
+    # Get API key from environment
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY", "")
+    if not api_key:
+        print("[WARN] OPENAI_API_KEY not set in environment, cannot use LLM for fixes")
+        return None
+    
     prompt = create_llm_fix_prompt(c_code, errors, target_arch)
     
     try:
-        response = get_openai_response(prompt, "")
+        response = get_openai_response(prompt, api_key)
         
         # Extract code from response
         if response:
@@ -401,6 +424,9 @@ def compile_with_fix(
     Compile C code with automatic syscall compatibility fixes.
     This is the main entry point for use by bug_db.py.
     
+    If a previously fixed file exists (_llm_fixed.c or _fixed.c), it will be used
+    first to avoid re-running the LLM.
+    
     Returns True if compilation succeeded (possibly after fixes).
     """
     if ndk_path is None:
@@ -414,7 +440,37 @@ def compile_with_fix(
         target = "x86_64"
         compile_script = f"./compile_x86_64.sh"
     
-    # Try normal compilation first
+    # Check for existing fixed files first (LLM fix takes precedence)
+    llm_fixed_path = c_code_path.parent / f"{c_code_path.stem}_llm_fixed.c"
+    quick_fixed_path = c_code_path.parent / f"{c_code_path.stem}_fixed.c"
+    
+    # Try previously saved LLM fix first
+    if llm_fixed_path.exists():
+        print(f"[INFO] Found existing LLM-fixed file: {llm_fixed_path.name}")
+        result = subprocess.run(
+            [compile_script, str(llm_fixed_path), str(output_path)],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0 and output_path.exists():
+            print(f"[INFO] Compiled successfully using cached LLM fix")
+            return True
+        else:
+            print(f"[INFO] Cached LLM fix no longer compiles, will regenerate")
+    
+    # Try previously saved quick fix
+    if quick_fixed_path.exists():
+        print(f"[INFO] Found existing quick-fixed file: {quick_fixed_path.name}")
+        result = subprocess.run(
+            [compile_script, str(quick_fixed_path), str(output_path)],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0 and output_path.exists():
+            print(f"[INFO] Compiled successfully using cached quick fix")
+            return True
+    
+    # Try normal compilation
     result = subprocess.run(
         [compile_script, str(c_code_path), str(output_path)],
         capture_output=True,
