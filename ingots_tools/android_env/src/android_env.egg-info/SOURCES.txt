@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+src/android_env/__init__.py
+src/android_env/codeql.py
+src/android_env/main.py
+src/android_env/seccomp.py
+src/android_env/selinux.py
+src/android_env/syscalls.py
+src/android_env/util.py
+src/android_env.egg-info/PKG-INFO
+src/android_env.egg-info/SOURCES.txt
+src/android_env.egg-info/dependency_links.txt
+src/android_env.egg-info/entry_points.txt
+src/android_env.egg-info/requires.txt
+src/android_env.egg-info/top_level.txt

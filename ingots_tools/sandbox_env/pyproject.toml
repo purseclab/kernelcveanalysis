@@ -1,0 +1,21 @@
+[project]
+name = "sandbox-env"
+version = "0.1.0"
+description = "Secure Docker sandbox environment"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "docker>=7.0.0",
+    "deepagents",
+    "typer>=0.21.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sandbox_env"]
+
+[project.scripts]
+sandbox_env = "sandbox_env.docker_sandbox:main"

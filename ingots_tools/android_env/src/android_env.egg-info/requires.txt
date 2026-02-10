@@ -1,0 +1,5 @@
+exrex>=0.12.0
+pyelftools>=0.32
+rich>=14.2.0
+typer>=0.20.0
+libadb

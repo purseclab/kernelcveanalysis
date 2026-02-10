@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: scripts
+Version: 0.1.0
+Summary: Collectino of miscellanous python scripts
+Requires-Python: >=3.13
+Description-Content-Type: text/markdown
+Requires-Dist: pyelftools>=0.32
+Requires-Dist: typer>=0.21.1
+Requires-Dist: libadb
+
+# scripts
+
+Collection of miscallaneous scripts that don't fit in with other tools

@@ -1,0 +1,14 @@
+[project]
+name = "scripts"
+version = "0.1.0"
+description = "Collectino of miscellanous python scripts"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pyelftools>=0.32",
+    "typer>=0.21.1",
+    "libadb",
+]
+
+[tool.uv.sources]
+libadb = { workspace = true }

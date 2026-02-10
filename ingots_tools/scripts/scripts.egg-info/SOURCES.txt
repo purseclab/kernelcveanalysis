@@ -1,0 +1,8 @@
+README.md
+expand_binary.py
+pyproject.toml
+scripts.egg-info/PKG-INFO
+scripts.egg-info/SOURCES.txt
+scripts.egg-info/dependency_links.txt
+scripts.egg-info/requires.txt
+scripts.egg-info/top_level.txt

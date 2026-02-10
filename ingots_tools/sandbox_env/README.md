@@ -1,0 +1,7 @@
+# Sandbox Env
+
+A secure Docker-based sandbox implementation for DeepAgents.
+
+## Environment
+
+The default environment is a standard ubunto container with the `template/` folder in the home directory.
