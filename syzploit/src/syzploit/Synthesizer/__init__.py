@@ -10,6 +10,8 @@ This module provides:
 - TargetPlatform: Enum for target platforms (Linux, Android, Generic)
 - ExploitStitcher: Stitch PDDL plans into C exploit code
 - CodeTemplateRegistry: Registry of C code templates for exploit actions
+- generate_exploit: LLM-driven exploit generation
+- ExploitGenerator: Main generator class
 
 This module is standalone and does not depend on chainreactor.
 Supports both Linux and Android kernel exploitation scenarios.
@@ -28,6 +30,14 @@ from .stitcher import (
     stitch_from_plan,
     ACTION_TO_LIBRARY,
 )
+from .exploit_generator import (
+    generate_exploit,
+    ExploitGenerator,
+    ExploitTemplateGenerator,
+    FunctionGenerator,
+    LLMExploitPlanner,
+    ExploitPlan as ExploitGenPlan,
+)
 
 __all__ = [
     'synthesize',
@@ -45,4 +55,9 @@ __all__ = [
     'StitcherConfig',
     'stitch_from_plan',
     'ACTION_TO_LIBRARY',
+    'generate_exploit',
+    'ExploitGenerator',
+    'ExploitTemplateGenerator',
+    'FunctionGenerator',
+    'LLMExploitPlanner',
 ]
