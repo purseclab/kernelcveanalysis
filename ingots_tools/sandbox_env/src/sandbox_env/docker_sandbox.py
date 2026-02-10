@@ -127,6 +127,11 @@ class DockerSandbox(BaseSandbox):
                 responses.append(FileDownloadResponse(path=path, error=str(e)))
         return responses
 
+    def download_file_to_tar(self, path: str, dest: Path):
+        bits, stat = self.container.get_archive(path)
+        with open(dest, 'wb') as f:
+            f.write(bits)
+
 IMAGE_TAG = 'kexploit_sandbox'
 
 class DockerSandboxProvider:

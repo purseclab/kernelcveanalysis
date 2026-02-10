@@ -1061,6 +1061,7 @@ dependencies = [
     { name = "deepagents" },
     { name = "keystone-engine" },
     { name = "langchain" },
+    { name = "langchain-openai" },
     { name = "litellm" },
     { name = "multilspy" },
     { name = "mypy" },
@@ -1075,6 +1076,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
     { name = "rich" },
+    { name = "sandbox-env" },
     { name = "sqlalchemy" },
     { name = "typer" },
 ]
@@ -1086,6 +1088,7 @@ requires-dist = [
     { name = "deepagents", specifier = ">=0.3.12" },
     { name = "keystone-engine", specifier = ">=0.9.2" },
     { name = "langchain", specifier = ">=1.2.7" },
+    { name = "langchain-openai", specifier = ">=1.1.8" },
     { name = "litellm", specifier = ">=1.80.10" },
     { name = "multilspy", specifier = ">=0.0.15" },
     { name = "mypy", specifier = ">=1.16.1" },
@@ -1100,6 +1103,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "rich", specifier = ">=14.0.0" },
+    { name = "sandbox-env", editable = "sandbox_env" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
     { name = "typer", specifier = ">=0.16.0" },
 ]
@@ -1177,6 +1181,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d8/0b/eae2305e207574dc633983a8a82a745e0ede1bce1f3a9daff24d2341fadc/langchain_google_genai-4.2.0.tar.gz", hash = "sha256:9a8d9bfc35354983ed29079cefff53c3e7c9c2a44b6ba75cc8f13a0cf8b55c33", size = 277361, upload-time = "2026-01-13T20:41:17.63Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/22/51/39942c0083139652494bb354dddf0ed397703a4882302f7b48aeca531c96/langchain_google_genai-4.2.0-py3-none-any.whl", hash = "sha256:856041aaafceff65a4ef0d5acf5731f2db95229ff041132af011aec51e8279d9", size = 66452, upload-time = "2026-01-13T20:41:16.296Z" },
+]
+
+[[package]]
+name = "langchain-openai"
+version = "1.1.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "langchain-core" },
+    { name = "openai" },
+    { name = "tiktoken" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/21/8053d1c41413521eae31cc6e71b0ac3048a53da0c7780c6e1b6ee4bf85b1/langchain_openai-1.1.8.tar.gz", hash = "sha256:3ff66966812a2362a8ccbcad24b517708f39c42471517abe77b07adc818a2c22", size = 1003370, upload-time = "2026-02-09T15:33:03.834Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/c0/8059e020fc308c321dcdca9768d2b0931e2b3b0685669a75124c9a675ee4/langchain_openai-1.1.8-py3-none-any.whl", hash = "sha256:c37d99eac78700cca2bef8d503cf367065685e1ac4cbdf674056046f3bebf118", size = 84939, upload-time = "2026-02-09T15:33:01.973Z" },
 ]
 
 [[package]]
