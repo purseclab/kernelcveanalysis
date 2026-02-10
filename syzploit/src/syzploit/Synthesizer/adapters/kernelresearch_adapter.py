@@ -13,12 +13,12 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from ..core import Primitive, PrimitiveRegistry
+from ...utils.debug import debug_print
 
 
-def _debug(msg: str, enabled: bool = True):
+def krkr_debug(msg: str, enabled: bool = True):
     """Print debug message if enabled."""
-    if enabled:
-        print(f"[DEBUG:KernelResearchAdapter] {msg}", file=sys.stderr)
+    debug_print("KernelResearchAdapter", msg, enabled)
 
 
 # RopActionId mapping from Target.h -> PDDL capabilities
@@ -136,9 +136,9 @@ class KernelResearchAdapter:
                 elif (p / 'include' / 'xdk').exists():
                     self._libxdk_path = p
                     
-        _debug(f"KernelResearchAdapter initialized", self.debug)
-        _debug(f"  repo_path: {repo_path}", self.debug)
-        _debug(f"  libxdk_path: {self._libxdk_path}", self.debug)
+        kr_debug(f"KernelResearchAdapter initialized", self.debug)
+        kr_debug(f"  repo_path: {repo_path}", self.debug)
+        kr_debug(f"  libxdk_path: {self._libxdk_path}", self.debug)
 
     def available(self) -> bool:
         """Check if kernel-research repo is available."""
@@ -151,10 +151,10 @@ class KernelResearchAdapter:
         
         target_h = self._libxdk_path / 'include' / 'xdk' / 'target' / 'Target.h'
         if not target_h.exists():
-            _debug(f"Target.h not found at {target_h}", self.debug)
+            kr_debug(f"Target.h not found at {target_h}", self.debug)
             return ROPACTION_TO_CAPS
         
-        _debug(f"Scanning Target.h for RopActionId enum", self.debug)
+        kr_debug(f"Scanning Target.h for RopActionId enum", self.debug)
         
         try:
             content = target_h.read_text()
@@ -166,14 +166,14 @@ class KernelResearchAdapter:
                 for entry in re.finditer(r'(\w+)\s*=\s*0x[\da-fA-F]+', enum_body):
                     action_name = entry.group(1)
                     if action_name not in ROPACTION_TO_CAPS:
-                        _debug(f"  Found new RopActionId: {action_name}", self.debug)
+                        kr_debug(f"  Found new RopActionId: {action_name}", self.debug)
                         # Add with generic caps
                         ROPACTION_TO_CAPS[action_name] = {
                             'caps': ['CAP_rop_action', f'CAP_{action_name.lower()}'],
                             'description': f'ROP action: {action_name}',
                         }
         except Exception as e:
-            _debug(f"Error scanning Target.h: {e}", self.debug)
+            kr_debug(f"Error scanning Target.h: {e}", self.debug)
         
         return ROPACTION_TO_CAPS
 
@@ -186,14 +186,14 @@ class KernelResearchAdapter:
         if not include_dir.exists():
             return LIBXDK_COMPONENTS
         
-        _debug(f"Scanning libxdk components in {include_dir}", self.debug)
+        kr_debug(f"Scanning libxdk components in {include_dir}", self.debug)
         
         for comp_name, comp_info in LIBXDK_COMPONENTS.items():
             header_path = include_dir / comp_info['header']
             if header_path.exists():
-                _debug(f"  Found component: {comp_name}", self.debug)
+                kr_debug(f"  Found component: {comp_name}", self.debug)
             else:
-                _debug(f"  Component not found: {comp_name} ({header_path})", self.debug)
+                kr_debug(f"  Component not found: {comp_name} ({header_path})", self.debug)
         
         return LIBXDK_COMPONENTS
 
@@ -207,7 +207,7 @@ class KernelResearchAdapter:
         if not samples_dir.exists():
             return samples
         
-        _debug(f"Scanning sample exploits in {samples_dir}", self.debug)
+        kr_debug(f"Scanning sample exploits in {samples_dir}", self.debug)
         
         for sample_dir in samples_dir.iterdir():
             if sample_dir.is_dir():
@@ -238,7 +238,7 @@ class KernelResearchAdapter:
                         pass
                     
                     samples.append(sample_info)
-                    _debug(f"  Sample {sample_dir.name}: {sample_info['caps']}", self.debug)
+                    kr_debug(f"  Sample {sample_dir.name}: {sample_info['caps']}", self.debug)
         
         return samples
 
@@ -261,7 +261,7 @@ class KernelResearchAdapter:
         self.debug = debug or self.debug
         prims: List[Primitive] = []
         
-        _debug("Listing kernel-research primitives...", self.debug)
+        kr_debug("Listing kernel-research primitives...", self.debug)
         
         # Scan for ROP actions
         rop_actions = self._scan_rop_actions()
@@ -278,7 +278,7 @@ class KernelResearchAdapter:
             )
             registry.add(p)
             prims.append(p)
-            _debug(f"  Added ROP action: {action_name} -> {action_info.get('caps', [])}", self.debug)
+            kr_debug(f"  Added ROP action: {action_name} -> {action_info.get('caps', [])}", self.debug)
         
         # Scan for components
         components = self._scan_components()
@@ -295,7 +295,7 @@ class KernelResearchAdapter:
             )
             registry.add(p)
             prims.append(p)
-            _debug(f"  Added component: {comp_name} -> {comp_info.get('caps', [])}", self.debug)
+            kr_debug(f"  Added component: {comp_name} -> {comp_info.get('caps', [])}", self.debug)
         
         # Add exploit techniques
         for tech_name, tech_info in EXPLOIT_TECHNIQUES.items():
@@ -311,7 +311,7 @@ class KernelResearchAdapter:
             )
             registry.add(p)
             prims.append(p)
-            _debug(f"  Added technique: {tech_name} -> {tech_info.get('caps', [])}", self.debug)
+            kr_debug(f"  Added technique: {tech_name} -> {tech_info.get('caps', [])}", self.debug)
         
         # Scan sample exploits
         samples = self._scan_samples()
@@ -330,7 +330,7 @@ class KernelResearchAdapter:
                 registry.add(p)
                 prims.append(p)
         
-        _debug(f"  Total primitives: {len(prims)}", self.debug)
+        kr_debug(f"  Total primitives: {len(prims)}", self.debug)
         return prims
 
     def generate_rop_chain(self, vmlinux: str, vmlinuz: Optional[str] = None) -> Optional[str]:
@@ -349,7 +349,7 @@ class KernelResearchAdapter:
             
         script = os.path.join(self.repo_path, 'rop_generator', 'angrop_rop_generator.py')
         if not os.path.exists(script):
-            _debug(f"ROP generator script not found: {script}", self.debug)
+            kr_debug(f"ROP generator script not found: {script}", self.debug)
             return None
             
         try:
@@ -357,7 +357,7 @@ class KernelResearchAdapter:
             if vmlinuz:
                 cmd.append(vmlinuz)
                 
-            _debug(f"Running ROP generator: {' '.join(cmd)}", self.debug)
+            kr_debug(f"Running ROP generator: {' '.join(cmd)}", self.debug)
             
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
                                   text=True) as proc:
@@ -369,12 +369,12 @@ class KernelResearchAdapter:
                 with open(out_path, 'w') as f:
                     f.write(out)
                     
-                _debug(f"ROP chain written to: {out_path}", self.debug)
+                kr_debug(f"ROP chain written to: {out_path}", self.debug)
                 return out_path
                 
         except subprocess.TimeoutExpired:
-            _debug("ROP generator timed out", self.debug)
+            kr_debug("ROP generator timed out", self.debug)
             return None
         except Exception as e:
-            _debug(f"ROP generator error: {e}", self.debug)
+            kr_debug(f"ROP generator error: {e}", self.debug)
             return None

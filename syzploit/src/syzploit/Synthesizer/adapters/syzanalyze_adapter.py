@@ -11,12 +11,12 @@ import os
 import sys
 from typing import Dict, Any, List, Optional
 from ..core import Primitive, PrimitiveRegistry
+from ...utils.debug import debug_print
 
 
-def _debug(msg: str, enabled: bool = True):
+def syzsyz_debug(msg: str, enabled: bool = True):
     """Print debug message if enabled."""
-    if enabled:
-        print(f"[DEBUG:SyzAnalyzeAdapter] {msg}", file=sys.stderr)
+    debug_print("SyzAnalyzeAdapter", msg, enabled)
 
 
 # Mapping of vulnerability types to PDDL capabilities
@@ -75,7 +75,7 @@ ACCESS_TO_CAPS = {
 }
 
 
-def _extract_caps_from_vuln(vuln_str: str) -> List[str]:
+def extract_caps_from_vuln(vuln_str: str) -> List[str]:
     """Extract capabilities from vulnerability type string."""
     caps = []
     vuln_lower = (vuln_str or '').lower()
@@ -87,7 +87,7 @@ def _extract_caps_from_vuln(vuln_str: str) -> List[str]:
     return list(set(caps))
 
 
-def _extract_caps_from_access(access: Dict[str, Any]) -> List[str]:
+def extract_caps_from_access(access: Dict[str, Any]) -> List[str]:
     """Extract capabilities from access operation info."""
     caps = []
     op = (access.get('op') or '').lower()
@@ -103,7 +103,7 @@ def _extract_caps_from_access(access: Dict[str, Any]) -> List[str]:
     return list(set(caps))
 
 
-def _extract_caps_from_llm(llm_analysis: Dict[str, Any]) -> List[str]:
+def extract_caps_from_llm(llm_analysis: Dict[str, Any]) -> List[str]:
     """Extract capabilities from LLM analysis results."""
     caps = []
     
@@ -156,7 +156,7 @@ def _extract_caps_from_llm(llm_analysis: Dict[str, Any]) -> List[str]:
     return list(set(caps))
 
 
-def _extract_caps_from_object(obj_info: Dict[str, Any]) -> List[str]:
+def extract_caps_from_object(obj_info: Dict[str, Any]) -> List[str]:
     """Extract capabilities from object/slab info."""
     caps = []
     
@@ -214,20 +214,20 @@ def load_from_analysis(analysis_dir: str, registry: PrimitiveRegistry,
     static_path = os.path.join(analysis_dir, 'static_analysis.json')
     dynamic_path = os.path.join(analysis_dir, 'dynamic_analysis.json')
     
-    _debug(f"Loading from analysis_dir: {analysis_dir}", debug)
+    syz_debug(f"Loading from analysis_dir: {analysis_dir}", debug)
     
     for path in (static_path, dynamic_path):
         if not os.path.exists(path):
-            _debug(f"  File not found: {path}", debug)
+            syz_debug(f"  File not found: {path}", debug)
             continue
             
-        _debug(f"  Processing: {path}", debug)
+        syz_debug(f"  Processing: {path}", debug)
         
         try:
             with open(path, 'r') as f:
                 data = json.load(f)
         except Exception as e:
-            _debug(f"  Error loading JSON: {e}", debug)
+            syz_debug(f"  Error loading JSON: {e}", debug)
             continue
         
         all_caps: List[str] = []
@@ -240,23 +240,23 @@ def load_from_analysis(analysis_dir: str, registry: PrimitiveRegistry,
             # Get vulnerability kind
             kind = parsed.get('kind', '')
             if kind:
-                caps = _extract_caps_from_vuln(kind)
+                caps = extract_caps_from_vuln(kind)
                 all_caps.extend(caps)
-                _debug(f"    from kind '{kind}': {caps}", debug)
+                syz_debug(f"    from kind '{kind}': {caps}", debug)
             
             # Get access info
             access = parsed.get('access', {})
             if isinstance(access, dict):
-                caps = _extract_caps_from_access(access)
+                caps = extract_caps_from_access(access)
                 all_caps.extend(caps)
-                _debug(f"    from access: {caps}", debug)
+                syz_debug(f"    from access: {caps}", debug)
             
             # Get object info
             obj_info = parsed.get('object_info', {})
             if isinstance(obj_info, dict):
-                caps = _extract_caps_from_object(obj_info)
+                caps = extract_caps_from_object(obj_info)
                 all_caps.extend(caps)
-                _debug(f"    from object_info: {caps}", debug)
+                syz_debug(f"    from object_info: {caps}", debug)
         
         # Extract from classification section
         classification = data.get('classification', {})
@@ -265,11 +265,11 @@ def load_from_analysis(analysis_dir: str, registry: PrimitiveRegistry,
             primitive = classification.get('primitive', '')
             
             if vuln:
-                caps = _extract_caps_from_vuln(vuln)
+                caps = extract_caps_from_vuln(vuln)
                 all_caps.extend(caps)
                 prim_name = primitive or vuln.split()[0].lower().replace('-', '_')
                 prim_desc = vuln
-                _debug(f"    from classification vuln '{vuln}': {caps}", debug)
+                syz_debug(f"    from classification vuln '{vuln}': {caps}", debug)
             
             # Exploitability rating
             exploit_rating = (classification.get('exploitability') or '').lower()
@@ -288,16 +288,16 @@ def load_from_analysis(analysis_dir: str, registry: PrimitiveRegistry,
         if isinstance(exploitability, dict):
             obj_info = exploitability.get('object', {})
             if isinstance(obj_info, dict):
-                caps = _extract_caps_from_object(obj_info)
+                caps = extract_caps_from_object(obj_info)
                 all_caps.extend(caps)
-                _debug(f"    from exploitability object: {caps}", debug)
+                syz_debug(f"    from exploitability object: {caps}", debug)
         
         # Extract from LLM analysis
         llm_analysis = data.get('llm_analysis', {})
         if isinstance(llm_analysis, dict):
-            caps = _extract_caps_from_llm(llm_analysis)
+            caps = extract_caps_from_llm(llm_analysis)
             all_caps.extend(caps)
-            _debug(f"    from llm_analysis: {caps}", debug)
+            syz_debug(f"    from llm_analysis: {caps}", debug)
         
         # Deduplicate capabilities
         all_caps = list(set(all_caps))
@@ -320,7 +320,7 @@ def load_from_analysis(analysis_dir: str, registry: PrimitiveRegistry,
             )
             registry.add(prim)
             prims.append(prim)
-            _debug(f"    Created primitive '{name}' with {len(all_caps)} capabilities", debug)
+            syz_debug(f"    Created primitive '{name}' with {len(all_caps)} capabilities", debug)
     
-    _debug(f"  Total primitives loaded: {len(prims)}", debug)
+    syz_debug(f"  Total primitives loaded: {len(prims)}", debug)
     return prims

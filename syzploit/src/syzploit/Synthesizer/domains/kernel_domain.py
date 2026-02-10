@@ -842,6 +842,100 @@ class KernelDomain:
     :effect (has_capability ARB_WRITE)
   )
 
+  ; ============== BINDER EPOLL UAF - IOVEC CORRUPTION TECHNIQUE ==============
+  ; This is the correct exploitation path for binder_thread UAF via epoll
+  ; Based on the badbinder exploit technique
+
+  (:action setup_binder_epoll
+    :parameters ()
+    :precondition (and
+      (has_vulnerability UAF)
+      (has_syzbot_reproducer)
+    )
+    :effect (and
+      (binder_controlled)
+      (heap_controlled)
+    )
+  )
+
+  (:action setup_iovec_spray
+    :parameters ()
+    :precondition (binder_controlled)
+    :effect (heap_sprayed PIPE_BUFFER)
+  )
+
+  (:action trigger_binder_uaf
+    :parameters ()
+    :precondition (and
+      (binder_controlled)
+      (heap_sprayed PIPE_BUFFER)
+    )
+    :effect (vulnerability_triggered UAF)
+  )
+
+  (:action reclaim_with_iovec
+    :parameters ()
+    :precondition (vulnerability_triggered UAF)
+    :effect (heap_controlled)
+  )
+
+  (:action corrupt_iovec_via_epoll
+    :parameters ()
+    :precondition (and
+      (vulnerability_triggered UAF)
+      (heap_controlled)
+    )
+    :effect (info_leak_available)
+  )
+
+  (:action leak_task_struct
+    :parameters ()
+    :precondition (info_leak_available)
+    :effect (and
+      (has_capability ARB_READ)
+      (kaslr_bypassed)
+    )
+  )
+
+  (:action setup_addr_limit_overwrite
+    :parameters ()
+    :precondition (and
+      (has_capability ARB_READ)
+      (kaslr_bypassed)
+    )
+    :effect (pan_bypassed)
+  )
+
+  (:action overwrite_addr_limit
+    :parameters ()
+    :precondition (pan_bypassed)
+    :effect (has_capability ARB_WRITE)
+  )
+
+  (:action kernel_read_primitive
+    :parameters ()
+    :precondition (has_capability ARB_WRITE)
+    :effect (capability_stable ARB_READ)
+  )
+
+  (:action kernel_write_primitive
+    :parameters ()
+    :precondition (has_capability ARB_WRITE)
+    :effect (capability_stable ARB_WRITE)
+  )
+
+  (:action overwrite_cred
+    :parameters ()
+    :precondition (and
+      (capability_stable ARB_WRITE)
+      (kaslr_bypassed)
+    )
+    :effect (and
+      (has_capability CRED_OVERWRITE)
+      (privilege_escalated)
+    )
+  )
+
   ; ============== HEAP SPRAY TECHNIQUES ==============
 
   (:action spray_msg_msg
