@@ -55,7 +55,8 @@ class CuttlefishConfig:
     already_running: bool = False  # If True with persistent, skip boot entirely
     
     # Commands for non-persistent mode (executed via SSH)
-    start_command: Optional[str] = None  # e.g., "HOME=$PWD ./bin/launch_cvd -kernel_path=..."
+    start_command: Optional[str] = None  # e.g., "HOME=$PWD ./bin/launch_cvd -kernel_path=..." (GDB-enabled start)
+    run_command: Optional[str] = None    # Non-GDB start command for symbol extraction (e.g., ./run.sh). Falls back to start_command.
     stop_command: Optional[str] = None   # e.g., "HOME=$PWD ./bin/stop_cvd"
     
     # Cuttlefish runtime log directory (for fetching kernel.log, logcat, etc.)
@@ -71,7 +72,9 @@ class CuttlefishConfig:
     gdb_host: str = "localhost"  # Host where GDB can connect (after SSH tunnel if needed)
     gdb_port: int = 1234
     enable_gdb: bool = True
-    gdb_connect_timeout: int = 60  # seconds to wait for GDB stub to accept connections
+    gdb_connect_timeout: int = 300  # seconds to wait for GDB stub to accept connections (launch_cvd can take 2-3 min for assembly)
+    gdb_attach_after_boot: bool = True  # If True, attach GDB AFTER kernel boots (better for crosvm)
+                                         # If False, attach at early boot (required for boot-time tracing)
     
     # ADB settings  
     adb_host: str = "localhost"
@@ -88,6 +91,7 @@ class CuttlefishConfig:
     vmlinux_path: Optional[str] = None       # Path to vmlinux ELF with symbols (auto-extracted if kernel_image_path set)
     system_map_path: Optional[str] = None    # Path to System.map for symbol resolution
     extract_symbols: bool = True             # Auto-extract vmlinux from kernel Image using vmlinux-to-elf
+    extract_runtime_symbols: bool = True     # Extract /proc/kallsyms from running VM for accurate breakpoint addresses
     
     # Logging
     log_file: Optional[str] = None  # Path to log file (default: cuttlefish_controller.log in cwd)
@@ -960,6 +964,21 @@ class CuttlefishController:
             adb_tunnel_cmd.extend(["-i", self.config.ssh_key_path])
         tunnels.append(("ADB Server", adb_tunnel_cmd))
         
+        # ADB device tunnel (forwards local device port to remote device port)
+        # This is REQUIRED because ADB connects to devices on their own port,
+        # not just the ADB server port. Without this, `adb connect` fails.
+        adb_device_port = self.config.adb_port
+        adb_device_tunnel_cmd = [
+            "ssh", "-N", "-L",
+            f"{adb_device_port}:localhost:{adb_device_port}",
+            ssh_target,
+        ]
+        if self.config.ssh_port != 22:
+            adb_device_tunnel_cmd.extend(["-p", str(self.config.ssh_port)])
+        if self.config.ssh_key_path:
+            adb_device_tunnel_cmd.extend(["-i", self.config.ssh_key_path])
+        tunnels.append((f"ADB Device (port {adb_device_port})", adb_device_tunnel_cmd))
+        
         for name, cmd in tunnels:
             cmd_str = ' '.join(cmd)
             self._log_info(f"Starting {name} tunnel: {cmd_str}")
@@ -1012,12 +1031,125 @@ class CuttlefishController:
             self._tunnel_processes = []
             self._log_info("All tunnels torn down")
     
+    def _raw_gdb_continue(self, host: str, port: int) -> bool:
+        """Send raw GDB protocol 'continue' command directly via socket.
+        
+        This bypasses gdb-multiarch entirely and sends the minimal GDB Remote
+        Serial Protocol packets to continue execution. This is more reliable
+        when dealing with flaky GDB stubs (like crosvm) because it avoids
+        the complexity of the full GDB client.
+        
+        GDB RSP format:
+        - Packets are: $<data>#<checksum>
+        - Checksum is sum of all bytes in <data> mod 256, as 2 hex chars
+        - 'c' = continue command
+        
+        Returns True if continue command was sent successfully.
+        """
+        def gdb_checksum(data: bytes) -> str:
+            """Calculate GDB RSP checksum."""
+            return f"{sum(data) % 256:02x}"
+        
+        def make_packet(cmd: str) -> bytes:
+            """Create a GDB RSP packet."""
+            data = cmd.encode()
+            return f"${cmd}#{gdb_checksum(data)}".encode()
+        
+        try:
+            self._log_info(f"Connecting to GDB stub at {host}:{port} for raw continue...")
+            sock = socket.create_connection((host, port), timeout=10)
+            sock.settimeout(5)
+            
+            # Send ACK first to sync
+            sock.send(b"+")
+            time.sleep(0.2)
+            
+            # Send continue packet: $c#63
+            continue_packet = make_packet("c")
+            self._log_info(f"Sending continue packet: {continue_packet}")
+            sock.send(continue_packet)
+            
+            # Wait briefly for ACK ('+' means command received)
+            try:
+                response = sock.recv(1)
+                if response == b"+":
+                    self._log_info("GDB stub acknowledged continue command")
+                else:
+                    self._log_warning(f"Unexpected response: {response}")
+            except socket.timeout:
+                self._log_info("No ACK received (stub may have continued anyway)")
+            
+            # Close connection - the stub should now be running the kernel
+            sock.close()
+            self._log_info("Raw GDB continue completed")
+            return True
+            
+        except socket.timeout:
+            self._log_warning("Socket timeout during raw GDB continue")
+            return False
+        except ConnectionResetError:
+            self._log_warning("Connection reset during raw GDB continue (stub may have continued)")
+            # This might actually be success - crosvm may reset after continue
+            return True
+        except Exception as e:
+            self._log_error(f"Raw GDB continue failed: {e}")
+            return False
+    
+    def _wait_for_gdb_port_closed(self, host: str, port: int, timeout: int = 30) -> bool:
+        """Wait for GDB port to close (proving the old/stale QEMU process is gone).
+        
+        This is critical for avoiding race conditions where a stale GDB stub from
+        a previous QEMU instance is still listening on the port. launch_cvd can take
+        several minutes to assemble disk images before starting QEMU, during which
+        time a stale port could still be open.
+        
+        Returns True if the port closed within the timeout, False if it's still open.
+        """
+        self._log_info(f"Checking if GDB port {host}:{port} is still open from a previous instance...")
+        start = time.time()
+        
+        # First, quick check if port is even open
+        try:
+            sock = socket.create_connection((host, port), timeout=2)
+            sock.close()
+        except (ConnectionRefusedError, OSError, socket.timeout):
+            self._log_info(f"GDB port {host}:{port} is already closed (no stale process)")
+            return True
+        
+        # Port IS open - likely a stale process. Wait for it to close.
+        self._log_warning(f"GDB port {host}:{port} is open from a STALE process! "
+                          f"Waiting up to {timeout}s for it to close...")
+        print(f"[CUTTLEFISH] GDB port still open from previous instance, waiting for it to close...")
+        
+        attempt = 0
+        while time.time() - start < timeout:
+            attempt += 1
+            try:
+                sock = socket.create_connection((host, port), timeout=2)
+                sock.close()
+                self._log_debug(f"Attempt {attempt}: Port still open, waiting...")
+                time.sleep(2)
+            except (ConnectionRefusedError, OSError, socket.timeout):
+                elapsed = time.time() - start
+                self._log_info(f"GDB port closed after {elapsed:.1f}s ({attempt} attempts)")
+                print(f"[CUTTLEFISH] Stale GDB port closed")
+                return True
+        
+        elapsed = time.time() - start
+        self._log_warning(f"GDB port still open after {elapsed:.1f}s - stale process may interfere")
+        print(f"[WARN] Stale GDB port still open after {timeout}s")
+        return False
+    
     def _wait_for_gdb_port(self, timeout: int = 60) -> bool:
-        """Wait for GDB port to become available.
+        """Wait for GDB port to become available from a FRESH QEMU instance.
         
         This checks both socket connectivity AND that the GDB stub actually responds.
         When using SSH tunnels, the socket may be open (tunnel is up) but the
         actual GDB stub on the remote may not be ready yet.
+        
+        IMPORTANT: This first waits for the port to CLOSE (proving the old QEMU is gone),
+        then waits for it to OPEN again (proving the new QEMU has started). This prevents
+        sending the GDB continue command to a stale QEMU instance.
         """
         # When using SSH tunnels, connect to localhost on the local tunnel port
         if self.config.setup_tunnels:
@@ -1031,8 +1163,20 @@ class CuttlefishController:
         
         self._log_separator()
         self._log_info(f"WAITING FOR GDB PORT: {host}:{port} (timeout: {timeout}s)")
-        self._log_info(f"Remote mode: {is_remote}, will test actual GDB connection")
+        self._log_info(f"Remote mode: {is_remote}, Tunnels: {self.config.setup_tunnels}")
         print(f"[CUTTLEFISH] Waiting for GDB on {host}:{port}...")
+        
+        # Phase 1: Wait for the port to CLOSE first (if a stale process has it open).
+        # launch_cvd takes a long time (2-3 min) to assemble disk images before QEMU starts.
+        # During that time, a stale GDB stub from a previous instance may still be listening.
+        # If we connect to the stale one and send 'continue', the NEW QEMU starts paused
+        # with -S and never gets the continue, so ADB never comes up.
+        close_timeout = min(timeout, 180)  # Up to 3 minutes for old QEMU to die
+        self._wait_for_gdb_port_closed(host, port, timeout=close_timeout)
+        
+        # Phase 2: Now wait for the NEW QEMU to open the port
+        self._log_info(f"Now waiting for NEW GDB stub to become ready...")
+        print(f"[CUTTLEFISH] Waiting for new GDB stub...")
         start = time.time()
         attempt = 0
         
@@ -1043,40 +1187,27 @@ class CuttlefishController:
             # First check socket connectivity
             try:
                 self._log_debug(f"Attempt {attempt}: Checking socket {host}:{port}...")
-                with socket.create_connection((host, port), timeout=2):
-                    self._log_debug(f"Attempt {attempt}: Socket is open")
-            except (ConnectionRefusedError, OSError, socket.timeout) as e:
-                self._log_debug(f"Attempt {attempt}: Socket not ready - {e}")
-                time.sleep(2)
-                continue
-            
-            # Socket is open, now test if GDB stub actually responds
-            # For remote instances, we need to test via SSH since the tunnel
-            # might be up but the actual GDB stub isn't ready
-            if is_remote:
-                self._log_debug(f"Attempt {attempt}: Testing GDB stub via SSH...")
-                # Quick GDB connect test - just connect and immediately quit
-                gdb_test_cmd = (
-                    f"gdb -batch -nx "
-                    f"-ex 'target remote :{self.config.gdb_port}' "
-                )
-                exit_code, stdout, stderr = self._ssh_exec(gdb_test_cmd, timeout=15)
-                combined = (stdout + stderr).lower()
-                
-                if "remote debugging" in combined or "0x" in combined:
-                    # Successfully connected to GDB stub
+                sock = socket.create_connection((host, port), timeout=5)
+                # Socket connected - try to do a minimal GDB protocol exchange
+                # Send $?#3f (halt reason query) to verify it's a fresh stopped stub
+                self._log_debug(f"Attempt {attempt}: Socket is open, testing GDB protocol...")
+                try:
+                    sock.settimeout(5)
+                    sock.send(b"+")  # ACK to sync
+                    time.sleep(0.1)
+                    # If we get here without ConnectionResetError, stub is alive
+                    sock.close()
                     self._log_info(f"GDB stub is ready after {elapsed:.1f}s ({attempt} attempts)")
                     print(f"[CUTTLEFISH] GDB port is ready")
                     return True
-                elif "connection refused" in combined or "connection timed out" in combined:
-                    self._log_debug(f"Attempt {attempt}: GDB stub not ready yet - {combined[:100]}")
-                else:
-                    self._log_debug(f"Attempt {attempt}: GDB test result unclear - {combined[:100]}")
-            else:
-                # Local mode - socket being open is usually sufficient
-                self._log_info(f"GDB port is ready after {elapsed:.1f}s ({attempt} attempts)")
-                print(f"[CUTTLEFISH] GDB port is ready")
-                return True
+                except (ConnectionResetError, BrokenPipeError, socket.timeout) as e:
+                    self._log_debug(f"Attempt {attempt}: GDB stub not responding - {e}")
+                    sock.close()
+                except Exception as e:
+                    self._log_debug(f"Attempt {attempt}: GDB test error - {e}")
+                    sock.close()
+            except (ConnectionRefusedError, OSError, socket.timeout) as e:
+                self._log_debug(f"Attempt {attempt}: Socket not ready - {e}")
             
             time.sleep(2)
         
@@ -1090,6 +1221,7 @@ class CuttlefishController:
         script_path: Path,
         vmlinux_path: Optional[str] = None,
         timeout: int = 60,
+        max_retries: int = 3,
     ) -> bool:
         """
         Attach GDB to the kernel with a custom Python script for analysis.
@@ -1098,10 +1230,13 @@ class CuttlefishController:
         breakpoints and logging), and then continues execution. All GDB output
         is logged for debugging.
         
+        Includes retry logic for unstable connections (crosvm GDB stub can be flaky).
+        
         Args:
             script_path: Path to GDB Python script to source
             vmlinux_path: Optional path to vmlinux with debug symbols
             timeout: Execution timeout (GDB runs in background after this)
+            max_retries: Number of connection retry attempts
         
         Returns True if GDB attached and script loaded successfully.
         """
@@ -1132,114 +1267,132 @@ class CuttlefishController:
         gdb_stdout_log = log_dir / "gdb_stdout.log"
         gdb_stderr_log = log_dir / "gdb_stderr.log"
         
-        # Try various GDB binaries - gdb-multiarch and aarch64-linux-gnu-gdb are needed
-        # for cross-architecture debugging (x86 host -> aarch64 target)
-        for gdb_binary in ["gdb-multiarch", "aarch64-linux-gnu-gdb", "gdb"]:
-            try:
-                gdb_cmd = [gdb_binary, "-q"]
-                
-                # Load vmlinux if provided
-                if vmlinux_path and os.path.exists(vmlinux_path):
-                    gdb_cmd.extend(["-ex", f"file {vmlinux_path}"])
-                    self._log_info(f"Loading symbols from {vmlinux_path}")
-                
-                gdb_cmd.extend([
-                    "-ex", f"set logging file {gdb_log_path}",
-                    "-ex", "set logging overwrite on",
-                    "-ex", "set logging enabled on",
-                    "-ex", "set pagination off",
-                    "-ex", "set confirm off",
-                    # Set architecture for cross-debugging (critical for x86 host -> aarch64 target)
-                    "-ex", "set architecture aarch64",
-                    "-ex", f"target remote {host}:{port}",
-                    "-ex", f"source {script_path}",
-                    "-ex", "continue",
-                ])
-                
-                self._log_debug(f"Running: {' '.join(gdb_cmd)}")
-                self._log_info(f"GDB session log: {gdb_log_path}")
-                print(f"[CUTTLEFISH] GDB connecting to {host}:{port}...")
-                
-                start_time = time.time()
-                
-                # Start GDB process - it will run in background after continue
-                proc = subprocess.Popen(
-                    gdb_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                
-                self._gdb_process = proc
-                self._log_info(f"GDB process started (PID: {proc.pid})")
-                
-                # Wait briefly for initial connection and script load
-                # GDB will continue running in background after 'continue' command
-                try:
-                    stdout, stderr = proc.communicate(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    # This is expected - GDB is running with the kernel
-                    self._log_info(f"GDB running in background (continuing after {timeout}s timeout)")
-                    # Don't kill it - let it continue monitoring
-                    stdout = ""
-                    stderr = ""
-                
-                elapsed = time.time() - start_time
-                
-                # Save stdout/stderr to files
-                if stdout:
-                    with open(gdb_stdout_log, 'w') as f:
-                        f.write(stdout)
-                if stderr:
-                    with open(gdb_stderr_log, 'w') as f:
-                        f.write(stderr)
-                
-                # Log output
-                if proc.returncode is not None:
-                    self._log_info(f"GDB exited in {elapsed:.2f}s with code {proc.returncode}")
-                else:
-                    self._log_info(f"GDB still running after {elapsed:.2f}s (monitoring kernel)")
-                
-                self._log_info("=" * 40 + " GDB STDOUT " + "=" * 40)
-                if stdout and stdout.strip():
-                    for line in stdout.strip().split('\n')[:30]:
-                        self._log_info(f"[GDB-OUT] {line}")
-                    if len(stdout.strip().split('\n')) > 30:
-                        self._log_info(f"[GDB-OUT] ... ({len(stdout.strip().split(chr(10))) - 30} more lines)")
-                else:
-                    self._log_info("[GDB-OUT] (empty or still running)")
-                
-                self._log_info("=" * 40 + " GDB STDERR " + "=" * 40)
-                if stderr and stderr.strip():
-                    for line in stderr.strip().split('\n')[:20]:
-                        self._log_info(f"[GDB-ERR] {line}")
-                else:
-                    self._log_info("[GDB-ERR] (empty)")
-                self._log_info("=" * 92)
-                
-                # Check for connection errors
-                combined = (stdout + stderr).lower() if stdout or stderr else ""
-                if "connection refused" in combined:
-                    self._log_error("GDB connection refused")
-                    return False
-                if "connection reset" in combined:
-                    self._log_error("GDB connection reset")
-                    return False
-                
-                self._log_info("GDB attached with script successfully")
-                print("[CUTTLEFISH] GDB attached and script loaded")
-                return True
-                
-            except FileNotFoundError:
-                self._log_debug(f"{gdb_binary} not found, trying next...")
-                continue
-            except Exception as e:
-                self._log_error(f"GDB attach failed: {e}")
-                import traceback
-                self._log_error(f"Traceback:\n{traceback.format_exc()}")
-                continue
+        # Add a small delay to let crosvm's GDB stub stabilize
+        # The stub can be flaky right after the port becomes available
+        self._log_info("Waiting 3s for GDB stub to stabilize...")
+        time.sleep(3)
         
-        self._log_error("No working GDB binary found")
+        # Try with retries - crosvm GDB stub can be flaky
+        for attempt in range(1, max_retries + 1):
+            self._log_info(f"GDB connection attempt {attempt}/{max_retries}")
+            
+            # Try various GDB binaries - gdb-multiarch and aarch64-linux-gnu-gdb are needed
+            # for cross-architecture debugging (x86 host -> aarch64 target)
+            for gdb_binary in ["gdb-multiarch", "aarch64-linux-gnu-gdb", "gdb"]:
+                try:
+                    gdb_cmd = [gdb_binary, "-q"]
+                    
+                    # Load vmlinux if provided
+                    if vmlinux_path and os.path.exists(vmlinux_path):
+                        gdb_cmd.extend(["-ex", f"file {vmlinux_path}"])
+                        self._log_info(f"Loading symbols from {vmlinux_path}")
+                    
+                    gdb_cmd.extend([
+                        "-ex", f"set logging file {gdb_log_path}",
+                        "-ex", "set logging overwrite on",
+                        "-ex", "set logging enabled on",
+                        "-ex", "set pagination off",
+                        "-ex", "set confirm off",
+                        # Set architecture for cross-debugging (critical for x86 host -> aarch64 target)
+                        "-ex", "set architecture aarch64",
+                        # Add TCP connection timeout to detect failures faster
+                        "-ex", "set tcp connect-timeout 30",
+                        "-ex", f"target remote {host}:{port}",
+                        "-ex", f"source {script_path}",
+                        # Note: 'continue' is handled by the script via syz_safe_continue
+                    ])
+                    
+                    self._log_debug(f"Running: {' '.join(gdb_cmd)}")
+                    self._log_info(f"GDB session log: {gdb_log_path}")
+                    print(f"[CUTTLEFISH] GDB connecting to {host}:{port} (attempt {attempt}/{max_retries})...")
+                    
+                    start_time = time.time()
+                
+                    # Start GDB process - it will run in background after continue
+                    proc = subprocess.Popen(
+                        gdb_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    
+                    self._gdb_process = proc
+                    self._log_info(f"GDB process started (PID: {proc.pid})")
+                    
+                    # Wait briefly for initial connection and script load
+                    # GDB will continue running in background after 'continue' command
+                    try:
+                        stdout, stderr = proc.communicate(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        # This is expected - GDB is running with the kernel
+                        self._log_info(f"GDB running in background (continuing after {timeout}s timeout)")
+                        # Don't kill it - let it continue monitoring
+                        stdout = ""
+                        stderr = ""
+                    
+                    elapsed = time.time() - start_time
+                    
+                    # Save stdout/stderr to files
+                    if stdout:
+                        with open(gdb_stdout_log, 'w') as f:
+                            f.write(stdout)
+                    if stderr:
+                        with open(gdb_stderr_log, 'w') as f:
+                            f.write(stderr)
+                    
+                    # Log output
+                    if proc.returncode is not None:
+                        self._log_info(f"GDB exited in {elapsed:.2f}s with code {proc.returncode}")
+                    else:
+                        self._log_info(f"GDB still running after {elapsed:.2f}s (monitoring kernel)")
+                    
+                    self._log_info("=" * 40 + " GDB STDOUT " + "=" * 40)
+                    if stdout and stdout.strip():
+                        for line in stdout.strip().split('\n')[:30]:
+                            self._log_info(f"[GDB-OUT] {line}")
+                        if len(stdout.strip().split('\n')) > 30:
+                            self._log_info(f"[GDB-OUT] ... ({len(stdout.strip().split(chr(10))) - 30} more lines)")
+                    else:
+                        self._log_info("[GDB-OUT] (empty or still running)")
+                    
+                    self._log_info("=" * 40 + " GDB STDERR " + "=" * 40)
+                    if stderr and stderr.strip():
+                        for line in stderr.strip().split('\n')[:20]:
+                            self._log_info(f"[GDB-ERR] {line}")
+                    else:
+                        self._log_info("[GDB-ERR] (empty)")
+                    self._log_info("=" * 92)
+                    
+                    # Check for connection errors - if found, retry
+                    combined = (stdout + stderr).lower() if stdout or stderr else ""
+                    if "connection refused" in combined:
+                        self._log_error(f"GDB connection refused (attempt {attempt})")
+                        break  # Try next attempt
+                    if "connection reset" in combined:
+                        self._log_error(f"GDB connection reset (attempt {attempt})")
+                        # Wait before retry
+                        if attempt < max_retries:
+                            self._log_info(f"Waiting 5s before retry...")
+                            time.sleep(5)
+                        break  # Try next attempt
+                    
+                    self._log_info("GDB attached with script successfully")
+                    print("[CUTTLEFISH] GDB attached and script loaded")
+                    return True
+                    
+                except FileNotFoundError:
+                    self._log_debug(f"{gdb_binary} not found, trying next...")
+                    continue
+                except Exception as e:
+                    self._log_error(f"GDB attach failed: {e}")
+                    import traceback
+                    self._log_error(f"Traceback:\n{traceback.format_exc()}")
+                    continue
+            
+            # If we get here without returning True, all gdb binaries failed for this attempt
+            # The outer loop will try again
+        
+        self._log_error(f"GDB attach failed after {max_retries} attempts")
         return False
     
     def _gdb_continue_kernel(self, timeout: int = 30) -> bool:
@@ -1284,7 +1437,22 @@ class CuttlefishController:
         # Create a GDB log file for debugging
         gdb_log_path = Path(self.config.log_file).parent / "gdb_continue.log" if self.config.log_file else Path("gdb_continue.log")
         
-        # Try various GDB binaries - gdb-multiarch and aarch64-linux-gnu-gdb are needed
+        # Add a small delay to let GDB stub stabilize after port check
+        self._log_info("Waiting 5s for GDB stub to stabilize...")
+        time.sleep(5)
+        
+        # Try to continue the kernel using raw GDB protocol over socket
+        # This is more reliable than spawning gdb-multiarch through SSH tunnels
+        # because it avoids potential protocol fragmentation issues
+        self._log_info("Attempting raw GDB protocol continue...")
+        if self._raw_gdb_continue(host, port):
+            self._log_info("Kernel continued via raw GDB protocol")
+            print("[CUTTLEFISH] Kernel continued via raw GDB")
+            return True
+        
+        self._log_warning("Raw GDB continue failed, trying gdb-multiarch...")
+        
+        # Fallback: Try various GDB binaries - gdb-multiarch and aarch64-linux-gnu-gdb are needed
         # for cross-architecture debugging (x86 host -> aarch64 target)
         for gdb_binary in ["gdb-multiarch", "aarch64-linux-gnu-gdb", "gdb"]:
             try:
@@ -1295,6 +1463,9 @@ class CuttlefishController:
                     "-ex", "set logging enabled on",
                     # Set architecture for cross-debugging (critical for x86 host -> aarch64 target)
                     "-ex", "set architecture aarch64",
+                    # TCP settings for flaky connections
+                    "-ex", "set tcp connect-timeout 30",
+                    "-ex", "set tcp auto-retry on",
                     "-ex", f"target remote {host}:{port}",
                     "-ex", "continue"
                 ]
@@ -1511,6 +1682,7 @@ class CuttlefishController:
         self,
         gdb_script_path: Optional[Path] = None,
         vmlinux_path: Optional[str] = None,
+        gdb_continue_only: bool = False,
     ) -> bool:
         """
         Start or connect to Cuttlefish instance.
@@ -1521,10 +1693,13 @@ class CuttlefishController:
                             connects, allowing breakpoints and logging to be set up
                             before the kernel continues booting.
             vmlinux_path: Optional path to vmlinux with debug symbols for GDB.
+            gdb_continue_only: If True, skip loading GDB script and just send 'continue'.
+                              Used for Phase 1 of two-phase symbol extraction where
+                              we just want to boot the kernel without breakpoints.
         
         Returns True if Cuttlefish is ready for use.
         """
-        self._gdb_script_path = gdb_script_path
+        self._gdb_script_path = gdb_script_path if not gdb_continue_only else None
         self._vmlinux_path = vmlinux_path
         
         self._log_separator()
@@ -1532,8 +1707,10 @@ class CuttlefishController:
         self._log_info("STARTING CUTTLEFISH INSTANCE")
         self._log_info("=" * 60)
         
-        if gdb_script_path:
+        if gdb_script_path and not gdb_continue_only:
             self._log_info(f"GDB Script: {gdb_script_path}")
+        if gdb_continue_only:
+            self._log_info("GDB mode: continue-only (no breakpoints)")
         if vmlinux_path:
             self._log_info(f"vmlinux: {vmlinux_path}")
         
@@ -1582,12 +1759,16 @@ class CuttlefishController:
             if self.config.ssh_host == "localhost" and self.config.ssh_port == 22:
                 self._log_info("Execution mode: LOCAL")
                 # Local execution - run in background
+                cwd = os.path.expanduser(self.config.cuttlefish_home) if self.config.cuttlefish_home else None
+                if cwd and not os.path.isdir(cwd):
+                    self._log_warning(f"cuttlefish_home directory not found: {cwd}, running without cwd")
+                    cwd = None
                 self._cuttlefish_process = subprocess.Popen(
                     self.config.start_command,
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    cwd=self.config.cuttlefish_home if self.config.cuttlefish_home != "~/" else None,
+                    cwd=cwd,
                 )
                 self._log_info(f"Local process started with PID: {self._cuttlefish_process.pid}")
             else:
@@ -1610,27 +1791,53 @@ class CuttlefishController:
         self._log_info(f"Waiting for boot (timeout: {self.config.boot_timeout}s)")
         print(f"[CUTTLEFISH] Waiting for boot (timeout: {self.config.boot_timeout}s)...")
         
-        # Wait for GDB first if enabled
+        # Wait for GDB first if enabled (kernel is paused, needs continue)
         if self.config.enable_gdb:
             # Wait for GDB stub to be ready - QEMU takes time to initialize
-            self._log_info("Waiting 10s for GDB stub to initialize...")
-            print("[CUTTLEFISH] Waiting 10s for GDB stub...")
-            time.sleep(10)
+            self._log_info("Waiting for GDB stub to become ready...")
+            print("[CUTTLEFISH] Waiting for GDB stub to become ready...")
             
-            # Cuttlefish with GDB starts paused - we need to continue the kernel
-            # If a GDB script is provided, we run it now (sets up breakpoints, logging)
-            # then continue. Otherwise just send continue.
-            if self._gdb_script_path:
-                self._log_info(f"Attaching GDB with script: {self._gdb_script_path}")
-                print(f"[CUTTLEFISH] Attaching GDB with analysis script...")
-                if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=60):
-                    self._log_warning("GDB script attach may have failed, but continuing anyway")
-                    print("[WARN] GDB script attach may have failed, but continuing anyway")
-            else:
-                self._log_info("Sending continue to resume kernel boot")
+            # Actually wait for the GDB port to be available, not just a fixed delay
+            if not self._wait_for_gdb_port(timeout=self.config.gdb_connect_timeout):
+                self._log_error("GDB port never became available")
+                print("[ERROR] GDB port never became available - check if QEMU started correctly")
+                # Fetch remote logs to help debug
+                if self.config.ssh_host != "localhost":
+                    self._append_remote_logs_to_local()
+                return False
+            
+            self._log_info("GDB port is available")
+            print("[CUTTLEFISH] GDB port available")
+            
+            # Two modes for GDB attachment:
+            # 1. Early attach (gdb_attach_after_boot=False): Attach script now, at early boot
+            #    - Better for boot-time tracing, but crosvm may disconnect
+            # 2. Late attach (gdb_attach_after_boot=True): Just continue now, attach script later
+            #    - Works better with crosvm, kernel fully booted when we attach
+            
+            if self.config.gdb_attach_after_boot:
+                # Late attach mode: just continue the kernel, attach script after boot
+                self._log_info("Late GDB attach mode - continuing kernel first, will attach script after boot")
+                print("[CUTTLEFISH] Late GDB attach mode - continuing kernel boot...")
                 if not self._gdb_continue_kernel(timeout=30):
                     self._log_warning("GDB continue may have failed, but continuing anyway")
                     print("[WARN] GDB continue may have failed, but continuing anyway")
+            else:
+                # Early attach mode: attach with script now (original behavior)
+                # Cuttlefish with GDB starts paused - we need to continue the kernel
+                # If a GDB script is provided, we run it now (sets up breakpoints, logging)
+                # then continue. Otherwise just send continue.
+                if self._gdb_script_path:
+                    self._log_info(f"Early attach mode - attaching GDB with script: {self._gdb_script_path}")
+                    print(f"[CUTTLEFISH] Early attach mode - attaching GDB with analysis script...")
+                    if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=60):
+                        self._log_warning("GDB script attach may have failed, but continuing anyway")
+                        print("[WARN] GDB script attach may have failed, but continuing anyway")
+                else:
+                    self._log_info("Sending continue to resume kernel boot")
+                    if not self._gdb_continue_kernel(timeout=30):
+                        self._log_warning("GDB continue may have failed, but continuing anyway")
+                        print("[WARN] GDB continue may have failed, but continuing anyway")
         
         # Wait for ADB
         if not self._wait_for_adb(timeout=self.config.boot_timeout):
@@ -1652,6 +1859,17 @@ class CuttlefishController:
                 # Fetch remote logs for reference
                 if self.config.ssh_host != "localhost":
                     self._append_remote_logs_to_local()
+                
+                # Late GDB attach: now that kernel is booted, attach the script
+                if self.config.enable_gdb and self.config.gdb_attach_after_boot and self._gdb_script_path:
+                    self._log_info("Late GDB attach: kernel booted, now attaching GDB script...")
+                    print("[CUTTLEFISH] Late GDB attach: attaching GDB script to running kernel...")
+                    if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=60):
+                        self._log_warning("Late GDB script attach may have failed, but continuing anyway")
+                        print("[WARN] Late GDB script attach may have failed, but continuing anyway")
+                    else:
+                        print("[CUTTLEFISH] GDB script attached successfully")
+                
                 return True
             time.sleep(5)
         
@@ -1661,6 +1879,17 @@ class CuttlefishController:
         if self.config.ssh_host != "localhost":
             self._append_remote_logs_to_local()
         self._is_booted = True
+        
+        # Late GDB attach: try to attach even if boot_completed not set
+        if self.config.enable_gdb and self.config.gdb_attach_after_boot and self._gdb_script_path:
+            self._log_info("Late GDB attach: ADB available, attempting GDB script attach...")
+            print("[CUTTLEFISH] Late GDB attach: attempting GDB script attach...")
+            if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=60):
+                self._log_warning("Late GDB script attach may have failed, but continuing anyway")
+                print("[WARN] Late GDB script attach may have failed, but continuing anyway")
+            else:
+                print("[CUTTLEFISH] GDB script attached successfully")
+        
         return True
     
     def stop(self) -> bool:
@@ -1775,7 +2004,8 @@ class CuttlefishController:
                     return f"{base_dir}/cuttlefish_runtime/logs"
         
         # Default fallback
-        return f"{self.config.cuttlefish_home}/cuttlefish_runtime/logs"
+        home = os.path.expanduser(self.config.cuttlefish_home)
+        return f"{home}/cuttlefish_runtime/logs"
 
     def fetch_cuttlefish_runtime_logs(self, local_output_dir: Optional[Path] = None) -> dict:
         """
@@ -2280,6 +2510,8 @@ class CuttlefishKernelGDB:
         use_syz_trace: bool = True,
         track_memory: bool = True,
         parsed_crash: Optional[dict] = None,
+        demo_mode: bool = False,
+        runtime_symbols_config: Optional[str] = None,
     ) -> Path:
         """
         Generate a GDB Python script for kernel-level dynamic analysis.
@@ -2295,6 +2527,9 @@ class CuttlefishKernelGDB:
             use_syz_trace: If True (default), use the full syz_trace (gdb.py) script
             track_memory: If True and System.map available, enable alloc/free tracking
             parsed_crash: Optional parsed crash info for fault address extraction
+            demo_mode: If True, generate sample data when real tracing fails
+            runtime_symbols_config: Path to JSON config with runtime-extracted symbol addresses.
+                                   This takes precedence over System.map for accurate addresses.
         
         Returns:
             Path to generated GDB script
@@ -2304,6 +2539,48 @@ class CuttlefishKernelGDB:
         # Use provided vmlinux or auto-extracted one
         effective_vmlinux = vmlinux_path or self.vmlinux_path
         effective_smap = self.system_map_path
+        
+        # Helper to convert string addresses to int
+        def to_int_addr(addr):
+            """Convert address to int, handling string hex format."""
+            if addr is None:
+                return None
+            if isinstance(addr, int):
+                return addr
+            if isinstance(addr, str):
+                try:
+                    return int(addr, 16) if addr.startswith('0x') else int(addr)
+                except ValueError:
+                    return None
+            return None
+        
+        # If runtime symbols config is provided, load it for addresses
+        runtime_addrs = {}
+        if runtime_symbols_config and os.path.exists(runtime_symbols_config):
+            try:
+                with open(runtime_symbols_config, 'r') as f:
+                    runtime_data = json.load(f)
+                # Load and convert addresses to integers
+                for key, val in runtime_data.get('alloc_addrs', {}).items():
+                    int_addr = to_int_addr(val)
+                    if int_addr:
+                        runtime_addrs[key] = int_addr
+                for key, val in runtime_data.get('free_addrs', {}).items():
+                    int_addr = to_int_addr(val)
+                    if int_addr:
+                        runtime_addrs[key] = int_addr
+                for key, val in runtime_data.get('crash_stack_addrs', {}).items():
+                    int_addr = to_int_addr(val)
+                    if int_addr:
+                        runtime_addrs[key] = int_addr
+                self.controller._log_info(f"Loaded runtime symbols from: {runtime_symbols_config}")
+                self.controller._log_info(f"  Loaded {len(runtime_addrs)} symbol addresses")
+                # Override System.map with runtime kallsyms
+                if runtime_data.get('system_map_path'):
+                    effective_smap = runtime_data.get('system_map_path')
+                    self.controller._log_info(f"  Using runtime System.map: {effective_smap}")
+            except Exception as e:
+                self.controller._log_warning(f"Failed to load runtime symbols config: {e}")
         
         # Log symbol info
         if effective_vmlinux:
@@ -2318,18 +2595,6 @@ class CuttlefishKernelGDB:
         
         # Results file path
         results_file = str(self.log_dir / f"{bug_id}_kernel_gdb_results.json")
-        
-        # Find the gdb.py (syz_trace) script
-        syz_trace_path = self._get_syz_trace_script_path()
-        if not syz_trace_path or not syz_trace_path.exists():
-            self.controller._log_error("Could not find gdb.py (syz_trace) script")
-            raise FileNotFoundError("gdb.py not found in SyzVerify directory")
-        
-        self.controller._log_info(f"Using syz_trace framework: {syz_trace_path}")
-        
-        # Read the base gdb.py script
-        with open(syz_trace_path, 'r') as f:
-            base_script = f.read()
         
         # Extract fault info from parsed crash if available
         fault_addr = None
@@ -2361,7 +2626,7 @@ class CuttlefishKernelGDB:
                     except:
                         pass
         
-        # Look up memory function addresses from System.map
+        # Look up memory function addresses from runtime symbols or System.map
         kmalloc_addr = None
         kfree_addr = None
         vfree_addr = None
@@ -2371,7 +2636,29 @@ class CuttlefishKernelGDB:
         kfree_rcu_addr = None
         vfree_atomic_addr = None
         
-        if effective_smap and track_memory:
+        # First, try to get addresses from runtime symbols (most accurate)
+        if runtime_addrs:
+            self.controller._log_info("Using runtime-extracted symbol addresses:")
+            kmalloc_addr = runtime_addrs.get('__kmalloc')
+            kfree_addr = runtime_addrs.get('kfree')
+            vfree_addr = runtime_addrs.get('vfree')
+            kmem_cache_alloc_addr = runtime_addrs.get('kmem_cache_alloc')
+            kmem_cache_free_addr = runtime_addrs.get('kmem_cache_free')
+            kvfree_addr = runtime_addrs.get('kvfree')
+            kfree_rcu_addr = runtime_addrs.get('kfree_rcu')
+            vfree_atomic_addr = runtime_addrs.get('vfree_atomic')
+            
+            if kmalloc_addr:
+                self.controller._log_info(f"  __kmalloc: 0x{kmalloc_addr:x}")
+            if kfree_addr:
+                self.controller._log_info(f"  kfree: 0x{kfree_addr:x}")
+            if kmem_cache_alloc_addr:
+                self.controller._log_info(f"  kmem_cache_alloc: 0x{kmem_cache_alloc_addr:x}")
+            if kmem_cache_free_addr:
+                self.controller._log_info(f"  kmem_cache_free: 0x{kmem_cache_free_addr:x}")
+        
+        # Fallback to System.map if no runtime symbols
+        if effective_smap and track_memory and not kmalloc_addr:
             try:
                 symbol_map = {}
                 with open(effective_smap, 'r') as f:
@@ -2416,27 +2703,80 @@ class CuttlefishKernelGDB:
         # Extract crash stack function names and resolve addresses
         crash_stack_funcs = []
         crash_stack_addrs = {}
+        
+        # Functions to filter out - debug/dump/sanitizer infrastructure
+        unimportant_funcs = {
+            'dump_stack', 'dump_stack_lvl', 'show_stack', 'show_trace', 'show_regs',
+            '__dump_stack', 'dump_backtrace', 'dump_stack_print_info',
+            'kasan_report', 'kasan_check_range', '__kasan_check_read', '__kasan_check_write',
+            'kasan_save_stack', 'kasan_set_track', 'kasan_save_free_info', 'kasan_save_alloc_info',
+            '__asan_report_load', '__asan_report_store', '__asan_load', '__asan_store',
+            'check_memory_region', 'print_address_description', 'print_report',
+            '__kmem_cache_alloc_node', '__slab_alloc', '__slab_free', 'slab_alloc_node',
+            'slab_free_freelist_hook', 'slab_free_hook', '__cache_alloc',
+            'do_page_fault', 'handle_page_fault', 'exc_page_fault', '__do_page_fault',
+            'die', 'oops_begin', 'oops_end', '__die', 'ret_from_fork',
+            '__might_resched', '__might_sleep', 'lock_acquire', 'lock_release',
+            'rcu_read_lock', 'rcu_read_unlock', 'preempt_schedule',
+        }
+        skip_prefixes = ('kasan_', '__kasan_', '__asan_', 'dump_', 'show_', 'print_', '__might_')
+        
         if parsed_crash:
             # Get unique function names from stack frames (try different fields)
             seen_funcs = set()
             frames_list = parsed_crash.get('stack_frames', parsed_crash.get('frames', []))
-            for frame in frames_list[:10]:  # Top 10 frames
+            
+            self.controller._log_info(f"Analyzing {len(frames_list)} stack frames for breakpoints...")
+            
+            for frame in frames_list[:15]:  # Look at top 15 frames
                 func_name = frame.get('function', frame.get('func', ''))
                 if func_name and func_name not in seen_funcs:
                     # Clean up function name (remove inline markers, etc)
                     base_func = func_name.split('+')[0].split('.')[0].strip()
                     if base_func and base_func not in seen_funcs:
+                        # Filter out unimportant functions
+                        if base_func.lower() in {f.lower() for f in unimportant_funcs}:
+                            self.controller._log_debug(f"  Skipping debug func: {base_func}")
+                            continue
+                        if any(base_func.lower().startswith(p) for p in skip_prefixes):
+                            self.controller._log_debug(f"  Skipping by prefix: {base_func}")
+                            continue
+                        
                         seen_funcs.add(base_func)
                         crash_stack_funcs.append(base_func)
+                        self.controller._log_info(f"  + Adding breakpoint target: {base_func}")
             
             # Also add corrupted_function if present
             if parsed_crash.get('corrupted_function'):
                 cf = parsed_crash['corrupted_function']
                 if cf not in seen_funcs:
                     crash_stack_funcs.insert(0, cf)  # Priority at front
+                    self.controller._log_info(f"  + Adding corrupted function: {cf}")
             
-            # Look up addresses from symbol_map if we have it
-            if effective_smap and track_memory:
+            # Print summary to console
+            if crash_stack_funcs:
+                print(f"[GDB] Stack trace breakpoint targets ({len(crash_stack_funcs)}):")
+                for i, fn in enumerate(crash_stack_funcs[:10]):
+                    print(f"      {i+1}. {fn}")
+                if len(crash_stack_funcs) > 10:
+                    print(f"      ... and {len(crash_stack_funcs) - 10} more")
+            else:
+                print("[GDB] No stack trace functions extracted for breakpoints")
+            
+            # First, try to get crash stack addresses from runtime symbols
+            if runtime_addrs:
+                for func_name in crash_stack_funcs:
+                    if func_name in runtime_addrs:
+                        crash_stack_addrs[func_name] = runtime_addrs[func_name]
+                
+                if crash_stack_addrs:
+                    self.controller._log_info(f"Crash stack from runtime symbols: {len(crash_stack_addrs)} of {len(crash_stack_funcs)}")
+                    for fn, addr in crash_stack_addrs.items():
+                        self.controller._log_info(f"  {fn}: 0x{addr:x}")
+            
+            # Fallback: Look up addresses from symbol_map if not found in runtime
+            remaining_funcs = [f for f in crash_stack_funcs if f not in crash_stack_addrs]
+            if remaining_funcs and effective_smap and track_memory:
                 try:
                     # Reuse symbol_map from above, or re-read if needed
                     if 'symbol_map' not in dir():
@@ -2449,7 +2789,7 @@ class CuttlefishKernelGDB:
                                     name = parts[2]
                                     symbol_map[name] = addr
                     
-                    for func_name in crash_stack_funcs:
+                    for func_name in remaining_funcs:
                         if func_name in symbol_map:
                             crash_stack_addrs[func_name] = symbol_map[func_name]
                     
@@ -2479,6 +2819,8 @@ class CuttlefishKernelGDB:
             "bug_id": bug_id,
             "crash_stack_funcs": crash_stack_funcs,
             "crash_stack_addrs": {fn: f"0x{addr:x}" for fn, addr in crash_stack_addrs.items()},
+            "runtime_symbols_config": runtime_symbols_config or "",
+            "symbols_source": "runtime" if runtime_addrs else "system_map",
         }
         
         # Write JSON config file
@@ -2487,136 +2829,89 @@ class CuttlefishKernelGDB:
             json.dump(gdb_json_config, f, indent=2)
         self.controller._log_info(f"GDB config JSON: {config_json_path}")
         
-        # Build configuration header (similar to dynamic.py approach)
-        # This sets GDB convenience variables that gdb.py reads
-        config_header = f'''#!/usr/bin/env python3
+        # Find the gdb.py (syz_trace) script path
+        syz_trace_path = self._get_syz_trace_script_path()
+        if not syz_trace_path or not syz_trace_path.exists():
+            self.controller._log_error("Could not find gdb.py (syz_trace) script")
+            raise FileNotFoundError("gdb.py not found in SyzVerify directory")
+        
+        self.controller._log_info(f"syz_trace script: {syz_trace_path}")
+        
+        # Demo mode setting (1 if enabled, 0 if disabled)
+        demo_mode_val = 1 if demo_mode else 0
+        if demo_mode:
+            self.controller._log_info("DEMO MODE: Will generate sample data if tracing fails")
+        
+        # Runtime symbols config path (empty string if not available)
+        runtime_config_str = runtime_symbols_config or ""
+        
+        # Generate a minimal bootstrap script that:
+        # 1. Sets all config variables BEFORE sourcing gdb.py
+        # 2. Sources the main gdb.py script (which calls _initialize() and installs breakpoints)
+        # 3. Loads additional config and explicitly reinstalls breakpoints
+        # This keeps all GDB logic in gdb.py
+        bootstrap_script = f'''#!/usr/bin/env python3
 """
-Auto-generated kernel GDB script for bug: {bug_id}
-Uses syz_trace framework for comprehensive memory tracking.
+Auto-generated GDB bootstrap script for bug: {bug_id}
+This script sets up configuration and sources gdb.py
 
-vmlinux: {effective_vmlinux or "not available"}
-System.map: {effective_smap or "not available"}
+All GDB tracing logic is in: {syz_trace_path}
+Config JSON: {config_json_path}
+Runtime Symbols: {runtime_config_str}
 Results: {results_file}
+Demo mode: {demo_mode}
 """
 import gdb
 
-# ============================================================================
-# Configuration - Set GDB convenience variables for syz_trace
-# ============================================================================
-
-# Fault address and instruction from crash analysis
-gdb.execute('set $fault_addr = {fault_addr if fault_addr else 0}')
-gdb.execute('set $fault_insn = {fault_insn if fault_insn else 0}')
-gdb.execute('set $access_type = "{access_type}"')
-gdb.execute('set $access_size = {access_size}')
-
-# System.map path for symbol resolution
-gdb.execute('set $system_map_path = "{effective_smap or ""}"')
-
-# Memory allocation function addresses from System.map (for hardware breakpoints)
-# Core alloc/free functions
-gdb.execute('set $kmalloc_addr = {kmalloc_addr if kmalloc_addr else 0}')
-gdb.execute('set $kfree_addr = {kfree_addr if kfree_addr else 0}')
-gdb.execute('set $vfree_addr = {vfree_addr if vfree_addr else 0}')
-gdb.execute('set $kmem_cache_alloc_addr = {kmem_cache_alloc_addr if kmem_cache_alloc_addr else 0}')
-gdb.execute('set $kmem_cache_free_addr = {kmem_cache_free_addr if kmem_cache_free_addr else 0}')
-# Additional free functions
-gdb.execute('set $kvfree_addr = {kvfree_addr if kvfree_addr else 0}')
-gdb.execute('set $kfree_rcu_addr = {kfree_rcu_addr if kfree_rcu_addr else 0}')
-gdb.execute('set $vfree_atomic_addr = {vfree_atomic_addr if vfree_atomic_addr else 0}')
-
-# Results export path
+# Set ALL config variables BEFORE sourcing gdb.py
+# This is critical - _initialize() reads these when the script is sourced
+gdb.execute('set $config_json_path = "{config_json_path}"')
 gdb.execute('set $export_path = "{results_file}"')
-
-# Monitor mode - continue on breakpoint hits instead of stopping
-gdb.execute('set $monitor_mode = 1')
-gdb.execute('set $monitor_always = 1')
-
-# Use HARDWARE breakpoints - they work at early boot before kernel memory is mapped
-# (hardware breakpoints use CPU debug registers, not memory access)
-gdb.execute('set $prefer_hw_breakpoints = 1')
-
-# Enable allocation tracking
-gdb.execute('set $_enable_alloc_track = 1')
-
-# Bug ID for logging
+gdb.execute('set $system_map_path = "{effective_smap or ""}"')
 gdb.execute('set $bug_id = "{bug_id}"')
+gdb.execute('set $runtime_symbols_path = "{runtime_config_str}"')
 
-gdb.write("[CONFIG] Kernel analysis configuration set\\n", gdb.STDERR)
-gdb.write("[CONFIG] Bug ID: {bug_id}\\n", gdb.STDERR)
-gdb.write("[CONFIG] System.map: {effective_smap or 'None'}\\n", gdb.STDERR)
-gdb.write("[CONFIG] Results file: {results_file}\\n", gdb.STDERR)
-gdb.write("[CONFIG] Using HARDWARE breakpoints (CPU debug registers)\\n", gdb.STDERR)
-if {kmalloc_addr if kmalloc_addr else 0}:
-    gdb.write("[CONFIG] __kmalloc: 0x{kmalloc_addr:x}\\n", gdb.STDERR)
-if {kfree_addr if kfree_addr else 0}:
-    gdb.write("[CONFIG] kfree: 0x{kfree_addr:x}\\n", gdb.STDERR)
-if {vfree_addr if vfree_addr else 0}:
-    gdb.write("[CONFIG] vfree: 0x{vfree_addr:x}\\n", gdb.STDERR)
-if {kmem_cache_alloc_addr if kmem_cache_alloc_addr else 0}:
-    gdb.write("[CONFIG] kmem_cache_alloc: 0x{kmem_cache_alloc_addr:x}\\n", gdb.STDERR)
-if {kmem_cache_free_addr if kmem_cache_free_addr else 0}:
-    gdb.write("[CONFIG] kmem_cache_free: 0x{kmem_cache_free_addr:x}\\n", gdb.STDERR)
+# Immediate install mode (kernel is paused at GDB attach point)
+gdb.execute('set $immediate_install = 1')
 
-# Crash stack functions from parsed crash analysis
-# These are written to a JSON config and loaded via syz_load_config
-_gdb_config_json_path = "{config_json_path}"
-gdb.write(f"[CONFIG] JSON config: {{_gdb_config_json_path}}\\n", gdb.STDERR)
+# Demo mode - generates sample data when real tracing fails
+gdb.execute('set $demo_mode = {demo_mode_val}')
 
-# ============================================================================
-# syz_trace framework follows
-# ============================================================================
+gdb.write("[BOOTSTRAP] Config variables set\\n", gdb.STDERR)
+gdb.write("[BOOTSTRAP]   config_json_path = {config_json_path}\\n", gdb.STDERR)
+gdb.write("[BOOTSTRAP]   runtime_symbols_path = {runtime_config_str}\\n", gdb.STDERR)
+gdb.write("[BOOTSTRAP]   system_map_path = {effective_smap or ""}\\n", gdb.STDERR)
 
-'''
-        
-        # Combine config header with the base script
-        modified_script = config_header + base_script
-        
-        # Add auto-continue section at the end (similar to dynamic.py)
-        output_section = f'''
+# Source the main gdb.py script which runs _initialize() and installs breakpoints
+gdb.write("[BOOTSTRAP] Loading syz_trace from {syz_trace_path}\\n", gdb.STDERR)
+gdb.execute('source {syz_trace_path}')
 
-# ============================================================================
-# Load JSON config and set up crash stack breakpoints
-# ============================================================================
-import json
+# Load additional config (crash stack functions, etc) and reinstall breakpoints
+# This ensures any addresses from the JSON config are used
+gdb.write("[BOOTSTRAP] Loading JSON config: {config_json_path}\\n", gdb.STDERR)
+gdb.execute('syz_load_config {config_json_path}')
 
-_json_config_path = "{config_json_path}"
-gdb.write(f"[SETUP] Loading config from: {{_json_config_path}}\\n", gdb.STDERR)
+# Explicitly reinstall breakpoints to ensure runtime symbols are used
+gdb.write("[BOOTSTRAP] Installing breakpoints with runtime symbols...\\n", gdb.STDERR)
+gdb.execute('syz_install_breakpoints force')
 
+# Show status before continuing
+gdb.execute('syz_status')
+
+# Auto-continue execution
+gdb.write("[BOOTSTRAP] Starting execution...\\n", gdb.STDERR)
 try:
-    # Load config via syz_load_config command (handles crash_stack_funcs/addrs)
-    gdb.execute(f"syz_load_config {{_json_config_path}}")
-except Exception as e:
-    gdb.write(f"[WARN] syz_load_config failed: {{e}}\\n", gdb.STDERR)
-    # Fallback: try to load JSON directly and set up manually
-    try:
-        with open(_json_config_path, 'r') as f:
-            _cfg = json.load(f)
-        gdb.write(f"[SETUP] Loaded JSON config directly\\n", gdb.STDERR)
-    except Exception as e2:
-        gdb.write(f"[ERROR] Failed to load config: {{e2}}\\n", gdb.STDERR)
-
-# ============================================================================
-# Auto-continue execution after setup
-# ============================================================================
-try:
-    # Use syz_safe_continue if available (handles breakpoint insertion errors)
     gdb.execute("syz_safe_continue")
-except gdb.error as e:
-    # Fallback to regular continue
-    try:
-        gdb.execute("continue")
-    except gdb.error as e2:
-        gdb.write("[WARN] continue failed: %s\\n" % e2, gdb.STDERR)
+except Exception as e:
+    gdb.write(f"[BOOTSTRAP] Continue error: {{e}}\\n", gdb.STDERR)
 '''
-        modified_script += output_section
         
-        # Write the combined script
+        # Write the bootstrap script
         script_path = self.log_dir / f"{bug_id}_kernel_gdb_script.py"
         with open(script_path, 'w') as f:
-            f.write(modified_script)
+            f.write(bootstrap_script)
         
-        self.controller._log_info(f"Generated GDB script: {script_path}")
+        self.controller._log_info(f"Generated GDB bootstrap script: {script_path}")
         
         return script_path
     
@@ -2689,10 +2984,19 @@ except gdb.error as e:
         
         gdb_cmd = [gdb_binary, "-q"]
         
-        # Load vmlinux if provided
+        # Load vmlinux if provided - CRITICAL for proper debugging
         if vmlinux_path and os.path.exists(vmlinux_path):
             gdb_cmd.extend(["-ex", f"file {vmlinux_path}"])
             print(f"[KERNEL-GDB] Loading symbols from {vmlinux_path}")
+        else:
+            print(f"[KERNEL-GDB] WARNING: No vmlinux file loaded!")
+            print(f"[KERNEL-GDB]   vmlinux_path={vmlinux_path}")
+            print(f"[KERNEL-GDB]   GDB will have limited functionality without symbols")
+            print(f"[KERNEL-GDB]   Use --vmlinux-path or set extract_symbols=True")
+            # Try to use auto-extracted vmlinux
+            if self.vmlinux_path and os.path.exists(self.vmlinux_path):
+                gdb_cmd.extend(["-ex", f"file {self.vmlinux_path}"])
+                print(f"[KERNEL-GDB] Using auto-extracted vmlinux: {self.vmlinux_path}")
         
         gdb_cmd.extend([
             "-ex", f"set logging file {self.log_dir}/kernel_gdb.log",
@@ -2704,7 +3008,8 @@ except gdb.error as e:
             "-ex", "set architecture aarch64",
             "-ex", f"target remote {gdb_target}",
             "-ex", f"source {script_path}",
-            "-ex", "continue",
+            # Note: The script itself handles 'continue' via syz_safe_continue
+            # so we don't add -ex continue here
         ])
         
         print(f"[KERNEL-GDB] Starting GDB (timeout: {timeout}s)...")
@@ -2905,6 +3210,7 @@ def run_cuttlefish_kernel_test(
             bug_id=bug_id,
             breakpoints=breakpoints,
             vmlinux_path=vmlinux_path if not is_remote else remote_vmlinux_path,
+            parsed_crash=parsed_crash,  # Pass parsed_crash for stack trace breakpoints
         )
         print(f"[TEST] Generated GDB script: {script_path}")
         

@@ -2,3 +2,4 @@
 from . import Synthesizer
 from . import SyzAnalyze
 from . import SyzVerify
+from . import utils

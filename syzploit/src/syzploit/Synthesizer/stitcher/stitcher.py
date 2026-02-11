@@ -6,15 +6,111 @@ a complete C exploit program.
 """
 
 import os
+import re
 import sys
 import json
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from .code_templates import CodeTemplate, CodeTemplateRegistry, DEFAULT_REGISTRY
+
+
+def deduplicate_globals(globals_list: List[str]) -> str:
+    """
+    Deduplicate global variable declarations, #defines, and other globals.
+    
+    This prevents duplicate definitions when multiple templates declare
+    the same variables or macros.
+    
+    Returns a single string with deduplicated globals.
+    """
+    seen_defines: Set[str] = set()
+    seen_vars: Set[str] = set()
+    seen_structs: Set[str] = set()
+    
+    output_lines = []
+    current_comment = None
+    
+    # Patterns to detect different types of declarations
+    define_pattern = re.compile(r'^#define\s+(\w+)')
+    var_pattern = re.compile(r'^static\s+(?:volatile\s+)?(?:int|char|void|unsigned|long|uint\d+_t|struct\s+\w+)\s*\*?\s*(\w+)')
+    struct_pattern = re.compile(r'^static\s+struct\s+(\w+)\s+(\w+)')
+    array_pattern = re.compile(r'^static\s+(?:struct\s+)?(\w+)\s+(\w+)\s*\[')
+    
+    for globals_block in globals_list:
+        if not globals_block or not globals_block.strip():
+            continue
+        
+        lines = globals_block.split('\n')
+        for line in lines:
+            stripped = line.strip()
+            
+            # Skip empty lines
+            if not stripped:
+                continue
+            
+            # Track comments (for context)
+            if stripped.startswith('//'):
+                current_comment = stripped
+                continue
+            
+            # Check for #define
+            define_match = define_pattern.match(stripped)
+            if define_match:
+                name = define_match.group(1)
+                if name not in seen_defines:
+                    seen_defines.add(name)
+                    if current_comment:
+                        output_lines.append(current_comment)
+                        current_comment = None
+                    output_lines.append(line)
+                continue
+            
+            # Check for struct variable
+            struct_match = struct_pattern.match(stripped)
+            if struct_match:
+                var_name = struct_match.group(2)
+                if var_name not in seen_vars:
+                    seen_vars.add(var_name)
+                    if current_comment:
+                        output_lines.append(current_comment)
+                        current_comment = None
+                    output_lines.append(line)
+                continue
+            
+            # Check for array variable
+            array_match = array_pattern.match(stripped)
+            if array_match:
+                var_name = array_match.group(2)
+                if var_name not in seen_vars:
+                    seen_vars.add(var_name)
+                    if current_comment:
+                        output_lines.append(current_comment)
+                        current_comment = None
+                    output_lines.append(line)
+                continue
+            
+            # Check for regular variable
+            var_match = var_pattern.match(stripped)
+            if var_match:
+                var_name = var_match.group(1)
+                if var_name not in seen_vars:
+                    seen_vars.add(var_name)
+                    if current_comment:
+                        output_lines.append(current_comment)
+                        current_comment = None
+                    output_lines.append(line)
+                continue
+            
+            # For other lines (like closing braces, etc.), include as-is
+            # but avoid duplicates of exact lines
+            if stripped not in seen_vars and stripped not in seen_defines:
+                output_lines.append(line)
+    
+    return '\n'.join(output_lines)
 
 
 @dataclass
@@ -115,7 +211,7 @@ class ExploitStitcher:
         for template in templates:
             includes.update(template.includes)
         
-        # Collect all globals
+        # Collect all globals (will be deduplicated later)
         globals_code = []
         
         # Collect setup, main, and cleanup code
@@ -125,7 +221,6 @@ class ExploitStitcher:
         
         for template in templates:
             if template.globals:
-                globals_code.append(f"// {template.description}")
                 globals_code.append(template.globals)
             if template.setup_code:
                 setup_code.append(template.setup_code)
@@ -157,10 +252,11 @@ class ExploitStitcher:
         # State tracking variables
         code_parts.append(self._generate_state_variables())
         
-        # Global variables from templates
+        # Global variables from templates - DEDUPLICATED
         if globals_code:
             code_parts.append("\n// === GLOBAL STATE ===")
-            code_parts.extend(globals_code)
+            deduplicated = deduplicate_globals(globals_code)
+            code_parts.append(deduplicated)
         
         # Helper function declarations
         code_parts.append(self._generate_helper_declarations())
@@ -280,7 +376,6 @@ static int privilege_escalated = 0;
 static int selinux_disabled = 0;
 static int sandbox_escaped = 0;
 static int adb_root_enabled = 0;
-static int binder_controlled = 0;
 
 static uint64_t info_leak_value = 0;
 """
@@ -295,7 +390,6 @@ static int trigger_vulnerable_alloc(void);
 static int trigger_vulnerable_free(void);
 static int trigger_oob_write_vuln(void);
 static int trigger_oob_read_vuln(uint64_t *leaked);
-static int trigger_binder_vuln(int binder_fd);
 static void *race_thread_1(void *arg);
 static void *race_thread_2(void *arg);
 
@@ -304,7 +398,6 @@ static int arb_read(uint64_t addr, void *buf, size_t len);
 static int arb_write(uint64_t addr, const void *buf, size_t len);
 static uint64_t calculate_kernel_slide(uint64_t leaked_ptr);
 static int find_corrupted_msg(void);
-static int spray_binder_node(int fd, uint32_t *handle);
 
 // Task/credential operations
 static uint64_t get_current_task(void);
@@ -351,12 +444,6 @@ static int trigger_oob_read_vuln(uint64_t *leaked) {
     // TODO: Implement OOB read trigger
     printf("[!] trigger_oob_read_vuln: NEEDS IMPLEMENTATION\\n");
     *leaked = 0;
-    return 0;
-}
-
-static int trigger_binder_vuln(int binder_fd) {
-    // TODO: Implement binder vulnerability trigger
-    printf("[!] trigger_binder_vuln: NEEDS IMPLEMENTATION\\n");
     return 0;
 }
 
@@ -408,14 +495,6 @@ static uint64_t calculate_kernel_slide(uint64_t leaked_ptr) {
 static int find_corrupted_msg(void) {
     // Find the msg_msg that overlaps with our UAF object
     printf("[!] find_corrupted_msg: NEEDS IMPLEMENTATION\\n");
-    return -1;
-}
-
-static int spray_binder_node(int fd, uint32_t *handle) {
-    // Spray a binder_node structure
-    (void)fd;
-    (void)handle;
-    printf("[!] spray_binder_node: NEEDS IMPLEMENTATION\\n");
     return -1;
 }
 

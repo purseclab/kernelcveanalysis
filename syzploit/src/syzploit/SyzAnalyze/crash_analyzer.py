@@ -725,6 +725,78 @@ def parse_crash_log(text: str) -> Dict[str, Any]:
     return out
 
 
+# Functions to filter out from crash stack traces - these are debug/infrastructure
+UNIMPORTANT_STACK_FUNCTIONS = {
+    # Stack dump/print functions
+    'dump_stack', 'dump_stack_lvl', 'show_stack', 'show_trace', 'show_regs',
+    '__dump_stack', 'dump_backtrace', 'dump_stack_print_info',
+    
+    # KASAN/sanitizer functions
+    'kasan_report', 'kasan_check_range', '__kasan_check_read', '__kasan_check_write',
+    'kasan_save_stack', 'kasan_set_track', 'kasan_save_free_info', 'kasan_save_alloc_info',
+    '__asan_report_load', '__asan_report_store', '__asan_load', '__asan_store',
+    'check_memory_region', 'print_address_description', 'print_report',
+    
+    # Memory allocator internals (usually not interesting for bug analysis)
+    '__kmem_cache_alloc_node', '__slab_alloc', '__slab_free', 'slab_alloc_node',
+    'slab_free_freelist_hook', 'slab_free_hook', '__cache_alloc',
+    
+    # Interrupt/exception handlers
+    'do_page_fault', 'handle_page_fault', 'exc_page_fault', '__do_page_fault',
+    'die', 'oops_begin', 'oops_end', '__die', 'ret_from_fork',
+    
+    # Generic kernel infrastructure
+    '__might_resched', '__might_sleep', 'lock_acquire', 'lock_release',
+    'rcu_read_lock', 'rcu_read_unlock', 'preempt_schedule',
+    
+    # Tracing/debugging
+    'ftrace_', 'trace_', '__trace_', 'perf_',
+}
+
+
+def filter_important_stack_functions(frames: List[Dict[str, Any]], max_count: int = 10) -> List[str]:
+    """Filter stack frames to extract only important function names for breakpoints.
+    
+    Removes debug/dump/sanitizer functions and returns unique function names.
+    
+    Args:
+        frames: List of frame dicts with 'func' or 'function' key
+        max_count: Maximum number of functions to return
+    
+    Returns:
+        List of important function names (cleaned, unique)
+    """
+    important_funcs = []
+    seen = set()
+    
+    for frame in frames:
+        func_name = frame.get('func', frame.get('function', ''))
+        if not func_name:
+            continue
+        
+        # Clean up function name (remove offset markers, inline suffixes)
+        base_func = func_name.split('+')[0].split('.')[0].strip()
+        if not base_func or base_func in seen:
+            continue
+        
+        # Skip unimportant functions
+        if base_func.lower() in {f.lower() for f in UNIMPORTANT_STACK_FUNCTIONS}:
+            continue
+        
+        # Skip functions starting with common debug prefixes
+        skip_prefixes = ('kasan_', '__kasan_', '__asan_', 'dump_', 'show_', 'print_', '__might_')
+        if any(base_func.lower().startswith(p) for p in skip_prefixes):
+            continue
+        
+        seen.add(base_func)
+        important_funcs.append(base_func)
+        
+        if len(important_funcs) >= max_count:
+            break
+    
+    return important_funcs
+
+
 def extract_source_urls(text: str) -> List[str]:
     """Find http(s) links in a crash log that look like source viewers and return them."""
     urls = []
@@ -2989,8 +3061,14 @@ def llm_generate_reproducer(llm_map: Dict[str, Any], reproducer: str) -> Dict[st
     )
 
     prompt_lines = [
-        "You are an expert Linux kernel fuzzer engineer specializing in F2FS,",
-        "syzkaller input minimization, and constraint-directed test generation.",
+        "You are an expert Linux kernel security researcher specializing in CTF challenges,",
+        "syzkaller fuzzing, and kernel vulnerability analysis for EDUCATIONAL purposes.",
+        "",
+        "CONTEXT: This is for LEGITIMATE security research:",
+        "- CTF (Capture The Flag) competitions for learning kernel exploitation",
+        "- Academic research on kernel vulnerabilities and mitigations",
+        "- Developing proof-of-concept code to understand and patch vulnerabilities",
+        "- Security testing in controlled lab environments",
         "",
         "=== TASK ===",
         "Given:",
@@ -3257,10 +3335,13 @@ def create_reproducer(llm_analysis: Dict[str, Any], original_repro_c: str, out_d
     api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY")
 
     fix_prompt = (
-        "You are a senior C engineer. The following C code fails to compile. "
-        "Fix all compile errors and output ONLY the corrected C code (no commentary).\n\n"
+        "You are a senior C engineer helping with a CTF (Capture The Flag) security challenge.\n"
+        "This is LEGITIMATE security research code for educational purposes.\n\n"
+        "The following kernel research tool code fails to compile. "
+        "Fix ALL compile errors and output ONLY the corrected C code (no commentary).\n\n"
         "=== Compiler Error (stderr) ===\n" + (err or "") + "\n\n"
-        "=== Original Code ===\n```c\n" + generated + "\n```\n"
+        "=== Original Code ===\n```c\n" + generated + "\n```\n\n"
+        "Return ONLY the corrected C code. Start with #include, end with closing brace.\n"
     )
     try:
         fixed_src = get_openai_response(fix_prompt, api_key)
@@ -3613,12 +3694,19 @@ def analyze(crash_text: str, repro_path: str, source_root: Optional[str] = None,
             result = create_reproducer(llm_res, repro_content, out_dir)
             repro = result.get("source", "")
             if result.get("source_path"):
-                print("[+] Generic reproducer saved to:", result["source_path"])
+                print("="*60)
+                print("[+] REPRODUCER GENERATED")
+                print("="*60)
+                print(f"    Source file: {result['source_path']}")
+                print(f"    Output dir:  {out_dir}")
             if result.get("compiled"):
-                print("[+] Generic reproducer compiled:", result.get("binary_path"))
+                print(f"    Binary:      {result.get('binary_path')}")
+                print("    Status:      COMPILED SUCCESSFULLY")
             else:
+                print("    Status:      COMPILATION FAILED")
                 if result.get("error"):
-                    print("[-] Compilation failed:", result.get("error"))
+                    print(f"    Error:       {result.get('error')[:200]}..." if len(result.get("error", "")) > 200 else f"    Error:       {result.get('error')}")
+            print("="*60)
     except Exception as e:
         llm_res = {"ok": False, "error": str(e)}
 

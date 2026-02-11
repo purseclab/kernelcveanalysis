@@ -41,44 +41,142 @@ export OPENAI_API_KEY=your_api_key_here
 echo "OPENAI_API_KEY=your_api_key_here" > .env
 ```
 
-## Cuttlefish Setup (Optional)
+## Cuttlefish Setup
 
-Start the cuttlefish emulator on cuttlefish server, and run adb once to start adb daemon:
+Syzploit supports running kernel bug reproducers on remote Cuttlefish (Android Virtual Device) instances via SSH. This is the primary path for ARM64 kernel analysis.
+
+### Why QEMU over crosvm?
+
+crosvm's GDB stub only supports a single CPU, making it unusable for exploits that need multiple CPUs. QEMU supports multi-CPU GDB but is "legacy" for Cuttlefish. To use QEMU, a **wrapper script** must be installed on the remote host (see [QEMU Wrapper](#qemu-wrapper-installation) below). For details, see [Cuttlefish_with_gdb.md](Cuttlefish_with_gdb.md).
+
+### Quick Start: Deploy and Run
+
+The recommended workflow for setting up a remote Cuttlefish host is:
+
 ```sh
-cd /home/jack/cuttlefish_images/aosp_android13_cgi/cf
-HOME=$PWD ./bin/launch_cvd -kernel_path=/home/jack/ingots/kernel/Image -initramfs_path=/home/jack/ingots/kernel/initramfs.img
-./bin/adb shell
+# 1. Deploy scripts to remote host (generates gdb_run.sh, run.sh, stop.sh and
+#    installs the QEMU wrapper for GDB support)
+./scripts/deploy_cuttlefish.sh \
+    --ssh-host cuttlefish2 \
+    --cf-dir /home/jack/challenge-4/challenge-4.1 \
+    --remote-dir /home/jack/challenge-4/challenge-4.1 \
+    --kernel /home/jack/challenge-4/challenge-4.1/package/kernel/Image \
+    --initramfs /home/jack/challenge-4/challenge-4.1/package/kernel/initramfs.img \
+    --install-qemu-wrapper
+
+# 2. Test a single bug on the remote instance
+uv run syzploit test-cuttlefish <bug_id> --syzkall-kernel upstream --arch arm64 \
+    --ssh-host cuttlefish2 --setup-tunnels --instance 5 --no-persistent --no-already-running \
+    --start-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./gdb_run.sh 5" \
+    --stop-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./stop.sh 5"
+
+# 3. Or run the full pipeline (analyze → dynamic trace → synthesize → verify)
+uv run syzploit pipeline-cuttlefish <bug_id> --syzkall-kernel upstream --arch arm64 \
+    --ssh-host cuttlefish2 --setup-tunnels --instance 5 --no-persistent --no-already-running \
+    --start-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./gdb_run.sh 5" \
+    --stop-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./stop.sh 5"
 ```
-The above command starts ingots kernel 5.10.101, but there are many different kernel versions on cuttlefish server.
 
-Setup ssh port forwarding for adb on local machine running kexploit:
+### Deployment Scripts
+
+Three scripts in `scripts/` automate remote Cuttlefish setup:
+
+#### `gen_cuttlefish_scripts.sh` — Generate Instance Scripts
+
+Generates `gdb_run.sh`, `run.sh`, `stop.sh`, and `cuttlefish_instance.conf` that syzploit's `--start-cmd` / `--stop-cmd` expect on the remote host.
+
 ```sh
+./scripts/gen_cuttlefish_scripts.sh \
+    --kernel /path/to/kernel/Image \
+    --cf-dir /path/to/cuttlefish/home \
+    --initramfs /path/to/initramfs.img \
+    --output-dir ./generated
+```
+
+The generated scripts:
+- **`gdb_run.sh <instance>`** — Starts Cuttlefish with `GDB_PORT=1234` exported for the QEMU wrapper, adds `nokaslr` to cmdline, launches with `--gdb_port`
+- **`run.sh <instance>`** — Starts Cuttlefish WITHOUT GDB (unsets `GDB_PORT`), used for symbol extraction and exploit verification
+- **`stop.sh <instance>`** — Stops the Cuttlefish instance via `stop_cvd`
+
+#### `deploy_cuttlefish.sh` — Deploy to Remote Host
+
+Generates scripts locally, SCPs them to the remote host, and optionally installs the QEMU wrapper.
+
+```sh
+./scripts/deploy_cuttlefish.sh \
+    --ssh-host cuttlefish2 \
+    --cf-dir /home/jack/cuttlefish \
+    --remote-dir /home/jack/cuttlefish \
+    --kernel /home/jack/cuttlefish/package/kernel/Image \
+    --install-qemu-wrapper  # requires sudo on remote
+```
+
+You can also upload a local kernel/initramfs to the remote host:
+```sh
+./scripts/deploy_cuttlefish.sh \
+    --ssh-host cuttlefish2 \
+    --cf-dir /home/jack/cuttlefish \
+    --remote-dir /home/jack/cuttlefish \
+    --local-kernel ./bzImage \
+    --local-initramfs ./initramfs.img \
+    --install-qemu-wrapper
+```
+
+#### `install_qemu_wrapper.sh` — QEMU Wrapper Installation
+
+Installs a wrapper around `qemu-system-aarch64` on the Cuttlefish host that fixes several issues with QEMU on ARM64:
+
+- **Disables MTE** (`mte=on` → `mte=off`) — fixes memory tagging errors
+- **Fixes AC97 audio** — adds dummy audio backend (AC97 is x86-only but Cuttlefish passes it)
+- **Adds virtio-vsock** — fixes "transport message failed" errors
+- **Injects GDB server** — when `GDB_PORT` env var is set, adds `-gdb tcp::<PORT>`
+- **Enables QEMU debug logging** to `/tmp/qemu.log`
+
+```sh
+# Install (run on the remote host)
+sudo ./install_qemu_wrapper.sh
+
+# Check status
+sudo ./install_qemu_wrapper.sh --status
+
+# Remove (restore original binary)
+sudo ./install_qemu_wrapper.sh --remove
+```
+
+### SSH Tunnels
+
+The `--setup-tunnels` option on `test-cuttlefish` and `pipeline-cuttlefish` automatically sets up SSH port forwarding for:
+- **ADB server** (local 5037 → remote 5037): Allows local `adb` commands to work
+- **ADB device** (local 6524 → remote 6524): Direct device port forwarding (port auto-calculated from `--instance`)
+- **GDB** (local 1234 → remote 1234): Allows kernel GDB attachment through the tunnel
+
+### Modes of Operation
+
+**Non-persistent mode** (`--no-persistent --no-already-running`): Cuttlefish is started and stopped for each test. Requires `--start-cmd` and `--stop-cmd`.
+
+**Persistent mode** (`--persistent --already-running`): Connects to an already-running Cuttlefish instance. No start/stop commands needed.
+
+**Persistent with first boot** (`--persistent --no-already-running`): Boots Cuttlefish once on first run and keeps it running for subsequent tests.
+
+### Symbol Extraction
+
+Syzploit automatically extracts kernel symbols for GDB breakpoint resolution:
+1. **Runtime kallsyms** (default): Boots the VM without GDB first, extracts `/proc/kallsyms` via ADB, then reboots with GDB using accurate addresses
+2. **Pre-extracted System.map**: Pass `--system-map /path/to/System.map` to skip runtime extraction
+3. **vmlinux-to-elf**: Pass `--kernel-image /path/to/Image` to auto-extract vmlinux with debug symbols
+
+### Legacy Setup (Manual)
+
+For manual setup without deployment scripts:
+```sh
+# Start cuttlefish on the server
+cd /home/jack/cuttlefish
+HOME=$PWD ./bin/launch_cvd -kernel_path=./Image -initramfs_path=./initramfs.img
+./bin/adb shell
+
+# Set up SSH port forwarding on local machine
 ssh -L localhost:5037:localhost:5037 cuttlefish-user@cuttlefish-host
 ```
-
-`uv run syzploit test <bug_id>` can now be used to test syzkaller bugs.
-
-### Remote Cuttlefish with Automatic Start/Stop
-
-For testing on remote Cuttlefish servers where you want automatic instance management, use the `test-cuttlefish` command:
-
-```sh
-# Test on remote Cuttlefish with automatic start/stop (non-persistent mode)
-uv run syzploit test-cuttlefish <bug_id> --syzkall-kernel upstream \
-    --ssh-host cuttlefish-server --ssh-user myuser \
-    --setup-tunnels --no-persistent \
-    --start-cmd "cd ~/cf && ./gdb_run.sh 5" \
-    --stop-cmd "cd ~/cf && ./stop.sh 5"
-
-# Test on already-running remote Cuttlefish (persistent mode)
-uv run syzploit test-cuttlefish <bug_id> --syzkall-kernel upstream \
-    --ssh-host cuttlefish-server --ssh-user myuser \
-    --setup-tunnels --persistent --already-running
-```
-
-The `--setup-tunnels` option automatically sets up SSH port forwarding for:
-- **ADB server** (local 5037 → remote 5037): Allows local `adb` commands to work
-- **GDB** (local 1234 → remote 1234): Allows kernel GDB attachment to crosvm
 
 ## Running
 
@@ -87,10 +185,12 @@ Run `uv run syzploit` to run syzploit. There are various commands and subcommand
 - `src/syzploit/` — main Python package
   - `main.py` — CLI entry and command routing
   - `SyzVerify/` — validation and dynamic analysis
+    - `cuttlefish.py` — `CuttlefishController` class: SSH tunnel management, GDB port detection, raw GDB protocol continue, ADB device wait, remote log collection
+    - `run_bug.py` — two-phase dynamic analysis: Phase 1 (boot without GDB for symbol extraction), Phase 2 (boot with GDB for tracing)
+    - `runtime_symbols.py` — extracts `/proc/kallsyms` from running VM via ADB for accurate symbol addresses
     - `dynamic.py` — orchestrates QEMU/Cuttlefish, kernel GDB, and userspace `gdbserver`; collects events and writes JSON
     - `gdb.py` — **automated kernel GDB tracing script**; tracks allocs/frees, auto-installs breakpoints on boot, supports aarch64 and x86_64
     - `userspace_gdb.py` — userspace tracing via gdbserver; monitor-only mode supported
-    - `run_bug.py` — VM boot + repro execution + artifact management
     - `bug_db.py` — local metadata for syzbot bugs
   - `SyzAnalyze/` — crash post-processing
     - `crash_analyzer.py` — parses crash logs and correlates with runtime events
@@ -101,6 +201,11 @@ Run `uv run syzploit` to run syzploit. There are various commands and subcommand
     - `adapters/` — primitive extraction from analysis results
   - `syzploit_data/` — downloaded syzbot bug data
   - `syzkall_crashes/` — output crash analyses and JSON artifacts
+- `scripts/` — deployment and setup scripts for remote Cuttlefish hosts
+  - `gen_cuttlefish_scripts.sh` — generates `gdb_run.sh`, `run.sh`, `stop.sh` instance scripts
+  - `deploy_cuttlefish.sh` — deploys scripts + wrapper to remote host via SCP
+  - `install_qemu_wrapper.sh` — installs the QEMU wrapper on the remote host
+  - `cuttlefish_qemu.sh` — standalone script to launch Cuttlefish with QEMU and optionally run syzploit
 
 ## SyzVerify: Dynamic Analysis
 
@@ -254,6 +359,38 @@ The script exports JSON with:
 │ --help                                                  Show this message and exit.                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
+- `uv run syzploit test-cuttlefish <bug_id>`: Test a bug reproducer on a remote Cuttlefish instance with SSH tunneling, automatic GDB tracing, and symbol extraction.
+```sh
+ Usage: syzploit test-cuttlefish [OPTIONS] BUG_ID
+
+ Test a bug reproducer on Cuttlefish with support for persistent and non-persistent modes.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────╮
+│ *    bug_id      TEXT  Bug ID to test [required]                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│ --syzkall-kernel            TEXT     Kernel name for bug [default: android-5-10]      │
+│ --arch                      TEXT     Architecture (arm64/x86_64) [default: arm64]     │
+│ --root / --no-root                   Run reproducer as root [default: root]           │
+│ --ssh-host                  TEXT     SSH host (alias or hostname) [default: localhost] │
+│ --ssh-port                  INTEGER  SSH port [default: 22]                           │
+│ --ssh-user                  TEXT     SSH user (optional)                              │
+│ --persistent / --no-persistent       Keep instance running [default: persistent]      │
+│ --already-running / --no-already-running  Instance is already booted [default: True]  │
+│ --start-cmd                 TEXT     Command to start with GDB (e.g. ./gdb_run.sh 5)  │
+│ --run-cmd                   TEXT     Command to start WITHOUT GDB (e.g. ./run.sh 5)   │
+│ --stop-cmd                  TEXT     Command to stop instance (e.g. ./stop.sh 5)      │
+│ --instance                  INTEGER  Instance number (auto-calculates ADB port)       │
+│ --gdb-port                  INTEGER  GDB port [default: 1234]                         │
+│ --setup-tunnels / --no-setup-tunnels  Set up SSH tunnels [default: no-setup-tunnels]  │
+│ --system-map                TEXT     Path to System.map for symbol resolution         │
+│ --kernel-image              TEXT     Path to kernel Image (for vmlinux extraction)    │
+│ --extract-runtime-symbols / --no-...  Extract kallsyms at runtime [default: True]     │
+│ --runtime-logs-dir          TEXT     Path to cuttlefish runtime logs dir              │
+│ --timeout                   INTEGER  Test timeout in seconds [default: 120]           │
+│ --help                               Show this message and exit.                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
 - `uv run syzploit collectstats`: This will collect statistics on all of the syzbot crashes to provide a starting point for understanding all of the crashes for a given kernel version.
 ```sh
  Usage: syzploit collectstats [OPTIONS]                                 
@@ -403,48 +540,67 @@ After running `synthesize`, you'll find in the `analysis_<bug_id>/` directory:
 
 ## Pipeline: End-to-End Automation
 
-The `pipeline` command runs the complete flow from bug ID to verified exploit:
+The `pipeline` command runs the complete flow from bug ID to verified exploit.
 
-1. **Step 1**: Compile and run original syzkaller reproducer
-2. **Step 2**: Run SyzAnalyze (static + optional dynamic analysis)
-3. **Step 3**: Test generated primitive C code
-4. **Step 4**: Run Synthesizer to generate exploit plan and code
-5. **Step 5**: Test final exploit artifact
+### `pipeline` (QEMU/Local)
 
-### Usage
+For x86_64 testing with QEMU:
 
 ```sh
-uv run syzploit pipeline <bug_id> [OPTIONS]
-
-# Example with QEMU
-uv run syzploit pipeline 283ce5a46486d6acdbaf --qemu --source-image /path/to/bzImage --source-disk /path/to/disk.img
+uv run syzploit pipeline <bug_id> --qemu --source-image /path/to/bzImage --source-disk /path/to/disk.img
 ```
 
+### `pipeline-cuttlefish` (Remote ARM64)
+
+For ARM64 testing on remote Cuttlefish with full GDB tracing and exploit synthesis:
+
 ```sh
- Usage: syzploit pipeline [OPTIONS] BUG_ID
+uv run syzploit pipeline-cuttlefish <bug_id> --syzkall-kernel upstream --arch arm64 \
+    --ssh-host cuttlefish2 --setup-tunnels --instance 5 \
+    --no-persistent --no-already-running \
+    --start-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./gdb_run.sh 5" \
+    --stop-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./stop.sh 5"
+```
 
- Run the full pipeline: verify crash, analyze, synthesize, and test exploit.
+#### Pipeline Steps
 
-╭─ Arguments ──────────────────────────────────────────────────────────────────╮
-│ *    bug_id      TEXT  Bug ID for end-to-end pipeline [required]             │
-╰──────────────────────────────────────────────────────────────────────────────╯
+1. **Static analysis** — LLM-based crash log analysis, exploitability rating
+2. **Parse crash stack** — Extract function names from the crash call stack
+3. **Dynamic analysis (Phase 1)** — Boot without GDB, extract runtime kallsyms via ADB
+4. **Dynamic analysis (Phase 2)** — Reboot with GDB, set breakpoints on stack functions, trace alloc/free events
+5. **Post-processing** — Correlate events for UAF/OOB detection
+6. **Synthesis** — PDDL planning + LLM code generation for exploit
+7. **Verification** — Compile and run the exploit, check for privilege escalation
+
+#### Key Options
+
+```sh
+ Usage: syzploit pipeline-cuttlefish [OPTIONS] BUG_ID
+
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --syzkall-kernel          TEXT     Kernel name [default: android-5-10]       │
-│ --qemu / --no-qemu                 Use QEMU VM [default: no-qemu]            │
-│ --local / --no-local               Use local cuttlefish [default: local]     │
-│ --root / --no-root                 Run as root in VM [default: root]         │
-│ --arch                    TEXT     Architecture [default: x86_64]            │
-│ --source-image            PATH     Path to kernel image (QEMU)               │
-│ --source-disk             PATH     Path to disk image (QEMU)                 │
-│ --dynamic-analysis                 Enable GDB-based analysis [default: True] │
-│ --gdb-port               INTEGER   GDB port [default: 1234]                  │
-│ --goal                    TEXT     Exploit goal [default: privilege_escalation]│
-│ --platform                TEXT     Target platform (auto-detect if not set)  │
-│ --debug                            Enable debug output                       │
-│ --verbose                          Print planner output                      │
-│ --help                             Show this message and exit.               │
+│ --ssh-host                  TEXT     SSH host for remote Cuttlefish           │
+│ --setup-tunnels                      Set up SSH tunnels for ADB/GDB          │
+│ --instance                  INTEGER  Instance number (sets ADB port)         │
+│ --start-cmd                 TEXT     GDB start command (./gdb_run.sh N)      │
+│ --run-cmd                   TEXT     Non-GDB start command (./run.sh N)      │
+│ --stop-cmd                  TEXT     Stop command (./stop.sh N)              │
+│ --exploit-start-cmd         TEXT     Separate start cmd for exploit verify   │
+│ --skip-static                        Skip static analysis step              │
+│ --ignore-exploitability              Run dynamic even if exploitability low  │
+│ --goal                      TEXT     Exploit goal [default: privilege_esc]   │
+│ --verify / --no-verify               Verify exploit at end [default: True]  │
+│ --help                               Show this message and exit.            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
+
+#### Two-Phase Dynamic Analysis
+
+The Cuttlefish pipeline uses a two-phase approach for dynamic analysis:
+
+- **Phase 1** (`run.sh`): Boots without GDB for fast startup. Extracts `/proc/kallsyms` at runtime to get accurate symbol addresses (accounting for KASLR). Also extracts `System.map` if not already provided.
+- **Phase 2** (`gdb_run.sh`): Reboots with GDB enabled (`-S -gdb tcp::1234`). Sets breakpoints on crash stack functions using the accurate addresses from Phase 1. Traces `kmalloc`/`kfree` and records all memory events.
+
+The `--run-cmd` option specifies the Phase 1 command. If not provided, it is auto-derived from `--start-cmd` by replacing `gdb_run.sh` with `run.sh`.
 
 ### Pipeline Output
 

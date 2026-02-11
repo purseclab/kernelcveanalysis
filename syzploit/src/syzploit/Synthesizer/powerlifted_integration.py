@@ -13,11 +13,12 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
+from ..utils.debug import debug_print
 
-def _debug(msg: str, debug: bool = True):
+
+def plpl_debug(msg: str, debug: bool = True):
     """Print debug message if debug is enabled."""
-    if debug:
-        print(f"[DEBUG:PowerliftedSolver] {msg}", file=sys.stderr)
+    debug_print("PowerliftedSolver", msg, debug)
 
 
 class PowerliftedSolver:
@@ -50,27 +51,27 @@ class PowerliftedSolver:
     
     def _detect_powerlifted(self) -> None:
         """Detect available powerlifted installation."""
-        _debug("Detecting powerlifted...", self.debug)
+        pl_debug("Detecting powerlifted...", self.debug)
         
         # Try standalone binary first
         binary = shutil.which('powerlifted')
         if binary:
-            _debug(f"Found powerlifted binary on PATH: {binary}", self.debug)
+            pl_debug(f"Found powerlifted binary on PATH: {binary}", self.debug)
             self._powerlifted_binary = binary
             return
-        _debug("powerlifted not found on PATH", self.debug)
+        pl_debug("powerlifted not found on PATH", self.debug)
         
         # Try provided path
         if self.powerlifted_path:
             path = Path(self.powerlifted_path)
-            _debug(f"Checking provided path: {path}", self.debug)
+            pl_debug(f"Checking provided path: {path}", self.debug)
             if path.is_file() and path.name == 'powerlifted.py':
-                _debug(f"Found powerlifted.py at provided path", self.debug)
+                pl_debug(f"Found powerlifted.py at provided path", self.debug)
                 self._powerlifted_driver = path
                 return
             driver = path / 'powerlifted.py'
             if driver.exists():
-                _debug(f"Found powerlifted.py in provided directory: {driver}", self.debug)
+                pl_debug(f"Found powerlifted.py in provided directory: {driver}", self.debug)
                 self._powerlifted_driver = driver
                 return
         
@@ -78,15 +79,15 @@ class PowerliftedSolver:
         try:
             src_root = Path(__file__).resolve().parents[2]  # src/syzploit/Synthesizer -> src
             driver = src_root / 'powerlifted' / 'powerlifted.py'
-            _debug(f"Checking relative path: {driver}", self.debug)
+            pl_debug(f"Checking relative path: {driver}", self.debug)
             if driver.exists():
-                _debug(f"Found powerlifted.py at: {driver}", self.debug)
+                pl_debug(f"Found powerlifted.py at: {driver}", self.debug)
                 self._powerlifted_driver = driver
                 return
         except Exception as e:
-            _debug(f"Error checking relative path: {e}", self.debug)
+            pl_debug(f"Error checking relative path: {e}", self.debug)
         
-        _debug("powerlifted not found anywhere", self.debug)
+        pl_debug("powerlifted not found anywhere", self.debug)
     
     def available(self) -> bool:
         """Check if powerlifted is available."""
@@ -167,15 +168,15 @@ class PowerliftedSolver:
         if debug is None:
             debug = self.debug
             
-        _debug(f"solve() called", debug)
-        _debug(f"  domain_path: {domain_path}", debug)
-        _debug(f"  problem_path: {problem_path}", debug)
-        _debug(f"  output_dir: {output_dir}", debug)
-        _debug(f"  time_limit: {time_limit}", debug)
-        _debug(f"  stop_after_first: {stop_after_first}", debug)
+        pl_debug(f"solve() called", debug)
+        pl_debug(f"  domain_path: {domain_path}", debug)
+        pl_debug(f"  problem_path: {problem_path}", debug)
+        pl_debug(f"  output_dir: {output_dir}", debug)
+        pl_debug(f"  time_limit: {time_limit}", debug)
+        pl_debug(f"  stop_after_first: {stop_after_first}", debug)
         
         if not self.available():
-            _debug("Powerlifted not available!", debug)
+            pl_debug("Powerlifted not available!", debug)
             return {
                 "success": False,
                 "error": "Powerlifted planner not available",
@@ -188,13 +189,13 @@ class PowerliftedSolver:
         output_dir = os.path.abspath(output_dir)
         
         if not os.path.isfile(domain_path):
-            _debug(f"Domain file not found: {domain_path}", debug)
+            pl_debug(f"Domain file not found: {domain_path}", debug)
             return {"success": False, "error": f"Domain file not found: {domain_path}"}
         if not os.path.isfile(problem_path):
-            _debug(f"Problem file not found: {problem_path}", debug)
+            pl_debug(f"Problem file not found: {problem_path}", debug)
             return {"success": False, "error": f"Problem file not found: {problem_path}"}
         
-        _debug(f"Input files validated", debug)
+        pl_debug(f"Input files validated", debug)
         os.makedirs(output_dir, exist_ok=True)
         
         # Build command (stop_after_first=False by default to find ALL plans)
@@ -207,12 +208,12 @@ class PowerliftedSolver:
             time_limit=time_limit,
             stop_after_first=stop_after_first
         )
-        _debug(f"Command: {' '.join(cmd)}", debug)
+        pl_debug(f"Command: {' '.join(cmd)}", debug)
         
         # Run solver
         all_output = []
         try:
-            _debug("Starting solver subprocess...", debug)
+            pl_debug("Starting solver subprocess...", debug)
             if verbose:
                 # Stream output in real-time
                 process = subprocess.Popen(
@@ -244,12 +245,12 @@ class PowerliftedSolver:
                 all_output = result.stdout.split('\n') if result.stdout else []
                 returncode = result.returncode
             
-            _debug(f"Solver finished with returncode: {returncode}", debug)
+            pl_debug(f"Solver finished with returncode: {returncode}", debug)
             output_text = '\n'.join(all_output)
             
             # Check for solution
             solution_found = "solution found" in output_text.lower()
-            _debug(f"Solution found: {solution_found}", debug)
+            pl_debug(f"Solution found: {solution_found}", debug)
             
             # Collect generated plan files
             # Plan files are named: plan, plan.1, plan.2, etc.
@@ -264,7 +265,7 @@ class PowerliftedSolver:
                         plans.append(str(f))
             # Sort plans by number (plan, plan.1, plan.2, etc.)
             plans.sort(key=lambda x: (0 if x.endswith('/plan') or x.endswith('\\plan') else int(Path(x).suffix[1:])))
-            _debug(f"Plan files found: {plans}", debug)
+            pl_debug(f"Plan files found: {plans}", debug)
             
             # Success if solution found (returncode may be non-zero but that's ok if solution found)
             return {
@@ -331,36 +332,3 @@ class PowerliftedSolver:
                             })
         
         return actions
-
-
-# Legacy compatibility - ChainReactor wrapper
-class ChainReactor:
-    """
-    Legacy wrapper for backward compatibility.
-    Delegates to PowerliftedSolver internally.
-    """
-    
-    def __init__(self, repo_path: Optional[str] = None) -> None:
-        self.repo_path = repo_path
-        self._solver = PowerliftedSolver()
-    
-    def available(self) -> bool:
-        """Check if solver is available."""
-        # Also check if chainreactor domain exists
-        if self.repo_path:
-            domain = Path(self.repo_path) / 'domain.pddl'
-            if domain.exists():
-                return self._solver.available()
-        return self._solver.available()
-    
-    def get_domain_path(self) -> Optional[str]:
-        """Get path to chainreactor domain.pddl if available."""
-        if self.repo_path:
-            domain = Path(self.repo_path) / 'domain.pddl'
-            if domain.exists():
-                return str(domain)
-        return None
-
-    def solve_with_pddl(self, domain_path: str, problem_path: str, outdir: str) -> Dict[str, Any]:
-        """Solve with PDDL files - delegates to PowerliftedSolver."""
-        return self._solver.solve(domain_path, problem_path, outdir)

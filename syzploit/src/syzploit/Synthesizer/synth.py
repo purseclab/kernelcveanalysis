@@ -16,6 +16,7 @@ from dataclasses import asdict
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
+from ..utils.debug import debug_print
 from .core import PrimitiveRegistry, ExploitPlan, Primitive
 from .adapters.syzanalyze_adapter import load_from_analysis
 from .adapters.kernelresearch_adapter import KernelResearchAdapter
@@ -27,19 +28,19 @@ from .stitcher import (
     LLMExploitStitcher,
     StitcherConfig,
 )
+from .llm_planner import (
+    generate_exploit_plan as llm_generate_plan,
+    ExploitPlan as LLMExploitPlan,
+    EXPLOITATION_PATTERNS,
+    save_code_hints_to_files,
+)
 
 
 # Import PowerliftedSolver (standalone, no chainreactor dependency)
 from .powerlifted_integration import PowerliftedSolver
 
 
-def _debug(msg: str, enabled: bool = True):
-    """Print debug message."""
-    if enabled:
-        print(f"[DEBUG:Synthesizer] {msg}", file=sys.stderr)
-
-
-def _plan_to_dict(plan: ExploitPlan) -> Dict[str, Any]:
+def plan_to_dict(plan: ExploitPlan) -> Dict[str, Any]:
     """Convert ExploitPlan to JSON-serializable dict."""
     return {
         "goal": plan.goal,
@@ -49,7 +50,7 @@ def _plan_to_dict(plan: ExploitPlan) -> Dict[str, Any]:
     }
 
 
-def _detect_platform(analysis_dir: Optional[str], kernel_config: Optional[str] = None) -> TargetPlatform:
+def detect_platform(analysis_dir: Optional[str], kernel_config: Optional[str] = None) -> TargetPlatform:
     """
     Auto-detect target platform from analysis data.
     
@@ -119,11 +120,11 @@ def _detect_platform(analysis_dir: Optional[str], kernel_config: Optional[str] =
         return TargetPlatform.GENERIC
 
 
-def _generate_capabilities_toml(primitives: List[Primitive], output_path: str, debug: bool = False) -> None:
+def generate_capabilities_toml(primitives: List[Primitive], output_path: str, debug: bool = False) -> None:
     """
     Generate a capabilities.toml file from extracted primitives.
     """
-    _debug(f"Generating capabilities TOML at {output_path}", debug)
+    debug_print("Synthesizer", f"Generating capabilities TOML at {output_path}", debug)
     
     categories: Dict[str, Dict[str, Any]] = {}
     
@@ -179,9 +180,9 @@ def _generate_capabilities_toml(primitives: List[Primitive], output_path: str, d
         with open(output_path, 'w') as f:
             f.write('\n'.join(lines))
         
-        _debug(f"  wrote {len(categories)} capability categories", debug)
+        debug_print("Synthesizer", f"  wrote {len(categories)} capability categories", debug)
     except Exception as e:
-        _debug(f"  failed to write capabilities TOML: {e}", debug)
+        debug_print("Synthesizer", f"  failed to write capabilities TOML: {e}", debug)
 
 
 def synthesize(bug_id: str, goal: str, 
@@ -189,6 +190,7 @@ def synthesize(bug_id: str, goal: str,
                analysis_dir: Optional[str] = None,
                vmlinux_path: Optional[str] = None,
                platform: Optional[str] = None,
+               planner: str = "auto",
                verbose: bool = False,
                time_limit: Optional[int] = None,
                debug: bool = False) -> Dict[str, Any]:
@@ -199,7 +201,7 @@ def synthesize(bug_id: str, goal: str,
     1. Loads primitives from syzanalyze analysis
     2. Integrates kernel-research (kernelXDK) primitives if available
     3. Generates PDDL domain and problem files
-    4. Invokes powerlifted planner to find exploit plan
+    4. Invokes planner to find exploit plan
     
     Args:
         bug_id: Bug identifier (e.g., syzbot hash)
@@ -208,6 +210,10 @@ def synthesize(bug_id: str, goal: str,
         analysis_dir: Directory containing analysis results
         vmlinux_path: Path to vmlinux for additional analysis
         platform: Target platform ("linux", "android", "generic", or auto-detect)
+        planner: Planner to use: "auto", "llm", or "powerlifted"
+                 - "auto": Use LLM planner when a known pattern matches, powerlifted otherwise
+                 - "llm": Use LLM-based pattern matching planner
+                 - "powerlifted": Use PDDL powerlifted planner
         verbose: Print planner output in real-time
         time_limit: Planner time limit in seconds
         debug: Enable debug output
@@ -218,32 +224,32 @@ def synthesize(bug_id: str, goal: str,
     if debug:
         set_pddl_debug(True)
     
-    _debug(f"synthesize() called", debug)
-    _debug(f"  bug_id: {bug_id}", debug)
-    _debug(f"  goal: {goal}", debug)
-    _debug(f"  platform: {platform}", debug)
-    _debug(f"  analysis_dir: {analysis_dir}", debug)
+    debug_print("Synthesizer", f"synthesize() called", debug)
+    debug_print("Synthesizer", f"  bug_id: {bug_id}", debug)
+    debug_print("Synthesizer", f"  goal: {goal}", debug)
+    debug_print("Synthesizer", f"  platform: {platform}", debug)
+    debug_print("Synthesizer", f"  analysis_dir: {analysis_dir}", debug)
     
     registry = PrimitiveRegistry()
 
     # Resolve default submodule paths if not provided
     try:
         src_root = Path(__file__).resolve().parents[2]  # src/syzploit/Synthesizer -> src
-        _debug(f"  src_root: {src_root}", debug)
+        debug_print("Synthesizer", f"  src_root: {src_root}", debug)
         if kernel_research_path is None:
             kr_candidate = src_root / 'kernel-research'
             if kr_candidate.exists():
                 kernel_research_path = str(kr_candidate)
-                _debug(f"  auto-detected kernel_research_path: {kernel_research_path}", debug)
+                debug_print("Synthesizer", f"  auto-detected kernel_research_path: {kernel_research_path}", debug)
     except Exception as e:
-        _debug(f"  error detecting paths: {e}", debug)
+        debug_print("Synthesizer", f"  error detecting paths: {e}", debug)
 
     # Locate analysis directory
     cwd = os.getcwd()
     if not analysis_dir:
         candidates = [d for d in os.listdir(cwd) if d.startswith('analysis_') and bug_id in d]
         analysis_dir = os.path.join(cwd, candidates[0]) if candidates else cwd
-    _debug(f"  analysis_dir resolved to: {analysis_dir}", debug)
+    debug_print("Synthesizer", f"  analysis_dir resolved to: {analysis_dir}", debug)
 
     # Detect or set platform
     if platform:
@@ -254,22 +260,22 @@ def synthesize(bug_id: str, goal: str,
         }
         target_platform = platform_map.get(platform.lower(), TargetPlatform.GENERIC)
     else:
-        target_platform = _detect_platform(analysis_dir)
-    _debug(f"  target platform: {target_platform}", debug)
+        target_platform = detect_platform(analysis_dir)
+    debug_print("Synthesizer", f"  target platform: {target_platform}", debug)
 
     # Load primitives from syzanalyze
-    _debug("Loading primitives from syzanalyze...", debug)
+    debug_print("Synthesizer", "Loading primitives from syzanalyze...", debug)
     syz_prims = load_from_analysis(analysis_dir, registry, debug=debug)
-    _debug(f"  loaded {len(syz_prims)} primitives from syzanalyze", debug)
+    debug_print("Synthesizer", f"  loaded {len(syz_prims)} primitives from syzanalyze", debug)
     for p in syz_prims:
         caps = p.provides.get('caps', [])
-        _debug(f"    - {p.name}: {caps}", debug)
+        debug_print("Synthesizer", f"    - {p.name}: {caps}", debug)
 
     # Integrate kernel-research primitives
-    _debug("Loading kernel-research primitives...", debug)
+    debug_print("Synthesizer", "Loading kernel-research primitives...", debug)
     kr = KernelResearchAdapter(kernel_research_path, debug=debug)
     xdk_prims = kr.list_primitives(registry, debug=debug) if kr.available() else []
-    _debug(f"  loaded {len(xdk_prims)} primitives from kernel-research", debug)
+    debug_print("Synthesizer", f"  loaded {len(xdk_prims)} primitives from kernel-research", debug)
 
     # Compose plan metadata
     target_info: Dict[str, Any] = {
@@ -279,11 +285,11 @@ def synthesize(bug_id: str, goal: str,
         "platform": target_platform.value,
     }
     plan = ExploitPlan(goal=goal, target_info=target_info, primitives=registry.list())
-    _debug(f"  total primitives in plan: {len(plan.primitives)}", debug)
+    debug_print("Synthesizer", f"  total primitives in plan: {len(plan.primitives)}", debug)
 
     # Generate capabilities TOML for reference
     caps_toml_path = os.path.join(analysis_dir, 'generated_capabilities.toml')
-    _generate_capabilities_toml(plan.primitives, caps_toml_path, debug)
+    generate_capabilities_toml(plan.primitives, caps_toml_path, debug)
 
     # Simple heuristic: choose steps based on goal
     steps = []
@@ -292,7 +298,7 @@ def synthesize(bug_id: str, goal: str,
         steps.append({"action": "generate_rop_chain", "provider": "kernelXDK"})
         steps.append({"action": "commit_creds_prepare_kernel_cred", "provider": "kernelXDK"})
     plan.steps = steps
-    _debug(f"  plan steps: {steps}", debug)
+    debug_print("Synthesizer", f"  plan steps: {steps}", debug)
 
     # Write spec for reference
     spec_path = os.path.join(analysis_dir, 'synth_spec.json')
@@ -304,19 +310,217 @@ def synthesize(bug_id: str, goal: str,
                 "primitives": [p.__dict__ for p in plan.primitives],
                 "steps": plan.steps,
             }, f, indent=2)
-        _debug(f"  wrote synth_spec.json to {spec_path}", debug)
+        debug_print("Synthesizer", f"  wrote synth_spec.json to {spec_path}", debug)
     except Exception as e:
-        _debug(f"  failed to write synth_spec.json: {e}", debug)
+        debug_print("Synthesizer", f"  failed to write synth_spec.json: {e}", debug)
 
-    # Initialize solver
-    _debug("Initializing PowerliftedSolver...", debug)
+    # Load analysis data early (needed for planner selection and code generation)
+    analysis_data = None
+    static_path = Path(analysis_dir) / 'static_analysis.json'
+    if static_path.exists():
+        try:
+            analysis_data = json.loads(static_path.read_text())
+            debug_print("Synthesizer", f"  Loaded static_analysis.json", debug)
+        except Exception as e:
+            debug_print("Synthesizer", f"  Failed to load static_analysis.json: {e}", debug)
+    
+    # Determine which planner to use
+    use_llm_planner = False
+    if planner == "llm":
+        use_llm_planner = True
+        debug_print("Synthesizer", "Using LLM-based planner (explicitly requested)", debug)
+    elif planner == "auto":
+        # Auto-detect: use LLM planner when loaded patterns can match the crash
+        raw_crash = ""
+        if analysis_data and "parsed" in analysis_data:
+            raw_crash = analysis_data["parsed"].get("raw", "").lower()
+        
+        # Check if any loaded pattern's detection rules match the crash
+        from .llm_planner import detect_vulnerability_pattern, _LOADED_PATTERNS, EXPLOITATION_PATTERNS
+        all_patterns = {**EXPLOITATION_PATTERNS, **_LOADED_PATTERNS}
+        if raw_crash and len(all_patterns) > 1:
+            detected = detect_vulnerability_pattern(analysis_data or {}, all_patterns)
+            if detected != "uaf_generic":
+                use_llm_planner = True
+                debug_print("Synthesizer", f"Auto-detected pattern '{detected}' - using LLM planner", debug)
+    
+    # Use LLM planner if selected
+    if use_llm_planner:
+        debug_print("Synthesizer", "=" * 50, debug)
+        debug_print("Synthesizer", "Using LLM-based exploitation pattern planner", debug)
+        debug_print("Synthesizer", "=" * 50, debug)
+        
+        try:
+            llm_plan, pddl_plan_str = llm_generate_plan(
+                analysis_dir=analysis_dir,
+                use_llm_refinement=True,
+                target_arch="arm64" if target_platform == TargetPlatform.ANDROID_KERNEL else "x86_64"
+            )
+            
+            debug_print("Synthesizer", f"LLM Planner detected pattern: {llm_plan.vulnerability_type}", debug)
+            debug_print("Synthesizer", f"LLM Planner exploitation technique: {llm_plan.exploitation_technique}", debug)
+            debug_print("Synthesizer", f"LLM Planner steps ({len(llm_plan.steps)}): {llm_plan.steps}", debug)
+            
+            # Validate steps - should never be empty
+            if not llm_plan.steps:
+                debug_print("Synthesizer", "WARNING: LLM plan has empty steps! This is a bug.", debug)
+                print("[!] WARNING: LLM planner returned empty steps - check llm_planner.py", file=sys.stderr)
+            
+            # Save code hints to separate files as backup
+            debug_print("Synthesizer", "Saving code hints to separate files for backup...", debug)
+            try:
+                hint_files = save_code_hints_to_files(llm_plan, analysis_dir)
+                debug_print("Synthesizer", f"Saved {len(hint_files)} code hint files", debug)
+                print(f"[+] Saved {len(hint_files)} code hints to: {os.path.join(analysis_dir, 'code_hints_backup')}", file=sys.stderr)
+            except Exception as e:
+                debug_print("Synthesizer", f"Failed to save code hints: {e}", debug)
+            
+            # Write the LLM-generated plan to PDDL format
+            pddl_dir = os.path.join(analysis_dir, 'pddl')
+            os.makedirs(pddl_dir, exist_ok=True)
+            
+            plan_path = os.path.join(pddl_dir, 'plan.1')
+            with open(plan_path, 'w') as f:
+                f.write(pddl_plan_str)
+            debug_print("Synthesizer", f"Wrote LLM plan to {plan_path}", debug)
+            
+            # Also generate domain/problem for reference
+            gen = PDDLGenerator(platform=target_platform, analysis_dir=analysis_dir)
+            domain_path = gen.domain_path(pddl_dir)
+            problem_path = gen.generate_problem(
+                f"{bug_id}_goal", 
+                plan.primitives, 
+                os.path.join(pddl_dir, 'problem.pddl'), 
+                goal,
+                debug=debug,
+                analysis_data=analysis_data
+            )
+            
+            # Create result structure similar to powerlifted
+            result = {
+                "success": True,
+                "planner": "llm",
+                "pattern": llm_plan.vulnerability_type,
+                "technique": llm_plan.exploitation_technique,
+                "plans": [plan_path],
+                "parsed_plan": llm_plan.steps,
+                "parsed_plans": [{
+                    "file": plan_path,
+                    "actions": llm_plan.steps,
+                    "num_steps": len(llm_plan.steps),
+                    "code_hints": llm_plan.code_hints,
+                }],
+            }
+            
+            # Generate exploit code
+            exploit_files = []
+            debug_print("Synthesizer", "Stitching exploit code from LLM plan...", debug)
+            
+            # Save LLM planner output for debugging
+            llm_planner_output_path = os.path.join(analysis_dir, 'llm_planner_output.json')
+            try:
+                llm_output = {
+                    "vulnerability_type": llm_plan.vulnerability_type,
+                    "exploitation_technique": llm_plan.exploitation_technique,
+                    "target_struct": llm_plan.target_struct,
+                    "description": llm_plan.description,
+                    "steps": llm_plan.steps,
+                    "code_hints": llm_plan.code_hints,
+                    "pddl_plan": pddl_plan_str,
+                }
+                with open(llm_planner_output_path, 'w') as f:
+                    json.dump(llm_output, f, indent=2)
+                print(f"[+] LLM planner output saved to: {llm_planner_output_path}")
+            except Exception as e:
+                debug_print("Synthesizer", f"Failed to save LLM planner output: {e}", debug)
+            
+            try:
+                if target_platform == TargetPlatform.ANDROID_KERNEL:
+                    stitch_platform = "android"
+                    stitch_arch = "arm64"
+                else:
+                    stitch_platform = "linux"
+                    stitch_arch = "x86_64"
+                
+                # Use LLM-enhanced stitcher with template fallback
+                # The LLMExploitStitcher now uses a hybrid approach:
+                # 1. Generate base skeleton from templates (guaranteed working code)
+                # 2. Try to enhance each function with LLM (benign prompts)
+                # 3. Fall back to template code if LLM refuses
+                from .stitcher.llm_stitcher import LLMExploitStitcher, StitcherConfig
+                
+                stitch_config = StitcherConfig(
+                    platform=stitch_platform,
+                    arch=stitch_arch,
+                    include_debug=True,
+                    output_dir=analysis_dir,
+                    verify_compilation=True,
+                )
+                
+                # Pass code hints from the LLM plan to the stitcher
+                if analysis_data is None:
+                    analysis_data = {}
+                analysis_data["llm_plan"] = {
+                    "pattern": llm_plan.vulnerability_type,
+                    "technique": llm_plan.exploitation_technique,
+                    "code_hints": llm_plan.code_hints,
+                }
+                
+                exploit_name = f"exploit_{bug_id}"
+                exploit_path = os.path.join(analysis_dir, f"{exploit_name}.c")
+                
+                # Convert step names (List[str]) to action dicts (List[Dict])
+                # The stitcher expects [{"action": "step_name"}, ...]
+                plan_actions = [{"action": step} for step in llm_plan.steps]
+                debug_print("Synthesizer", f"Converted {len(llm_plan.steps)} steps to action dicts: {plan_actions}", debug)
+                print(f"[*] Using LLM-enhanced stitcher (template fallback) with {len(plan_actions)} actions")
+                
+                # Use LLM-enhanced stitcher (tries LLM per-function, falls back to templates)
+                stitcher = LLMExploitStitcher(stitch_config)
+                
+                generated_path = stitcher.stitch(
+                    plan_actions=plan_actions,
+                    bug_id=bug_id,
+                    output_path=exploit_path,
+                    analysis_data=analysis_data
+                )
+                exploit_files.append(generated_path)
+                debug_print("Synthesizer", f"Generated: {generated_path}", debug)
+            except Exception as e:
+                debug_print("Synthesizer", f"Stitching failed: {e}", debug)
+                import traceback
+                debug_print("Synthesizer", f"Traceback: {traceback.format_exc()}", debug)
+            
+            return {
+                "plan": plan_to_dict(plan),
+                "powerlifted": result,
+                "pddl": {
+                    "domain": domain_path,
+                    "problem": problem_path,
+                },
+                "exploits": exploit_files,
+                "llm_plan": {
+                    "pattern": llm_plan.vulnerability_type,
+                    "technique": llm_plan.exploitation_technique,
+                    "steps": llm_plan.steps,
+                    "description": llm_plan.description,
+                },
+            }
+        except Exception as e:
+            debug_print("Synthesizer", f"LLM planner failed: {e}, falling back to powerlifted", debug)
+            import traceback
+            debug_print("Synthesizer", f"Traceback: {traceback.format_exc()}", debug)
+            # Fall through to powerlifted
+
+    # Initialize solver (powerlifted)
+    debug_print("Synthesizer", "Initializing PowerliftedSolver...", debug)
     solver = PowerliftedSolver(debug=debug)
     
-    _debug(f"Solver available: {solver.available()}", debug)
+    debug_print("Synthesizer", f"Solver available: {solver.available()}", debug)
     if not solver.available():
-        _debug("Powerlifted solver not available!", debug)
+        debug_print("Synthesizer", "Powerlifted solver not available!", debug)
         return {
-            "plan": _plan_to_dict(plan),
+            "plan": plan_to_dict(plan),
             "powerlifted": {
                 "success": False, 
                 "error": "Powerlifted planner not available",
@@ -328,29 +532,19 @@ def synthesize(bug_id: str, goal: str,
     # Generate PDDL files
     pddl_dir = os.path.join(analysis_dir, 'pddl')
     os.makedirs(pddl_dir, exist_ok=True)
-    _debug(f"PDDL output directory: {pddl_dir}", debug)
+    debug_print("Synthesizer", f"PDDL output directory: {pddl_dir}", debug)
     
     # Create PDDL generator with detected platform
-    _debug("Creating PDDLGenerator...", debug)
+    debug_print("Synthesizer", "Creating PDDLGenerator...", debug)
     gen = PDDLGenerator(platform=target_platform, analysis_dir=analysis_dir)
     
     # Generate domain file
-    _debug("Generating domain PDDL...", debug)
+    debug_print("Synthesizer", "Generating domain PDDL...", debug)
     domain_path = gen.domain_path(pddl_dir)
-    _debug(f"  domain_path: {domain_path}", debug)
+    debug_print("Synthesizer", f"  domain_path: {domain_path}", debug)
     
-    # Load analysis data if available (needed for reproducer info)
-    analysis_data = None
-    static_path = Path(analysis_dir) / 'static_analysis.json'
-    if static_path.exists():
-        try:
-            analysis_data = json.loads(static_path.read_text())
-            _debug(f"  Loaded static_analysis.json", debug)
-        except Exception as e:
-            _debug(f"  Failed to load static_analysis.json: {e}", debug)
-    
-    # Generate problem PDDL
-    _debug("Generating problem PDDL...", debug)
+    # Generate problem PDDL (analysis_data already loaded earlier)
+    debug_print("Synthesizer", "Generating problem PDDL...", debug)
     problem_path = gen.generate_problem(
         f"{bug_id}_goal", 
         plan.primitives, 
@@ -359,10 +553,10 @@ def synthesize(bug_id: str, goal: str,
         debug=debug,
         analysis_data=analysis_data
     )
-    _debug(f"  problem_path: {problem_path}", debug)
+    debug_print("Synthesizer", f"  problem_path: {problem_path}", debug)
 
     # Run solver
-    _debug("Running solver...", debug)
+    debug_print("Synthesizer", "Running solver...", debug)
     result = solver.solve(
         domain_path, 
         problem_path, 
@@ -371,12 +565,12 @@ def synthesize(bug_id: str, goal: str,
         verbose=verbose,
         debug=debug
     )
-    _debug(f"Solver result: success={result.get('success')}", debug)
+    debug_print("Synthesizer", f"Solver result: success={result.get('success')}", debug)
     
     # If solution found, parse ALL plans
     exploit_files = []
     if result.get('success') and result.get('plans'):
-        _debug(f"Solution found! Plans: {result.get('plans')}", debug)
+        debug_print("Synthesizer", f"Solution found! Plans: {result.get('plans')}", debug)
         all_parsed_plans = []
         for plan_file in result['plans']:
             parsed_actions = solver.parse_plan(plan_file)
@@ -385,17 +579,17 @@ def synthesize(bug_id: str, goal: str,
                 'actions': parsed_actions,
                 'num_steps': len(parsed_actions)
             })
-            _debug(f"Parsed {len(parsed_actions)} actions from {plan_file}", debug)
+            debug_print("Synthesizer", f"Parsed {len(parsed_actions)} actions from {plan_file}", debug)
         
         result['parsed_plans'] = all_parsed_plans
         # Keep backward compatibility - first plan in 'parsed_plan'
         if all_parsed_plans:
             result['parsed_plan'] = all_parsed_plans[0]['actions']
         
-        _debug(f"Total plans found: {len(all_parsed_plans)}", debug)
+        debug_print("Synthesizer", f"Total plans found: {len(all_parsed_plans)}", debug)
         
         # STITCH: Generate C exploit code from the plan(s)
-        _debug("Stitching exploit code from plans...", debug)
+        debug_print("Synthesizer", "Stitching exploit code from plans...", debug)
         try:
             # Determine platform for stitcher
             if target_platform == TargetPlatform.ANDROID_KERNEL:
@@ -420,10 +614,10 @@ def synthesize(bug_id: str, goal: str,
             )
             
             # Use LLM stitcher if available, otherwise fall back to template stitcher
-            _debug("Using LLM-powered stitcher with library code mapping", debug)
+            debug_print("Synthesizer", "Using LLM-powered stitcher with library code mapping", debug)
             stitcher = LLMExploitStitcher(stitch_config)
             # else:
-            #     _debug("LiteLLM not available, using template-based stitcher", debug)
+            #     debug_print("Synthesizer", "LiteLLM not available, using template-based stitcher", debug)
             #     from .stitcher.stitcher import StitcherConfig as TemplateConfig
             #     template_config = TemplateConfig(
             #         platform=stitch_platform,
@@ -445,7 +639,7 @@ def synthesize(bug_id: str, goal: str,
                 
                 exploit_path = os.path.join(analysis_dir, f"{exploit_name}.c")
                 
-                _debug(f"Stitching plan {i+1} -> {exploit_path}", debug)
+                debug_print("Synthesizer", f"Stitching plan {i+1} -> {exploit_path}", debug)
                 
                 try:
                     generated_path = stitcher.stitch(
@@ -455,25 +649,25 @@ def synthesize(bug_id: str, goal: str,
                         analysis_data=analysis_data
                     )
                     exploit_files.append(generated_path)
-                    _debug(f"  Generated: {generated_path}", debug)
+                    debug_print("Synthesizer", f"  Generated: {generated_path}", debug)
                 except Exception as e:
-                    _debug(f"  Failed to stitch plan {i+1}: {e}", debug)
+                    debug_print("Synthesizer", f"  Failed to stitch plan {i+1}: {e}", debug)
                     import traceback
-                    _debug(f"  Traceback: {traceback.format_exc()}", debug)
+                    debug_print("Synthesizer", f"  Traceback: {traceback.format_exc()}", debug)
             
             if exploit_files:
-                _debug(f"Generated {len(exploit_files)} exploit file(s)", debug)
+                debug_print("Synthesizer", f"Generated {len(exploit_files)} exploit file(s)", debug)
         except Exception as e:
-            _debug(f"Stitching failed: {e}", debug)
+            debug_print("Synthesizer", f"Stitching failed: {e}", debug)
             import traceback
-            _debug(f"Traceback: {traceback.format_exc()}", debug)
+            debug_print("Synthesizer", f"Traceback: {traceback.format_exc()}", debug)
     else:
-        _debug(f"No solution found or no plans generated", debug)
+        debug_print("Synthesizer", f"No solution found or no plans generated", debug)
         if result.get('error'):
-            _debug(f"  error: {result.get('error')}", debug)
+            debug_print("Synthesizer", f"  error: {result.get('error')}", debug)
     
     return {
-        "plan": _plan_to_dict(plan),
+        "plan": plan_to_dict(plan),
         "powerlifted": result,
         "pddl": {
             "domain": domain_path,
@@ -513,8 +707,8 @@ def synthesize_from_facts(bug_id: str, goal: str,
     Returns:
         Dictionary with plan and solver results
     """
-    _debug(f"synthesize_from_facts called: bug_id={bug_id}, goal={goal}", debug)
-    _debug(f"  facts keys: {list(facts.keys())}", debug)
+    debug_print("Synthesizer", f"synthesize_from_facts called: bug_id={bug_id}, goal={goal}", debug)
+    debug_print("Synthesizer", f"  facts keys: {list(facts.keys())}", debug)
     
     # Determine platform
     if platform:
@@ -527,12 +721,13 @@ def synthesize_from_facts(bug_id: str, goal: str,
     else:
         # Default based on vulnerability types
         vulns = facts.get('vulnerabilities', [])
-        if any('binder' in v.lower() for v in vulns):
+        android_indicators = ['binder', 'ashmem', 'ion', 'goldfish', 'cuttlefish']
+        if any(ind in v.lower() for v in vulns for ind in android_indicators):
             target_platform = TargetPlatform.ANDROID_KERNEL
         else:
             target_platform = TargetPlatform.LINUX_KERNEL
     
-    _debug(f"Using platform: {target_platform}", debug)
+    debug_print("Synthesizer", f"Using platform: {target_platform}", debug)
     
     # Setup output directory
     if not output_dir:
@@ -541,14 +736,14 @@ def synthesize_from_facts(bug_id: str, goal: str,
     
     pddl_dir = os.path.join(output_dir, 'pddl')
     os.makedirs(pddl_dir, exist_ok=True)
-    _debug(f"PDDL dir: {pddl_dir}", debug)
+    debug_print("Synthesizer", f"PDDL dir: {pddl_dir}", debug)
     
     # Generate PDDL
     gen = PDDLGenerator(platform=target_platform)
-    _debug("PDDLGenerator created", debug)
+    debug_print("Synthesizer", "PDDLGenerator created", debug)
     
     domain_path = gen.domain_path(pddl_dir)
-    _debug(f"Domain generated: {domain_path}", debug)
+    debug_print("Synthesizer", f"Domain generated: {domain_path}", debug)
     
     problem_path = gen.generate_problem_from_facts(
         f"{bug_id}_facts",
@@ -556,20 +751,20 @@ def synthesize_from_facts(bug_id: str, goal: str,
         os.path.join(pddl_dir, 'problem.pddl'),
         goal
     )
-    _debug(f"Problem generated: {problem_path}", debug)
+    debug_print("Synthesizer", f"Problem generated: {problem_path}", debug)
     
     # Solve
     solver = PowerliftedSolver(debug=debug)
-    _debug(f"PowerliftedSolver created, available={solver.available()}", debug)
+    debug_print("Synthesizer", f"PowerliftedSolver created, available={solver.available()}", debug)
     if not solver.available():
-        _debug("Powerlifted not available!", debug)
+        debug_print("Synthesizer", "Powerlifted not available!", debug)
         return {
             "success": False,
             "error": "Powerlifted not available",
             "pddl": {"domain": domain_path, "problem": problem_path}
         }
     
-    _debug("Running solver...", debug)
+    debug_print("Synthesizer", "Running solver...", debug)
     result = solver.solve(
         domain_path,
         problem_path,
@@ -578,16 +773,16 @@ def synthesize_from_facts(bug_id: str, goal: str,
         verbose=verbose,
         debug=debug
     )
-    _debug(f"Solver result: success={result.get('success')}", debug)
+    debug_print("Synthesizer", f"Solver result: success={result.get('success')}", debug)
     
     if result.get('success') and result.get('plans'):
-        _debug(f"Solution found! Parsing plan...", debug)
+        debug_print("Synthesizer", f"Solution found! Parsing plan...", debug)
         for plan_file in result['plans']:
             result['parsed_plan'] = solver.parse_plan(plan_file)
-            _debug(f"Parsed {len(result['parsed_plan'])} actions", debug)
+            debug_print("Synthesizer", f"Parsed {len(result['parsed_plan'])} actions", debug)
             break
     else:
-        _debug("No solution found or no plans", debug)
+        debug_print("Synthesizer", "No solution found or no plans", debug)
     
     return {
         "success": result.get('success', False),
