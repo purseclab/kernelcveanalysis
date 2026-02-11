@@ -24,7 +24,4 @@ ENV PATH=${ANDROID_NDK_HOME}:${PATH}
 # RUN useradd -m -s /bin/bash user
 # just run as root for now
 
-COPY template /exp
-WORKDIR /exp
-
-USER user
+WORKDIR /
