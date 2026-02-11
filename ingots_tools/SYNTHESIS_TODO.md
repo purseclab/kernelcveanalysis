@@ -5,7 +5,7 @@ Todos for exploit synthesis tools which will integrate with syzploit pipeline.
 ## Features
 
 - Template folders with compilation commands
-- Sandboxing in a docker container for llm command execution (done, needs testing)
+- Sandboxing in a docker container for llm command execution: ✅
 - Debugging integration for llm
   - could be gdb, idk exactly what the syzploit gdb features are
   - something else, thinking if we could make some qemu tcg tracing thing and query the debug trace
