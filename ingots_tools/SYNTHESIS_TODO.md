@@ -4,7 +4,7 @@ Todos for exploit synthesis tools which will integrate with syzploit pipeline.
 
 ## Features
 
-- Template folders with compilation commands
+- Template folders with compilation commands: ✅
 - Sandboxing in a docker container for llm command execution: ✅
 - Debugging integration for llm
   - could be gdb, idk exactly what the syzploit gdb features are
