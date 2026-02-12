@@ -7,7 +7,7 @@ dependencies = [
     "kexploit",
     "libadb",
     "scripts",
-    "sandbox_env",
+    "kexploit_agent",
     "kexploit_utils",
 ]
 
@@ -17,7 +17,7 @@ members = [
   "kexploit",
   "libadb",
   "scripts",
-  "sandbox_env",
+  "kexploit_agent",
   "kexploit_utils",
 ]
 
@@ -26,5 +26,5 @@ android_env = { workspace = true }
 kexploit = { workspace = true }
 libadb = { workspace = true }
 scripts = { workspace = true }
-sandbox_env = { workspace = true }
+kexploit_agent = { workspace = true }
 kexploit_utils = { workspace = true }

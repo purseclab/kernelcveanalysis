@@ -6,10 +6,10 @@
 
 The project is organized as a `uv` workspace with the following members:
 
-### 1. `exploit_adaptation` (Tool: `kexploit`)
-*   **Purpose:** automatically adapt Proof-of-Concept (PoC) exploits between different Linux kernel versions using LLMs and binary analysis (Ghidra).
+### 1. `kexploit` (Tool: `kexploit`)
+*   **Purpose:** Automatically adapt Proof-of-Concept (PoC) exploits between different Linux kernel versions using LLMs and binary analysis (Ghidra).
 *   **Key Features:** Exploit annotation, offset adaptation, and experimental exploit synthesis.
-*   **Documentation:** See `exploit_adaptation/GEMINI.md` for detailed instructions.
+*   **Documentation:** See `kexploit/GEMINI.md` for detailed instructions.
 *   **Usage:** `uv run kexploit [COMMAND]`
 
 ### 2. `android_env` (Tool: `aenv`)
@@ -23,17 +23,29 @@ The project is organized as a `uv` workspace with the following members:
     *   `uv run aenv selinux dump <setype>`: Dump SELinux type info.
     *   `uv run aenv selinux diff <type1> <type2>`: Compare SELinux types.
 
-### 3. `libadb`
+### 3. `kexploit_agent` (Tool: `kexploit_agent`)
+*   **Purpose:** Secure Docker-based sandbox implementation for DeepAgents.
+*   **Key Features:**
+    *   **Docker Sandboxing:** `DockerSandbox` and `DockerSandboxProvider` for managing isolated environments with restricted capabilities (`cap_drop=['ALL']`) for secure execution.
+    *   **Resource Mounting:** Support for mounting host folders (read-only or read-write) to provide context (e.g., kernel source code) or workspace for agents.
+    *   **Agent Integration:** Integration with `deepagents` for creating autonomous exploit analysis agents, including automatic system prompt injection of sandbox mount information.
+    *   **Automated Image Building:** CLI tool to build the standardized Docker image used for the sandbox environment.
+*   **Usage:** `uv run kexploit_agent build_image`
+
+### 4. `kexploit_utils`
+*   **Purpose:** Shared utility library for the `ingots_tools` workspace.
+*   **Key Features:**
+    *   Centralized management of the `KEXPLOIT_DATA_DIR` and its subdirectories (kernels, Ghidra projects, VMs, etc.).
+    *   Common file operations (downloading, conditional writing).
+    *   Workspace-wide configuration management (`KexploitConfig`).
+
+### 5. `libadb`
 *   **Purpose:** A Python library providing ADB (Android Debug Bridge) utilities and tools specifically tailored for kernel exploitation research.
 *   **Used by:** `android_env` and `scripts`.
 
-### 4. `scripts`
+### 6. `scripts`
 *   **Purpose:** Miscellaneous utility scripts.
 *   **Key Script:** `expand_binary.py` (expands dynamically linked binaries for exploit chaining).
-
-### 5. `sandbox_env`
-*   **Purpose:** Secure Docker-based sandbox implementation for DeepAgents.
-*   **Key Features:** `DockerSandbox` and `DockerSandboxProvider`.
 
 ## Setup & Dependencies
 
@@ -41,7 +53,7 @@ The project uses `uv` for dependency management.
 
 1.  **Install uv:** [Installation Guide](https://docs.astral.sh/uv/getting-started/installation/)
 2.  **Environment Variables:**
-    *   Check `exploit_adaptation/README.md` for `kexploit` specific variables (e.g., `OPENAI_API_KEY`, `GHIDRA_INSTALL_DIR`).
+    *   Check `kexploit/README.md` for `kexploit` specific variables (e.g., `OPENAI_API_KEY`, `GHIDRA_INSTALL_DIR`, `KEXPLOIT_DATA_DIR`).
     *   Check `android_env/README.md` for Android-specific setup (SSH tunnels for Cuttlefish/ADB).
 
 ## Development
@@ -53,7 +65,9 @@ The project uses `uv` for dependency management.
 ## Directory Structure
 
 *   `android_env/`: Android analysis tools.
-*   `exploit_adaptation/`: Kernel exploit adaptation (kexploit).
+*   `kexploit/`: Kernel exploit adaptation and synthesis tool.
+*   `kexploit_agent/`: Sandbox environment for agents.
+*   `kexploit_utils/`: Shared utilities and data management.
 *   `libadb/`: Shared ADB library.
-*   `scripts/`: Standalone scripts.
+*   `scripts/`: Standalone utility scripts.
 *   `SYNTHESIS_TODO.md`: Roadmap for exploit synthesis features.
