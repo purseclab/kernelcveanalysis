@@ -7,6 +7,7 @@ members = [
     "android-env",
     "ingots-tools",
     "kexploit",
+    "kexploit-utils",
     "libadb",
     "sandbox-env",
     "scripts",
@@ -858,6 +859,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "android-env" },
     { name = "kexploit" },
+    { name = "kexploit-utils" },
     { name = "libadb" },
     { name = "sandbox-env" },
     { name = "scripts" },
@@ -866,7 +868,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "android-env", editable = "android_env" },
-    { name = "kexploit", editable = "exploit_adaptation" },
+    { name = "kexploit", editable = "kexploit" },
+    { name = "kexploit-utils", editable = "kexploit_utils" },
     { name = "libadb", editable = "libadb" },
     { name = "sandbox-env", editable = "sandbox_env" },
     { name = "scripts", editable = "scripts" },
@@ -1054,14 +1057,16 @@ wheels = [
 [[package]]
 name = "kexploit"
 version = "0.1.0"
-source = { editable = "exploit_adaptation" }
+source = { editable = "kexploit" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "capstone" },
     { name = "deepagents" },
+    { name = "kexploit-utils" },
     { name = "keystone-engine" },
     { name = "langchain" },
     { name = "langchain-openai" },
+    { name = "langgraph" },
     { name = "litellm" },
     { name = "multilspy" },
     { name = "mypy" },
@@ -1086,9 +1091,11 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.13.4" },
     { name = "capstone", specifier = ">=5.0.6" },
     { name = "deepagents", specifier = ">=0.3.12" },
+    { name = "kexploit-utils", editable = "kexploit_utils" },
     { name = "keystone-engine", specifier = ">=0.9.2" },
     { name = "langchain", specifier = ">=1.2.7" },
     { name = "langchain-openai", specifier = ">=1.1.8" },
+    { name = "langgraph", specifier = ">=1.0.7" },
     { name = "litellm", specifier = ">=1.80.10" },
     { name = "multilspy", specifier = ">=0.0.15" },
     { name = "mypy", specifier = ">=1.16.1" },
@@ -1106,6 +1113,21 @@ requires-dist = [
     { name = "sandbox-env", editable = "sandbox_env" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
     { name = "typer", specifier = ">=0.16.0" },
+]
+
+[[package]]
+name = "kexploit-utils"
+version = "0.1.0"
+source = { editable = "kexploit_utils" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "requests", specifier = ">=2.32.3" },
 ]
 
 [[package]]

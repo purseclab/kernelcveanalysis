@@ -1,5 +1,5 @@
 [project]
-name = "android-env"
+name = "android_env"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"

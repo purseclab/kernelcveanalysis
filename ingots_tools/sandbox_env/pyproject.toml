@@ -1,5 +1,5 @@
 [project]
-name = "sandbox-env"
+name = "sandbox_env"
 version = "0.1.0"
 description = "Secure Docker sandbox environment"
 readme = "README.md"

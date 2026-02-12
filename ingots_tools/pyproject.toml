@@ -3,25 +3,28 @@ name = "ingots-tools"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "android-env",
+    "android_env",
     "kexploit",
     "libadb",
     "scripts",
-    "sandbox-env",
+    "sandbox_env",
+    "kexploit_utils",
 ]
 
 [tool.uv.workspace]
 members = [
   "android_env",
-  "exploit_adaptation",
+  "kexploit",
   "libadb",
   "scripts",
   "sandbox_env",
+  "kexploit_utils",
 ]
 
 [tool.uv.sources]
-android-env = { workspace = true }
+android_env = { workspace = true }
 kexploit = { workspace = true }
 libadb = { workspace = true }
 scripts = { workspace = true }
-sandbox-env = { workspace = true }
+sandbox_env = { workspace = true }
+kexploit_utils = { workspace = true }

@@ -15,7 +15,7 @@ Todos for exploit synthesis tools which will integrate with syzploit pipeline.
 - ghidra integration, and mapping the definitions from source with ghidra definitions
 - debugger subagent
 - collect a repository of primitives, to expand upon the initial list of syzploit
-- improve llm prompt
+- improve llm prompt for testing and adaptation agent
 
 ### Minor Feature
 

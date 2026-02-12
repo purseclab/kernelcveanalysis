@@ -5,6 +5,7 @@ import os
 import tarfile
 from dataclasses import dataclass
 from typing import Optional, Self
+from pathlib import Path
 
 import docker  # type: ignore
 from deepagents.backends.protocol import (
@@ -19,6 +20,20 @@ from deepagents.backends.sandbox import (
 import typer
 
 @dataclass
+class MountInfo:
+    # path of folder on host to mount into docker container
+    src_folder: Path
+    # name of the mount info passed to llm and determines where mounted (all mounts are mounted in /data/{name})
+    name: str
+    # description of mount info for llm (what the data in the mount contains)
+    description: str
+    # if the folder is mounted read only or read write
+    writable: bool
+
+def path_for_mount_name(name: str) -> str:
+    return f'/data/{name}'
+
+@dataclass
 class DockerMetadata:
     id: str
     status: str
@@ -29,8 +44,11 @@ class DockerMetadata:
 WORKDIR = "/exp"
 
 class DockerSandbox(BaseSandbox):
-    def __init__(self, container: docker.models.containers.Container):
+    mounts: list[MountInfo]
+
+    def __init__(self, container: docker.models.containers.Container, mounts: list[MountInfo]):
         self.container = container
+        self.mounts = mounts
 
     @property
     def id(self) -> str:
@@ -202,8 +220,14 @@ class DockerSandboxProvider:
 
         return items
 
-    def create_instance(self, *, name: Optional[str] = None) -> DockerSandbox:
+    def create_instance(self, mounts: list[MountInfo], *, name: Optional[str] = None) -> DockerSandbox:
         image = self.client.images.get(IMAGE_TAG)
+
+        volumes = {
+            mount.src_folder: {'bind': path_for_mount_name(mount.name), 'mode': 'rw' if mount.writable else 'ro'}
+            for mount in mounts
+        }
+
         container = self.client.containers.run(
             image,
             command="/bin/sh -c 'while true; do sleep 3600; done'",
@@ -212,6 +236,7 @@ class DockerSandboxProvider:
             labels={"created_by": "deepagents"},
             cap_drop=['ALL'],
             security_opt=[],
+            volumes=volumes,
         )
 
         return DockerSandbox(container)
