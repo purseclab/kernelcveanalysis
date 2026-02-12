@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: libadb
+Version: 0.1.0
+Summary: ADB utilities and tools for kernel exploitation research
+Requires-Python: >=3.13
+Description-Content-Type: text/markdown
+
+# libadb
+
+ADB utilities and tools for kernel exploitation research.
