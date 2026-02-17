@@ -906,6 +906,38 @@ def pipeline_cuttlefish(
         typer.echo(f"[!] Post-processing failed: {e}")
         summary["steps"]["post_process"] = {"success": False, "error": str(e)}
     
+    # Step 4b: Adapt PoC for target device
+    typer.echo("\n[STEP 4b] Adapting PoC for target device...")
+    try:
+        from .SyzAnalyze.poc_adapter import adapt_poc
+
+        adapt_result = adapt_poc(
+            analysis_dir=str(output_dir),
+            output_dir=str(output_dir),
+            target_arch=arch,
+            model="gpt-5",
+        )
+        if adapt_result.get("success"):
+            typer.echo(f"[+] Adapted PoC written: {adapt_result['adapted_poc']}")
+            typer.echo(f"    Kernel: {adapt_result.get('kernel_version', '?')}")
+            typer.echo(f"    Verdict: {adapt_result.get('verdict', '?')} "
+                       f"({(adapt_result.get('confidence') or 0):.0%})")
+            summary["steps"]["adapt_poc"] = {
+                "success": True,
+                "adapted_poc": adapt_result["adapted_poc"],
+                "verdict": adapt_result.get("verdict"),
+                "confidence": adapt_result.get("confidence"),
+            }
+        else:
+            typer.echo(f"[!] PoC adaptation failed: {adapt_result.get('error')}")
+            summary["steps"]["adapt_poc"] = {
+                "success": False,
+                "error": adapt_result.get("error", "unknown"),
+            }
+    except Exception as e:
+        typer.echo(f"[!] PoC adaptation failed: {e}")
+        summary["steps"]["adapt_poc"] = {"success": False, "error": str(e)}
+
     # Step 5: Synthesize (optional)
     exploit_path = None
     if goal:
@@ -1499,6 +1531,58 @@ def generate_exploit_cmd(
             typer.echo(f"    {key}: {path}")
     else:
         typer.echo(f"\n[!] Exploit generation failed")
+        raise typer.Exit(code=1)
+
+
+@app.command(name="adapt-poc")
+def adapt_poc_cmd(
+    analysis_dir: Annotated[Path, typer.Argument(
+        help='Path to analysis directory with static_analysis.json and '
+             'trace_analysis.json (or controller log sub-dir)')],
+    arch: Annotated[str, typer.Option(
+        help='Target architecture (arm64/x86_64)')] = 'arm64',
+    output_dir: Annotated[Optional[Path], typer.Option(
+        help='Output directory (defaults to analysis_dir)')] = None,
+    model: Annotated[str, typer.Option(
+        help='LLM model to use')] = 'gpt-5',
+    skip_llm: Annotated[bool, typer.Option(
+        '--skip-llm',
+        help='Skip LLM; just prepend runtime addresses to original PoC'
+    )] = False,
+):
+    """Adapt a syzbot PoC for a specific target device.
+
+    Uses trace_analysis.json (runtime addresses, path verification,
+    device profile) together with the original syzbot reproducer to
+    produce an adapted PoC that works on a non-KASAN target device.
+
+    Requires that test-cuttlefish (with --extract-runtime-symbols) has
+    already been run so that trace_analysis.json exists in the analysis
+    directory or one of its sub-directories.
+
+    Examples:
+        syzploit adapt-poc ./analysis_abc123 --arch arm64
+        syzploit adapt-poc ./analysis_abc123 --skip-llm
+    """
+    from .SyzAnalyze.poc_adapter import adapt_poc
+
+    result = adapt_poc(
+        analysis_dir=str(analysis_dir),
+        output_dir=str(output_dir) if output_dir else None,
+        target_arch=arch,
+        model=model,
+        skip_llm=skip_llm,
+    )
+
+    if result.get("success"):
+        typer.echo(f"\n[+] Adapted PoC: {result['adapted_poc']}")
+        typer.echo(f"    Metadata:    {result.get('metadata_path')}")
+        typer.echo(f"    Arch:        {result.get('arch')}")
+        typer.echo(f"    Kernel:      {result.get('kernel_version', '?')}")
+        typer.echo(f"    Verdict:     {result.get('verdict', '?')} "
+                   f"({(result.get('confidence') or 0):.0%})")
+    else:
+        typer.echo(f"\n[!] PoC adaptation failed: {result.get('error')}")
         raise typer.Exit(code=1)
 
 

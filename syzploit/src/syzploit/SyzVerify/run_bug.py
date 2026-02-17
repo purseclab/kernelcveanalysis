@@ -2507,6 +2507,134 @@ def _verify_crash_path(dynamic_results: dict, parsed_crash: dict) -> dict:
     return verification
 
 
+def _export_trace_analysis(dynamic_results: dict, parsed_crash: dict,
+                           log_dir: str) -> str:
+    """Export a self-contained trace_analysis.json for downstream consumers.
+
+    This file aggregates everything a downstream stage (exploit adaptation,
+    LLM-based PoC rewriting, etc.) needs in a single document:
+
+      - target device / kernel info
+      - resolved symbol addresses from runtime kallsyms
+      - crash stack with per-function hit counts
+      - path verification verdict and confidence
+      - observed event statistics
+      - alloc / free address maps
+      - no-crash explanation (KASAN missing, offsets, etc.)
+
+    Returns the path to the saved file.
+    """
+    pv = dynamic_results.get("path_verification", {})
+    bp = dynamic_results.get("breakpoints", {})
+
+    # Build per-function address + hit-count table
+    crash_stack_addrs = bp.get("crash_stack_addrs", {})
+    coverage = pv.get("crash_stack_coverage", {})
+    crash_functions = []
+    for fn in (parsed_crash.get("stack_frames",
+                                parsed_crash.get("frames", []))):
+        name = fn.get("function", fn.get("func", ""))
+        if not name:
+            continue
+        crash_functions.append({
+            "function": name,
+            "address": crash_stack_addrs.get(name),
+            "hits": coverage.get(name, 0),
+        })
+
+    # Build alloc/free symbol -> address maps from runtime config
+    alloc_map: Dict[str, str] = {}
+    free_map: Dict[str, str] = {}
+    runtime_cfg = dynamic_results.get("runtime_symbols_config")
+    if runtime_cfg and os.path.exists(runtime_cfg):
+        try:
+            with open(runtime_cfg, 'r') as f:
+                cfg = json.load(f)
+            alloc_map = cfg.get("alloc_addrs", {})
+            free_map = cfg.get("free_addrs", {})
+        except Exception:
+            pass
+
+    # Summarise events
+    events = dynamic_results.get("events", [])
+    from collections import Counter
+    event_types = Counter(e.get("type") for e in events)
+
+    trace = {
+        # ---- target identity ----
+        "bug_id": dynamic_results.get("bug_id"),
+        "arch": dynamic_results.get("arch"),
+        "kernel_version": dynamic_results.get("kernel_version"),
+        "device_model": dynamic_results.get("device_model"),
+        "android_version": dynamic_results.get("android_version"),
+
+        # ---- path verification ----
+        "path_verification": {
+            "verdict": pv.get("verdict", "UNKNOWN"),
+            "confidence": pv.get("confidence", 0.0),
+            "vulnerable_path_confirmed": pv.get("vulnerable_path_confirmed",
+                                                  False),
+            "best_chain_depth": 0,
+            "chain_match_count": 0,
+            "details": pv.get("details", []),
+            "no_crash_explanation": pv.get("no_crash_explanation", []),
+            "backtrace_chain_matches": pv.get("backtrace_chain_matches", []),
+        },
+
+        # ---- crash stack with addresses ----
+        "crash_functions": crash_functions,
+
+        # ---- runtime symbol addresses ----
+        "runtime_addresses": {
+            "crash_stack": crash_stack_addrs,
+            "alloc_functions": alloc_map,
+            "free_functions": free_map,
+        },
+
+        # ---- alloc / free breakpoint addresses ----
+        "installed_breakpoints": {
+            "symbols": bp.get("installed_symbols", []),
+            "alloc_addrs": bp.get("alloc_addrs", []),
+            "free_addrs": bp.get("free_addrs", []),
+        },
+
+        # ---- event summary ----
+        "event_summary": {
+            "total": len(events),
+            "by_type": dict(event_types),
+        },
+
+        # ---- alloc / free tracking ----
+        "alloc_free_stats": pv.get("alloc_free_stats", {}),
+
+        # ---- crash and device state ----
+        "crash_detected": dynamic_results.get("crash_detected", False),
+        "crash_type": dynamic_results.get("crash_type", 0),
+
+        # ---- symbols ----
+        "symbols_resolved": dynamic_results.get("symbols_resolved", 0),
+        "system_map_used": dynamic_results.get("system_map_used"),
+    }
+
+    # Fill in best_chain values from chain matches
+    matches = pv.get("backtrace_chain_matches", [])
+    if matches:
+        trace["path_verification"]["best_chain_depth"] = max(
+            m.get("chain_depth", m.get("depth", 0)) for m in matches
+        )
+        trace["path_verification"]["chain_match_count"] = len(
+            [e for e in events
+             if e.get("type") == "func_hit"
+             and e.get("func") in {m.get("func") for m in matches}]
+        )
+
+    out_path = os.path.join(log_dir, "trace_analysis.json")
+    with open(out_path, 'w') as f:
+        json.dump(trace, f, indent=2)
+    print(f"[POST] Exported trace analysis: {out_path}")
+    return out_path
+
+
 def test_repro_with_cuttlefish_controller(
     repro_path: str,
     bug_id: str,
@@ -2979,7 +3107,12 @@ def test_repro_with_cuttlefish_controller(
             print(f"[POST]   {detail}")
         if verification.get("no_crash_explanation"):
             print(f"[POST] Why no crash: {verification['no_crash_explanation'][0]}")
-    
+
+        # Export self-contained trace analysis for downstream stages
+        trace_path = _export_trace_analysis(dynamic_results, parsed_crash,
+                                            log_dir)
+        dynamic_results["trace_analysis_path"] = trace_path
+
     # Save results
     results_output = os.path.join(log_dir, f"{bug_id}_controller_results.json")
     with open(results_output, 'w') as f:
