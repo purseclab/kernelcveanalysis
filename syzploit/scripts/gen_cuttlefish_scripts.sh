@@ -188,7 +188,12 @@ rm -f "${CF_DIR}/cuttlefish_runtime.${INSTANCE_NUM}/launcher.log" 2>/dev/null
 # Run: sudo ./install_qemu_wrapper.sh
 # The wrapper injects GDB, disables MTE, fixes audio, and adds vsock.
 
-# Build launch arguments — mirrors the working run.sh but adds GDB
+# Build launch arguments — mirrors the working run.sh but with GDB
+# NOTE: We do NOT pass --gdb_port to launch_cvd because it adds -S (pause)
+# to QEMU, which requires an external GDB client to send 'continue' before
+# the kernel will boot. Instead, we export GDB_PORT and let the QEMU wrapper
+# inject -gdb tcp::<port> WITHOUT -S, so the kernel boots normally with
+# the GDB server available for post-boot attachment.
 LAUNCH_ARGS=(
     -kernel_path "$KERNEL_PATH"
     -extra_kernel_cmdline "$GDB_CMDLINE"
@@ -199,7 +204,6 @@ LAUNCH_ARGS=(
     -daemon
     -start_webrtc=true
     -base_instance_num "${INSTANCE_NUM}"
-    --gdb_port "$GDB_PORT"
 )
 
 if [[ -n "$INITRAMFS_PATH" ]]; then
