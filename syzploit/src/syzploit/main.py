@@ -12,8 +12,80 @@ from .SyzVerify.run_bug import test_repro_crashes, test_repro_crashes_qemu, test
 from .SyzVerify.cuttlefish import CuttlefishConfig, create_config_from_args
 import json
 import os
+import re
 
 app = typer.Typer(help="Syzkall/Syzbot tooling for pulling, testing, and analyzing bugs.")
+
+
+def _parse_crash_report_for_stack(crash_report: str) -> dict:
+    """Parse a raw kernel crash report to extract stack frames for GDB breakpoints.
+    
+    Handles KASAN/UBSAN/KMSAN reports and generic kernel oops/panic stack traces.
+    Returns a dict compatible with the parsed_crash format used by CuttlefishKernelGDB.
+    """
+    result = {
+        'crash_type': '',
+        'corrupted_function': '',
+        'stack_frames': [],
+        'access': {},
+    }
+    
+    # Parse crash type and corrupted function
+    bug_match = re.search(
+        r'BUG:\s*(KASAN|UBSAN|KMSAN):\s*([^\n]+?)\s+in\s+(\S+)',
+        crash_report
+    )
+    if bug_match:
+        result['crash_type'] = f"{bug_match.group(1)}: {bug_match.group(2).split(' in ')[0].strip()}"
+        func = bug_match.group(3).split('+')[0].split('.')[0]
+        result['corrupted_function'] = func
+    
+    # Parse access info (read/write, address, size)
+    access_match = re.search(r'(Read|Write) of size (\d+) at addr ([0-9a-fA-Fx]+)', crash_report)
+    if access_match:
+        result['access'] = {
+            'type': access_match.group(1).lower(),
+            'size': int(access_match.group(2)),
+            'address': access_match.group(3),
+        }
+    
+    # Extract stack frames from "Call Trace:" section
+    # Look for lines like: " func_name+0x123/0x456  file.c:123"
+    # or: " func_name+0x123/0x456"
+    in_stack = False
+    seen_funcs = set()
+    
+    for line in crash_report.split('\n'):
+        stripped = line.strip()
+        if 'Call Trace:' in stripped:
+            in_stack = True
+            continue
+        if in_stack:
+            # End of stack trace
+            if stripped == '' or stripped.startswith('RIP:') or stripped.startswith('RSP:'):
+                break
+            
+            # Match stack frame: " func+0xoffset/0xsize  file:line  [inline]"
+            frame_match = re.match(
+                r'(?:\?\s+)?(\w+)\+0x[0-9a-f]+/0x[0-9a-f]+\s*(?:(\S+):(\d+))?\s*(\[inline\])?',
+                stripped
+            )
+            if frame_match:
+                func_name = frame_match.group(1)
+                source_file = frame_match.group(2) or ''
+                line_num = int(frame_match.group(3)) if frame_match.group(3) else 0
+                is_inline = bool(frame_match.group(4))
+                
+                if func_name not in seen_funcs:
+                    seen_funcs.add(func_name)
+                    result['stack_frames'].append({
+                        'function': func_name,
+                        'file': source_file,
+                        'line': line_num,
+                        'inline': is_inline,
+                    })
+    
+    return result if result['stack_frames'] or result['corrupted_function'] else None
 
 
 # TODO: decide if this will even be apart of kexploit
@@ -460,6 +532,15 @@ def test_cuttlefish(
     parsed_crash = None
     if hasattr(md, 'crash_parser_results') and md.crash_parser_results:
         parsed_crash = md.crash_parser_results
+    
+    # If no parsed crash but we have a crash report text, parse it for stack trace
+    if not parsed_crash and hasattr(md, 'crash_report') and md.crash_report:
+        typer.echo("[+] Parsing crash report for stack trace breakpoints...")
+        parsed_crash = _parse_crash_report_for_stack(md.crash_report)
+        if parsed_crash and parsed_crash.get('stack_frames'):
+            typer.echo(f"[+] Extracted {len(parsed_crash['stack_frames'])} stack frames from crash report")
+        else:
+            typer.echo("[+] No stack frames extracted from crash report")
     
     # Run test
     typer.echo(f"[+] Running test with Cuttlefish controller...")
