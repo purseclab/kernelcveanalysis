@@ -12,11 +12,18 @@ class TargetType(StrEnum):
     Any = "any"
 
 
+class Architecture(StrEnum):
+    X86 = "x86"
+    AMD64 = "amd64"
+    AARCH64 = "aarch64"
+
+
 class Metadata(BaseModel):
     name: str
     description: str
     target: TargetType
     version: Optional[str] = None
+    arch: list[Architecture] = list(Architecture)
 
 
 @dataclass

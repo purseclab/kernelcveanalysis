@@ -1,5 +1,6 @@
 {
   "name": "pipe_spray",
   "description": "Exploit primitive to spray kernel heap using pipe buffers. This allows controlling heap layout and potentially overwriting adjacent objects.",
-  "target": "any"
+  "target": "any",
+  "arch": ["amd64"]
 }
