@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+src/primitives/__init__.py
+src/primitives.egg-info/PKG-INFO
+src/primitives.egg-info/SOURCES.txt
+src/primitives.egg-info/dependency_links.txt
+src/primitives.egg-info/requires.txt
+src/primitives.egg-info/top_level.txt

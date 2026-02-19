@@ -6,15 +6,16 @@ Todos for exploit synthesis tools which will integrate with syzploit pipeline.
 
 - Template folders with compilation commands: ✅
 - Sandboxing in a docker container for llm command execution: ✅
-  - Still need to support mounting read only volumes for additional context (linux src for example)
+  - Still need to support mounting read only volumes for additional context (linux src for example): ✅
 - Debugging integration for llm
   - could be gdb, idk exactly what the syzploit gdb features are
   - something else, thinking if we could make some qemu tcg tracing thing and query the debug trace
   - Proibably just gdb first cause its easy and if llm has poor abilties with gdb something else
+- debugger subagent using debugger tools
 - heap object more details from runtime info
 - ghidra integration, and mapping the definitions from source with ghidra definitions
-- debugger subagent
 - collect a repository of primitives, to expand upon the initial list of syzploit
+  - apparently only description, and code are needed
 - improve llm prompt for testing and adaptation agent
 
 ### Minor Feature

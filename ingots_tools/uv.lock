@@ -10,6 +10,7 @@ members = [
     "kexploit-agent",
     "kexploit-utils",
     "libadb",
+    "primitives",
     "scripts",
 ]
 
@@ -871,6 +872,7 @@ dependencies = [
     { name = "kexploit-agent" },
     { name = "kexploit-utils" },
     { name = "libadb" },
+    { name = "primitives" },
     { name = "scripts" },
 ]
 
@@ -881,6 +883,7 @@ requires-dist = [
     { name = "kexploit-agent", editable = "kexploit_agent" },
     { name = "kexploit-utils", editable = "kexploit_utils" },
     { name = "libadb", editable = "libadb" },
+    { name = "primitives", editable = "primitives" },
     { name = "scripts", editable = "scripts" },
 ]
 
@@ -1777,6 +1780,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/dc/c8/11a5f792704b70f07
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/ad/45312df6b63ba64ea35b8d8f5f0c577aac16e6b416eafe8e1cb34e03f9a7/plumbum-1.10.0-py3-none-any.whl", hash = "sha256:9583d737ac901c474d99d030e4d5eec4c4e6d2d7417b1cf49728cf3be34f6dc8", size = 127383, upload-time = "2025-10-31T05:02:47.002Z" },
 ]
+
+[[package]]
+name = "primitives"
+version = "0.1.0"
+source = { editable = "primitives" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.12.5" }]
 
 [[package]]
 name = "propcache"

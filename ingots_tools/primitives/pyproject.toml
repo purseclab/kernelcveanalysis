@@ -1,0 +1,12 @@
+[project]
+name = "primitives"
+version = "0.1.0"
+description = "A collection of exploit primitives for Linux kernel research."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.12.5",
+]
+
+[tool.uv]
+package = true

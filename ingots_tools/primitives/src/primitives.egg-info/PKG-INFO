@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: primitives
+Version: 0.1.0
+Summary: A collection of exploit primitives for Linux kernel research.
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.12.5
+
+# Primitives
+
+This package contains exploit primitives for Linux kernel research.
+
+Each primitive is stored in a directory within `src/primitive_data/` (or a custom path) and contains:
+- `metadata.json`: Metadata about the primitive.
+- `PRIMITIVE.md`: Documentation on how to use the primitive.
+- `primitive.c`: C code implementing the primitive.
