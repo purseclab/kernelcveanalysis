@@ -14,6 +14,7 @@ Key features:
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple, List, Callable
+import signal
 import subprocess
 import time
 import os
@@ -84,7 +85,7 @@ class CuttlefishConfig:
     # SSH tunneling (for remote cuttlefish)
     setup_tunnels: bool = False  # Whether to set up SSH tunnels for GDB/ADB
     local_gdb_port: int = 1234   # Local port to forward GDB
-    local_adb_server_port: int = 5037   # Local port for ADB server tunnel (ssh -L 5037:localhost:5037)
+    local_adb_server_port: int = 5037   # Local ADB server port (default 5037, NOT tunneled to remote)
     
     # Kernel symbol extraction (for GDB debugging with symbols)
     kernel_image_path: Optional[str] = None  # Path to kernel Image file (local or remote)
@@ -572,6 +573,8 @@ class CuttlefishController:
         self._gdb_process: Optional[subprocess.Popen] = None
         self._gdb_script_path: Optional[Path] = None
         self._vmlinux_path: Optional[str] = None
+        self._gdb_file_paths: dict = {}  # Populated by generate_kernel_gdb_script for remote deploy
+        self._remote_gdb_paths: dict = {}  # Populated by _gdb_attach_remote for result download
         self._is_booted = False
         self._boot_log: List[str] = []
         
@@ -918,8 +921,153 @@ class CuttlefishController:
             self._log_error(f"Local command failed after {elapsed:.2f}s: {e}")
             return -1, "", str(e)
     
+    def _scp_upload(self, local_path: str, remote_path: str, timeout: int = 120) -> bool:
+        """Upload a file to the remote host via SCP."""
+        cmd = ["scp"]
+        if self.config.ssh_port != 22:
+            cmd.extend(["-P", str(self.config.ssh_port)])
+        if self.config.ssh_key_path:
+            cmd.extend(["-i", self.config.ssh_key_path])
+        ssh_target = f"{self.config.ssh_user}@{self.config.ssh_host}" if self.config.ssh_user else self.config.ssh_host
+        cmd.extend([local_path, f"{ssh_target}:{remote_path}"])
+        self._log_debug(f"SCP upload: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if result.returncode != 0:
+                self._log_error(f"SCP upload failed: {result.stderr}")
+                return False
+            return True
+        except Exception as e:
+            self._log_error(f"SCP upload exception: {e}")
+            return False
+
+    def _scp_download(self, remote_path: str, local_path: str, timeout: int = 120) -> bool:
+        """Download a file from the remote host via SCP."""
+        cmd = ["scp"]
+        if self.config.ssh_port != 22:
+            cmd.extend(["-P", str(self.config.ssh_port)])
+        if self.config.ssh_key_path:
+            cmd.extend(["-i", self.config.ssh_key_path])
+        ssh_target = f"{self.config.ssh_user}@{self.config.ssh_host}" if self.config.ssh_user else self.config.ssh_host
+        cmd.extend([f"{ssh_target}:{remote_path}", local_path])
+        self._log_debug(f"SCP download: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if result.returncode != 0:
+                self._log_error(f"SCP download failed: {result.stderr}")
+                return False
+            return True
+        except Exception as e:
+            self._log_error(f"SCP download exception: {e}")
+            return False
+
+    def _kill_existing_port_tunnels(self, ports: list) -> None:
+        """Kill any existing SSH tunnel processes that are listening on the given local ports.
+        
+        This prevents 'Address already in use' errors when setting up new tunnels,
+        and ensures we don't have stale tunnels from a previous run.
+        
+        Uses multiple strategies: lsof, fuser, or scanning /proc for ssh processes
+        with matching port arguments.
+        """
+        for port in ports:
+            self._log_info(f"Checking for existing SSH tunnels on local port {port}...")
+            killed = False
+            
+            # Strategy 1: Try lsof
+            try:
+                result = subprocess.run(
+                    ["lsof", "-ti", f":{port}"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    for pid_str in result.stdout.strip().split('\n'):
+                        self._kill_ssh_tunnel_pid(pid_str.strip(), port, "lsof")
+                        killed = True
+                    continue
+                else:
+                    self._log_debug(f"lsof: no process on port {port}")
+                    continue
+            except FileNotFoundError:
+                self._log_debug("lsof not available")
+            except Exception as e:
+                self._log_debug(f"lsof error: {e}")
+            
+            # Strategy 2: Try fuser
+            try:
+                result = subprocess.run(
+                    ["fuser", f"{port}/tcp"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    pids_str = result.stderr.strip() or result.stdout.strip()
+                    if pids_str:
+                        for pid_str in pids_str.split():
+                            self._kill_ssh_tunnel_pid(pid_str.strip(), port, "fuser")
+                            killed = True
+                        continue
+            except FileNotFoundError:
+                self._log_debug("fuser not available")
+            except Exception as e:
+                self._log_debug(f"fuser error: {e}")
+            
+            # Strategy 3: Scan /proc for ssh processes with this port in their cmdline
+            self._log_debug(f"Scanning /proc for ssh tunnels on port {port}...")
+            try:
+                for pid_dir in Path("/proc").iterdir():
+                    if not pid_dir.name.isdigit():
+                        continue
+                    try:
+                        cmdline_path = pid_dir / "cmdline"
+                        if not cmdline_path.exists():
+                            continue
+                        cmdline = cmdline_path.read_bytes().decode("utf-8", errors="replace")
+                        # /proc/*/cmdline uses null bytes as separators
+                        if "ssh" in cmdline and f":{port}" in cmdline and "-N" in cmdline:
+                            pid = int(pid_dir.name)
+                            self._log_warning(f"Found stale SSH tunnel PID {pid} for port {port}")
+                            self._kill_ssh_tunnel_pid(str(pid), port, "/proc scan")
+                            killed = True
+                    except (PermissionError, OSError):
+                        continue
+            except Exception as e:
+                self._log_debug(f"/proc scan error: {e}")
+            
+            if not killed:
+                self._log_debug(f"No existing tunnel found on port {port}")
+    
+    def _kill_ssh_tunnel_pid(self, pid_str: str, port: int, source: str) -> None:
+        """Kill an SSH tunnel process by PID."""
+        try:
+            pid = int(pid_str)
+            self._log_warning(f"Killing stale SSH tunnel PID {pid} on port {port} (via {source})")
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)  # Check if still alive
+                self._log_warning(f"PID {pid} still alive, sending SIGKILL")
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass  # Process is gone
+            self._log_info(f"Killed stale tunnel PID {pid} on port {port}")
+        except ValueError:
+            self._log_debug(f"Invalid PID '{pid_str}'")
+        except OSError as e:
+            self._log_debug(f"Could not kill PID {pid_str}: {e}")
+    
     def _setup_ssh_tunnels(self) -> bool:
-        """Set up SSH tunnels for GDB and ADB access to remote Cuttlefish."""
+        """Set up SSH tunnels for GDB and ADB access to remote Cuttlefish.
+        
+        Architecture:
+        - GDB tunnel: forwards local_gdb_port -> remote gdb_port (only when GDB enabled)
+        - ADB device tunnel: forwards local adb_port -> remote adb_port
+        
+        We do NOT tunnel the ADB server port (5037). Instead, we use the LOCAL
+        ADB server and connect it to the remote device through the device port
+        tunnel. Tunneling 5037 to the remote ADB server causes devices to show
+        as 'offline' because the ADB protocol's data channel cannot properly
+        operate through an SSH tunnel of the server port.
+        """
         if not self.config.setup_tunnels:
             self._log_info("SSH tunnels not requested, skipping setup")
             return True
@@ -927,6 +1075,29 @@ class CuttlefishController:
         self._log_separator()
         self._log_info("SETTING UP SSH TUNNELS")
         print(f"[CUTTLEFISH] Setting up SSH tunnels to {self.config.ssh_host}...")
+        
+        # Kill the local ADB server first to ensure clean state.
+        # We'll restart it after tunnels are up so it doesn't grab port 5037
+        # before we want it to, and to clear any stale device registrations.
+        self._log_info("Killing local ADB server for clean state...")
+        try:
+            subprocess.run(
+                [self.config.adb_exe, "kill-server"],
+                capture_output=True, text=True, timeout=10
+            )
+            self._log_info("Local ADB server killed")
+        except Exception as e:
+            self._log_debug(f"ADB kill-server: {e} (may not have been running)")
+        
+        # Kill any existing SSH tunnel processes on the ports we need
+        # This prevents 'Address already in use' and ensures clean state
+        ports_to_clean = []
+        is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+        # GDB tunnel only needed for local mode (remote runs GDB natively)
+        if self.config.enable_gdb and not is_remote:
+            ports_to_clean.append(self.config.local_gdb_port)
+        ports_to_clean.append(self.config.adb_port)
+        self._kill_existing_port_tunnels(ports_to_clean)
         
         tunnels = []
         
@@ -938,8 +1109,11 @@ class CuttlefishController:
         
         self._log_info(f"SSH target: {ssh_target}")
         
-        # GDB tunnel
-        if self.config.enable_gdb:
+        # GDB tunnel — only needed for LOCAL GDB mode.
+        # When remote, GDB runs natively on the remote host and connects
+        # directly to localhost:<gdb_port>, so no tunnel is needed.
+        is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+        if self.config.enable_gdb and not is_remote:
             gdb_tunnel_cmd = [
                 "ssh", "-N", "-L",
                 f"{self.config.local_gdb_port}:{self.config.gdb_host}:{self.config.gdb_port}",
@@ -951,22 +1125,10 @@ class CuttlefishController:
                 gdb_tunnel_cmd.extend(["-i", self.config.ssh_key_path])
             tunnels.append(("GDB", gdb_tunnel_cmd))
         
-        # ADB server tunnel (forwards local 5037 to remote 5037)
-        # This allows local `adb` commands to use the remote ADB server
-        adb_tunnel_cmd = [
-            "ssh", "-N", "-L",
-            f"{self.config.local_adb_server_port}:localhost:5037",
-            ssh_target,
-        ]
-        if self.config.ssh_port != 22:
-            adb_tunnel_cmd.extend(["-p", str(self.config.ssh_port)])
-        if self.config.ssh_key_path:
-            adb_tunnel_cmd.extend(["-i", self.config.ssh_key_path])
-        tunnels.append(("ADB Server", adb_tunnel_cmd))
-        
         # ADB device tunnel (forwards local device port to remote device port)
-        # This is REQUIRED because ADB connects to devices on their own port,
-        # not just the ADB server port. Without this, `adb connect` fails.
+        # This is the ONLY ADB tunnel we need. The local ADB server connects
+        # to this forwarded port to reach the remote Cuttlefish device.
+        # We do NOT tunnel port 5037 (ADB server) — that causes 'offline' issues.
         adb_device_port = self.config.adb_port
         adb_device_tunnel_cmd = [
             "ssh", "-N", "-L",
@@ -1014,11 +1176,118 @@ class CuttlefishController:
         self._log_info("All SSH tunnels established successfully")
         return True
     
+    def _build_gdb_tunnel_cmd(self) -> list:
+        """Build the SSH command for the GDB tunnel."""
+        if self.config.ssh_user:
+            ssh_target = f"{self.config.ssh_user}@{self.config.ssh_host}"
+        else:
+            ssh_target = self.config.ssh_host
+        cmd = [
+            "ssh", "-N", "-L",
+            f"{self.config.local_gdb_port}:{self.config.gdb_host}:{self.config.gdb_port}",
+            ssh_target,
+        ]
+        if self.config.ssh_port != 22:
+            cmd.extend(["-p", str(self.config.ssh_port)])
+        if self.config.ssh_key_path:
+            cmd.extend(["-i", self.config.ssh_key_path])
+        return cmd
+    
+    def _restart_gdb_tunnel(self) -> bool:
+        """Tear down the existing GDB tunnel and create a fresh one.
+        
+        This should be called AFTER the remote GDB port is confirmed open,
+        right before connecting to the GDB stub. This ensures the tunnel is
+        fresh and properly connected to the now-listening remote port.
+        
+        The GDB tunnel is always the first tunnel in self._tunnel_processes.
+        """
+        if not self.config.setup_tunnels or not self.config.enable_gdb:
+            return True
+        
+        self._log_separator()
+        self._log_info("RESTARTING GDB TUNNEL (ensuring fresh connection to remote GDB stub)")
+        print("[CUTTLEFISH] Restarting GDB tunnel for fresh connection...")
+        
+        # Step 1: Kill the old GDB tunnel (index 0 in _tunnel_processes)
+        if self._tunnel_processes:
+            old_proc = self._tunnel_processes[0]
+            try:
+                self._log_info(f"Terminating old GDB tunnel (PID: {old_proc.pid})")
+                old_proc.terminate()
+                old_proc.wait(timeout=5)
+                self._log_info("Old GDB tunnel terminated")
+            except subprocess.TimeoutExpired:
+                self._log_warning("Old GDB tunnel did not terminate, killing")
+                old_proc.kill()
+            except Exception as e:
+                self._log_warning(f"Error terminating old GDB tunnel: {e}")
+        
+        # Step 2: Kill any other process on the local GDB port
+        self._kill_existing_port_tunnels([self.config.local_gdb_port])
+        
+        # Brief pause to let port be freed
+        time.sleep(1)
+        
+        # Step 3: Create a fresh GDB tunnel
+        gdb_cmd = self._build_gdb_tunnel_cmd()
+        cmd_str = ' '.join(gdb_cmd)
+        self._log_info(f"Starting fresh GDB tunnel: {cmd_str}")
+        
+        try:
+            proc = subprocess.Popen(
+                gdb_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            # Replace the old tunnel process
+            if self._tunnel_processes:
+                self._tunnel_processes[0] = proc
+            else:
+                self._tunnel_processes.insert(0, proc)
+            
+            self._log_info(f"Fresh GDB tunnel started (PID: {proc.pid})")
+        except Exception as e:
+            self._log_error(f"Failed to start fresh GDB tunnel: {e}")
+            return False
+        
+        # Step 4: Wait for tunnel to establish and verify it's working
+        self._log_info("Waiting 2s for fresh tunnel to establish...")
+        time.sleep(2)
+        
+        if proc.poll() is not None:
+            stdout, stderr = proc.communicate()
+            self._log_error(f"Fresh GDB tunnel exited immediately with code {proc.returncode}")
+            self._log_error(f"stderr: {stderr.decode() if stderr else 'empty'}")
+            return False
+        
+        # Verify tunnel is alive by checking the process is still running
+        # Do NOT open a TCP connection to the GDB stub here — that would consume
+        # the initial stop reply that _raw_gdb_continue() needs to read.
+        self._log_info("Fresh GDB tunnel is up and running (PID still alive)")
+        print("[CUTTLEFISH] GDB tunnel restarted successfully")
+        return True
+    
     def _teardown_ssh_tunnels(self) -> None:
-        """Tear down SSH tunnels."""
+        """Tear down SSH tunnels and clean up local ADB state."""
         if self._tunnel_processes:
             self._log_separator()
             self._log_info("TEARING DOWN SSH TUNNELS")
+            
+            # Disconnect ADB device and kill local server to clean up
+            try:
+                subprocess.run(
+                    [self.config.adb_exe, "disconnect"],
+                    capture_output=True, text=True, timeout=5
+                )
+                subprocess.run(
+                    [self.config.adb_exe, "kill-server"],
+                    capture_output=True, text=True, timeout=5
+                )
+                self._log_info("ADB disconnected and server killed")
+            except Exception as e:
+                self._log_debug(f"ADB cleanup: {e}")
+            
             for i, proc in enumerate(self._tunnel_processes):
                 try:
                     self._log_info(f"Terminating tunnel process {i} (PID: {proc.pid})")
@@ -1039,10 +1308,15 @@ class CuttlefishController:
         when dealing with flaky GDB stubs (like crosvm) because it avoids
         the complexity of the full GDB client.
         
-        GDB RSP format:
+        GDB RSP protocol overview:
         - Packets are: $<data>#<checksum>
         - Checksum is sum of all bytes in <data> mod 256, as 2 hex chars
-        - 'c' = continue command
+        - '+' = ACK (packet received OK), '-' = NACK (retransmit)
+        - On new connection, stub sends a stop reply ($T05...) telling why it stopped
+        - Client must ACK the stop reply, THEN can send 'c' to continue
+        
+        IMPORTANT: The GDB stub is single-connection. Each new TCP connection
+        triggers a fresh stop reply. We must read and ACK it before sending commands.
         
         Returns True if continue command was sent successfully.
         """
@@ -1055,44 +1329,161 @@ class CuttlefishController:
             data = cmd.encode()
             return f"${cmd}#{gdb_checksum(data)}".encode()
         
+        def recv_all(sock, timeout=3.0):
+            """Receive all available data with a timeout."""
+            sock.settimeout(timeout)
+            chunks = []
+            try:
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    # Short timeout for subsequent reads
+                    sock.settimeout(0.5)
+            except socket.timeout:
+                pass
+            return b"".join(chunks)
+        
         try:
             self._log_info(f"Connecting to GDB stub at {host}:{port} for raw continue...")
             sock = socket.create_connection((host, port), timeout=10)
+            
+            # Step 1: Read the initial stop reply from the GDB stub.
+            # On a new connection, QEMU's GDB stub sends $T05... (SIGTRAP stop)
+            # or similar to tell the client why execution is stopped.
+            self._log_info("Waiting for initial stop reply from GDB stub...")
+            initial_data = recv_all(sock, timeout=5.0)
+            
+            if initial_data:
+                self._log_info(f"GDB stub initial data ({len(initial_data)} bytes): {initial_data[:120]}")
+                
+                if b"$" in initial_data:
+                    # Got a GDB packet — this is the stop reply
+                    self._log_info("Received stop reply from GDB stub (kernel is paused)")
+                    
+                    # Step 2: ACK the stop reply
+                    self._log_info("Sending ACK (+) for stop reply...")
+                    sock.send(b"+")
+                    time.sleep(0.2)
+                    
+                    # Drain any response to our ACK
+                    ack_resp = recv_all(sock, timeout=1.0)
+                    if ack_resp:
+                        self._log_debug(f"Response after ACK: {ack_resp[:80]}")
+                else:
+                    self._log_warning(f"Got unexpected initial data (no $ packet): {initial_data[:80]}")
+                    # Send ACK anyway to try to sync
+                    sock.send(b"+")
+                    time.sleep(0.2)
+            else:
+                self._log_warning("No initial data from GDB stub after 5s — stub may be in unexpected state")
+                # Try sending ACK to provoke a response
+                sock.send(b"+")
+                time.sleep(0.5)
+                retry_data = recv_all(sock, timeout=2.0)
+                if retry_data:
+                    self._log_info(f"Data after ACK probe: {retry_data[:80]}")
+                else:
+                    self._log_warning("Still no response — attempting continue anyway")
+            
+            # Step 3: Send halt reason query to confirm stub state
+            self._log_info("Querying halt reason ($?#3f) to confirm stub state...")
             sock.settimeout(5)
+            sock.send(b"$?#3f")
+            time.sleep(0.3)
+            halt_response = recv_all(sock, timeout=3.0)
+            if halt_response:
+                self._log_info(f"Halt reason response: {halt_response[:80]}")
+                if b"$" in halt_response:
+                    # ACK the halt reason reply
+                    sock.send(b"+")
+                    time.sleep(0.1)
+            else:
+                self._log_warning("No response to halt reason query")
             
-            # Send ACK first to sync
-            sock.send(b"+")
-            time.sleep(0.2)
-            
-            # Send continue packet: $c#63
+            # Step 4: Send continue packet: $c#63
             continue_packet = make_packet("c")
             self._log_info(f"Sending continue packet: {continue_packet}")
+            sock.settimeout(5)
             sock.send(continue_packet)
             
-            # Wait briefly for ACK ('+' means command received)
+            # Step 5: Wait for ACK ('+' means command received and will be executed)
             try:
-                response = sock.recv(1)
-                if response == b"+":
-                    self._log_info("GDB stub acknowledged continue command")
+                response = recv_all(sock, timeout=3.0)
+                if response:
+                    self._log_info(f"GDB response after continue ({len(response)} bytes): {response[:80]}")
+                    if b"+" in response:
+                        self._log_info("GDB stub acknowledged continue command — kernel should be running")
+                    if b"$T" in response or b"$S" in response:
+                        # Got a stop reply immediately after continue — kernel stopped again
+                        self._log_warning(f"Kernel stopped immediately after continue: {response[:80]}")
+                        self._log_warning("Sending another continue...")
+                        sock.send(b"+")  # ACK the stop reply
+                        time.sleep(0.2)
+                        sock.send(continue_packet)
+                        retry_resp = recv_all(sock, timeout=3.0)
+                        if retry_resp:
+                            self._log_info(f"Second continue response: {retry_resp[:80]}")
                 else:
-                    self._log_warning(f"Unexpected response: {response}")
+                    # No response at all — unexpected
+                    self._log_warning("No response after continue (not even ACK)")
             except socket.timeout:
-                self._log_info("No ACK received (stub may have continued anyway)")
+                # Timeout after sending continue is EXPECTED — kernel is running
+                # and stub only sends data when it stops again
+                self._log_info("Timeout after continue (expected — kernel is running)")
             
-            # Close connection - the stub should now be running the kernel
+            # Step 6: Close this connection — the kernel should be running now
             sock.close()
-            self._log_info("Raw GDB continue completed")
+            self._log_info("Raw GDB continue completed, connection closed")
+            
+            # NOTE: We do NOT reconnect to verify the kernel is running. The GDB stub
+            # is single-connection and a new connection while the kernel is running could
+            # cause the stub to halt the kernel (to report to the new debugger). The `+` ACK
+            # from Step 5 is our best confirmation that the continue command was accepted.
             return True
             
         except socket.timeout:
             self._log_warning("Socket timeout during raw GDB continue")
             return False
+        except ConnectionRefusedError:
+            self._log_warning("Connection refused to GDB stub — is QEMU running?")
+            return False
         except ConnectionResetError:
             self._log_warning("Connection reset during raw GDB continue (stub may have continued)")
-            # This might actually be success - crosvm may reset after continue
             return True
         except Exception as e:
             self._log_error(f"Raw GDB continue failed: {e}")
+            import traceback
+            self._log_debug(f"Traceback: {traceback.format_exc()}")
+            return False
+    
+    def _check_remote_port_open(self, port: int) -> bool:
+        """Check if a port is open on the REMOTE host via SSH.
+        
+        This avoids the SSH tunnel problem where the local tunnel listener
+        always accepts connections even when nothing is listening on the remote.
+        
+        Returns True if something is listening on the remote port, False otherwise.
+        """
+        is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+        if not is_remote:
+            # Local mode — just do a normal socket check
+            try:
+                sock = socket.create_connection(("localhost", port), timeout=2)
+                sock.close()
+                return True
+            except (ConnectionRefusedError, OSError, socket.timeout):
+                return False
+        
+        # Remote mode — check the port on the remote host via SSH
+        # Use ss (or netstat) to check if anything is listening on the port
+        check_cmd = f"ss -tlnH 'sport = :{port}' | grep -q :{port}"
+        try:
+            exit_code, stdout, stderr = self._ssh_exec(check_cmd, timeout=10)
+            return exit_code == 0
+        except Exception as e:
+            self._log_debug(f"Remote port check failed: {e}")
             return False
     
     def _wait_for_gdb_port_closed(self, host: str, port: int, timeout: int = 30) -> bool:
@@ -1103,16 +1494,34 @@ class CuttlefishController:
         several minutes to assemble disk images before starting QEMU, during which
         time a stale port could still be open.
         
+        When using SSH tunnels, checks the REMOTE port via SSH command instead of
+        the local tunnel endpoint (the local tunnel listener always accepts
+        connections, so it can never appear "closed").
+        
         Returns True if the port closed within the timeout, False if it's still open.
         """
         self._log_info(f"Checking if GDB port {host}:{port} is still open from a previous instance...")
+        
+        is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+        use_remote_check = is_remote  # Always use remote check for remote hosts
+        
+        if use_remote_check:
+            self._log_info("Using REMOTE port check via SSH (local tunnel would always appear open)")
+        
         start = time.time()
         
         # First, quick check if port is even open
-        try:
-            sock = socket.create_connection((host, port), timeout=2)
-            sock.close()
-        except (ConnectionRefusedError, OSError, socket.timeout):
+        if use_remote_check:
+            port_open = self._check_remote_port_open(port)
+        else:
+            try:
+                sock = socket.create_connection((host, port), timeout=2)
+                sock.close()
+                port_open = True
+            except (ConnectionRefusedError, OSError, socket.timeout):
+                port_open = False
+        
+        if not port_open:
             self._log_info(f"GDB port {host}:{port} is already closed (no stale process)")
             return True
         
@@ -1124,16 +1533,26 @@ class CuttlefishController:
         attempt = 0
         while time.time() - start < timeout:
             attempt += 1
-            try:
-                sock = socket.create_connection((host, port), timeout=2)
-                sock.close()
-                self._log_debug(f"Attempt {attempt}: Port still open, waiting...")
-                time.sleep(2)
-            except (ConnectionRefusedError, OSError, socket.timeout):
-                elapsed = time.time() - start
-                self._log_info(f"GDB port closed after {elapsed:.1f}s ({attempt} attempts)")
-                print(f"[CUTTLEFISH] Stale GDB port closed")
-                return True
+            
+            if use_remote_check:
+                if not self._check_remote_port_open(port):
+                    elapsed = time.time() - start
+                    self._log_info(f"GDB port closed after {elapsed:.1f}s ({attempt} attempts)")
+                    print(f"[CUTTLEFISH] Stale GDB port closed")
+                    return True
+                self._log_debug(f"Attempt {attempt}: Remote port {port} still open, waiting...")
+            else:
+                try:
+                    sock = socket.create_connection((host, port), timeout=2)
+                    sock.close()
+                    self._log_debug(f"Attempt {attempt}: Port still open, waiting...")
+                except (ConnectionRefusedError, OSError, socket.timeout):
+                    elapsed = time.time() - start
+                    self._log_info(f"GDB port closed after {elapsed:.1f}s ({attempt} attempts)")
+                    print(f"[CUTTLEFISH] Stale GDB port closed")
+                    return True
+            
+            time.sleep(2)
         
         elapsed = time.time() - start
         self._log_warning(f"GDB port still open after {elapsed:.1f}s - stale process may interfere")
@@ -1143,38 +1562,76 @@ class CuttlefishController:
     def _wait_for_gdb_port(self, timeout: int = 60) -> bool:
         """Wait for GDB port to become available from a FRESH QEMU instance.
         
-        This checks both socket connectivity AND that the GDB stub actually responds.
-        When using SSH tunnels, the socket may be open (tunnel is up) but the
-        actual GDB stub on the remote may not be ready yet.
+        For REMOTE mode (GDB runs on remote host): checks the remote port via SSH.
+        No GDB tunnel exists in remote mode — GDB connects directly on the remote host.
+        
+        For LOCAL mode with tunnels: checks remote port via SSH then verifies local tunnel.
+        For LOCAL mode without tunnels: checks local TCP socket connectivity.
         
         IMPORTANT: This first waits for the port to CLOSE (proving the old QEMU is gone),
-        then waits for it to OPEN again (proving the new QEMU has started). This prevents
-        sending the GDB continue command to a stale QEMU instance.
+        then waits for it to OPEN again (proving the new QEMU has started).
         """
-        # When using SSH tunnels, connect to localhost on the local tunnel port
-        if self.config.setup_tunnels:
+        is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+        remote_port = self.config.gdb_port
+        
+        if is_remote:
+            # Remote mode: always check the remote port via SSH
+            # There is NO GDB tunnel — GDB runs natively on the remote host
+            host = "localhost"  # For logging only
+            port = remote_port
+            use_remote_check = True
+            
+            # Remote launch_cvd takes 3-5 minutes to assemble before QEMU starts
+            # Override short timeouts to give it enough time
+            if timeout < 300:
+                self._log_info(f"Remote mode: extending GDB port timeout from {timeout}s to 300s")
+                timeout = 300
+        elif self.config.setup_tunnels:
             host = "localhost"
             port = self.config.local_gdb_port
+            use_remote_check = True
         else:
             host = self.config.gdb_host
             port = self.config.gdb_port
+            use_remote_check = False
         
-        is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+        # The remote port to check is always the GDB port on the remote host
+        remote_port = self.config.gdb_port
         
         self._log_separator()
         self._log_info(f"WAITING FOR GDB PORT: {host}:{port} (timeout: {timeout}s)")
         self._log_info(f"Remote mode: {is_remote}, Tunnels: {self.config.setup_tunnels}")
+        if use_remote_check:
+            self._log_info(f"Will check REMOTE port {remote_port} via SSH to avoid tunnel false-positives")
         print(f"[CUTTLEFISH] Waiting for GDB on {host}:{port}...")
         
         # Phase 1: Wait for the port to CLOSE first (if a stale process has it open).
         # launch_cvd takes a long time (2-3 min) to assemble disk images before QEMU starts.
         # During that time, a stale GDB stub from a previous instance may still be listening.
-        # If we connect to the stale one and send 'continue', the NEW QEMU starts paused
-        # with -S and never gets the continue, so ADB never comes up.
-        close_timeout = min(timeout, 180)  # Up to 3 minutes for old QEMU to die
-        self._wait_for_gdb_port_closed(host, port, timeout=close_timeout)
+        if use_remote_check:
+            # For remote mode, check the remote port via SSH
+            self._log_info(f"Checking if remote GDB port {remote_port} is still open from a previous instance...")
+            if self._check_remote_port_open(remote_port):
+                self._log_info(f"Remote port {remote_port} is still open, waiting for it to close...")
+                close_start = time.time()
+                close_timeout = min(timeout, 180)
+                while time.time() - close_start < close_timeout:
+                    if not self._check_remote_port_open(remote_port):
+                        self._log_info(f"Remote port {remote_port} closed after {time.time()-close_start:.1f}s")
+                        break
+                    time.sleep(2)
+            else:
+                self._log_info(f"Remote GDB port {remote_port} is already closed (no stale process)")
+        else:
+            close_timeout = min(timeout, 180)  # Up to 3 minutes for old QEMU to die
+            self._wait_for_gdb_port_closed(host, port, timeout=close_timeout)
         
         # Phase 2: Now wait for the NEW QEMU to open the port
+        # IMPORTANT: We do NOT do GDB protocol verification here!
+        # The GDB stub is single-connection — if we connect, send $?#3f, then disconnect,
+        # the stub may get confused or enter a bad state. The full protocol handshake
+        # (read stop reply, ACK, send continue) happens in _raw_gdb_continue() as a
+        # single uninterrupted connection.
         self._log_info(f"Now waiting for NEW GDB stub to become ready...")
         print(f"[CUTTLEFISH] Waiting for new GDB stub...")
         start = time.time()
@@ -1184,32 +1641,35 @@ class CuttlefishController:
             attempt += 1
             elapsed = time.time() - start
             
-            # First check socket connectivity
-            try:
-                self._log_debug(f"Attempt {attempt}: Checking socket {host}:{port}...")
-                sock = socket.create_connection((host, port), timeout=5)
-                # Socket connected - try to do a minimal GDB protocol exchange
-                # Send $?#3f (halt reason query) to verify it's a fresh stopped stub
-                self._log_debug(f"Attempt {attempt}: Socket is open, testing GDB protocol...")
+            if use_remote_check:
+                # When tunnels are active, check the REMOTE port first via SSH
+                # The local tunnel always accepts connections, so we can't use it to detect readiness
+                # IMPORTANT: Do NOT connect through the tunnel here! The GDB stub is
+                # single-connection and sends a stop reply on connect. If we connect+disconnect
+                # just to verify, the stub may get confused. The remote ss check is sufficient.
+                if not self._check_remote_port_open(remote_port):
+                    self._log_debug(f"Attempt {attempt}: Remote port {remote_port} not yet open...")
+                    time.sleep(2)
+                    continue
+                
+                # Remote port is open — QEMU's GDB stub is listening
+                self._log_info(f"Remote port {remote_port} is open after {elapsed:.1f}s ({attempt} attempts)")
+                self._log_info("GDB stub is listening on remote — ready for continue")
+                print(f"[CUTTLEFISH] GDB port is ready")
+                return True
+            else:
+                # Local mode — just check TCP connectivity (no GDB protocol)
                 try:
-                    sock.settimeout(5)
-                    sock.send(b"+")  # ACK to sync
-                    time.sleep(0.1)
-                    # If we get here without ConnectionResetError, stub is alive
+                    self._log_debug(f"Attempt {attempt}: Checking socket {host}:{port}...")
+                    sock = socket.create_connection((host, port), timeout=5)
                     sock.close()
                     self._log_info(f"GDB stub is ready after {elapsed:.1f}s ({attempt} attempts)")
                     print(f"[CUTTLEFISH] GDB port is ready")
                     return True
-                except (ConnectionResetError, BrokenPipeError, socket.timeout) as e:
-                    self._log_debug(f"Attempt {attempt}: GDB stub not responding - {e}")
-                    sock.close()
-                except Exception as e:
-                    self._log_debug(f"Attempt {attempt}: GDB test error - {e}")
-                    sock.close()
-            except (ConnectionRefusedError, OSError, socket.timeout) as e:
-                self._log_debug(f"Attempt {attempt}: Socket not ready - {e}")
-            
-            time.sleep(2)
+                except (ConnectionRefusedError, OSError, socket.timeout) as e:
+                    self._log_debug(f"Attempt {attempt}: Socket not ready - {e}")
+                
+                time.sleep(2)
         
         elapsed = time.time() - start
         self._log_error(f"GDB port not available after {elapsed:.1f}s ({attempt} attempts)")
@@ -1226,11 +1686,11 @@ class CuttlefishController:
         """
         Attach GDB to the kernel with a custom Python script for analysis.
         
-        This connects to the GDB stub, loads the analysis script (which sets up
-        breakpoints and logging), and then continues execution. All GDB output
-        is logged for debugging.
+        For remote instances: runs GDB natively on the remote host (avoids
+        cross-architecture GDB incompatibilities between x86 gdb-multiarch and
+        aarch64 QEMU stub). Files are deployed via SCP and results downloaded.
         
-        Includes retry logic for unstable connections (crosvm GDB stub can be flaky).
+        For local instances: runs GDB locally with gdb-multiarch.
         
         Args:
             script_path: Path to GDB Python script to source
@@ -1248,18 +1708,755 @@ class CuttlefishController:
         if vmlinux_path:
             self._log_info(f"vmlinux: {vmlinux_path}")
         
-        # Determine GDB connection target
         if is_remote:
-            if self.config.setup_tunnels:
-                host = "localhost"
-                port = self.config.local_gdb_port
-                self._log_info(f"Remote instance - using GDB tunnel localhost:{port}")
-            else:
-                self._log_error("Remote instance but setup_tunnels=False")
-                return False
+            return self._gdb_attach_remote(script_path, vmlinux_path, timeout, max_retries)
         else:
-            host = "localhost"
-            port = self.config.local_gdb_port if self.config.setup_tunnels else self.config.gdb_port
+            return self._gdb_attach_local(script_path, vmlinux_path, timeout, max_retries)
+
+    def _gdb_attach_remote(
+        self,
+        script_path: Path,
+        vmlinux_path: Optional[str] = None,
+        timeout: int = 60,
+        max_retries: int = 3,
+    ) -> bool:
+        """
+        Run GDB on the remote host where QEMU runs.
+        
+        This avoids cross-architecture GDB issues by running GDB natively on the
+        remote aarch64 host, connecting to localhost:<gdb_port> directly. No GDB
+        SSH tunnel is needed.
+        
+        Files are uploaded via SCP. Results are downloaded after GDB completes.
+        """
+        remote_gdb_dir = "/tmp/syzploit_gdb"
+        gdb_port = self.config.gdb_port
+        
+        # Create log directory for local copies of GDB output
+        log_dir = Path(self.config.log_file).parent if self.config.log_file else Path(".")
+        gdb_stdout_log = log_dir / "gdb_stdout.log"
+        gdb_stderr_log = log_dir / "gdb_stderr.log"
+        
+        self._log_info("REMOTE GDB MODE: Running GDB on remote host")
+        self._log_info(f"Remote GDB dir: {remote_gdb_dir}")
+        self._log_info(f"GDB port on remote: {gdb_port}")
+        
+        # 1. Create remote directory
+        exit_code, _, _ = self._ssh_exec(f"mkdir -p {remote_gdb_dir}", timeout=10)
+        if exit_code != 0:
+            self._log_error("Failed to create remote GDB directory")
+            return False
+        
+        # 2. Upload files needed by the GDB script
+        file_paths = self._gdb_file_paths
+        if not file_paths:
+            self._log_warning("_gdb_file_paths is empty — reconstructing from script_path")
+            # Reconstruct file paths from the bootstrap script and its directory
+            script_dir = script_path.parent
+            script_stem = script_path.stem.replace("_kernel_gdb_script", "")
+            
+            # Find syz_trace (gdb.py) by reading the bootstrap script
+            syz_trace_path = ""
+            try:
+                with open(script_path) as f:
+                    for line in f:
+                        if "source " in line and "gdb.py" in line:
+                            # Extract path from: gdb.execute('source /path/to/gdb.py')
+                            import re
+                            match = re.search(r"source\s+([^\s'\"]+gdb\.py)", line)
+                            if match:
+                                syz_trace_path = match.group(1)
+                                break
+            except Exception as e:
+                self._log_warning(f"Could not parse bootstrap script: {e}")
+            
+            # Find config JSON and other files in the script directory
+            config_json = ""
+            system_map = ""
+            runtime_symbols = ""
+            results_file = ""
+            
+            for f in script_dir.iterdir():
+                name = f.name
+                if name.endswith("_gdb_config.json"):
+                    config_json = str(f)
+                elif name == "System.map":
+                    system_map = str(f)
+                elif name == "runtime_symbols_config.json":
+                    runtime_symbols = str(f)
+                elif name.endswith("_kernel_gdb_results.json"):
+                    results_file = str(f)
+            
+            # If no results file found, construct one
+            if not results_file:
+                results_file = str(script_dir / f"{script_stem}_kernel_gdb_results.json")
+            
+            file_paths = {
+                'config_json': config_json,
+                'syz_trace': syz_trace_path,
+                'results_file': results_file,
+                'system_map': system_map,
+                'runtime_symbols': runtime_symbols,
+                'bootstrap_script': str(script_path),
+            }
+            self._gdb_file_paths = file_paths
+            self._log_info(f"Reconstructed file paths: {json.dumps({k: v for k, v in file_paths.items() if v}, indent=2)}")
+        
+        if not file_paths.get('syz_trace'):
+            self._log_error("Cannot find gdb.py (syz_trace) path — cannot proceed with remote GDB")
+            return False
+        
+        # Build local->remote path mapping
+        path_mapping = {}  # local_path -> remote_path
+        
+        # Upload gdb.py (syz_trace script)
+        syz_trace_local = file_paths.get('syz_trace', '')
+        if syz_trace_local and os.path.exists(syz_trace_local):
+            remote_syz_trace = f"{remote_gdb_dir}/gdb.py"
+            if self._scp_upload(syz_trace_local, remote_syz_trace):
+                path_mapping[syz_trace_local] = remote_syz_trace
+                self._log_info(f"Uploaded syz_trace: {remote_syz_trace}")
+            else:
+                self._log_error("Failed to upload gdb.py to remote")
+                return False
+        
+        # Upload config JSON — rewrite internal paths to remote paths
+        config_json_local = file_paths.get('config_json', '')
+        if config_json_local and os.path.exists(config_json_local):
+            remote_config = f"{remote_gdb_dir}/{Path(config_json_local).name}"
+            
+            # Rewrite JSON config contents to use remote paths
+            try:
+                with open(config_json_local, 'r') as f:
+                    config_data = json.load(f)
+                
+                # Remap system_map_path
+                smap_local = file_paths.get('system_map', '')
+                if smap_local and config_data.get('system_map_path'):
+                    remote_smap = f"{remote_gdb_dir}/{Path(smap_local).name}"
+                    config_data['system_map_path'] = remote_smap
+                    self._log_info(f"  Remapped system_map_path: {remote_smap}")
+                
+                # Remap export_path to remote
+                if config_data.get('export_path'):
+                    remote_export = f"{remote_gdb_dir}/{Path(config_data['export_path']).name}"
+                    config_data['export_path'] = remote_export
+                    self._log_info(f"  Remapped export_path: {remote_export}")
+                
+                # Remap runtime_symbols_config
+                runtime_local = file_paths.get('runtime_symbols', '')
+                if runtime_local and config_data.get('runtime_symbols_config'):
+                    remote_runtime_cfg = f"{remote_gdb_dir}/{Path(runtime_local).name}"
+                    config_data['runtime_symbols_config'] = remote_runtime_cfg
+                    self._log_info(f"  Remapped runtime_symbols_config: {remote_runtime_cfg}")
+                
+                # Write remapped config to a temp file and upload
+                remapped_config_local = Path(config_json_local).parent / f"{Path(config_json_local).stem}_remote.json"
+                with open(remapped_config_local, 'w') as f:
+                    json.dump(config_data, f, indent=2)
+                
+                if self._scp_upload(str(remapped_config_local), remote_config):
+                    path_mapping[config_json_local] = remote_config
+                    self._log_info(f"Uploaded config JSON (remapped): {remote_config}")
+                else:
+                    self._log_warning("Failed to upload remapped config JSON, uploading original")
+                    if self._scp_upload(config_json_local, remote_config):
+                        path_mapping[config_json_local] = remote_config
+            except Exception as e:
+                self._log_warning(f"Failed to remap config JSON paths: {e}, uploading original")
+                if self._scp_upload(config_json_local, remote_config):
+                    path_mapping[config_json_local] = remote_config
+                    self._log_info(f"Uploaded config JSON (original): {remote_config}")
+        
+        # Upload System.map (if exists)
+        smap_local = file_paths.get('system_map', '')
+        if smap_local and os.path.exists(smap_local):
+            remote_smap = f"{remote_gdb_dir}/{Path(smap_local).name}"
+            if self._scp_upload(smap_local, remote_smap):
+                path_mapping[smap_local] = remote_smap
+                self._log_info(f"Uploaded System.map: {remote_smap}")
+        
+        # Upload runtime symbols config (if exists) — also remap paths
+        runtime_local = file_paths.get('runtime_symbols', '')
+        if runtime_local and os.path.exists(runtime_local):
+            remote_runtime = f"{remote_gdb_dir}/{Path(runtime_local).name}"
+            
+            # Remap system_map_path inside runtime symbols config
+            try:
+                with open(runtime_local, 'r') as f:
+                    runtime_data = json.load(f)
+                
+                smap_local = file_paths.get('system_map', '')
+                if smap_local and runtime_data.get('system_map_path'):
+                    remote_smap = f"{remote_gdb_dir}/{Path(smap_local).name}"
+                    runtime_data['system_map_path'] = remote_smap
+                
+                remapped_runtime_local = Path(runtime_local).parent / f"{Path(runtime_local).stem}_remote.json"
+                with open(remapped_runtime_local, 'w') as f:
+                    json.dump(runtime_data, f, indent=2)
+                
+                if self._scp_upload(str(remapped_runtime_local), remote_runtime):
+                    path_mapping[runtime_local] = remote_runtime
+                    self._log_info(f"Uploaded runtime symbols (remapped): {remote_runtime}")
+                else:
+                    if self._scp_upload(runtime_local, remote_runtime):
+                        path_mapping[runtime_local] = remote_runtime
+                        self._log_info(f"Uploaded runtime symbols: {remote_runtime}")
+            except Exception as e:
+                self._log_warning(f"Failed to remap runtime config: {e}")
+                if self._scp_upload(runtime_local, remote_runtime):
+                    path_mapping[runtime_local] = remote_runtime
+                    self._log_info(f"Uploaded runtime symbols: {remote_runtime}")
+        
+        # Set up remote results path
+        results_local = file_paths.get('results_file', '')
+        remote_results = f"{remote_gdb_dir}/{Path(results_local).name}" if results_local else f"{remote_gdb_dir}/results.json"
+        if results_local:
+            path_mapping[results_local] = remote_results
+        
+        # 3. Rewrite bootstrap script with remote paths and upload
+        with open(script_path) as f:
+            bootstrap_content = f.read()
+        
+        remote_bootstrap = bootstrap_content
+        for local_path, remote_path in path_mapping.items():
+            remote_bootstrap = remote_bootstrap.replace(local_path, remote_path)
+        
+        # Write rewritten bootstrap locally then upload
+        remote_bootstrap_local = script_path.parent / f"{script_path.stem}_remote{script_path.suffix}"
+        with open(remote_bootstrap_local, 'w') as f:
+            f.write(remote_bootstrap)
+        
+        remote_script = f"{remote_gdb_dir}/bootstrap.py"
+        if not self._scp_upload(str(remote_bootstrap_local), remote_script):
+            self._log_error("Failed to upload bootstrap script to remote")
+            return False
+        self._log_info(f"Uploaded bootstrap script: {remote_script}")
+        
+        # 4. Upload vmlinux if provided and exists locally
+        remote_vmlinux = None
+        if vmlinux_path and os.path.exists(vmlinux_path):
+            remote_vmlinux = f"{remote_gdb_dir}/vmlinux"
+            self._log_info(f"Uploading vmlinux ({os.path.getsize(vmlinux_path) // (1024*1024)}MB)...")
+            if not self._scp_upload(vmlinux_path, remote_vmlinux, timeout=300):
+                self._log_warning("Failed to upload vmlinux, continuing without symbols")
+                remote_vmlinux = None
+        
+        # 5. Build GDB command for remote execution
+        remote_gdb_log = f"{remote_gdb_dir}/gdb_session.log"
+        
+        gdb_ex_cmds = []
+        if remote_vmlinux:
+            gdb_ex_cmds.append(f"file {remote_vmlinux}")
+        gdb_ex_cmds.extend([
+            f"set logging file {remote_gdb_log}",
+            "set logging overwrite on",
+            "set logging enabled on",
+            "set pagination off",
+            "set confirm off",
+            "set tcp connect-timeout 30",
+            f"target remote localhost:{gdb_port}",
+            f"source {remote_script}",
+        ])
+        
+        # Build the remote GDB command string
+        gdb_ex_str = " ".join(f"-ex '{cmd}'" for cmd in gdb_ex_cmds)
+        remote_gdb_cmd = f"gdb -q {gdb_ex_str}"
+        
+        # Add a small delay to let QEMU's GDB stub stabilize
+        self._log_info("Waiting 3s for GDB stub to stabilize...")
+        time.sleep(3)
+        
+        # Try with retries
+        for attempt in range(1, max_retries + 1):
+            self._log_info(f"Remote GDB connection attempt {attempt}/{max_retries}")
+            
+            try:
+                # Run GDB on remote via SSH
+                ssh_cmd = self._build_ssh_cmd(remote_gdb_cmd)
+                self._log_debug(f"Running: {' '.join(ssh_cmd)}")
+                print(f"[CUTTLEFISH] Remote GDB connecting to localhost:{gdb_port} (attempt {attempt}/{max_retries})...")
+                
+                start_time = time.time()
+                
+                proc = subprocess.Popen(
+                    ssh_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                
+                self._gdb_process = proc
+                self._log_info(f"Remote GDB process started via SSH (local PID: {proc.pid})")
+                
+                # Wait for completion or timeout
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # This is expected - GDB is running with the kernel
+                    self._log_info(f"Remote GDB running in background (continuing after {timeout}s timeout)")
+                    stdout = ""
+                    stderr = ""
+                
+                elapsed = time.time() - start_time
+                
+                # Save stdout/stderr
+                if stdout:
+                    with open(gdb_stdout_log, 'w') as f:
+                        f.write(stdout)
+                if stderr:
+                    with open(gdb_stderr_log, 'w') as f:
+                        f.write(stderr)
+                
+                # Log output
+                if proc.returncode is not None:
+                    self._log_info(f"Remote GDB exited in {elapsed:.2f}s with code {proc.returncode}")
+                else:
+                    self._log_info(f"Remote GDB still running after {elapsed:.2f}s (monitoring kernel)")
+                
+                self._log_info("=" * 40 + " GDB STDOUT " + "=" * 40)
+                if stdout and stdout.strip():
+                    for line in stdout.strip().split('\n')[:30]:
+                        self._log_info(f"[GDB-OUT] {line}")
+                    if len(stdout.strip().split('\n')) > 30:
+                        self._log_info(f"[GDB-OUT] ... ({len(stdout.strip().split(chr(10))) - 30} more lines)")
+                else:
+                    self._log_info("[GDB-OUT] (empty or still running)")
+                
+                self._log_info("=" * 40 + " GDB STDERR " + "=" * 40)
+                if stderr and stderr.strip():
+                    for line in stderr.strip().split('\n')[:20]:
+                        self._log_info(f"[GDB-ERR] {line}")
+                else:
+                    self._log_info("[GDB-ERR] (empty)")
+                self._log_info("=" * 92)
+                
+                # Check for connection errors
+                combined = (stdout + stderr).lower() if stdout or stderr else ""
+                if "connection refused" in combined:
+                    self._log_error(f"GDB connection refused (attempt {attempt})")
+                    if attempt < max_retries:
+                        time.sleep(5)
+                    continue
+                if "connection reset" in combined:
+                    self._log_error(f"GDB connection reset (attempt {attempt})")
+                    if attempt < max_retries:
+                        time.sleep(5)
+                    continue
+                
+                # 6. Save remote paths for later result download
+                # Results are NOT downloaded here — GDB is still running in background
+                # and collecting breakpoint data. Results are downloaded after the
+                # reproducer finishes, via download_remote_gdb_results().
+                self._remote_gdb_paths = {
+                    'results': remote_results,
+                    'results_local': results_local,
+                    'gdb_log': remote_gdb_log,
+                    'gdb_log_local': str(log_dir / "gdb_session.log"),
+                    'remote_dir': remote_gdb_dir,
+                }
+                
+                # Download just the GDB session log (for immediate diagnostics)
+                local_gdb_log = log_dir / "gdb_session.log"
+                self._scp_download(remote_gdb_log, str(local_gdb_log))
+                
+                self._log_info("Remote GDB attached with script successfully")
+                self._log_info("Results will be downloaded later via download_remote_gdb_results()")
+                print("[CUTTLEFISH] Remote GDB attached and script loaded")
+                return True
+                
+            except Exception as e:
+                self._log_error(f"Remote GDB attach failed: {e}")
+                import traceback
+                self._log_error(f"Traceback:\n{traceback.format_exc()}")
+                if attempt < max_retries:
+                    time.sleep(5)
+                continue
+        
+        self._log_error(f"Remote GDB attach failed after {max_retries} attempts")
+        return False
+
+    def _refresh_runtime_symbols_for_current_boot(self) -> bool:
+        """Re-extract /proc/kallsyms from the CURRENT boot and update all config files.
+        
+        This is critical when Phase 1 (symbol extraction) and Phase 2 (GDB tracing)
+        boot with different KASLR settings. Phase 1 may use KASLR (randomized addresses)
+        while Phase 2 boots with nokaslr (deterministic addresses). Without refreshing,
+        GDB breakpoints would be set at Phase 1's addresses, which are wrong for Phase 2.
+        
+        Updates:
+          - runtime_symbols_config.json (alloc/free/crash_stack addresses)
+          - System.map (full symbol table)
+          - GDB config JSON (breakpoint addresses)
+          - _gdb_file_paths dict (so remote upload uses updated files)
+        """
+        self._log_info("=== Refreshing runtime symbols for current boot ===")
+        
+        # Get ADB target for the currently running system
+        adb_target = self.get_adb_target()
+        adb_exe = self.config.adb_exe
+        self._log_info(f"ADB target: {adb_target}, ADB exe: {adb_exe}")
+        
+        # Reconstruct _gdb_file_paths from _gdb_script_path if empty
+        # This happens in non-persistent mode where a fresh controller is created
+        if not self._gdb_file_paths and self._gdb_script_path:
+            script_path = Path(self._gdb_script_path)
+            script_dir = script_path.parent
+            self._log_info(f"Reconstructing _gdb_file_paths from script dir: {script_dir}")
+            
+            config_json = ""
+            system_map = ""
+            runtime_symbols = ""
+            results_file = ""
+            syz_trace_path = ""
+            
+            for f in script_dir.iterdir():
+                name = f.name
+                if name.endswith("_gdb_config.json"):
+                    config_json = str(f)
+                elif name == "System.map":
+                    system_map = str(f)
+                elif name == "runtime_symbols_config.json":
+                    runtime_symbols = str(f)
+                elif name.endswith("_kernel_gdb_results.json"):
+                    results_file = str(f)
+            
+            # If no results file found, construct expected path
+            if not results_file:
+                script_stem = script_path.stem.replace("_kernel_gdb_script", "")
+                results_file = str(script_dir / f"{script_stem}_kernel_gdb_results.json")
+            
+            # Also check symbols subdirectory for System.map
+            symbols_dir = script_dir / "symbols"
+            if symbols_dir.exists():
+                smap_in_symbols = symbols_dir / "System.map"
+                if smap_in_symbols.exists() and not system_map:
+                    system_map = str(smap_in_symbols)
+            
+            # Find gdb.py path from the bootstrap script
+            try:
+                with open(script_path) as f:
+                    import re
+                    for line in f:
+                        if "source " in line and "gdb.py" in line:
+                            match = re.search(r"source\s+([^\s'\"]+gdb\.py)", line)
+                            if match:
+                                syz_trace_path = match.group(1)
+                                break
+            except Exception:
+                pass
+            
+            self._gdb_file_paths = {
+                'config_json': config_json,
+                'syz_trace': syz_trace_path,
+                'results_file': results_file,
+                'system_map': system_map,
+                'runtime_symbols': runtime_symbols,
+                'bootstrap_script': str(script_path),
+            }
+            self._log_info(f"Reconstructed _gdb_file_paths: {json.dumps({k: v for k, v in self._gdb_file_paths.items() if v}, indent=2)}")
+        elif not self._gdb_file_paths:
+            self._log_warning("No _gdb_file_paths and no _gdb_script_path, cannot refresh symbols")
+            return False
+        
+        # Find the log directory from existing file paths
+        config_json_path = self._gdb_file_paths.get('config_json', '')
+        if config_json_path:
+            output_dir = str(Path(config_json_path).parent)
+        else:
+            bootstrap_path = self._gdb_file_paths.get('bootstrap_script', '')
+            if bootstrap_path:
+                output_dir = str(Path(bootstrap_path).parent)
+            else:
+                self._log_warning("Cannot determine output dir for symbol refresh")
+                return False
+        
+        self._log_info(f"Output directory: {output_dir}")
+        
+        # Delete old System.map so extract_kallsyms_from_running_system doesn't skip
+        old_smap = self._gdb_file_paths.get('system_map', '')
+        if old_smap and os.path.exists(old_smap):
+            self._log_info(f"Removing old System.map: {old_smap}")
+            os.remove(old_smap)
+        
+        # Also check the symbols subdirectory
+        symbols_dir = os.path.join(output_dir, "symbols")
+        for smap_name in ["System.map", "kallsyms.txt"]:
+            old_file = os.path.join(symbols_dir, smap_name)
+            if os.path.exists(old_file):
+                self._log_info(f"Removing old {smap_name}: {old_file}")
+                os.remove(old_file)
+        old_smap_in_dir = os.path.join(output_dir, "System.map")
+        if os.path.exists(old_smap_in_dir):
+            os.remove(old_smap_in_dir)
+        
+        # Re-extract /proc/kallsyms from the running system
+        # Use runtime_symbols.py's extraction which has better root handling
+        # (adb root, pipe-to-su, etc.) compared to the simpler extract_kallsyms_from_running_system
+        self._log_info("Extracting /proc/kallsyms from current boot (via runtime_symbols)...")
+        try:
+            from .runtime_symbols import extract_runtime_symbols
+            runtime_result = extract_runtime_symbols(
+                output_dir=symbols_dir,
+                vm_type="cuttlefish",
+                adb_exe=adb_exe,
+                adb_target=adb_target,
+                logger=lambda msg: self._log_info(msg),
+            )
+        except ImportError:
+            self._log_warning("Could not import runtime_symbols, falling back to extract_kallsyms_from_running_system")
+            runtime_result = None
+        
+        if runtime_result and runtime_result.system_map_path:
+            new_smap_path = runtime_result.system_map_path
+            self._log_info(f"Extracted {len(runtime_result.symbols)} symbols via runtime_symbols")
+        else:
+            # Fallback to the original extraction method
+            self._log_info("Falling back to extract_kallsyms_from_running_system...")
+            new_smap_path = extract_kallsyms_from_running_system(
+                ssh_host=self.config.ssh_host,
+                local_output_dir=symbols_dir,
+                ssh_user=self.config.ssh_user,
+                ssh_key_path=self.config.ssh_key_path,
+                adb_exe=adb_exe,
+                adb_target=adb_target,
+                use_adb=True,
+                logger=lambda msg: self._log_info(msg),
+            )
+        
+        if not new_smap_path:
+            self._log_warning("Failed to extract kallsyms from current boot")
+            return False
+        
+        self._log_info(f"New System.map: {new_smap_path}")
+        
+        # Copy System.map to the output_dir root so it's found by path remapping
+        smap_in_output_dir = os.path.join(output_dir, "System.map")
+        if new_smap_path != smap_in_output_dir:
+            import shutil
+            shutil.copy2(new_smap_path, smap_in_output_dir)
+            self._log_info(f"Copied System.map to: {smap_in_output_dir}")
+            # Use the copied path as the canonical path
+            new_smap_path = smap_in_output_dir
+        
+        # Parse the new System.map
+        new_symbols = {}
+        try:
+            with open(new_smap_path, 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 3:
+                        addr = int(parts[0], 16)
+                        name = parts[2]
+                        new_symbols[name] = addr
+            self._log_info(f"Parsed {len(new_symbols)} symbols from new System.map")
+        except Exception as e:
+            self._log_warning(f"Failed to parse new System.map: {e}")
+            return False
+        
+        # Log some key addresses to verify they look correct
+        for sym in ['__kmalloc', 'kfree', 'start_kernel']:
+            if sym in new_symbols:
+                self._log_info(f"  {sym}: 0x{new_symbols[sym]:x}")
+        
+        # Update runtime_symbols_config.json
+        runtime_config_path = self._gdb_file_paths.get('runtime_symbols', '')
+        if runtime_config_path:
+            try:
+                # Load existing config to preserve crash_stack_funcs and other metadata
+                old_config = {}
+                if os.path.exists(runtime_config_path):
+                    with open(runtime_config_path, 'r') as f:
+                        old_config = json.load(f)
+                
+                # Rebuild alloc/free addresses from new symbols
+                alloc_names = ['__kmalloc', 'kmem_cache_alloc', 'kmem_cache_alloc_trace',
+                              'krealloc', 'vmalloc', 'kvmalloc', '__kmalloc_node']
+                free_names = ['kfree', 'kmem_cache_free', 'vfree', 'kvfree',
+                             'kfree_rcu', 'vfree_atomic']
+                
+                new_alloc_addrs = {}
+                new_free_addrs = {}
+                for name in alloc_names:
+                    if name in new_symbols:
+                        new_alloc_addrs[name] = f"0x{new_symbols[name]:x}"
+                for name in free_names:
+                    if name in new_symbols:
+                        new_free_addrs[name] = f"0x{new_symbols[name]:x}"
+                
+                # Rebuild crash stack addresses
+                crash_stack_funcs = old_config.get('crash_stack_funcs', [])
+                new_crash_addrs = {}
+                for func in crash_stack_funcs:
+                    if func in new_symbols:
+                        new_crash_addrs[func] = f"0x{new_symbols[func]:x}"
+                
+                new_runtime_config = {
+                    'system_map_path': new_smap_path,
+                    'alloc_addrs': new_alloc_addrs,
+                    'free_addrs': new_free_addrs,
+                    'crash_stack_addrs': new_crash_addrs,
+                    'crash_stack_funcs': crash_stack_funcs,
+                    'extraction_method': 'adb_kallsyms_phase2_refresh',
+                    'kptr_restrict_disabled': old_config.get('kptr_restrict_disabled', False),
+                }
+                
+                with open(runtime_config_path, 'w') as f:
+                    json.dump(new_runtime_config, f, indent=2)
+                self._log_info(f"Updated runtime_symbols_config.json: {len(new_alloc_addrs)} alloc, {len(new_free_addrs)} free, {len(new_crash_addrs)} crash stack")
+                
+            except Exception as e:
+                self._log_warning(f"Failed to update runtime symbols config: {e}")
+        
+        # Update _gdb_file_paths with new System.map path
+        self._gdb_file_paths['system_map'] = new_smap_path
+        
+        # Update the GDB config JSON with new addresses
+        if config_json_path and os.path.exists(config_json_path):
+            try:
+                with open(config_json_path, 'r') as f:
+                    gdb_config = json.load(f)
+                
+                # Update alloc/free addresses
+                addr_keys = {
+                    'kmalloc_addr': '__kmalloc',
+                    'kfree_addr': 'kfree',
+                    'vfree_addr': 'vfree',
+                    'kmem_cache_alloc_addr': 'kmem_cache_alloc',
+                    'kmem_cache_free_addr': 'kmem_cache_free',
+                    'kvfree_addr': 'kvfree',
+                    'kfree_rcu_addr': 'kfree_rcu',
+                    'vfree_atomic_addr': 'vfree_atomic',
+                }
+                for json_key, sym_name in addr_keys.items():
+                    if sym_name in new_symbols:
+                        gdb_config[json_key] = new_symbols[sym_name]
+                    else:
+                        gdb_config[json_key] = 0
+                
+                # Update system_map_path
+                gdb_config['system_map_path'] = new_smap_path
+                gdb_config['symbols_source'] = 'runtime_phase2_refresh'
+                
+                # Update crash stack addresses
+                if gdb_config.get('crash_stack_addrs'):
+                    new_crash = {}
+                    for func_name in gdb_config.get('crash_stack_funcs', []):
+                        if func_name in new_symbols:
+                            new_crash[func_name] = f"0x{new_symbols[func_name]:x}"
+                    gdb_config['crash_stack_addrs'] = new_crash
+                
+                with open(config_json_path, 'w') as f:
+                    json.dump(gdb_config, f, indent=2)
+                self._log_info(f"Updated GDB config JSON with Phase 2 addresses")
+                
+                # Log updated addresses for verification
+                for json_key, sym_name in addr_keys.items():
+                    val = gdb_config.get(json_key, 0)
+                    if val:
+                        self._log_info(f"  {sym_name}: 0x{val:x}")
+                
+            except Exception as e:
+                self._log_warning(f"Failed to update GDB config JSON: {e}")
+        
+        # Also update the bootstrap script with new System.map path
+        bootstrap_path = self._gdb_file_paths.get('bootstrap_script', '')
+        if bootstrap_path and os.path.exists(bootstrap_path):
+            try:
+                with open(bootstrap_path, 'r') as f:
+                    script_content = f.read()
+                
+                # Replace old system_map_path in the bootstrap script
+                if old_smap and old_smap in script_content:
+                    script_content = script_content.replace(old_smap, new_smap_path)
+                    with open(bootstrap_path, 'w') as f:
+                        f.write(script_content)
+                    self._log_info("Updated bootstrap script with new System.map path")
+            except Exception as e:
+                self._log_warning(f"Failed to update bootstrap script: {e}")
+        
+        self._log_info("=== Runtime symbols refresh complete ===")
+        return True
+
+    def download_remote_gdb_results(self) -> bool:
+        """Download GDB results and session log from the remote host.
+        
+        Called AFTER the reproducer has finished running, so the GDB process
+        has had time to collect breakpoint data. If the GDB process is still
+        running, it will be terminated first to ensure results are flushed.
+        
+        Returns True if results were downloaded successfully.
+        """
+        if not hasattr(self, '_remote_gdb_paths') or not self._remote_gdb_paths:
+            self._log_debug("No remote GDB paths stored — nothing to download")
+            return False
+        
+        paths = self._remote_gdb_paths
+        self._log_separator()
+        self._log_info("DOWNLOADING REMOTE GDB RESULTS")
+        
+        # If the GDB process is still running, terminate it to flush results
+        if self._gdb_process and self._gdb_process.returncode is None:
+            self._log_info("Terminating remote GDB process to flush results...")
+            try:
+                self._gdb_process.terminate()
+                try:
+                    self._gdb_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self._gdb_process.kill()
+                    self._gdb_process.wait(timeout=5)
+                self._log_info(f"Remote GDB process terminated (exit code: {self._gdb_process.returncode})")
+            except Exception as e:
+                self._log_warning(f"Failed to terminate remote GDB: {e}")
+            # Give GDB atexit handlers time to flush results to disk
+            time.sleep(2)
+        
+        success = True
+        
+        # Download results JSON
+        results_remote = paths.get('results')
+        results_local = paths.get('results_local')
+        self._log_debug(f"Results download paths: remote={results_remote!r}, local={results_local!r}")
+        if results_remote and results_local:
+            self._log_info(f"Downloading results: {results_remote} -> {results_local}")
+            if not self._scp_download(results_remote, results_local):
+                self._log_warning("Failed to download GDB results from remote")
+                success = False
+            else:
+                self._log_info("GDB results downloaded successfully")
+        
+        # Download GDB session log (updated version with breakpoint hit data)
+        gdb_log_remote = paths.get('gdb_log')
+        gdb_log_local = paths.get('gdb_log_local')
+        if gdb_log_remote and gdb_log_local:
+            self._log_info(f"Downloading GDB log: {gdb_log_remote} -> {gdb_log_local}")
+            if not self._scp_download(gdb_log_remote, gdb_log_local):
+                self._log_warning("Failed to download GDB session log from remote")
+            else:
+                self._log_info("GDB session log downloaded")
+        
+        # Also try to download dynamic_analysis.json if it exists
+        remote_dir = paths.get('remote_dir', '/tmp/syzploit_gdb')
+        local_dir = Path(results_local).parent if results_local else Path(".")
+        dynamic_remote = f"{remote_dir}/dynamic_analysis.json"
+        dynamic_local = str(local_dir / "dynamic_analysis.json")
+        self._scp_download(dynamic_remote, dynamic_local)
+        
+        return success
+
+    def _gdb_attach_local(
+        self,
+        script_path: Path,
+        vmlinux_path: Optional[str] = None,
+        timeout: int = 60,
+        max_retries: int = 3,
+    ) -> bool:
+        """
+        Run GDB locally to connect to a local or tunneled QEMU instance.
+        """
+        # Determine GDB connection target
+        host = "localhost"
+        port = self.config.local_gdb_port if self.config.setup_tunnels else self.config.gdb_port
         
         # Create log directory for GDB output
         log_dir = Path(self.config.log_file).parent if self.config.log_file else Path(".")
@@ -1268,7 +2465,6 @@ class CuttlefishController:
         gdb_stderr_log = log_dir / "gdb_stderr.log"
         
         # Add a small delay to let crosvm's GDB stub stabilize
-        # The stub can be flaky right after the port becomes available
         self._log_info("Waiting 3s for GDB stub to stabilize...")
         time.sleep(3)
         
@@ -1293,8 +2489,8 @@ class CuttlefishController:
                         "-ex", "set logging enabled on",
                         "-ex", "set pagination off",
                         "-ex", "set confirm off",
-                        # Set architecture for cross-debugging (critical for x86 host -> aarch64 target)
-                        "-ex", "set architecture aarch64",
+                        # Note: do NOT pre-set architecture — let GDB auto-detect from
+                        # the target's XML description to avoid mismatches
                         # Add TCP connection timeout to detect failures faster
                         "-ex", "set tcp connect-timeout 30",
                         "-ex", f"target remote {host}:{port}",
@@ -1437,9 +2633,9 @@ class CuttlefishController:
         # Create a GDB log file for debugging
         gdb_log_path = Path(self.config.log_file).parent / "gdb_continue.log" if self.config.log_file else Path("gdb_continue.log")
         
-        # Add a small delay to let GDB stub stabilize after port check
-        self._log_info("Waiting 5s for GDB stub to stabilize...")
-        time.sleep(5)
+        # Add a brief delay to let GDB stub stabilize after port check
+        self._log_info("Waiting 1s for GDB stub to stabilize...")
+        time.sleep(1)
         
         # Try to continue the kernel using raw GDB protocol over socket
         # This is more reliable than spawning gdb-multiarch through SSH tunnels
@@ -1461,8 +2657,7 @@ class CuttlefishController:
                     "-ex", f"set logging file {gdb_log_path}",
                     "-ex", "set logging overwrite on",
                     "-ex", "set logging enabled on",
-                    # Set architecture for cross-debugging (critical for x86 host -> aarch64 target)
-                    "-ex", "set architecture aarch64",
+                    # Note: do NOT pre-set architecture — let GDB auto-detect
                     # TCP settings for flaky connections
                     "-ex", "set tcp connect-timeout 30",
                     "-ex", "set tcp auto-retry on",
@@ -1560,19 +2755,44 @@ class CuttlefishController:
         return False
     
     def _wait_for_adb(self, timeout: int = 120) -> bool:
-        """Wait for ADB connection to Cuttlefish device."""
+        """Wait for ADB connection to Cuttlefish device.
+        
+        For remote setups with SSH tunnels, we connect to localhost:{port}
+        because the device port is forwarded via an SSH tunnel. The LOCAL
+        ADB server handles the connection — we do NOT tunnel the remote
+        ADB server port (5037).
+        """
         adb_cmd = [self.config.adb_exe]
         port = self.config.adb_port
         
-        # The device may be listed as either localhost:port or 0.0.0.0:port
-        # We need to check for both variants
-        target_localhost = f"localhost:{port}"
-        target_0000 = f"0.0.0.0:{port}"
+        # When using SSH tunnels, we connect to localhost:{port} since
+        # the device port is forwarded locally. We do NOT use 0.0.0.0
+        # as that's the remote-side device address.
+        target = f"localhost:{port}"
         
         self._log_separator()
-        self._log_info(f"WAITING FOR ADB DEVICE: port {port} (timeout: {timeout}s)")
-        self._log_info(f"Will check for: {target_localhost} or {target_0000}")
-        print(f"[CUTTLEFISH] Waiting for ADB device on port {port}...")
+        self._log_info(f"WAITING FOR ADB DEVICE: {target} (timeout: {timeout}s)")
+        print(f"[CUTTLEFISH] Waiting for ADB device on {target}...")
+        
+        # Kill any existing local ADB server and start fresh.
+        # This clears stale device registrations from previous runs and ensures
+        # the local ADB server is the one handling connections (not a remote
+        # server through a stale tunnel).
+        self._log_info("Restarting local ADB server for clean device list...")
+        try:
+            subprocess.run(
+                adb_cmd + ["kill-server"],
+                capture_output=True, text=True, timeout=10
+            )
+            time.sleep(1)
+            subprocess.run(
+                adb_cmd + ["start-server"],
+                capture_output=True, text=True, timeout=10
+            )
+            self._log_info("Local ADB server restarted")
+        except Exception as e:
+            self._log_debug(f"ADB server restart: {e}")
+        
         start = time.time()
         attempt = 0
         
@@ -1580,17 +2800,16 @@ class CuttlefishController:
             attempt += 1
             elapsed = time.time() - start
             try:
-                # Try connecting to both variants
-                for target in [target_0000, target_localhost]:
-                    connect_cmd = adb_cmd + ["connect", target]
-                    self._log_debug(f"Attempt {attempt}: Running: {' '.join(connect_cmd)}")
-                    connect_result = subprocess.run(
-                        connect_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
-                    self._log_debug(f"Connect result: code={connect_result.returncode}, stdout={connect_result.stdout.strip()}, stderr={connect_result.stderr.strip()}")
+                # Connect to the device through the tunnel
+                connect_cmd = adb_cmd + ["connect", target]
+                self._log_debug(f"Attempt {attempt}: Running: {' '.join(connect_cmd)}")
+                connect_result = subprocess.run(
+                    connect_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                self._log_debug(f"Connect result: code={connect_result.returncode}, stdout={connect_result.stdout.strip()}, stderr={connect_result.stderr.strip()}")
                 
                 # Check device status
                 devices_cmd = adb_cmd + ["devices"]
@@ -1607,22 +2826,30 @@ class CuttlefishController:
                 device_found = False
                 device_status = None
                 for line in result.stdout.strip().split('\n'):
-                    # Check for either localhost:port or 0.0.0.0:port with "device" status
-                    if (target_localhost in line or target_0000 in line):
+                    if target in line:
                         parts = line.split('\t')
                         if len(parts) >= 2:
                             device_status = parts[1].strip()
-                            self._log_debug(f"Found device on port {port} with status: {device_status}")
+                            self._log_debug(f"Found device {target} with status: {device_status}")
                             if device_status == "device":
                                 device_found = True
                                 break
                 
                 if device_found:
                     self._log_info(f"ADB device connected after {elapsed:.1f}s ({attempt} attempts)")
-                    print(f"[CUTTLEFISH] ADB device connected on port {port}")
+                    print(f"[CUTTLEFISH] ADB device connected on {target}")
                     return True
                 elif device_status:
-                    self._log_debug(f"Attempt {attempt}: Device found but status is '{device_status}', waiting...")
+                    # If stuck as offline, try disconnecting and reconnecting
+                    if device_status == "offline" and attempt % 10 == 0:
+                        self._log_info(f"Device stuck as 'offline', forcing disconnect/reconnect...")
+                        subprocess.run(
+                            adb_cmd + ["disconnect", target],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        time.sleep(1)
+                    else:
+                        self._log_debug(f"Attempt {attempt}: Device found but status is '{device_status}', waiting...")
                 else:
                     self._log_debug(f"Attempt {attempt}: Device not found yet")
                 
@@ -1639,24 +2866,28 @@ class CuttlefishController:
         return False
     
     def _get_adb_device_serial(self) -> str:
-        """Get the ADB device serial, trying both 0.0.0.0 and localhost variants."""
+        """Get the ADB device serial for the tunneled Cuttlefish device.
+        
+        With our tunnel architecture (device port forwarded, no ADB server tunnel),
+        the device is always at localhost:{port}.
+        """
         port = self.config.adb_port
         
-        # Check which variant is available
+        # Check which variant is available (for backward compatibility)
         try:
             devices_cmd = [self.config.adb_exe, "devices"]
             result = subprocess.run(devices_cmd, capture_output=True, text=True, timeout=5)
             
-            # Check for 0.0.0.0:port first (Cuttlefish typically uses this)
-            if f"0.0.0.0:{port}" in result.stdout:
-                return f"0.0.0.0:{port}"
-            elif f"localhost:{port}" in result.stdout:
+            # Prefer localhost:port (our tunnel architecture)
+            if f"localhost:{port}" in result.stdout:
                 return f"localhost:{port}"
+            elif f"0.0.0.0:{port}" in result.stdout:
+                return f"0.0.0.0:{port}"
         except Exception:
             pass
         
-        # Default to 0.0.0.0:port as that's what Cuttlefish typically uses
-        return f"0.0.0.0:{port}"
+        # Default to localhost:port (matches our tunnel architecture)
+        return f"localhost:{port}"
 
     def _check_boot_complete(self) -> bool:
         """Check if Cuttlefish has finished booting via ADB."""
@@ -1791,53 +3022,48 @@ class CuttlefishController:
         self._log_info(f"Waiting for boot (timeout: {self.config.boot_timeout}s)")
         print(f"[CUTTLEFISH] Waiting for boot (timeout: {self.config.boot_timeout}s)...")
         
-        # Wait for GDB first if enabled (kernel is paused, needs continue)
+        # GDB handling during boot:
+        # gdb_run.sh exports GDB_PORT for the QEMU wrapper which injects
+        # -gdb tcp::<port> WITHOUT -S. This means the kernel boots normally
+        # with the GDB server available.
+        #
+        # For REMOTE mode: GDB runs natively on the remote host (no tunnel).
+        # We attach GDB DURING boot (after QEMU starts but before kernel
+        # finishes booting) so the boot watcher on start_kernel can fire
+        # and install breakpoints before symbols are lost.
+        #
+        # For LOCAL mode: GDB runs locally through an SSH tunnel.
+        #
+        # NOTE: We do NOT use launch_cvd --gdb_port because it adds -S (pause)
+        # which requires a manual GDB continue before the kernel will boot.
         if self.config.enable_gdb:
-            # Wait for GDB stub to be ready - QEMU takes time to initialize
-            self._log_info("Waiting for GDB stub to become ready...")
-            print("[CUTTLEFISH] Waiting for GDB stub to become ready...")
+            self._log_info("GDB enabled — QEMU wrapper injects GDB server (no -S pause)")
             
-            # Actually wait for the GDB port to be available, not just a fixed delay
-            if not self._wait_for_gdb_port(timeout=self.config.gdb_connect_timeout):
-                self._log_error("GDB port never became available")
-                print("[ERROR] GDB port never became available - check if QEMU started correctly")
-                # Fetch remote logs to help debug
-                if self.config.ssh_host != "localhost":
-                    self._append_remote_logs_to_local()
-                return False
-            
-            self._log_info("GDB port is available")
-            print("[CUTTLEFISH] GDB port available")
-            
-            # Two modes for GDB attachment:
-            # 1. Early attach (gdb_attach_after_boot=False): Attach script now, at early boot
-            #    - Better for boot-time tracing, but crosvm may disconnect
-            # 2. Late attach (gdb_attach_after_boot=True): Just continue now, attach script later
-            #    - Works better with crosvm, kernel fully booted when we attach
-            
-            if self.config.gdb_attach_after_boot:
-                # Late attach mode: just continue the kernel, attach script after boot
-                self._log_info("Late GDB attach mode - continuing kernel first, will attach script after boot")
-                print("[CUTTLEFISH] Late GDB attach mode - continuing kernel boot...")
-                if not self._gdb_continue_kernel(timeout=30):
-                    self._log_warning("GDB continue may have failed, but continuing anyway")
-                    print("[WARN] GDB continue may have failed, but continuing anyway")
-            else:
-                # Early attach mode: attach with script now (original behavior)
-                # Cuttlefish with GDB starts paused - we need to continue the kernel
-                # If a GDB script is provided, we run it now (sets up breakpoints, logging)
-                # then continue. Otherwise just send continue.
-                if self._gdb_script_path:
-                    self._log_info(f"Early attach mode - attaching GDB with script: {self._gdb_script_path}")
-                    print(f"[CUTTLEFISH] Early attach mode - attaching GDB with analysis script...")
-                    if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=60):
-                        self._log_warning("GDB script attach may have failed, but continuing anyway")
-                        print("[WARN] GDB script attach may have failed, but continuing anyway")
+            if self._gdb_script_path and not self.config.gdb_attach_after_boot:
+                # Attach GDB early (during boot) to catch start_kernel
+                # This uses HW breakpoints which may NOT work with KVM
+                # Wait for the GDB port to become available first
+                is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+                self._log_info("EARLY ATTACH MODE: Waiting for GDB port before attaching script...")
+                print("[CUTTLEFISH] Waiting for GDB port before attaching script...")
+                if self._wait_for_gdb_port(timeout=60):
+                    self._log_info("GDB port ready, attaching script during boot...")
+                    print("[CUTTLEFISH] Attaching GDB script during boot (early attach)...")
+                    if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=120):
+                        self._log_warning("GDB script attach may have failed, but continuing with boot")
+                        print("[WARN] GDB script attach may have failed, continuing with boot")
+                    else:
+                        print("[CUTTLEFISH] GDB script attached successfully (monitoring boot)")
                 else:
-                    self._log_info("Sending continue to resume kernel boot")
-                    if not self._gdb_continue_kernel(timeout=30):
-                        self._log_warning("GDB continue may have failed, but continuing anyway")
-                        print("[WARN] GDB continue may have failed, but continuing anyway")
+                    self._log_warning("GDB port not available before boot, will try after boot")
+                    print("[WARN] GDB port not ready, will try attaching after boot")
+            elif self._gdb_script_path:
+                # gdb_attach_after_boot=True (default): will attach after boot
+                # This is more reliable with KVM which doesn't support HW breakpoints well
+                self._log_info("POST-BOOT ATTACH MODE: GDB will attach after kernel boots (SW breakpoints)")
+                print("[CUTTLEFISH] GDB will attach AFTER boot (reliable SW breakpoints with KVM)")
+            else:
+                print("[CUTTLEFISH] GDB enabled — kernel boots with GDB server available...")
         
         # Wait for ADB
         if not self._wait_for_adb(timeout=self.config.boot_timeout):
@@ -1860,15 +3086,28 @@ class CuttlefishController:
                 if self.config.ssh_host != "localhost":
                     self._append_remote_logs_to_local()
                 
-                # Late GDB attach: now that kernel is booted, attach the script
-                if self.config.enable_gdb and self.config.gdb_attach_after_boot and self._gdb_script_path:
-                    self._log_info("Late GDB attach: kernel booted, now attaching GDB script...")
-                    print("[CUTTLEFISH] Late GDB attach: attaching GDB script to running kernel...")
+                # GDB attach: only if not already attached during boot
+                if self.config.enable_gdb and self._gdb_script_path and self._gdb_process is None:
+                    is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+                    
+                    # Re-extract kallsyms from THIS boot to get correct addresses
+                    # (Phase 1 and Phase 2 may have different KASLR offsets)
+                    self._refresh_runtime_symbols_for_current_boot()
+                    
+                    # Only restart GDB tunnel for local mode (remote has no GDB tunnel)
+                    if self.config.setup_tunnels and not is_remote:
+                        self._log_info("Restarting GDB tunnel for post-boot script attach...")
+                        if not self._restart_gdb_tunnel():
+                            self._log_warning("Failed to restart GDB tunnel for script attach")
+                    self._log_info("Post-boot GDB attach: kernel booted, attaching GDB with SW breakpoints...")
+                    print("[CUTTLEFISH] Attaching GDB script to running kernel (post-boot, SW breakpoints)...")
                     if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=60):
-                        self._log_warning("Late GDB script attach may have failed, but continuing anyway")
-                        print("[WARN] Late GDB script attach may have failed, but continuing anyway")
+                        self._log_warning("GDB script attach may have failed, but continuing anyway")
+                        print("[WARN] GDB script attach may have failed, but continuing anyway")
                     else:
-                        print("[CUTTLEFISH] GDB script attached successfully")
+                        print("[CUTTLEFISH] GDB script attached successfully (SW breakpoints active)")
+                elif self._gdb_process is not None:
+                    self._log_info("GDB already attached during boot, skipping post-boot attach")
                 
                 return True
             time.sleep(5)
@@ -1880,15 +3119,27 @@ class CuttlefishController:
             self._append_remote_logs_to_local()
         self._is_booted = True
         
-        # Late GDB attach: try to attach even if boot_completed not set
-        if self.config.enable_gdb and self.config.gdb_attach_after_boot and self._gdb_script_path:
-            self._log_info("Late GDB attach: ADB available, attempting GDB script attach...")
-            print("[CUTTLEFISH] Late GDB attach: attempting GDB script attach...")
+        # GDB attach: try to attach even if boot_completed not set (only if not already attached)
+        if self.config.enable_gdb and self._gdb_script_path and self._gdb_process is None:
+            is_remote = self.config.ssh_host != "localhost" or self.config.ssh_port != 22
+            
+            # Re-extract kallsyms from THIS boot to get correct addresses
+            self._refresh_runtime_symbols_for_current_boot()
+            
+            # Only restart GDB tunnel for local mode (remote has no GDB tunnel)
+            if self.config.setup_tunnels and not is_remote:
+                self._log_info("Restarting GDB tunnel for post-boot script attach...")
+                if not self._restart_gdb_tunnel():
+                    self._log_warning("Failed to restart GDB tunnel for script attach")
+            self._log_info("Post-boot GDB attach (fallback): ADB available, attempting GDB script attach...")
+            print("[CUTTLEFISH] Attaching GDB script to running kernel (post-boot fallback)...")
             if not self._gdb_attach_with_script(self._gdb_script_path, self._vmlinux_path, timeout=60):
-                self._log_warning("Late GDB script attach may have failed, but continuing anyway")
-                print("[WARN] Late GDB script attach may have failed, but continuing anyway")
+                self._log_warning("GDB script attach may have failed, but continuing anyway")
+                print("[WARN] GDB script attach may have failed, but continuing anyway")
             else:
                 print("[CUTTLEFISH] GDB script attached successfully")
+        elif self._gdb_process is not None:
+            self._log_info("GDB already attached during boot, skipping post-boot attach")
         
         return True
     
@@ -2129,22 +3380,21 @@ class CuttlefishController:
         """
         Get ADB target string for connecting to device.
         
-        Cuttlefish devices are typically listed as 0.0.0.0:port rather than
-        localhost:port. This method returns the correct device serial.
+        With SSH tunnels, the device is accessed via localhost:{port}
+        since we forward the device port locally. Without tunnels,
+        Cuttlefish devices are typically listed as 0.0.0.0:port.
         """
         return self._get_adb_device_serial()
     
     def get_adb_env(self) -> dict:
         """
-        Get environment variables for ADB commands when using SSH tunnels.
+        Get environment variables for ADB commands.
         
-        When the ADB server is tunneled (ssh -L 5037:localhost:5037), we need
-        to ensure the local ADB client connects to the correct port.
+        We use the LOCAL ADB server (default port 5037) which connects
+        to the remote Cuttlefish device through the SSH device port tunnel.
+        No special environment overrides are needed.
         """
         env = os.environ.copy()
-        if self.config.setup_tunnels:
-            # Tell ADB client to use our tunneled server port
-            env["ADB_SERVER_SOCKET"] = f"tcp:localhost:{self.config.local_adb_server_port}"
         return env
     
     def __enter__(self):
@@ -2273,9 +3523,10 @@ class CuttlefishKernelGDB:
     - Collecting kernel-level crash information
     - Auto-extraction of vmlinux with symbols from kernel Image
     
-    For remote Cuttlefish instances, an SSH tunnel is used to forward the GDB port
-    from the remote server to localhost. This allows GDB to run locally and connect
-    through the tunnel. The tunnel must be set up via setup_tunnels=True in config.
+    For remote Cuttlefish instances, GDB runs natively on the remote host to
+    avoid cross-architecture incompatibilities (x86 gdb-multiarch can't properly
+    handle QEMU 8.2's aarch64 GDB stub). Files are deployed via SCP and results
+    are downloaded after GDB completes.
     """
     
     def __init__(self, controller: CuttlefishController, log_dir: Path):
@@ -2717,6 +3968,8 @@ class CuttlefishKernelGDB:
             'do_page_fault', 'handle_page_fault', 'exc_page_fault', '__do_page_fault',
             'die', 'oops_begin', 'oops_end', '__die', 'ret_from_fork',
             '__might_resched', '__might_sleep', 'lock_acquire', 'lock_release',
+            '__lock_acquire', '_raw_spin_lock', '_raw_spin_lock_irqsave',
+            '_raw_spin_unlock', '_raw_spin_unlock_irqrestore',
             'rcu_read_lock', 'rcu_read_unlock', 'preempt_schedule',
         }
         skip_prefixes = ('kasan_', '__kasan_', '__asan_', 'dump_', 'show_', 'print_', '__might_')
@@ -2913,6 +4166,20 @@ except Exception as e:
         
         self.controller._log_info(f"Generated GDB bootstrap script: {script_path}")
         
+        # Save file paths for remote deployment (used by _gdb_attach_with_script)
+        self.controller._gdb_file_paths = {
+            'config_json': str(config_json_path),
+            'syz_trace': str(syz_trace_path),
+            'results_file': results_file,
+            'system_map': effective_smap or '',
+            'runtime_symbols': runtime_config_str,
+            'bootstrap_script': str(script_path),
+        }
+        self.controller._log_info(f"_gdb_file_paths populated with {len(self.controller._gdb_file_paths)} entries")
+        self.controller._log_info(f"  syz_trace: {syz_trace_path}")
+        self.controller._log_info(f"  config_json: {config_json_path}")
+        self.controller._log_info(f"  results_file: {results_file}")
+        
         return script_path
     
     def attach_and_run(
@@ -3004,8 +4271,7 @@ except Exception as e:
             "-ex", "set logging enabled on",
             "-ex", "set pagination off",
             "-ex", "set confirm off",
-            # Set architecture for cross-debugging (critical for x86 host -> aarch64 target)
-            "-ex", "set architecture aarch64",
+            # Note: do NOT pre-set architecture — let GDB auto-detect from target
             "-ex", f"target remote {gdb_target}",
             "-ex", f"source {script_path}",
             # Note: The script itself handles 'continue' via syz_safe_continue
@@ -3137,14 +4403,17 @@ def run_cuttlefish_kernel_test(
     
     This orchestrates:
     1. Starting Cuttlefish (if not persistent/already running)
-    2. Setting up SSH tunnels for GDB and ADB (for remote instances)
+    2. Setting up SSH tunnels for ADB (for remote instances)
     3. Attaching GDB to crosvm's kernel for dynamic analysis
+       - Remote: GDB runs natively on the remote host (no cross-arch issues)
+       - Local: GDB runs locally with gdb-multiarch
     4. Collecting crash/event data
     5. Stopping Cuttlefish (if non-persistent mode)
     
     For remote Cuttlefish instances:
-    - An SSH tunnel is used to forward the GDB port from the remote server
-    - GDB runs locally and connects through the tunnel
+    - GDB runs on the remote host to avoid cross-architecture issues
+    - GDB script files are deployed via SCP, results downloaded after
+    - An SSH tunnel is used for ADB device port access
     - This requires setup_tunnels=True in the CuttlefishConfig
     
     Args:

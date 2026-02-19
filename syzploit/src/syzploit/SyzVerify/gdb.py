@@ -29,6 +29,12 @@ _alloc_map = {}  # ptr -> {"size": int, "bt": list, "time": float}
 _free_set = set()  # Set of freed pointers
 _func_hits = {}  # func_name -> hit count
 
+# Auto-throttle: disable breakpoints that fire too frequently
+_bp_hit_counts = {}  # addr (int) -> hit count
+_addr_to_bp = {}     # addr (int) -> gdb.Breakpoint object
+_addr_to_name = {}   # addr (int) -> function name
+_BP_THROTTLE_MAX = 50  # Max hits per BP before auto-disable (50 × ~50ms = 2.5s max per BP)
+
 # Breakpoint tracking
 _installed_symbols = set()
 _breakpoints_installed = False  # True once breakpoints are installed after boot
@@ -147,23 +153,29 @@ def _get_pc():
 
 
 def _get_arg(n):
-    """Get nth function argument."""
+    """Get nth function argument (unsigned)."""
     if _is_aarch64():
         reg = f"$x{n}"
     else:
         regs = ["$rdi", "$rsi", "$rdx", "$rcx", "$r8", "$r9"]
         reg = regs[n] if n < len(regs) else "$rdi"
     try:
-        return int(gdb.parse_and_eval(reg))
+        val = int(gdb.parse_and_eval(reg))
+        if val < 0:
+            val += (1 << 64)  # Treat as unsigned 64-bit
+        return val
     except Exception:
         return None
 
 
 def _get_ret():
-    """Get return value register."""
+    """Get return value register (unsigned)."""
     reg = "$x0" if _is_aarch64() else "$rax"
     try:
-        return int(gdb.parse_and_eval(reg))
+        val = int(gdb.parse_and_eval(reg))
+        if val < 0:
+            val += (1 << 64)  # Treat as unsigned 64-bit
+        return val
     except Exception:
         return None
 
@@ -516,15 +528,29 @@ class AllocBreakpoint(gdb.Breakpoint):
         spec = f"*0x{addr:x}"
         super().__init__(spec, gdb.BP_BREAKPOINT, internal=False)
         self.silent = True
-        self.name = name
-        self.hit_count = 0
+        try:
+            self.name = name
+        except (AttributeError, TypeError):
+            pass
+        self._my_name = name
+        self._my_hits = 0
+        self._addr = addr
         _log(f"Installed alloc breakpoint: {name} @ 0x{addr:x}")
     
     def stop(self):
-        self.hit_count += 1
+        self._my_hits += 1
+        # Auto-throttle: disable if too hot
+        if self._my_hits >= _BP_THROTTLE_MAX:
+            if self._my_hits == _BP_THROTTLE_MAX:
+                _log(f"AUTO-THROTTLE: {self._my_name} hit {_BP_THROTTLE_MAX} times, disabling")
+                try:
+                    self.enabled = False
+                except Exception:
+                    pass
+            return False
         try:
             # Get size argument
-            if "cache" in self.name.lower():
+            if "cache" in self._my_name.lower():
                 size = _get_arg(1)  # kmem_cache_alloc(cache, flags)
             else:
                 size = _get_arg(0)  # __kmalloc(size, flags)
@@ -534,11 +560,11 @@ class AllocBreakpoint(gdb.Breakpoint):
             # Try to capture return value with FinishBreakpoint
             try:
                 frame = gdb.selected_frame()
-                AllocFinishBreakpoint(frame, size or 0, bt, self.name)
+                AllocFinishBreakpoint(frame, size or 0, bt, self._my_name)
             except Exception as e:
                 # Log the entry anyway
-                _record_event("alloc_entry", func=self.name, size=size, bt=bt)
-                _log(f"ALLOC: {self.name} size={size} (no finish bp: {e})")
+                _record_event("alloc_entry", func=self._my_name, size=size, bt=bt)
+                _log(f"ALLOC: {self._my_name} size={size} (no finish bp: {e})")
         except Exception as e:
             _log(f"AllocBreakpoint error: {e}")
         
@@ -574,15 +600,29 @@ class FreeBreakpoint(gdb.Breakpoint):
         spec = f"*0x{addr:x}"
         super().__init__(spec, gdb.BP_BREAKPOINT, internal=False)
         self.silent = True
-        self.name = name
-        self.hit_count = 0
+        try:
+            self.name = name
+        except (AttributeError, TypeError):
+            pass
+        self._my_name = name
+        self._my_hits = 0
+        self._addr = addr
         _log(f"Installed free breakpoint: {name} @ 0x{addr:x}")
     
     def stop(self):
-        self.hit_count += 1
+        self._my_hits += 1
+        # Auto-throttle: disable if too hot
+        if self._my_hits >= _BP_THROTTLE_MAX:
+            if self._my_hits == _BP_THROTTLE_MAX:
+                _log(f"AUTO-THROTTLE: {self._my_name} hit {_BP_THROTTLE_MAX} times, disabling")
+                try:
+                    self.enabled = False
+                except Exception:
+                    pass
+            return False
         try:
             # Get pointer argument
-            if "cache" in self.name.lower():
+            if "cache" in self._my_name.lower():
                 ptr = _get_arg(1)  # kmem_cache_free(cache, ptr)
             else:
                 ptr = _get_arg(0)  # kfree(ptr)
@@ -593,8 +633,8 @@ class FreeBreakpoint(gdb.Breakpoint):
                 alloc_info = _alloc_map.pop(ptr, None)
                 _free_set.add(ptr)
                 
-                _record_event("free", ptr=hex(ptr), func=self.name, was_allocated=was_allocated, bt=bt)
-                _log(f"FREE: {self.name} ptr=0x{ptr:x} (was_allocated={was_allocated})")
+                _record_event("free", ptr=hex(ptr), func=self._my_name, was_allocated=was_allocated, bt=bt)
+                _log(f"FREE: {self._my_name} ptr=0x{ptr:x} (was_allocated={was_allocated})")
         except Exception as e:
             _log(f"FreeBreakpoint error: {e}")
         
@@ -609,20 +649,34 @@ class FuncBreakpoint(gdb.Breakpoint):
         spec = f"*0x{addr:x}"
         super().__init__(spec, gdb.BP_BREAKPOINT, internal=False)
         self.silent = True
-        self.name = name
-        self.hit_count = 0
+        try:
+            self.name = name
+        except (AttributeError, TypeError):
+            pass
+        self._my_name = name
+        self._my_hits = 0
+        self._addr = addr
         _sw_breakpoints.append(self)  # Track for cleanup
         _log(f"Installed func breakpoint: {name} @ 0x{addr:x}")
     
     def stop(self):
-        self.hit_count += 1
+        self._my_hits += 1
+        # Auto-throttle: disable if too hot
+        if self._my_hits >= _BP_THROTTLE_MAX:
+            if self._my_hits == _BP_THROTTLE_MAX:
+                _log(f"AUTO-THROTTLE: {self._my_name} hit {_BP_THROTTLE_MAX} times, disabling")
+                try:
+                    self.enabled = False
+                except Exception:
+                    pass
+            return False
         try:
             bt = _get_backtrace(16)
             regs = _get_regs()
-            _func_hits[self.name] = _func_hits.get(self.name, 0) + 1
+            _func_hits[self._my_name] = _func_hits.get(self._my_name, 0) + 1
             
-            _record_event("func_hit", func=self.name, hit_count=self.hit_count, bt=bt, regs=regs)
-            _log(f"FUNC HIT: {self.name} (count={self.hit_count})")
+            _record_event("func_hit", func=self._my_name, hit_count=self._my_hits, bt=bt, regs=regs)
+            _log(f"FUNC HIT: {self._my_name} (count={self._my_hits})")
         except Exception as e:
             _log(f"FuncBreakpoint error: {e}")
         
@@ -636,16 +690,28 @@ class TestBreakpoint(gdb.Breakpoint):
         spec = f"*0x{addr:x}"
         super().__init__(spec, gdb.BP_BREAKPOINT, internal=False)
         self.silent = True
-        self.name = name
-        self.hit_count = 0
+        self._my_name = name
+        try:
+            self.name = name
+        except Exception:
+            pass
+        self._my_hits = 0
         _log(f"*** TEST BREAKPOINT installed: {name} @ 0x{addr:x}")
     
     def stop(self):
-        self.hit_count += 1
+        self._my_hits += 1
+        if self._my_hits > _BP_THROTTLE_MAX:
+            if self._my_hits == _BP_THROTTLE_MAX + 1:
+                _log(f"AUTO-THROTTLE: {self._my_name} hit {_BP_THROTTLE_MAX} times, disabling")
+                try:
+                    self.enabled = False
+                except Exception:
+                    pass
+            return False
         try:
             pc = _get_pc()
-            _record_event("test_hit", func=self.name, hit_count=self.hit_count)
-            _log(f"*** TEST HIT #{self.hit_count}: {self.name} @ 0x{pc:x if pc else 0}")
+            _record_event("test_hit", func=self._my_name, hit_count=self._my_hits)
+            _log(f"*** TEST HIT #{self._my_hits}: {self._my_name} @ 0x{pc:x}")
         except Exception as e:
             _log(f"TestBreakpoint error: {e}")
         
@@ -704,15 +770,46 @@ def _clear_software_breakpoints():
 
 
 def _is_early_boot():
-    """Check if kernel is in early boot (before MMU fully set up)."""
+    """Check if kernel is in early boot (before kernel text is accessible).
+    
+    Uses actual memory access test rather than PC heuristics, because:
+    - During early boot: PC is at physical addresses (low), kernel not mapped
+    - After boot with user process: PC is at user-space address (also low)
+    - After boot with kernel code: PC is at kernel virtual address (high)
+    
+    The PC-based check incorrectly classifies user-space PCs as early boot.
+    Instead, we try to read kernel memory at a known symbol address.
+    """
+    # If runtime symbols were loaded from /proc/kallsyms, kernel has booted
+    # (kallsyms extraction requires a running kernel with ADB access)
+    if _runtime_symbols_loaded:
+        return False
+    
+    # First try the reliable check: can we access kernel memory?
+    if _system_map or _runtime_symbols_loaded:
+        accessible = _check_kernel_accessible()
+        if accessible:
+            return False  # Kernel is accessible = not early boot
+    
+    # Fallback to PC heuristic only if we have no symbols to test
     pc = _get_pc()
     if pc is None:
         return True  # Assume early boot if we can't get PC
     
-    # Kernel virtual addresses on aarch64 start at 0xffff...
-    # Physical/early boot addresses are lower
     if _is_aarch64():
-        return pc < 0xffff000000000000
+        # On aarch64, true early boot PCs (EFI/bootloader) are typically < 4GB
+        # User-space PCs are in 0-0x0000ffffffffffff range
+        # Kernel virtual PCs are in 0xffff... range
+        # If PC is in user-space range (>4GB but < kernel VA), it's NOT early boot
+        if pc >= 0xffff000000000000:
+            return False  # Kernel virtual address - definitely not early boot
+        elif pc > 0x100000000:
+            # Likely a user-space address - not early boot
+            _log(f"PC 0x{pc:x} appears to be user-space (kernel likely booted)")
+            return False
+        else:
+            # Very low address - likely physical/early boot
+            return True
     else:
         # x86_64 kernel addresses start at 0xffffffff80000000
         return pc < 0xffffffff80000000
@@ -756,10 +853,19 @@ def _install_sw_breakpoint(addr, name, bp_class=None):
     try:
         if bp_class:
             bp = bp_class(addr, name)
-            _sw_breakpoints.append(bp)
         else:
-            gdb.execute(f"break *0x{addr:x}", to_string=True)
+            # Create a tracked breakpoint object (not just gdb.execute)
+            # so _clear_software_breakpoints() can find and delete it
+            bp = gdb.Breakpoint(f"*0x{addr:x}", gdb.BP_BREAKPOINT)
+            bp.silent = True
+        try:
+            bp.name = name  # Store name for logging/tracking
+        except (AttributeError, TypeError):
+            pass  # gdb.Breakpoint C extension may not allow custom attrs
+        _sw_breakpoints.append(bp)
         _installed_symbols.add(name)
+        _addr_to_bp[addr] = bp  # Track for auto-throttle
+        _addr_to_name[addr] = name
         _log(f"Installed SW breakpoint: {name} @ 0x{addr:x}")
         return True
     except gdb.error as e:
@@ -804,7 +910,13 @@ def _install_breakpoint_with_fallback(addr, name, bp_class=None, prefer_hw=True,
 
 
 def install_alloc_breakpoints():
-    """Install breakpoints on alloc/free functions using hardware breakpoints.
+    """Install breakpoints on alloc/free functions.
+    
+    Uses SOFTWARE breakpoints when the kernel is running (post-boot),
+    and HARDWARE breakpoints only during early boot.
+    
+    SW breakpoints are more reliable with KVM (which doesn't always
+    deliver HW debug exceptions through the GDB stub).
     
     Uses multiple sources for symbol addresses in priority order:
     1. Runtime-extracted addresses (from /proc/kallsyms)
@@ -813,7 +925,16 @@ def install_alloc_breakpoints():
     """
     global _runtime_alloc_addrs, _runtime_free_addrs
     
-    # Priority list - most important functions first (we only have 4 HW breakpoints)
+    early_boot = _is_early_boot()
+    use_sw = not early_boot  # SW breakpoints are reliable post-boot; HW may not work with KVM
+    bp_type_label = "SW" if use_sw else "HW"
+    
+    if use_sw:
+        _log("POST-BOOT: Using SOFTWARE breakpoints (reliable with KVM)")
+    else:
+        _log("EARLY BOOT: Using HARDWARE breakpoints (only option before MMU)")
+    
+    # Priority list - most important functions first
     # Format: (gdb_var, symbol_name, is_alloc)
     functions = [
         ("$kmalloc_addr", "__kmalloc", True),
@@ -824,6 +945,22 @@ def install_alloc_breakpoints():
     
     installed = 0
     
+    def _install_bp(addr, name):
+        """Install breakpoint using SW or HW depending on boot state."""
+        if use_sw:
+            return _install_sw_breakpoint(addr, name)
+        else:
+            return _install_hw_breakpoint(addr, name)
+    
+    # Auto-throttle handles hot functions: each BP is auto-disabled after
+    # _BP_THROTTLE_MAX hits, so even hot functions only cause brief pauses.
+    # Only skip functions that are so hot they'd freeze the kernel before
+    # auto-throttle kicks in (>500 hits/sec = 25s of freezing for 50-hit limit).
+    _hot_skip = {
+        "kmem_cache_alloc",      # ~167/sec — 50 hits in 0.3s, ok with throttle
+        "kmem_cache_free",       # ~167/sec — 50 hits in 0.3s, ok with throttle  
+    }
+    
     # If we have runtime symbols loaded, prioritize them
     if _runtime_symbols_loaded:
         _log("Using runtime-extracted addresses for alloc/free breakpoints")
@@ -832,20 +969,26 @@ def install_alloc_breakpoints():
         for name, addr in _runtime_alloc_addrs.items():
             if name in _installed_symbols:
                 continue
-            if _install_hw_breakpoint(addr, name):
+            if name in _hot_skip:
+                _log(f"Skipping hot function: {name} (would overwhelm GDB)")
+                continue
+            if _install_bp(addr, name):
                 _installed_symbols.add(name)
                 _alloc_addrs.add(addr)
                 installed += 1
-                if installed >= _max_hw_bps:
-                    break
+                if not use_sw and installed >= _max_hw_bps:
+                    break  # HW breakpoint limit
         
         # Install free breakpoints from runtime symbols
         for name, addr in _runtime_free_addrs.items():
             if name in _installed_symbols:
                 continue
-            if installed >= _max_hw_bps:
-                break
-            if _install_hw_breakpoint(addr, name):
+            if name in _hot_skip:
+                _log(f"Skipping hot function: {name} (would overwhelm GDB)")
+                continue
+            if not use_sw and installed >= _max_hw_bps:
+                break  # HW breakpoint limit
+            if _install_bp(addr, name):
                 _installed_symbols.add(name)
                 _free_addrs.add(addr)
                 installed += 1
@@ -861,7 +1004,7 @@ def install_alloc_breakpoints():
                 addr = _resolve_symbol(name)
             
             if addr:
-                if _install_hw_breakpoint(addr, name):
+                if _install_bp(addr, name):
                     _installed_symbols.add(name)
                     if is_alloc:
                         _alloc_addrs.add(addr)
@@ -869,7 +1012,7 @@ def install_alloc_breakpoints():
                         _free_addrs.add(addr)
                     installed += 1
     
-    _log(f"Installed {installed} alloc/free HW breakpoints")
+    _log(f"Installed {installed} alloc/free {bp_type_label} breakpoints")
     return installed
 
 
@@ -1129,7 +1272,7 @@ def _on_stop(event):
         pc = _get_pc()
         
         # Log all stops for debugging
-        _log(f"STOP: pc=0x{pc:x if pc else 0}, breakpoints_installed={_breakpoints_installed}")
+        _log(f"STOP: pc=0x{pc:x}, breakpoints_installed={_breakpoints_installed}")
         
         # Check if this is the boot watcher hit
         if not _boot_complete and _boot_watcher_addr and pc == _boot_watcher_addr:
@@ -1161,68 +1304,60 @@ def _on_stop(event):
         
         # If breakpoints are installed, log the event
         elif _breakpoints_installed and pc:
-            # Check if it's an alloc or free
-            if pc in _alloc_addrs:
-                try:
-                    size = _get_arg(0)  # First arg is usually size
-                    bt = _get_backtrace(8)
-                    _record_event("alloc_entry", pc=hex(pc), size=size, bt=bt)
-                    _log(f"ALLOC @ 0x{pc:x} size={size} (event #{len(_events)})")
-                except Exception as e:
-                    _log(f"Alloc logging error: {e}")
-            elif pc in _free_addrs:
-                try:
-                    ptr = _get_arg(0)  # First arg is pointer
-                    bt = _get_backtrace(8)
-                    was_allocated = ptr in _alloc_map if ptr else False
-                    _record_event("free", pc=hex(pc), ptr=hex(ptr) if ptr else None, 
-                                 was_allocated=was_allocated, bt=bt)
-                    _log(f"FREE @ 0x{pc:x} ptr=0x{ptr:x if ptr else 0} (event #{len(_events)})")
-                    if ptr:
-                        _free_set.add(ptr)
-                        _alloc_map.pop(ptr, None)
-                except Exception as e:
-                    _log(f"Free logging error: {e}")
-            else:
-                # Generic stop event - check if it's any known breakpoint address
-                _record_event("stop", pc=hex(pc))
-                _log(f"GENERIC STOP @ 0x{pc:x} (event #{len(_events)})")
-        
-        # Auto-continue
-        def _resume():
-            try:
-                gdb.execute("continue", to_string=True)
-            except gdb.error as e:
-                err = str(e).lower()
-                if "remote connection closed" in err or "not being run" in err:
-                    _log(f"Target terminated: {e}")
-                    _log(f"Final event count: {len(_events)}")
-                    _export_results()
-                elif "cannot insert breakpoint" in err or "cannot access memory" in err:
-                    _log(f"Breakpoint error (continuing): {e}")
-                    # Try again
+            # Auto-throttle: count hits per address and disable if too hot
+            _bp_hit_counts[pc] = _bp_hit_counts.get(pc, 0) + 1
+            _throttled = _bp_hit_counts[pc] > _BP_THROTTLE_MAX
+            
+            if _bp_hit_counts[pc] == _BP_THROTTLE_MAX:
+                bp_name = _addr_to_name.get(pc, hex(pc))
+                _log(f"AUTO-THROTTLE: {bp_name} hit {_BP_THROTTLE_MAX} times, disabling breakpoint")
+                bp_obj = _addr_to_bp.get(pc)
+                if bp_obj:
                     try:
-                        gdb.execute("delete breakpoints", to_string=True)
-                        gdb.execute("continue", to_string=True)
-                    except Exception:
-                        _log("Failed to recover, target may be stopped")
-                        _export_results()
+                        bp_obj.enabled = False
+                        _log(f"  Disabled BP for {bp_name} @ 0x{pc:x}")
+                    except Exception as e:
+                        _log(f"  Failed to disable BP: {e}")
+                        try:
+                            bp_obj.delete()
+                            _log(f"  Deleted BP for {bp_name} @ 0x{pc:x}")
+                        except Exception:
+                            pass
+            
+            # Only record event if not throttled
+            if not _throttled:
+                if pc in _alloc_addrs:
+                    try:
+                        size = _get_arg(0)  # First arg is usually size
+                        bt = _get_backtrace(8)
+                        _record_event("alloc_entry", pc=hex(pc), size=size, bt=bt)
+                        _log(f"ALLOC @ 0x{pc:x} size={size} (event #{len(_events)})")
+                    except Exception as e:
+                        _log(f"Alloc logging error: {e}")
+                elif pc in _free_addrs:
+                    try:
+                        ptr = _get_arg(0)  # First arg is pointer
+                        bt = _get_backtrace(8)
+                        was_allocated = ptr in _alloc_map if ptr else False
+                        _record_event("free", pc=hex(pc), ptr=hex(ptr) if ptr else None, 
+                                     was_allocated=was_allocated, bt=bt)
+                        _log(f"FREE @ 0x{pc:x} ptr=0x{ptr:x} (event #{len(_events)})")
+                        if ptr:
+                            _free_set.add(ptr)
+                            _alloc_map.pop(ptr, None)
+                    except Exception as e:
+                        _log(f"Free logging error: {e}")
                 else:
-                    _log(f"Continue failed: {e}")
-                    _export_results()
-            except Exception as e:
-                _log(f"Resume error: {e}")
-                _export_results()
+                    # Generic stop event - check if it's any known breakpoint address
+                    _record_event("stop", pc=hex(pc))
+                    _log(f"GENERIC STOP @ 0x{pc:x} (event #{len(_events)})")
         
-        gdb.post_event(_resume)
+        # Do NOT auto-continue here - the syz_safe_continue loop handles it
+        # _on_stop just records events and returns; the loop calls continue again
     except Exception as e:
         _log(f"Stop handler error: {e}")
-        _export_results()
-        # Try to continue anyway
-        try:
-            gdb.post_event(lambda: gdb.execute("continue", to_string=True))
-        except Exception:
-            pass
+        import traceback
+        _log(f"Stop handler traceback: {traceback.format_exc()}")
 
 
 # ============================================================================
@@ -1662,24 +1797,21 @@ class SyzSafeContinueCmd(gdb.Command):
         super().__init__("syz_safe_continue", gdb.COMMAND_USER)
     
     def invoke(self, arg, from_tty):
-        global _sw_breakpoints, _deferred_crash_stack, _tracing_failed
+        global _sw_breakpoints, _deferred_crash_stack, _tracing_failed, _breakpoints_installed
         
-        # Capture snapshot BEFORE continue in case connection drops
-        _log("Capturing pre-continue snapshot...")
-        _capture_kernel_snapshot()
-        
-        # Pre-export in case continue kills the connection
-        _export_results()
-        _log("Pre-continue export complete")
-        
-        # Check if we're at early boot (PC in physical address range)
+        # Use the improved early boot detection (checks kernel memory accessibility)
         pc = _get_pc()
-        is_early_boot = pc is not None and pc < 0xffff000000000000
+        is_early_boot = _is_early_boot()
         
         if is_early_boot:
+            # Early boot: capture snapshot before continue in case connection drops
+            _log("Capturing pre-continue snapshot (early boot - connection may drop)...")
+            _capture_kernel_snapshot()
+            _export_results()
+            _log("Pre-continue export complete")
+            
             _log(f"Early boot detected (PC=0x{pc:x}) - clearing software breakpoints")
             # Software breakpoints can't be inserted at early boot
-            # They require kernel virtual memory to be mapped
             _clear_software_breakpoints()
             _deferred_crash_stack = True
             _log("Software breakpoints cleared - will use boot watcher to reinstall")
@@ -1688,49 +1820,136 @@ class SyzSafeContinueCmd(gdb.Command):
             if not _boot_watcher_addr:
                 _log("Setting up boot watcher for deferred breakpoint installation...")
                 install_boot_watcher()
+            
+            _log("Starting execution (continue)...")
+            _log("")
+            _log("=" * 60)
+            _log("NOTE: Some VM managers (crosvm) disconnect GDB on continue.")
+            _log("If this happens, the snapshot above is all we can collect.")
+            _log("QEMU should maintain the connection and deliver breakpoint hits.")
+            _log("=" * 60)
+            _log("")
+        else:
+            # Post-boot: kernel is running, SW breakpoints are set
+            # No need to panic-export - GDB connection should stay alive
+            _log(f"Post-boot mode (PC=0x{pc:x}) - SW breakpoints active")
+            _log(f"  Breakpoints installed: {len(_installed_symbols)}")
+            _log(f"  Alloc addresses: {len(_alloc_addrs)}")
+            _log(f"  Free addresses: {len(_free_addrs)}")
+            _log("Starting execution (continue loop)...")
         
-        _log("Starting execution (continue)...")
-        _log("")
-        _log("=" * 60)
-        _log("NOTE: crosvm disconnects GDB when the VM continues!")
-        _log("This is a fundamental limitation of crosvm's GDB stub.")
-        _log("The snapshot captured above is all we can collect.")
-        _log("")
-        _log("For full breakpoint tracing, use QEMU instead of crosvm:")
-        _log("  launch_cvd -vm_manager qemu_cli --gdb_port 1234")
-        _log("=" * 60)
-        _log("")
+        # Loop: continue execution and handle breakpoints
+        # _on_stop records events; this loop handles auto-continue
+        max_stops = 100000  # Safety limit
+        stop_count = 0
+        import time as _loop_time
+        _last_export = _loop_time.time()
         
-        try:
-            gdb.execute("continue")
-        except gdb.error as e:
-            _tracing_failed = True
-            err_msg = str(e).lower()
-            if "remote connection closed" in err_msg or "connection reset" in err_msg:
-                _log(f"GDB connection closed (expected with crosvm/QEMU early exit)")
-                _log("Snapshot data has been exported to dynamic_analysis.json")
-                if _demo_mode:
-                    _log("DEMO MODE: Will generate sample data for demonstration")
-            elif "not being run" in err_msg:
-                _log("Program not running - connection was lost before continue")
-                if _demo_mode:
-                    _log("DEMO MODE: Will generate sample data for demonstration")
-            elif "cannot insert breakpoint" in err_msg or "cannot access memory" in err_msg:
-                _log(f"Breakpoint insertion failed (early boot?) - clearing and retrying")
-                _clear_software_breakpoints()
-                _deferred_crash_stack = True
-                try:
-                    gdb.execute("continue")
-                    _tracing_failed = False  # Retry succeeded
-                except Exception as e2:
-                    _log(f"Retry continue failed: {e2}")
-            else:
-                _log(f"Continue failed: {e}")
-            _export_results()
-        except Exception as e:
-            _tracing_failed = True
-            _log(f"Continue error: {e}")
-            _export_results()
+        while stop_count < max_stops:
+            try:
+                gdb.execute("continue")
+                stop_count += 1
+                # When continue returns, _on_stop already handled the event
+                # Log progress and export periodically
+                if stop_count % 500 == 0:
+                    _log(f"Continue loop: {stop_count} stops, {len(_events)} events captured")
+                # Periodic export every 30s so results survive external kill
+                now = _loop_time.time()
+                if now - _last_export >= 30:
+                    _export_results()
+                    _last_export = now
+            except gdb.error as e:
+                _tracing_failed = True
+                err_msg = str(e).lower()
+                if "remote connection closed" in err_msg or "connection reset" in err_msg:
+                    _log(f"Target disconnected after {stop_count} stops, {len(_events)} events")
+                    break
+                elif "not being run" in err_msg:
+                    _log(f"Target not running after {stop_count} stops, {len(_events)} events")
+                    break
+                elif "cannot insert breakpoint" in err_msg or "cannot access memory" in err_msg or "command aborted" in err_msg:
+                    _log(f"Breakpoint error (CPU likely in userspace): {e}")
+                    _log("Will cycle: clear BPs → run briefly → interrupt → reinstall in kernel mode")
+                    _clear_software_breakpoints()
+                    # Also force-delete ALL remaining breakpoints in GDB
+                    try:
+                        gdb.execute("delete breakpoints", to_string=True)
+                        _log("Force-deleted all GDB breakpoints")
+                    except Exception:
+                        pass
+                    _breakpoints_installed = False
+                    _installed_symbols.clear()
+                    _alloc_addrs.clear()
+                    _free_addrs.clear()
+                    _bp_hit_counts.clear()
+                    _addr_to_bp.clear()
+                    _addr_to_name.clear()
+                    
+                    import threading, time as _time, os, signal
+                    
+                    # Cycle to get into kernel mode
+                    bp_retry_success = False
+                    for retry in range(20):
+                        _log(f"  Retry {retry+1}/20: running without BPs, will interrupt in 0.3s...")
+                        
+                        # Schedule SIGINT after a delay to interrupt the target
+                        # GDB interprets SIGINT during continue as "interrupt target"
+                        def _send_sigint(delay):
+                            _time.sleep(delay)
+                            try:
+                                os.kill(os.getpid(), signal.SIGINT)
+                            except Exception:
+                                pass
+                        
+                        t = threading.Thread(target=_send_sigint, args=(0.3 + retry * 0.1,), daemon=True)
+                        t.start()
+                        
+                        try:
+                            gdb.execute("continue")
+                            # If continue returns, target stopped
+                        except gdb.error as ce:
+                            _log(f"  Continue during retry: {ce}")
+                            break
+                        except KeyboardInterrupt:
+                            # SIGINT was caught by Python — target should be stopped
+                            pass
+                        
+                        # Small delay for GDB to fully stop
+                        _time.sleep(0.1)
+                        
+                        # Check if we're in kernel mode now
+                        new_pc = _get_pc()
+                        if new_pc and new_pc >= 0xffff000000000000:
+                            _log(f"  Now in kernel mode: PC=0x{new_pc:x}")
+                            # Reinstall breakpoints
+                            _install_all_breakpoints()
+                            if _breakpoints_installed:
+                                _log(f"  Breakpoints reinstalled! Resuming trace loop.")
+                                bp_retry_success = True
+                                break
+                            else:
+                                _log(f"  BP install reported failure, trying again...")
+                        else:
+                            _log(f"  Still in userspace: PC=0x{new_pc:x}" if new_pc else "  Still in userspace: PC=None")
+                    
+                    if not bp_retry_success:
+                        _log("Failed to get into kernel mode after 20 retries")
+                        _tracing_failed = True
+                        break
+                    # Don't count this as a stop — continue the loop
+                else:
+                    _log(f"Continue error after {stop_count} stops: {e}")
+                    break
+            except Exception as e:
+                _tracing_failed = True
+                _log(f"Unexpected error after {stop_count} stops: {e}")
+                break
+        
+        if stop_count >= max_stops:
+            _log(f"Reached max stops limit ({max_stops}), {len(_events)} events captured")
+        
+        _log(f"Execution loop ended: {stop_count} stops, {len(_events)} events captured")
+        _export_results()
 
 SyzSafeContinueCmd()
 
@@ -2178,8 +2397,9 @@ def _initialize():
     except Exception:
         pass
     
-    # Set up export path
-    _export_path = _gvar_str("$export_path")
+    # Set up export path (only if not already set by config JSON)
+    if not _export_path:
+        _export_path = _gvar_str("$export_path")
     if _export_path:
         try:
             os.makedirs(os.path.dirname(_export_path), exist_ok=True)

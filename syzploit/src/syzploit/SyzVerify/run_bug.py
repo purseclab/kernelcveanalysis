@@ -2107,6 +2107,534 @@ end
 # INTEGRATED CUTTLEFISH CONTROLLER FUNCTIONS
 # =============================================================================
 
+
+def _load_symbol_table(system_map_path: str) -> List[Tuple[int, str]]:
+    """Load System.map into a sorted list of (address, name) tuples for binary search.
+    
+    Loads all text symbols (T and t).  When multiple symbols share an address,
+    prefers the global (T) over the local (t) variant.
+    """
+    addr_to_name: Dict[int, Tuple[str, bool]] = {}  # addr -> (name, is_global)
+    try:
+        with open(system_map_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    try:
+                        sym_type = parts[1]
+                        if sym_type.lower() not in ('t', 'w'):
+                            continue
+                        addr = int(parts[0], 16)
+                        name = parts[2]
+                        is_global = sym_type.isupper()
+                        existing = addr_to_name.get(addr)
+                        if existing is None or (is_global and not existing[1]):
+                            addr_to_name[addr] = (name, is_global)
+                    except (ValueError, IndexError):
+                        continue
+    except Exception as e:
+        print(f"[WARN] Failed to load System.map for symbol resolution: {e}")
+    
+    symbols = [(addr, name) for addr, (name, _) in addr_to_name.items()]
+    symbols.sort(key=lambda x: x[0])
+    return symbols
+
+
+def _resolve_addr(addr_int: int, symbols: List[Tuple[int, str]]) -> str:
+    """Resolve a single address to 'func+offset' using binary search on sorted symbol table."""
+    import bisect
+    if not symbols or addr_int == 0:
+        return "??"
+    # bisect to find the insertion point for (addr_int,).
+    # We use (addr_int + 1,) so that an exact match at addr_int is included
+    # to the LEFT of the insertion point, then index - 1 gives us the match.
+    idx = bisect.bisect_right(symbols, (addr_int + 1,)) - 1
+    if idx < 0:
+        return "??"
+    sym_addr, sym_name = symbols[idx]
+    offset = addr_int - sym_addr
+    # Sanity: if offset is huge (>1MB), the address probably isn't in this symbol
+    if offset < 0 or offset > 0x100000:
+        return "??"
+    if offset == 0:
+        return sym_name
+    return f"{sym_name}+0x{offset:x}"
+
+
+def _resolve_backtrace_symbols(dynamic_results: dict, log_dir: str) -> int:
+    """Resolve '??' function names in event backtraces using System.map.
+
+    Looks for System.map in log_dir (or via runtime_symbols_config).
+    Modifies dynamic_results in-place. Returns number of addresses resolved.
+    """
+    # Find System.map path
+    system_map_path = None
+
+    # 1) Check runtime_symbols_config for the System.map path
+    runtime_cfg = dynamic_results.get("runtime_symbols_config")
+    if runtime_cfg and os.path.exists(runtime_cfg):
+        try:
+            with open(runtime_cfg, 'r') as f:
+                cfg = json.load(f)
+            smap = cfg.get("system_map_path", "")
+            if smap and os.path.exists(smap):
+                system_map_path = smap
+        except Exception:
+            pass
+
+    # 2) Check common locations in log_dir
+    if not system_map_path:
+        for candidate in [
+            os.path.join(log_dir, "System.map"),
+            os.path.join(log_dir, "symbols", "System.map"),
+        ]:
+            if os.path.exists(candidate):
+                system_map_path = candidate
+                break
+
+    if not system_map_path:
+        print("[WARN] No System.map found — cannot resolve backtrace symbols")
+        return 0
+
+    print(f"[POST] Resolving backtrace symbols using: {system_map_path}")
+    symbols = _load_symbol_table(system_map_path)
+    if not symbols:
+        print("[WARN] System.map loaded but contains no symbols")
+        return 0
+
+    resolved_count = 0
+    events = dynamic_results.get("events", [])
+    for event in events:
+        # Resolve top-level PC
+        pc_str = event.get("pc")
+        if pc_str and event.get("func") in (None, "", "??"):
+            try:
+                pc_int = int(pc_str, 16)
+                resolved = _resolve_addr(pc_int, symbols)
+                if resolved != "??":
+                    event["func"] = resolved
+                    resolved_count += 1
+            except (ValueError, TypeError):
+                pass
+
+        # Resolve backtrace frames
+        bt = event.get("bt", [])
+        for frame in bt:
+            if frame.get("func") in (None, "", "??"):
+                frame_pc = frame.get("pc", "0x0")
+                try:
+                    pc_int = int(frame_pc, 16)
+                    resolved = _resolve_addr(pc_int, symbols)
+                    if resolved != "??":
+                        frame["func"] = resolved
+                        resolved_count += 1
+                except (ValueError, TypeError):
+                    pass
+
+    print(f"[POST] Resolved {resolved_count} addresses to symbol names")
+    dynamic_results["symbols_resolved"] = resolved_count
+    dynamic_results["system_map_used"] = system_map_path
+    return resolved_count
+
+
+def _verify_crash_path(dynamic_results: dict, parsed_crash: dict) -> dict:
+    """Verify that the vulnerable code path was exercised during tracing.
+
+    Compares GDB trace events against the crash report's call chain to
+    determine whether the reproducer actually reached the vulnerable code,
+    even when KASAN is not enabled and no crash occurred.
+
+    Returns a verification dict with:
+      - crash_stack_coverage: which crash functions were hit
+      - backtrace_chain_matches: events whose backtrace matches the crash call chain
+      - vulnerable_path_confirmed: bool - True if the crash call chain was observed
+      - confidence: float 0.0-1.0
+      - verdict: human-readable summary
+      - details: list of findings
+    """
+    from collections import Counter
+
+    events = dynamic_results.get("events", [])
+    verification: Dict[str, Any] = {
+        "crash_stack_coverage": {},
+        "backtrace_chain_matches": [],
+        "vulnerable_path_confirmed": False,
+        "confidence": 0.0,
+        "verdict": "UNKNOWN",
+        "details": [],
+    }
+
+    if not events:
+        verification["verdict"] = "NO_EVENTS"
+        verification["details"].append("No GDB events captured — tracing may have failed")
+        return verification
+
+    if not parsed_crash:
+        verification["verdict"] = "NO_CRASH_INFO"
+        verification["details"].append("No parsed crash info — cannot verify crash path")
+        return verification
+
+    # ---- 1. Extract the expected crash call chain ----
+    crash_chain: List[str] = []
+    frames_list = parsed_crash.get("stack_frames", parsed_crash.get("frames", []))
+    for frame in frames_list:
+        func = frame.get("function", frame.get("func", ""))
+        if func and func not in crash_chain:
+            crash_chain.append(func)
+    corrupted_fn = parsed_crash.get("corrupted_function", "")
+    if corrupted_fn and corrupted_fn not in crash_chain:
+        crash_chain.insert(0, corrupted_fn)
+
+    if not crash_chain:
+        verification["verdict"] = "NO_CRASH_STACK"
+        verification["details"].append("Parsed crash has no stack frames")
+        return verification
+
+    crash_chain_set = set(crash_chain)
+
+    # ---- 2. Crash-stack function coverage ----
+    func_hit_events = [e for e in events if e.get("type") == "func_hit"]
+    hit_funcs = Counter(e.get("func", "") for e in func_hit_events)
+
+    for fn in crash_chain:
+        count = hit_funcs.get(fn, 0)
+        verification["crash_stack_coverage"][fn] = count
+
+    covered = sum(1 for fn in crash_chain if hit_funcs.get(fn, 0) > 0)
+    total = len(crash_chain)
+    coverage_pct = covered / total if total > 0 else 0.0
+    verification["details"].append(
+        f"Crash-stack coverage: {covered}/{total} functions hit ({coverage_pct:.0%})"
+    )
+
+    # ---- 3. Backtrace chain matching ----
+    # For each func_hit event, check if its backtrace contains a subsequence
+    # of the crash report's call chain (callee → caller order).
+    chain_match_count = 0
+    best_chain_depth = 0
+
+    for event in func_hit_events:
+        bt_funcs = []
+        for frame in event.get("bt", []):
+            fname = frame.get("func", "??")
+            # Strip +0xoffset for comparison
+            base = fname.split("+")[0] if "+" in fname else fname
+            bt_funcs.append(base)
+
+        if not bt_funcs:
+            continue
+
+        # Find the longest contiguous subsequence of the crash chain in this backtrace.
+        # The crash chain is callee-first: [__lock_acquire, _raw_spin_lock, remove_wait_queue, ep_free, ...]
+        # The backtrace is also callee-first: [func, caller, caller_of_caller, ...]
+        # We look for the event's func in the crash chain, then check if subsequent
+        # BT frames match subsequent crash-chain entries.
+        event_func = bt_funcs[0] if bt_funcs else ""
+        if event_func not in crash_chain_set:
+            continue
+
+        # Find where this function sits in the crash chain
+        try:
+            chain_idx = crash_chain.index(event_func)
+        except ValueError:
+            continue
+
+        # Walk from chain_idx upward (toward callers) and check BT frames.
+        # GDB without debug info often misses intermediate frames (inlined
+        # functions, CFI jump tables, etc.) so we allow arbitrary gaps in
+        # the crash chain — each BT frame just needs to appear somewhere
+        # further up the expected crash chain.
+        matched_depth = 1  # the function itself matches
+        bt_idx = 1
+        chain_walk = chain_idx + 1
+        while bt_idx < len(bt_funcs) and chain_walk < len(crash_chain):
+            bt_base = bt_funcs[bt_idx]
+            if bt_base == "??" or bt_base == "":
+                bt_idx += 1
+                continue  # skip unresolved frames
+            # Scan forward in the crash chain for this BT frame
+            found = False
+            for scan in range(chain_walk, len(crash_chain)):
+                if bt_base == crash_chain[scan]:
+                    matched_depth += 1
+                    chain_walk = scan + 1
+                    found = True
+                    break
+            if not found:
+                break  # BT frame not in crash chain at all
+            bt_idx += 1
+
+        if matched_depth >= 2:
+            chain_match_count += 1
+            best_chain_depth = max(best_chain_depth, matched_depth)
+            if len(verification["backtrace_chain_matches"]) < 5:
+                verification["backtrace_chain_matches"].append({
+                    "func": event_func,
+                    "chain_depth": matched_depth,
+                    "bt": [f.get("func", "??") for f in event.get("bt", [])],
+                })
+
+    verification["details"].append(
+        f"Backtrace chain matches: {chain_match_count} events match "
+        f"crash call chain (best depth: {best_chain_depth})"
+    )
+
+    # ---- 4. Caller-context verification for key functions ----
+    # Check that critical functions (near the bug) were called from the expected
+    # context.  Only check functions in the first half of the crash chain (close
+    # to the crash site).  Functions at the bottom of the chain (e.g. do_exit,
+    # do_group_exit) have callers (el0_svc, etc.) that are legitimately outside
+    # the crash chain and would produce false negatives.
+    caller_check_depth = max(len(crash_chain) // 2, 3)
+    caller_check_funcs = set(crash_chain[:caller_check_depth])
+    caller_verified = {}
+    for event in func_hit_events:
+        fn = event.get("func", "")
+        if fn not in caller_check_funcs:
+            continue
+        bt = event.get("bt", [])
+        if len(bt) < 2:
+            continue
+        caller_base = bt[1].get("func", "??").split("+")[0]
+        if caller_base in ("??", ""):
+            continue
+
+        # Find expected caller from crash chain — accept any ancestor
+        # in the chain, not just the immediate next entry, because GDB
+        # without debug symbols often skips inlined / optimised-out frames.
+        try:
+            idx = crash_chain.index(fn)
+        except ValueError:
+            continue
+        if idx + 1 < len(crash_chain):
+            expected_ancestors = set(crash_chain[idx + 1:])
+            caller_verified.setdefault(fn, {"correct": 0, "other": 0})
+            if caller_base in expected_ancestors:
+                caller_verified[fn]["correct"] += 1
+            else:
+                caller_verified[fn]["other"] += 1
+
+    for fn, counts in caller_verified.items():
+        verification["details"].append(
+            f"  {fn}: {counts['correct']} calls from expected caller, "
+            f"{counts['other']} from other callers"
+        )
+
+    # ---- 5. Alloc/free correlation (UAF pattern) ----
+    free_events = [e for e in events if e.get("type") == "free"]
+    alloc_events = [e for e in events if e.get("type") in ("alloc_entry", "alloc")]
+    frees_with_ptr = [e for e in free_events if e.get("ptr")]
+    allocs_with_ptr = [e for e in alloc_events if e.get("ptr")]
+
+    alloc_ptrs = set(e["ptr"] for e in allocs_with_ptr)
+    uaf_candidates = 0
+    for fe in frees_with_ptr:
+        if fe["ptr"] in alloc_ptrs:
+            uaf_candidates += 1
+
+    verification["alloc_free_stats"] = {
+        "total_allocs": len(alloc_events),
+        "total_frees": len(free_events),
+        "allocs_with_ptr": len(allocs_with_ptr),
+        "frees_with_ptr": len(frees_with_ptr),
+        "freed_previously_allocated": uaf_candidates,
+    }
+
+    # ---- 6. Compute confidence score ----
+    score = 0.0
+
+    # Coverage weight (up to 0.3)
+    score += min(coverage_pct, 1.0) * 0.3
+
+    # Chain match weight (up to 0.4)
+    if best_chain_depth >= 4:
+        score += 0.4
+    elif best_chain_depth >= 3:
+        score += 0.3
+    elif best_chain_depth >= 2:
+        score += 0.2
+
+    # Caller verification weight (up to 0.2)
+    if caller_verified:
+        correct_total = sum(c["correct"] for c in caller_verified.values())
+        all_total = sum(c["correct"] + c["other"] for c in caller_verified.values())
+        if all_total > 0:
+            score += (correct_total / all_total) * 0.2
+
+    # Event volume weight (up to 0.1) — more events = more confidence
+    if len(func_hit_events) >= 20:
+        score += 0.1
+    elif len(func_hit_events) >= 5:
+        score += 0.05
+
+    verification["confidence"] = round(score, 3)
+
+    # ---- 7. Determine verdict ----
+    if score >= 0.7:
+        verification["vulnerable_path_confirmed"] = True
+        verification["verdict"] = "CONFIRMED"
+    elif score >= 0.4:
+        verification["vulnerable_path_confirmed"] = True
+        verification["verdict"] = "LIKELY"
+    elif score >= 0.2:
+        verification["verdict"] = "PARTIAL"
+    else:
+        verification["verdict"] = "INSUFFICIENT"
+
+    # ---- 8. Explain why no crash (if applicable) ----
+    if not dynamic_results.get("crash_detected", False):
+        reasons = []
+        # Check if KASAN is enabled
+        kernel_ver = dynamic_results.get("kernel_version", "")
+        if "kasan" not in kernel_ver.lower():
+            reasons.append(
+                "KASAN not enabled — UAF memory access proceeds silently "
+                "instead of triggering a panic"
+            )
+        # Check offsets  
+        if best_chain_depth >= 2 and score >= 0.4:
+            reasons.append(
+                "Code path was exercised but without KASAN the stale pointer "
+                "dereference accesses recycled/valid memory (different offsets "
+                "or timing) so no fault is raised"
+            )
+        if reasons:
+            verification["no_crash_explanation"] = reasons
+            verification["details"].append(
+                f"No crash expected: {'; '.join(reasons)}"
+            )
+
+    return verification
+
+
+def _export_trace_analysis(dynamic_results: dict, parsed_crash: dict,
+                           log_dir: str) -> str:
+    """Export a self-contained trace_analysis.json for downstream consumers.
+
+    This file aggregates everything a downstream stage (exploit adaptation,
+    LLM-based PoC rewriting, etc.) needs in a single document:
+
+      - target device / kernel info
+      - resolved symbol addresses from runtime kallsyms
+      - crash stack with per-function hit counts
+      - path verification verdict and confidence
+      - observed event statistics
+      - alloc / free address maps
+      - no-crash explanation (KASAN missing, offsets, etc.)
+
+    Returns the path to the saved file.
+    """
+    pv = dynamic_results.get("path_verification", {})
+    bp = dynamic_results.get("breakpoints", {})
+
+    # Build per-function address + hit-count table
+    crash_stack_addrs = bp.get("crash_stack_addrs", {})
+    coverage = pv.get("crash_stack_coverage", {})
+    crash_functions = []
+    for fn in (parsed_crash.get("stack_frames",
+                                parsed_crash.get("frames", []))):
+        name = fn.get("function", fn.get("func", ""))
+        if not name:
+            continue
+        crash_functions.append({
+            "function": name,
+            "address": crash_stack_addrs.get(name),
+            "hits": coverage.get(name, 0),
+        })
+
+    # Build alloc/free symbol -> address maps from runtime config
+    alloc_map: Dict[str, str] = {}
+    free_map: Dict[str, str] = {}
+    runtime_cfg = dynamic_results.get("runtime_symbols_config")
+    if runtime_cfg and os.path.exists(runtime_cfg):
+        try:
+            with open(runtime_cfg, 'r') as f:
+                cfg = json.load(f)
+            alloc_map = cfg.get("alloc_addrs", {})
+            free_map = cfg.get("free_addrs", {})
+        except Exception:
+            pass
+
+    # Summarise events
+    events = dynamic_results.get("events", [])
+    from collections import Counter
+    event_types = Counter(e.get("type") for e in events)
+
+    trace = {
+        # ---- target identity ----
+        "bug_id": dynamic_results.get("bug_id"),
+        "arch": dynamic_results.get("arch"),
+        "kernel_version": dynamic_results.get("kernel_version"),
+        "device_model": dynamic_results.get("device_model"),
+        "android_version": dynamic_results.get("android_version"),
+
+        # ---- path verification ----
+        "path_verification": {
+            "verdict": pv.get("verdict", "UNKNOWN"),
+            "confidence": pv.get("confidence", 0.0),
+            "vulnerable_path_confirmed": pv.get("vulnerable_path_confirmed",
+                                                  False),
+            "best_chain_depth": 0,
+            "chain_match_count": 0,
+            "details": pv.get("details", []),
+            "no_crash_explanation": pv.get("no_crash_explanation", []),
+            "backtrace_chain_matches": pv.get("backtrace_chain_matches", []),
+        },
+
+        # ---- crash stack with addresses ----
+        "crash_functions": crash_functions,
+
+        # ---- runtime symbol addresses ----
+        "runtime_addresses": {
+            "crash_stack": crash_stack_addrs,
+            "alloc_functions": alloc_map,
+            "free_functions": free_map,
+        },
+
+        # ---- alloc / free breakpoint addresses ----
+        "installed_breakpoints": {
+            "symbols": bp.get("installed_symbols", []),
+            "alloc_addrs": bp.get("alloc_addrs", []),
+            "free_addrs": bp.get("free_addrs", []),
+        },
+
+        # ---- event summary ----
+        "event_summary": {
+            "total": len(events),
+            "by_type": dict(event_types),
+        },
+
+        # ---- alloc / free tracking ----
+        "alloc_free_stats": pv.get("alloc_free_stats", {}),
+
+        # ---- crash and device state ----
+        "crash_detected": dynamic_results.get("crash_detected", False),
+        "crash_type": dynamic_results.get("crash_type", 0),
+
+        # ---- symbols ----
+        "symbols_resolved": dynamic_results.get("symbols_resolved", 0),
+        "system_map_used": dynamic_results.get("system_map_used"),
+    }
+
+    # Fill in best_chain values from chain matches
+    matches = pv.get("backtrace_chain_matches", [])
+    if matches:
+        trace["path_verification"]["best_chain_depth"] = max(
+            m.get("chain_depth", m.get("depth", 0)) for m in matches
+        )
+        trace["path_verification"]["chain_match_count"] = len(
+            [e for e in events
+             if e.get("type") == "func_hit"
+             and e.get("func") in {m.get("func") for m in matches}]
+        )
+
+    out_path = os.path.join(log_dir, "trace_analysis.json")
+    with open(out_path, 'w') as f:
+        json.dump(trace, f, indent=2)
+    print(f"[POST] Exported trace analysis: {out_path}")
+    return out_path
+
+
 def test_repro_with_cuttlefish_controller(
     repro_path: str,
     bug_id: str,
@@ -2457,6 +2985,14 @@ def test_repro_with_cuttlefish_controller(
             print(f"[GDB] Waiting {timeout}s for reproducer execution...")
             time.sleep(min(timeout, 30))
             
+            # Download remote GDB results (if remote mode)
+            # This must happen AFTER the reproducer has had time to run,
+            # so the GDB process has had a chance to collect breakpoint data
+            is_remote = cuttlefish_config.ssh_host != "localhost" or cuttlefish_config.ssh_port != 22
+            if is_remote and hasattr(controller, 'download_remote_gdb_results'):
+                print("[GDB] Downloading results from remote GDB...")
+                controller.download_remote_gdb_results()
+            
             # Check for results
             if kernel_gdb:
                 results_file = Path(log_dir) / f"{bug_id}_kernel_gdb_results.json"
@@ -2553,6 +3089,30 @@ def test_repro_with_cuttlefish_controller(
         controller.cleanup()
         print("[OK] Cleanup complete")
     
+    # Post-process: resolve backtrace addresses to symbol names
+    if dynamic_results.get("events"):
+        _resolve_backtrace_symbols(dynamic_results, log_dir)
+    
+    # Post-process: verify the vulnerable code path was exercised
+    if dynamic_results.get("events") and parsed_crash:
+        print()
+        print("-" * 60)
+        print("[POST] Verifying crash path was exercised...")
+        print("-" * 60)
+        verification = _verify_crash_path(dynamic_results, parsed_crash)
+        dynamic_results["path_verification"] = verification
+        print(f"[POST] Verdict: {verification['verdict']} "
+              f"(confidence: {verification['confidence']:.0%})")
+        for detail in verification.get("details", []):
+            print(f"[POST]   {detail}")
+        if verification.get("no_crash_explanation"):
+            print(f"[POST] Why no crash: {verification['no_crash_explanation'][0]}")
+
+        # Export self-contained trace analysis for downstream stages
+        trace_path = _export_trace_analysis(dynamic_results, parsed_crash,
+                                            log_dir)
+        dynamic_results["trace_analysis_path"] = trace_path
+
     # Save results
     results_output = os.path.join(log_dir, f"{bug_id}_controller_results.json")
     with open(results_output, 'w') as f:
@@ -2567,6 +3127,9 @@ def test_repro_with_cuttlefish_controller(
     print(f"[RESULTS] Crash type: {crash_type}")
     print(f"[RESULTS] Mode: {dynamic_results['analysis_mode']}")
     print(f"[RESULTS] Symbols source: {dynamic_results.get('symbols_source', 'unknown')}")
+    if dynamic_results.get("path_verification"):
+        pv = dynamic_results["path_verification"]
+        print(f"[RESULTS] Path verification: {pv['verdict']} ({pv['confidence']:.0%} confidence)")
     print(f"[RESULTS] Detailed log: {controller.get_log_file_path()}")
     if cuttlefish_config.enable_gdb:
         print(f"[RESULTS] GDB session log: {dynamic_results.get('gdb_session_log')}")

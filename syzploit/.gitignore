@@ -30,3 +30,8 @@ baseline*
 logs*
 android-*
 syzploit_data*
+upstream*
+syzkall_crashes/
+analysis_*
+cuttlefish_*
+outdir/*

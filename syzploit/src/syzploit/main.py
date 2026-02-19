@@ -12,8 +12,80 @@ from .SyzVerify.run_bug import test_repro_crashes, test_repro_crashes_qemu, test
 from .SyzVerify.cuttlefish import CuttlefishConfig, create_config_from_args
 import json
 import os
+import re
 
 app = typer.Typer(help="Syzkall/Syzbot tooling for pulling, testing, and analyzing bugs.")
+
+
+def _parse_crash_report_for_stack(crash_report: str) -> dict:
+    """Parse a raw kernel crash report to extract stack frames for GDB breakpoints.
+    
+    Handles KASAN/UBSAN/KMSAN reports and generic kernel oops/panic stack traces.
+    Returns a dict compatible with the parsed_crash format used by CuttlefishKernelGDB.
+    """
+    result = {
+        'crash_type': '',
+        'corrupted_function': '',
+        'stack_frames': [],
+        'access': {},
+    }
+    
+    # Parse crash type and corrupted function
+    bug_match = re.search(
+        r'BUG:\s*(KASAN|UBSAN|KMSAN):\s*([^\n]+?)\s+in\s+(\S+)',
+        crash_report
+    )
+    if bug_match:
+        result['crash_type'] = f"{bug_match.group(1)}: {bug_match.group(2).split(' in ')[0].strip()}"
+        func = bug_match.group(3).split('+')[0].split('.')[0]
+        result['corrupted_function'] = func
+    
+    # Parse access info (read/write, address, size)
+    access_match = re.search(r'(Read|Write) of size (\d+) at addr ([0-9a-fA-Fx]+)', crash_report)
+    if access_match:
+        result['access'] = {
+            'type': access_match.group(1).lower(),
+            'size': int(access_match.group(2)),
+            'address': access_match.group(3),
+        }
+    
+    # Extract stack frames from "Call Trace:" section
+    # Look for lines like: " func_name+0x123/0x456  file.c:123"
+    # or: " func_name+0x123/0x456"
+    in_stack = False
+    seen_funcs = set()
+    
+    for line in crash_report.split('\n'):
+        stripped = line.strip()
+        if 'Call Trace:' in stripped:
+            in_stack = True
+            continue
+        if in_stack:
+            # End of stack trace
+            if stripped == '' or stripped.startswith('RIP:') or stripped.startswith('RSP:'):
+                break
+            
+            # Match stack frame: " func+0xoffset/0xsize  file:line  [inline]"
+            frame_match = re.match(
+                r'(?:\?\s+)?(\w+)\+0x[0-9a-f]+/0x[0-9a-f]+\s*(?:(\S+):(\d+))?\s*(\[inline\])?',
+                stripped
+            )
+            if frame_match:
+                func_name = frame_match.group(1)
+                source_file = frame_match.group(2) or ''
+                line_num = int(frame_match.group(3)) if frame_match.group(3) else 0
+                is_inline = bool(frame_match.group(4))
+                
+                if func_name not in seen_funcs:
+                    seen_funcs.add(func_name)
+                    result['stack_frames'].append({
+                        'function': func_name,
+                        'file': source_file,
+                        'line': line_num,
+                        'inline': is_inline,
+                    })
+    
+    return result if result['stack_frames'] or result['corrupted_function'] else None
 
 
 # TODO: decide if this will even be apart of kexploit
@@ -461,6 +533,15 @@ def test_cuttlefish(
     if hasattr(md, 'crash_parser_results') and md.crash_parser_results:
         parsed_crash = md.crash_parser_results
     
+    # If no parsed crash but we have a crash report text, parse it for stack trace
+    if not parsed_crash and hasattr(md, 'crash_report') and md.crash_report:
+        typer.echo("[+] Parsing crash report for stack trace breakpoints...")
+        parsed_crash = _parse_crash_report_for_stack(md.crash_report)
+        if parsed_crash and parsed_crash.get('stack_frames'):
+            typer.echo(f"[+] Extracted {len(parsed_crash['stack_frames'])} stack frames from crash report")
+        else:
+            typer.echo("[+] No stack frames extracted from crash report")
+    
     # Run test
     typer.echo(f"[+] Running test with Cuttlefish controller...")
     typer.echo(f"[+] Mode: {'persistent' if persistent else 'non-persistent'}")
@@ -825,6 +906,38 @@ def pipeline_cuttlefish(
         typer.echo(f"[!] Post-processing failed: {e}")
         summary["steps"]["post_process"] = {"success": False, "error": str(e)}
     
+    # Step 4b: Adapt PoC for target device
+    typer.echo("\n[STEP 4b] Adapting PoC for target device...")
+    try:
+        from .SyzAnalyze.poc_adapter import adapt_poc
+
+        adapt_result = adapt_poc(
+            analysis_dir=str(output_dir),
+            output_dir=str(output_dir),
+            target_arch=arch,
+            model="gpt-5",
+        )
+        if adapt_result.get("success"):
+            typer.echo(f"[+] Adapted PoC written: {adapt_result['adapted_poc']}")
+            typer.echo(f"    Kernel: {adapt_result.get('kernel_version', '?')}")
+            typer.echo(f"    Verdict: {adapt_result.get('verdict', '?')} "
+                       f"({(adapt_result.get('confidence') or 0):.0%})")
+            summary["steps"]["adapt_poc"] = {
+                "success": True,
+                "adapted_poc": adapt_result["adapted_poc"],
+                "verdict": adapt_result.get("verdict"),
+                "confidence": adapt_result.get("confidence"),
+            }
+        else:
+            typer.echo(f"[!] PoC adaptation failed: {adapt_result.get('error')}")
+            summary["steps"]["adapt_poc"] = {
+                "success": False,
+                "error": adapt_result.get("error", "unknown"),
+            }
+    except Exception as e:
+        typer.echo(f"[!] PoC adaptation failed: {e}")
+        summary["steps"]["adapt_poc"] = {"success": False, "error": str(e)}
+
     # Step 5: Synthesize (optional)
     exploit_path = None
     if goal:
@@ -1418,6 +1531,58 @@ def generate_exploit_cmd(
             typer.echo(f"    {key}: {path}")
     else:
         typer.echo(f"\n[!] Exploit generation failed")
+        raise typer.Exit(code=1)
+
+
+@app.command(name="adapt-poc")
+def adapt_poc_cmd(
+    analysis_dir: Annotated[Path, typer.Argument(
+        help='Path to analysis directory with static_analysis.json and '
+             'trace_analysis.json (or controller log sub-dir)')],
+    arch: Annotated[str, typer.Option(
+        help='Target architecture (arm64/x86_64)')] = 'arm64',
+    output_dir: Annotated[Optional[Path], typer.Option(
+        help='Output directory (defaults to analysis_dir)')] = None,
+    model: Annotated[str, typer.Option(
+        help='LLM model to use')] = 'gpt-5',
+    skip_llm: Annotated[bool, typer.Option(
+        '--skip-llm',
+        help='Skip LLM; just prepend runtime addresses to original PoC'
+    )] = False,
+):
+    """Adapt a syzbot PoC for a specific target device.
+
+    Uses trace_analysis.json (runtime addresses, path verification,
+    device profile) together with the original syzbot reproducer to
+    produce an adapted PoC that works on a non-KASAN target device.
+
+    Requires that test-cuttlefish (with --extract-runtime-symbols) has
+    already been run so that trace_analysis.json exists in the analysis
+    directory or one of its sub-directories.
+
+    Examples:
+        syzploit adapt-poc ./analysis_abc123 --arch arm64
+        syzploit adapt-poc ./analysis_abc123 --skip-llm
+    """
+    from .SyzAnalyze.poc_adapter import adapt_poc
+
+    result = adapt_poc(
+        analysis_dir=str(analysis_dir),
+        output_dir=str(output_dir) if output_dir else None,
+        target_arch=arch,
+        model=model,
+        skip_llm=skip_llm,
+    )
+
+    if result.get("success"):
+        typer.echo(f"\n[+] Adapted PoC: {result['adapted_poc']}")
+        typer.echo(f"    Metadata:    {result.get('metadata_path')}")
+        typer.echo(f"    Arch:        {result.get('arch')}")
+        typer.echo(f"    Kernel:      {result.get('kernel_version', '?')}")
+        typer.echo(f"    Verdict:     {result.get('verdict', '?')} "
+                   f"({(result.get('confidence') or 0):.0%})")
+    else:
+        typer.echo(f"\n[!] PoC adaptation failed: {result.get('error')}")
         raise typer.Exit(code=1)
 
 

@@ -14,7 +14,7 @@ from ..core import Primitive, PrimitiveRegistry
 from ...utils.debug import debug_print
 
 
-def syzsyz_debug(msg: str, enabled: bool = True):
+def syz_debug(msg: str, enabled: bool = True):
     """Print debug message if enabled."""
     debug_print("SyzAnalyzeAdapter", msg, enabled)
 
@@ -322,5 +322,114 @@ def load_from_analysis(analysis_dir: str, registry: PrimitiveRegistry,
             prims.append(prim)
             syz_debug(f"    Created primitive '{name}' with {len(all_caps)} capabilities", debug)
     
+    # Also load trace analysis if available
+    trace = load_trace_analysis(analysis_dir, registry, debug)
+    if trace:
+        syz_debug(f"  Trace analysis loaded (verdict: "
+                  f"{trace.get('path_verification', {}).get('verdict', '?')})",
+                  debug)
+
     syz_debug(f"  Total primitives loaded: {len(prims)}", debug)
     return prims
+
+
+def _find_trace_analysis(analysis_dir: str) -> Optional[str]:
+    """Locate trace_analysis.json on disk (may be in a log sub-directory)."""
+    direct = os.path.join(analysis_dir, "trace_analysis.json")
+    if os.path.exists(direct):
+        return direct
+    # Check sub-directories (controller log dirs)
+    try:
+        for d in sorted(os.listdir(analysis_dir)):
+            dp = os.path.join(analysis_dir, d)
+            if os.path.isdir(dp):
+                candidate = os.path.join(dp, "trace_analysis.json")
+                if os.path.exists(candidate):
+                    return candidate
+    except OSError:
+        pass
+    return None
+
+
+def load_trace_analysis(analysis_dir: str,
+                        registry: PrimitiveRegistry,
+                        debug: bool = False) -> Optional[Dict[str, Any]]:
+    """Load trace_analysis.json and register a runtime-evidence primitive.
+
+    The trace analysis contains:
+      - runtime kernel addresses for crash-stack / alloc / free functions
+      - path-verification verdict and confidence
+      - event statistics from GDB tracing
+      - device profile (kernel version, arch, android version)
+
+    This information enriches the PDDL planner's world-state so it can
+    account for device-specific constraints (e.g., no KASAN, ARM64 offsets).
+
+    Returns the raw trace dict or *None* if unavailable.
+    """
+    trace_path = _find_trace_analysis(analysis_dir)
+    if trace_path is None:
+        syz_debug("  No trace_analysis.json found", debug)
+        return None
+
+    syz_debug(f"  Loading trace analysis: {trace_path}", debug)
+    try:
+        with open(trace_path, "r") as f:
+            trace = json.load(f)
+    except Exception as e:
+        syz_debug(f"  Error loading trace analysis: {e}", debug)
+        return None
+
+    pv = trace.get("path_verification", {})
+    verdict = pv.get("verdict", "UNKNOWN")
+    confidence = pv.get("confidence", 0.0)
+    confirmed = pv.get("vulnerable_path_confirmed", False)
+
+    caps: List[str] = []
+
+    # High-confidence runtime verification → strong capability
+    if confidence >= 0.6 or confirmed:
+        caps.append("CAP_runtime_verified")
+    if confidence >= 0.4:
+        caps.append("CAP_partially_verified")
+
+    # Address knowledge enables offset-based exploitation
+    rt = trace.get("runtime_addresses", {})
+    if rt.get("crash_stack"):
+        caps.append("CAP_known_crash_addrs")
+    if rt.get("alloc_functions"):
+        caps.append("CAP_known_alloc_addrs")
+    if rt.get("free_functions"):
+        caps.append("CAP_known_free_addrs")
+
+    # No KASAN → silent UAF, different exploitation strategy
+    crash_detected = trace.get("crash_detected", False)
+    no_crash = pv.get("no_crash_explanation", [])
+    if not crash_detected and no_crash:
+        caps.append("CAP_silent_uaf")
+
+    if caps:
+        prim = Primitive(
+            name="runtime_trace_evidence",
+            description=(f"Runtime trace verification: {verdict} "
+                         f"({confidence:.0%} confidence). "
+                         f"{len(rt.get('crash_stack', {}))} crash addresses, "
+                         f"{trace.get('event_summary', {}).get('total', 0)} "
+                         f"GDB events captured."),
+            requirements={},
+            provides={
+                "caps": caps,
+                "source": "trace_analysis",
+                "analysis_path": trace_path,
+                "verdict": verdict,
+                "confidence": confidence,
+                "kernel_version": trace.get("kernel_version"),
+                "arch": trace.get("arch"),
+                "runtime_addresses": rt,
+            },
+        )
+        registry.add(prim)
+        syz_debug(f"    Created runtime_trace_evidence primitive with "
+                  f"{len(caps)} caps: {caps}", debug)
+
+    return trace
