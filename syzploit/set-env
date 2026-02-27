@@ -1,0 +1,17 @@
+#!/bin/bash
+# set-env — Create and start the syzploit Docker container.
+#
+# Usage:
+#   ./set-env              # start fresh container
+#   docker attach syzploit # re-attach to running container
+
+docker run -it -d --name syzploit \
+  -u 1000:1000 \
+  --network=host \
+  --device=/dev/kvm \
+  --group-add $(getent group kvm | cut -d: -f3) \
+  -v "$(pwd):/workspace/syzploit" \
+  -v "$(pwd)/../ingots_tools:/workspace/ingots_tools" \
+  -v "$HOME/.ssh:/home/kuser/.ssh:ro" \
+  -v "/etc/hosts:/etc/hosts:ro" \
+  syzploit-env2
