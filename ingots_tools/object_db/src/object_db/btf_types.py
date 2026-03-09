@@ -1,0 +1,494 @@
+from dataclasses import asdict, dataclass, fields
+import json
+from pathlib import Path
+from typing import Any, Optional, Self, Type
+
+BTF_JSON_NAME = "btf_types.json"
+
+
+def _filter_kwargs(cls, btf_types: "BtfTypes", data):
+    if "type_id" in data:
+        data["type_id"] = TypeReference(btf_types, data["type_id"])
+
+    valid_fields = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in valid_fields}
+
+
+class BtfTypes:
+    types: dict[int, "BtfType"]
+    type_name_map: dict[str, "BtfType"]
+
+    def __init__(self, json_data: dict[str, Any]):
+        self.types = {}
+        self.type_name_map = {}
+
+        for type_data in json_data.get("types", []):
+            btf_type = BtfType.from_json(self, type_data)
+            self.types[btf_type.id] = btf_type
+            self.type_name_map[btf_type.name] = btf_type
+
+    @classmethod
+    def load(cls, btf_json_path: Path) -> Self:
+        with open(btf_json_path, "r") as f:
+            json_data = json.load(f)
+        return cls(json_data)
+
+    def get_type(self, type_id: int) -> Optional["BtfType"]:
+        return self.types.get(type_id)
+
+    def get_type_by_name(self, type_name: str) -> Optional["BtfType"]:
+        return self.type_name_map.get(type_name)
+
+    def get_type_ref(self, type_id: int) -> "TypeReference":
+        return TypeReference(self, type_id)
+
+
+class TypeReference:
+    def __init__(self, btf_types: BtfTypes, type_id: int):
+        self.btf_types = btf_types
+        self.type_id = type_id
+
+    def __str__(self):
+        return "TypeReference"
+
+    def __repr__(self):
+        return "TypeReference"
+
+    @property
+    def type(self) -> Optional["BtfType"]:
+        return self.btf_types.get_type(self.type_id)
+
+    @property
+    def name(self) -> Optional[str]:
+        t = self.type
+        return t.name if t else None
+
+    @property
+    def kind(self) -> Optional[str]:
+        t = self.type
+        return t.kind if t else None
+
+
+@dataclass
+class BtfType:
+    id: int
+    kind: str
+    name: str
+
+    @classmethod
+    def from_json(cls, btf_types: BtfTypes, data: dict) -> "BtfType":
+        kind = data.get("kind")
+
+        target_cls: Type[BtfType] = BtfType
+
+        if kind == "INT":
+            target_cls = BtfInt
+        elif kind == "PTR":
+            target_cls = BtfPtr
+        elif kind == "ARRAY":
+            target_cls = BtfArray
+        elif kind == "STRUCT":
+            target_cls = BtfStruct
+        elif kind == "UNION":
+            target_cls = BtfUnion
+        elif kind == "ENUM":
+            target_cls = BtfEnum
+        elif kind == "FWD":
+            target_cls = BtfFwd
+        elif kind == "TYPEDEF":
+            target_cls = BtfTypedef
+        elif kind == "VOLATILE":
+            target_cls = BtfVolatile
+        elif kind == "CONST":
+            target_cls = BtfConst
+        elif kind == "RESTRICT":
+            target_cls = BtfRestrict
+        elif kind == "FUNC":
+            target_cls = BtfFunc
+        elif kind == "FUNC_PROTO":
+            target_cls = BtfFuncProto
+        elif kind == "VAR":
+            target_cls = BtfVar
+        elif kind == "DATASEC":
+            target_cls = BtfDatasec
+        elif kind == "FLOAT":
+            target_cls = BtfFloat
+        elif kind == "DECL_TAG":
+            target_cls = BtfDeclTag
+        elif kind == "TYPE_TAG":
+            target_cls = BtfTypeTag
+
+        data_copy = data.copy()
+
+        if target_cls == BtfStruct or target_cls == BtfUnion:
+            m_data = data_copy.pop("members", [])
+            data_copy["members"] = [BtfMember(**_filter_kwargs(BtfMember, btf_types, m)) for m in m_data]
+        elif target_cls == BtfEnum:
+            v_data = data_copy.pop("values", [])
+            data_copy["values"] = [BtfEnumMember(**_filter_kwargs(BtfEnumMember, btf_types, v)) for v in v_data]
+        elif target_cls == BtfFuncProto:
+            p_data = data_copy.pop("params", [])
+            data_copy["params"] = [BtfParam(**_filter_kwargs(BtfParam, btf_types, p)) for p in p_data]
+        elif target_cls == BtfDatasec:
+            v_data = data_copy.pop("vars", [])
+            data_copy["vars"] = [BtfDatasecVar(**_filter_kwargs(BtfDatasecVar, btf_types, v)) for v in v_data]
+        elif target_cls == BtfArray:
+            data_copy["index_type_id"] = TypeReference(btf_types, data_copy["index_type_id"])
+        elif target_cls == BtfFuncProto:
+            data_copy["ret_type_id"] = TypeReference(btf_types, data_copy["ret_type_id"])
+
+        return target_cls(**_filter_kwargs(target_cls, btf_types, data_copy))
+
+    def to_db_dict(self) -> dict:
+        data = {
+            "id": self.id,
+            "kind": self.kind,
+            "name": self.name,
+            "type_id": None,
+            "size": None,
+            "bits_offset": None,
+            "nr_bits": None,
+            "encoding": None,
+            "index_type_id": None,
+            "nr_elems": None,
+            "vlen": None,
+            "members": None,
+            "values_json": None,
+            "fwd_kind": None,
+            "ret_type_id": None,
+            "params": None,
+            "vars": None,
+            "linkage": None,
+            "component_idx": None,
+        }
+
+        if hasattr(self, "type_id") and isinstance(self.type_id, TypeReference):
+            data["type_id"] = self.type_id.type_id
+        if hasattr(self, "size"):
+            data["size"] = self.size
+        if hasattr(self, "bits_offset"):
+            data["bits_offset"] = self.bits_offset
+        if hasattr(self, "nr_bits"):
+            data["nr_bits"] = self.nr_bits
+        if hasattr(self, "encoding"):
+            data["encoding"] = self.encoding
+        if hasattr(self, "index_type_id") and isinstance(self.index_type_id, TypeReference):
+            data["index_type_id"] = self.index_type_id.type_id
+        if hasattr(self, "nr_elems"):
+            data["nr_elems"] = self.nr_elems
+        if hasattr(self, "vlen"):
+            data["vlen"] = self.vlen
+        if hasattr(self, "fwd_kind"):
+            data["fwd_kind"] = self.fwd_kind
+        if hasattr(self, "ret_type_id") and isinstance(self.ret_type_id, TypeReference):
+            data["ret_type_id"] = self.ret_type_id.type_id
+        if hasattr(self, "linkage"):
+            data["linkage"] = str(self.linkage)
+        if hasattr(self, "component_idx"):
+            data["component_idx"] = self.component_idx
+
+        if hasattr(self, "members") and self.members:
+            m_list = []
+            for m in self.members:  # type: ignore
+                m_dict = asdict(m)
+                if isinstance(m.type_id, TypeReference):
+                    m_dict["type_id"] = m.type_id.type_id
+                m_list.append(m_dict)
+            data["members"] = json.dumps(m_list)
+
+        if hasattr(self, "values") and self.values:
+            data["values_json"] = json.dumps([asdict(v) for v in self.values])  # type: ignore
+
+        if hasattr(self, "params") and self.params:
+            p_list = []
+            for p in self.params:  # type: ignore
+                p_dict = asdict(p)
+                if isinstance(p.type_id, TypeReference):
+                    p_dict["type_id"] = p.type_id.type_id
+                p_list.append(p_dict)
+            data["params"] = json.dumps(p_list)
+
+        if hasattr(self, "vars") and self.vars:
+            v_list = []
+            for v in self.vars:  # type: ignore
+                v_dict = asdict(v)
+                if isinstance(v.type_id, TypeReference):
+                    v_dict["type_id"] = v.type_id.type_id
+                v_list.append(v_dict)
+            data["vars"] = json.dumps(v_list)
+
+        return data
+
+    @classmethod
+    def from_db_row(cls, btf_types: BtfTypes, row: tuple) -> "BtfType":
+        (
+            id_val,
+            kind,
+            name,
+            type_id,
+            size,
+            bits_offset,
+            nr_bits,
+            encoding,
+            index_type_id,
+            nr_elems,
+            vlen,
+            members_json,
+            values_json,
+            fwd_kind,
+            ret_type_id,
+            params_json,
+            vars_json,
+            linkage,
+            component_idx,
+        ) = row
+
+        data = {"id": id_val, "kind": kind, "name": name}
+
+        if type_id is not None:
+            data["type_id"] = type_id
+        if size is not None:
+            data["size"] = size
+        if bits_offset is not None:
+            data["bits_offset"] = bits_offset
+        if nr_bits is not None:
+            data["nr_bits"] = nr_bits
+        if encoding is not None:
+            data["encoding"] = encoding
+        if index_type_id is not None:
+            data["index_type_id"] = index_type_id
+        if nr_elems is not None:
+            data["nr_elems"] = nr_elems
+        if vlen is not None:
+            data["vlen"] = vlen
+        if fwd_kind is not None:
+            data["fwd_kind"] = fwd_kind
+        if ret_type_id is not None:
+            data["ret_type_id"] = ret_type_id
+        if linkage is not None:
+            if kind == "VAR" and linkage.isdigit():
+                data["linkage"] = int(linkage)
+            else:
+                data["linkage"] = linkage
+        if component_idx is not None:
+            data["component_idx"] = component_idx
+
+        if members_json:
+            data["members"] = json.loads(members_json)
+        if values_json:
+            data["values"] = json.loads(values_json)
+        if params_json:
+            data["params"] = json.loads(params_json)
+        if vars_json:
+            data["vars"] = json.loads(vars_json)
+
+        return cls.from_json(btf_types, data)
+
+    def format_short(self) -> str:
+        return self.format_long()
+
+    def format_long(self) -> str:
+        return str(self)
+
+    def __repr__(self) -> str:
+        return self.format_long()
+
+
+@dataclass
+class BtfRefType(BtfType):
+    type_id: TypeReference
+
+    def format_short(self) -> str:
+        return f"{self.type_id.type.format_short()}*"
+
+    def format_long(self) -> str:
+        return f"{self.type_id.type.format_long()}*"
+
+
+@dataclass
+class BtfInt(BtfType):
+    size: int
+    bits_offset: int
+    nr_bits: int
+    encoding: str
+
+    def format_long(self) -> str:
+        return self.name
+
+
+@dataclass
+class BtfPtr(BtfRefType):
+    pass
+
+
+@dataclass
+class BtfArray(BtfType):
+    type_id: TypeReference
+    index_type_id: TypeReference
+    nr_elems: int
+
+    def format_long(self) -> str:
+        return f"{self.type_id.type.format_short()}[{self.nr_elems}]"
+
+
+@dataclass
+class BtfMember:
+    name: str
+    type_id: TypeReference
+    bits_offset: int
+    bitfield_size: int = 0
+
+
+@dataclass
+class BtfStruct(BtfType):
+    size: int
+    vlen: int
+    members: list[BtfMember]
+
+    def format_short(self) -> str:
+        return f"struct {self.name}"
+
+    def format_long(self) -> str:
+        return f"struct {self.name} {{\n{self.format_fields()}}}"
+
+    def format_fields(self) -> str:
+        return "".join(
+            f"    // field byte offset: {field.bits_offset // 8}\n    {field.type_id.type.format_short()} {field.name};\n"
+            for field in self.members
+        )
+
+
+@dataclass
+class BtfUnion(BtfStruct):
+    def format_short(self) -> str:
+        return f"union {self.name}"
+
+    def format_long(self) -> str:
+        return f"union {self.name} {{\n{self.format_fields()}}}"
+
+
+@dataclass
+class BtfEnumMember:
+    name: str
+    val: int
+
+
+@dataclass
+class BtfEnum(BtfType):
+    size: int
+    vlen: int
+    encoding: str = "UNSIGNED"
+    values: list[BtfEnumMember] = None  # type: ignore
+
+    def format_short(self) -> str:
+        return f"union {self.name}"
+
+    def format_long(self) -> str:
+        return f"union {self.name} {{\n{self.format_variants()}}}"
+
+    def format_variants(self) -> str:
+        return "".join(f"    {variant.name} = {variant.val},\n" for variant in self.values)
+
+
+@dataclass
+class BtfFwd(BtfType):
+    fwd_kind: str
+
+    def format_long(self) -> str:
+        return f"{self.fwd_kind} {self.name}"
+
+
+@dataclass
+class BtfTypedef(BtfRefType):
+    type_id: TypeReference
+
+    def format_short(self) -> str:
+        return self.name
+
+    def format_long(self) -> str:
+        return f"typedef {self.type_id.type.format_long()} {self.name}"
+
+
+@dataclass
+class BtfVolatile(BtfRefType):
+    type_id: TypeReference
+
+    def format_short(self) -> str:
+        return f"volatile {self.type_id.type.format_short()}"
+
+    def format_long(self) -> str:
+        return f"volatile {self.type_id.type.format_long()}"
+
+
+@dataclass
+class BtfConst(BtfRefType):
+    type_id: TypeReference
+
+    def format_short(self) -> str:
+        return f"const {self.type_id.type.format_short()}"
+
+    def format_long(self) -> str:
+        return f"const {self.type_id.type.format_long()}"
+
+
+@dataclass
+class BtfRestrict(BtfRefType):
+    type_id: TypeReference
+
+    def format_short(self) -> str:
+        return f"restrict {self.type_id.type.format_short()}"
+
+    def format_long(self) -> str:
+        return f"restrict {self.type_id.type.format_long()}"
+
+
+@dataclass
+class BtfFunc(BtfRefType):
+    linkage: str
+
+
+@dataclass
+class BtfParam:
+    name: str
+    type_id: TypeReference
+
+
+@dataclass
+class BtfFuncProto(BtfType):
+    ret_type_id: TypeReference
+    vlen: int
+    params: list[BtfParam]
+
+
+@dataclass
+class BtfVar(BtfRefType):
+    linkage: int
+
+
+@dataclass
+class BtfDatasecVar:
+    type_id: TypeReference
+    offset: int
+    size: int
+
+
+@dataclass
+class BtfDatasec(BtfType):
+    size: int
+    vlen: int
+    vars: list[BtfDatasecVar]
+
+
+@dataclass
+class BtfFloat(BtfType):
+    size: int
+
+
+@dataclass
+class BtfDeclTag(BtfRefType):
+    component_idx: int
+
+
+@dataclass
+class BtfTypeTag(BtfRefType):
+    pass

@@ -1,0 +1,7 @@
+{
+  "name": "pipe_buffer_rw",
+  "description": "Exploit primitive that corrupts pipe_buffer structures to achieve arbitrary kernel read and write capabilities.",
+  "target": "any",
+  "arch": ["amd64", "arm64"],
+  "version": "any"
+}

@@ -10,6 +10,7 @@ members = [
     "kexploit-agent",
     "kexploit-utils",
     "libadb",
+    "object-db",
     "primitives",
     "scripts",
 ]
@@ -872,6 +873,7 @@ dependencies = [
     { name = "kexploit-agent" },
     { name = "kexploit-utils" },
     { name = "libadb" },
+    { name = "object-db" },
     { name = "primitives" },
     { name = "scripts" },
 ]
@@ -883,6 +885,7 @@ requires-dist = [
     { name = "kexploit-agent", editable = "kexploit_agent" },
     { name = "kexploit-utils", editable = "kexploit_utils" },
     { name = "libadb", editable = "libadb" },
+    { name = "object-db", editable = "object_db" },
     { name = "primitives", editable = "primitives" },
     { name = "scripts", editable = "scripts" },
 ]
@@ -1083,6 +1086,7 @@ dependencies = [
     { name = "litellm" },
     { name = "multilspy" },
     { name = "mypy" },
+    { name = "object-db" },
     { name = "openai" },
     { name = "pwntools" },
     { name = "pycparser" },
@@ -1112,6 +1116,7 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.80.10" },
     { name = "multilspy", specifier = ">=0.0.15" },
     { name = "mypy", specifier = ">=1.16.1" },
+    { name = "object-db", editable = "object_db" },
     { name = "openai", specifier = ">=1.82.1" },
     { name = "pwntools", specifier = ">=4.14.1" },
     { name = "pycparser", specifier = ">=2.22" },
@@ -1630,6 +1635,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/a2/6e/371856a3fb9d31ca8
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505", size = 4963, upload-time = "2025-04-22T14:54:22.983Z" },
 ]
+
+[[package]]
+name = "object-db"
+version = "0.1.0"
+source = { editable = "object_db" }
+dependencies = [
+    { name = "sqlalchemy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sqlalchemy", specifier = ">=2.0.45" }]
 
 [[package]]
 name = "openai"

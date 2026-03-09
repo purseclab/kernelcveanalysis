@@ -10,6 +10,7 @@ dependencies = [
     "kexploit_agent",
     "kexploit_utils",
     "primitives",
+    "object_db",
 ]
 
 [tool.uv.workspace]
@@ -21,6 +22,7 @@ members = [
   "kexploit_agent",
   "kexploit_utils",
   "primitives",
+  "object_db",
 ]
 
 [tool.uv.sources]
@@ -31,3 +33,4 @@ scripts = { workspace = true }
 kexploit_agent = { workspace = true }
 kexploit_utils = { workspace = true }
 primitives = { workspace = true }
+object_db = { workspace = true }
