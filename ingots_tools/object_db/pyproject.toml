@@ -5,6 +5,7 @@ description = "Kernel object database models and extraction utilities"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "pydantic>=2.11.5",
     "sqlalchemy>=2.0.45",
 ]
 

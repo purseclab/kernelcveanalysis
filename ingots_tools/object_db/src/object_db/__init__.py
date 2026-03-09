@@ -8,6 +8,8 @@ from .codeql import (
 )
 from .location import Location, Position
 from .object_db import HeapObject, KmallocCall, OBJECT_DB_FILE_NAME, ObjectDb
+from .setup import extract_kmalloc_calls, extract_type_info, setup_synthesis_object_db
+from .synthesis_metadata import METADATA_FILE_NAME, SynthesisMetadata
 
 __all__ = [
     "AllocType",
@@ -19,11 +21,16 @@ __all__ = [
     "HeapObject",
     "KmallocCall",
     "Location",
+    "METADATA_FILE_NAME",
     "OBJECT_DB_FILE_NAME",
     "ObjectDb",
     "Position",
+    "SynthesisMetadata",
     "BtfType",
     "BtfStruct",
     "BtfTypes",
     "TypeReference",
+    "extract_kmalloc_calls",
+    "extract_type_info",
+    "setup_synthesis_object_db",
 ]
