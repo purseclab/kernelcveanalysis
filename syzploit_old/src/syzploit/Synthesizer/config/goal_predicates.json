@@ -1,0 +1,19 @@
+{
+  "_doc": "Maps goal strings to PDDL goal predicate sets",
+  "privilege_escalation": ["(privilege_escalated)"],
+  "root_shell": ["(root_shell)"],
+  "root": ["(privilege_escalated)"],
+  "priv_esc": ["(privilege_escalated)"],
+  "code_exec": ["(code_exec)"],
+  "code_execution": ["(code_exec)"],
+  "kernel_code_exec": ["(code_exec)"],
+  "arb_read": ["(has_capability ARB_READ)"],
+  "arb_write": ["(has_capability ARB_WRITE)"],
+  "arbitrary_read": ["(has_capability ARB_READ)"],
+  "arbitrary_write": ["(has_capability ARB_WRITE)"],
+  "info_leak": ["(has_info_leak)"],
+  "kaslr_bypass": ["(kaslr_bypassed)"],
+  "sandbox_escape": ["(sandbox_escaped)"],
+  "selinux_bypass": ["(selinux_disabled)"],
+  "adb_root": ["(adb_root_enabled)"]
+}

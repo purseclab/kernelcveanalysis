@@ -1,0 +1,16 @@
+{
+  "_doc": "Maps technique name strings to PDDL predicate sets",
+  "msg_msg": ["(sprayed_struct MSG_MSG)", "(heap_controlled)"],
+  "pipe_buffer": ["(sprayed_struct PIPE_BUFFER)", "(heap_controlled)"],
+  "pipe_buffer_rop": ["(sprayed_struct PIPE_BUFFER)", "(heap_controlled)"],
+  "pipe_buf_rop": ["(sprayed_struct PIPE_BUFFER)", "(heap_controlled)"],
+  "cross_cache": ["(cross_cache_ready)", "(heap_controlled)"],
+  "dirty_pagetable": ["(pte_corrupted)", "(heap_controlled)"],
+  "seq_operations": ["(sprayed_struct SEQ_OPERATIONS)", "(heap_controlled)"],
+  "tty_struct": ["(sprayed_struct TTY_STRUCT)", "(heap_controlled)"],
+  "sk_buff": ["(sprayed_struct SK_BUFF)", "(heap_controlled)"],
+  "modprobe_hijack": ["(modprobe_path_overwritten)"],
+  "rop_chain": ["(rop_chain_ready)"],
+  "jop_chain": ["(jop_chain_ready)"],
+  "stack_pivot": ["(stack_pivoted)"]
+}

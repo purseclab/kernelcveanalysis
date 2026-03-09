@@ -15,5 +15,5 @@ CXX="${TOOLCHAIN}/bin/${TARGET}${API}-clang++"
 
 echo $CC
 
-$CC $1 -pthread -static -o $2
+$CC $EXTRA_CFLAGS $1 -pthread -static -o $2
 

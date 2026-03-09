@@ -1,0 +1,20 @@
+{
+  "_doc": "Maps capability strings to PDDL predicate sets for the init section",
+  "CAP_ARB_READ": ["(has_capability ARB_READ)"],
+  "CAP_ARB_WRITE": ["(has_capability ARB_WRITE)"],
+  "CAP_CODE_EXEC": ["(code_exec)"],
+  "CAP_INFO_LEAK": ["(has_info_leak)"],
+  "CAP_HEAP_SPRAY": ["(heap_controlled)"],
+  "CAP_ROP_CHAIN": ["(rop_chain_ready)"],
+  "CAP_JOP_CHAIN": ["(jop_chain_ready)"],
+  "CAP_STACK_PIVOT": ["(stack_pivoted)"],
+  "CAP_CRED_OVERWRITE": ["(privilege_escalated)"],
+  "CAP_NAMESPACE_ESCAPE": ["(privilege_escalated)"],
+  "CAP_KASLR_BYPASS": ["(kaslr_bypassed)"],
+  "CAP_SMEP_BYPASS": ["(smep_bypassed)"],
+  "CAP_SMAP_BYPASS": ["(smap_bypassed)"],
+  "CAP_PAN_BYPASS": ["(pan_bypassed)"],
+  "CAP_PAC_BYPASS": ["(pac_bypassed)"],
+  "CAP_MTE_BYPASS": ["(mte_bypassed)"],
+  "CAP_SELINUX_DISABLE": ["(selinux_disabled)"]
+}
