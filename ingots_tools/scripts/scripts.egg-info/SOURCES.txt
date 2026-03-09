@@ -1,5 +1,6 @@
 README.md
 expand_binary.py
+object_db_query.py
 pyproject.toml
 scripts.egg-info/PKG-INFO
 scripts.egg-info/SOURCES.txt

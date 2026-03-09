@@ -5,10 +5,17 @@ description = "Collectino of miscellanous python scripts"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "object_db",
     "pyelftools>=0.32",
+    "python-dotenv>=1.1.0",
+    "rich>=14.0.0",
     "typer>=0.21.1",
     "libadb",
 ]
 
 [tool.uv.sources]
 libadb = { workspace = true }
+object_db = { workspace = true }
+
+[tool.setuptools]
+py-modules = ["expand_binary", "object_db_query"]

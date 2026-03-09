@@ -2452,14 +2452,20 @@ version = "0.1.0"
 source = { editable = "scripts" }
 dependencies = [
     { name = "libadb" },
+    { name = "object-db" },
     { name = "pyelftools" },
+    { name = "python-dotenv" },
+    { name = "rich" },
     { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "libadb", editable = "libadb" },
+    { name = "object-db", editable = "object_db" },
     { name = "pyelftools", specifier = ">=0.32" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
+    { name = "rich", specifier = ">=14.0.0" },
     { name = "typer", specifier = ">=0.21.1" },
 ]
 
