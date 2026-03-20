@@ -1,7 +1,7 @@
 {
   "name": "pipe_buffer_rw",
-  "description": "Exploit primitive that corrupts pipe_buffer structures to achieve arbitrary kernel read and write capabilities.",
-  "target": "any",
-  "arch": ["amd64", "arm64"],
-  "version": "any"
+  "description": "Corrupt a live pipe_buffer after overlap to retarget pipe I/O at chosen struct page entries. This yields physical read and write over the linear mapping once vmemmap and linear-base information is available.",
+  "target": "linux",
+  "arch": ["amd64", "aarch64"],
+  "version": "5.x kernels with 40-byte pipe_buffer entries"
 }

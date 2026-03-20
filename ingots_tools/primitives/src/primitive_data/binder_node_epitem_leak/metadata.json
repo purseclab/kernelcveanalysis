@@ -1,0 +1,7 @@
+{
+  "name": "binder_node_epitem_leak",
+  "description": "Exploit a Binder-node UAF to reclaim the freed node with epitem objects and leak kernel pointers through reflected Binder object fields. The leaked pointers identify a struct file and a struct epitem suitable for later read primitives.",
+  "target": "android",
+  "arch": ["aarch64"],
+  "version": "Android 13 5.10 Binder and epitem layouts"
+}

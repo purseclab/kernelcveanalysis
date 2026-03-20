@@ -1,0 +1,7 @@
+{
+  "name": "sendmsg_control_heap_spray",
+  "description": "Spray kmalloc with kernel copies of sendmsg control buffers held live by blocked Unix socket sends. This closely parallels pipe iovec spraying, but uses ancillary-data copies instead of readv iovec arrays.",
+  "target": "linux",
+  "arch": ["amd64", "aarch64"],
+  "version": "Linux kernels with kmalloc-backed Unix socket control-buffer copies"
+}

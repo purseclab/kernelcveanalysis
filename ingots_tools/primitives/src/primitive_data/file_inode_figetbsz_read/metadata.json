@@ -1,0 +1,7 @@
+{
+  "name": "file_inode_figetbsz_read",
+  "description": "Read kernel values through FIGETBSZ after an exploit has redirected struct file->f_inode into attacker-controlled or attacker-addressable memory. This models the 32-bit file read gadget used after Binder-based file corruption on Android.",
+  "target": "android",
+  "arch": ["amd64", "aarch64"],
+  "version": "Android kernels exposing FIGETBSZ on controllable file objects"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "tty_write_buffer_heap_spray",
+  "description": "Spray kmalloc-1k style caches with tty_write_buffer objects by writing controlled bytes to /dev/ptmx. This works on both Linux and Android where PTY allocation is available.",
+  "target": "any",
+  "arch": ["amd64", "aarch64"],
+  "version": "Kernels exposing /dev/ptmx tty write buffers"
+}

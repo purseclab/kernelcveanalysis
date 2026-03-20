@@ -1,0 +1,7 @@
+{
+  "name": "pipe_iovec_reclaim",
+  "description": "Use blocked pipe readv operations to allocate controlled iovec arrays in kmalloc and later free that cache state. This is useful for reclaiming a freed page with pipe-backed data that can feed a later pipe_buffer overlap.",
+  "target": "linux",
+  "arch": ["amd64", "aarch64"],
+  "version": "5.x kernels with kmalloc-backed pipe readv iovec arrays"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "pipe_wakeup_race_extender",
+  "description": "Extend race windows by pinning a high-priority thread on a pipe read and waking it to preempt a lower-priority thread on the same CPU. This is a reusable scheduler-assisted timing primitive for delayed-free and RCU races.",
+  "target": "any",
+  "arch": ["amd64", "aarch64"],
+  "version": "Kernels supporting thread affinity and pipe wakeups"
+}

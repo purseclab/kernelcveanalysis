@@ -1,0 +1,7 @@
+{
+  "name": "list_unlink_write",
+  "description": "Exploit a corrupted linked-list unlink path to turn forged next and prev pointers into a constrained kernel write.",
+  "target": "any",
+  "arch": ["amd64", "aarch64"],
+  "version": "any"
+}

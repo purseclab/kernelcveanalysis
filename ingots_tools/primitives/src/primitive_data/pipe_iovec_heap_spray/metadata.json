@@ -1,0 +1,7 @@
+{
+  "name": "pipe_iovec_heap_spray",
+  "description": "Use blocked pipe readv operations to pin kmalloc-backed iovec arrays in a chosen cache size. This provides a reusable heap spray for caches reachable through sizeof(struct iovec) times the vector count.",
+  "target": "linux",
+  "arch": ["amd64", "aarch64"],
+  "version": "5.x kernels with kmalloc-backed pipe readv iovec arrays"
+}

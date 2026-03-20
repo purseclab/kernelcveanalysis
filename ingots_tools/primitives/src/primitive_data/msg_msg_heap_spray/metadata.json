@@ -1,0 +1,7 @@
+{
+  "name": "msg_msg_heap_spray",
+  "description": "Spray kmalloc with SysV message queue messages containing largely controlled data. This is a Linux-only primitive because newer Android kernels often isolate or restrict the relevant message-queue paths.",
+  "target": "linux",
+  "arch": ["amd64", "aarch64"],
+  "version": "Linux kernels with SysV message queues"
+}

