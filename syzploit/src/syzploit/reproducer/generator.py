@@ -110,19 +110,22 @@ def generate_reproducer_code(
             "path was reached and what return codes were received.\n"
         )
 
+    def _esc(s: str) -> str:
+        return s.replace("{", "{{").replace("}", "}}")
+
     prompt = _REPRODUCER_PROMPT.format(
         vuln_type=root_cause.vulnerability_type.value,
         function=root_cause.vulnerable_function,
         subsystem=root_cause.affected_subsystem,
-        root_cause=root_cause.root_cause_description,
+        root_cause=_esc(root_cause.root_cause_description),
         triggers=", ".join(root_cause.trigger_conditions) or "unknown",
         structs=", ".join(root_cause.affected_structs) or "unknown",
         syscalls=", ".join(root_cause.syscalls) or "unknown",
         slab_cache=", ".join(root_cause.slab_caches) or "unknown",
         target_kernel=target_kernel or "latest",
         arch=arch,
-        existing_reproducer=existing,
-        previous_feedback=feedback_section,
+        existing_reproducer=_esc(existing),
+        previous_feedback=_esc(feedback_section),
     )
 
     code = llm.research_chat(
@@ -135,11 +138,15 @@ def generate_reproducer_code(
     code = code.strip()
     if code.startswith("```"):
         lines = code.split("\n")
-        # Remove first and last fence lines
         if lines[0].startswith("```"):
             lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
+        close_idx = None
+        for _i in range(len(lines) - 1, -1, -1):
+            if lines[_i].strip() == "```":
+                close_idx = _i
+                break
+        if close_idx is not None:
+            lines = lines[:close_idx]
         code = "\n".join(lines)
 
     # Detect and recover from truncation

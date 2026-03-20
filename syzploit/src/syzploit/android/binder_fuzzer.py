@@ -244,14 +244,14 @@ int main(void) {
     },
     "scatter_gather_uaf": {
         "description": (
-            "Trigger binder scatter-gather UAF (CVE-2023-20938 pattern). "
+            "Trigger binder scatter-gather UAF. "
             "Uses SG transactions with crafted buffer/offset patterns "
             "to cause use-after-free in binder_transaction_buffer_release."
         ),
         "code": r"""
 /* ── Binder scatter-gather UAF trigger ─────────────────────────── */
-/* Pattern from CVE-2023-20938: Use scatter-gather transactions     */
-/* to trigger UAF in binder buffer cleanup path                    */
+/* Uses scatter-gather transactions to trigger UAF in binder       */
+/* buffer cleanup path (binder_transaction_buffer_release)          */
 
 %(binder_header)s
 
