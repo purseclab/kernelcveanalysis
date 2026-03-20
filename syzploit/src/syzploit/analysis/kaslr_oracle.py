@@ -65,7 +65,7 @@ static uint64_t kaslr_bypass_pipe_ops(uint8_t *leaked_buf) {
             "Leak struct file->f_op pointer.  Every open file descriptor "
             "has a file struct with an f_op function table pointer.  If you "
             "can read a freed struct file (e.g. via dangling fd), f_op "
-            "reveals the kernel base.  Used by badnode (timerfd_fops leak)."
+            "reveals the kernel base.  Common with timerfd_fops leak."
         ),
         "symbol": "timerfd_fops (or target-specific fops)",
         "how": (

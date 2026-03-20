@@ -18,6 +18,7 @@ from ..orchestrator.context import TaskContext
 from .crash_parser import parse_crash_log
 from .cve_analyzer import analyze_cve
 from .blog_analyzer import analyze_blog
+from .investigate import investigate_cve
 from .root_cause import root_cause_analysis
 from .exploitability import classify_exploitability
 
@@ -37,10 +38,29 @@ def analyze_input(ctx: TaskContext, cfg: Config) -> TaskContext:
     input_value = ctx.input_value
 
     if input_type == "cve":
-        console.print(f"[bold]Analysing CVE: {input_value}[/]")
-        rca = analyze_cve(input_value, cfg=cfg)
+        console.print(f"[bold]Investigating CVE: {input_value}[/]")
+        # Use investigate_cve for comprehensive web-scraping-based analysis
+        inv_report = investigate_cve(
+            input_value,
+            cfg=cfg,
+            blog_urls=getattr(ctx, "blog_urls", None) or None,
+        )
+        if inv_report.root_cause:
+            rca = inv_report.root_cause
+        else:
+            # Fallback to basic CVE analysis if investigation failed
+            rca = analyze_cve(input_value, cfg=cfg)
         ctx.root_cause = rca
-        ctx.log("analysis", "analyze_cve", f"type={rca.vulnerability_type.value}")
+        # Store the full investigation report in analysis_data
+        inv_dict = inv_report.to_dict()
+        ctx.analysis_data["investigation_report"] = inv_dict
+
+        # Build structured investigation briefing for downstream LLM prompts
+        from .investigation_briefing import InvestigationBriefing
+        ctx.investigation_briefing = InvestigationBriefing.from_investigation_report(
+            inv_dict, root_cause=rca,
+        )
+        ctx.log("analysis", "investigate_cve", f"type={rca.vulnerability_type.value}")
 
     elif input_type == "syzbot":
         console.print(f"[bold]Fetching syzbot crash: {input_value}[/]")

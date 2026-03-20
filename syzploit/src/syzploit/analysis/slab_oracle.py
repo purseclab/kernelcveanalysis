@@ -189,11 +189,15 @@ class SlabOracle:
         self,
         slabinfo: str = "",
         struct_sizes: Optional[Dict[str, int]] = None,
+        codeql_db_path: Optional[str] = None,
     ) -> None:
         self._caches: Dict[str, Dict[str, Any]] = {}
         self._struct_sizes = struct_sizes or {}
+        self._codeql_allocations: Dict[str, List[Dict[str, Any]]] = {}
         if slabinfo:
             self._parse_slabinfo(slabinfo)
+        if codeql_db_path:
+            self._load_codeql_allocations(codeql_db_path)
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -208,9 +212,24 @@ class SlabOracle:
     def get_cache_for_struct(self, struct_name: str) -> Optional[str]:
         """Get the slab cache for a given kernel struct.
 
-        1. Check dedicated caches (filp, inode_cache, cred_jar, etc.)
-        2. Fall back to kmalloc-N based on struct size from pahole
+        1. Check CodeQL allocation data (most accurate, from real source)
+        2. Check dedicated caches (filp, inode_cache, cred_jar, etc.)
+        3. Fall back to kmalloc-N based on struct size from pahole
         """
+        # CodeQL gives the most accurate info — uses real source analysis
+        if struct_name in self._codeql_allocations:
+            allocs = self._codeql_allocations[struct_name]
+            # Prefer named caches over kmalloc-N
+            for a in allocs:
+                cache = a.get("kmalloc_cache_name", "")
+                if cache and not cache.startswith("kmalloc-"):
+                    return cache
+            # Fall back to kmalloc cache from allocation size
+            for a in allocs:
+                cache = a.get("kmalloc_cache_name", "")
+                if cache:
+                    return cache
+
         if struct_name in _DEDICATED_SLAB_MAP:
             cache_name = _DEDICATED_SLAB_MAP[struct_name]
             # Verify it exists in slabinfo if we have it
@@ -422,6 +441,55 @@ class SlabOracle:
         return "\n".join(lines)
 
     # ── Private ───────────────────────────────────────────────────────
+
+    def _load_codeql_allocations(self, codeql_db_path: str) -> None:
+        """Load allocation site data from a CodeQL database.
+
+        Populates ``_codeql_allocations`` mapping struct_type → list of
+        allocation info dicts.  Falls back silently if kexploit is not
+        available or the query fails.
+        """
+        try:
+            from .kexploit_bridge import (
+                is_available as kexploit_available,
+                query_codeql_allocations,
+            )
+            if not kexploit_available():
+                return
+            result = query_codeql_allocations(codeql_db_path)
+            if "error" in result:
+                return
+            for alloc in result.get("allocations", []):
+                stype = alloc.get("struct_type", "")
+                if stype:
+                    # Normalize: remove "struct " prefix
+                    stype = stype.replace("struct ", "")
+                    self._codeql_allocations.setdefault(stype, []).append(alloc)
+        except Exception:
+            pass
+
+    def get_codeql_alloc_info(self, struct_name: str) -> List[Dict[str, Any]]:
+        """Get CodeQL allocation site info for a struct.
+
+        Returns list of allocation dicts with call_site, alloc_size,
+        kmalloc_cache_name, flags, etc.  Empty list if unavailable.
+        """
+        return self._codeql_allocations.get(struct_name, [])
+
+    def format_codeql_context(self, struct_name: str) -> str:
+        """Format CodeQL allocation info as prompt context for the LLM."""
+        allocs = self.get_codeql_alloc_info(struct_name)
+        if not allocs:
+            return ""
+        lines = [f"=== CodeQL Allocation Sites for {struct_name} ==="]
+        for a in allocs[:10]:  # limit to 10 sites
+            lines.append(
+                f"  {a.get('call_site', '?')}: "
+                f"size={a.get('alloc_size', '?')}, "
+                f"cache={a.get('kmalloc_cache_name', '?')}, "
+                f"flags={a.get('flags', '?')}"
+            )
+        return "\n".join(lines)
 
     def _parse_slabinfo(self, slabinfo: str) -> None:
         """Parse ``/proc/slabinfo`` text."""
