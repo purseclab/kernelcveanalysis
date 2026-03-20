@@ -1,0 +1,34 @@
+# Version control
+.git
+
+# Secrets
+.env
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# Docker build artifacts
+.kexploit_installed
+
+# IDE
+.vscode
+.idea
+
+# Data (will be generated at runtime)
+syzploit_data/
+syzploit_output/
+vmlinux*
+demo_*
+analysis_*
+paper/
+
+# OS
+.DS_Store
+Thumbs.db
