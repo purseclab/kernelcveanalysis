@@ -66,6 +66,8 @@ def agent(
     goal: Optional[str] = typer.Option(None, "--goal", "-g", help="Custom goal for the agent"),
     # Input context
     blog_url: Optional[List[str]] = typer.Option(None, "--blog-url", help="Blog / write-up URL(s) for context (repeatable)"),
+    reference_exploit: Optional[str] = typer.Option(None, "--reference-exploit", help="Path to a reference exploit file or directory to guide generation"),
+    extra_context: Optional[str] = typer.Option(None, "--extra-context", help="Free-form text or file path with additional context for the LLM"),
     # Infrastructure
     ssh_host: Optional[str] = typer.Option(None, "--ssh-host", help="SSH host for Cuttlefish / QEMU"),
     ssh_port: int = typer.Option(22, "--ssh-port", help="SSH port"),
@@ -83,6 +85,8 @@ def agent(
     analysis_model: Optional[str] = typer.Option(None, "--analysis-model", help="Model for crash/CVE/blog analysis"),
     codegen_model: Optional[str] = typer.Option(None, "--codegen-model", help="Model for exploit/reproducer code generation"),
     planning_model: Optional[str] = typer.Option(None, "--planning-model", help="Model for exploit strategy planning"),
+    static: bool = typer.Option(False, "--static", help="Static-only mode: skip all VM/ADB/SSH steps (no boot, no reproducer/exploit verification on target)"),
+    replay: Optional[str] = typer.Option(None, "--replay", help="Replay a previous run from its execution_trace JSON (skips LLM calls, re-executes tools/GDB/ADB)"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output"),
 ) -> None:
     """Run the agentic orchestrator (LLM-driven analysis loop)."""
@@ -98,6 +102,12 @@ def agent(
         llm_planning_model=planning_model,
         debug=debug,
     )
+
+    # Enable output.log capture — tees ALL console + subprocess output
+    if output_dir:
+        from ..core.log import enable_file_logging
+        log_path = enable_file_logging(output_dir)
+        console.print(f"  [dim]Logging to {log_path}[/]")
 
     # Build context with ALL infra options BEFORE the agent starts
     ctx = TaskContext(
@@ -115,10 +125,57 @@ def agent(
         setup_tunnels=setup_tunnels, persistent=persistent, blog_urls=blog_url,
     )
 
-    ag = Agent(
-        goal=goal or "Analyze vulnerability, understand root cause, generate reproducer and exploit",
-        cfg=cfg,
-    )
+    # Populate reference exploit and extra context
+    if reference_exploit:
+        ref_path = Path(reference_exploit).resolve()
+        if ref_path.exists():
+            ctx.reference_exploit_path = str(ref_path)
+        else:
+            console.print(f"[yellow]Warning: --reference-exploit path not found: {reference_exploit}[/]")
+    if extra_context:
+        # If it looks like a file path and the file exists, read it
+        ec_path = Path(extra_context)
+        if ec_path.exists() and ec_path.is_file():
+            ctx.extra_context = ec_path.read_text()[:50000]
+            console.print(f"  Loaded extra context from {ec_path} ({len(ctx.extra_context)} chars)")
+        else:
+            ctx.extra_context = extra_context
+
+    if replay:
+        # Replay mode: read tool sequence from a saved trace and
+        # re-execute each tool WITHOUT querying the LLM for decisions.
+        # GDB, ADB, compile, and verify steps still run live.
+        replay_path = Path(replay)
+        if not replay_path.exists():
+            console.print(f"[red]Replay trace not found: {replay}[/]")
+            raise typer.Exit(1)
+        import json as _json
+        trace_data = _json.loads(replay_path.read_text())
+        # Extract tool sequence from trace
+        steps = trace_data.get("steps", [])
+        if not steps:
+            # Try nested format
+            steps = trace_data.get("data", {}).get("steps", [])
+        tool_sequence = [
+            {"tool": s["tool"], "reason": s.get("reason", "replay"), "kwargs": s.get("kwargs", {})}
+            for s in steps
+            if s.get("tool") not in ("done", "stop", "reflect")
+        ]
+        console.print(
+            f"[bold cyan]REPLAY MODE[/] — replaying {len(tool_sequence)} "
+            f"tools from {replay_path.name} (GDB/ADB/compile run live)"
+        )
+        ag = Agent(
+            goal=goal or "Replay previous run",
+            cfg=cfg,
+            replay_sequence=tool_sequence,
+        )
+    else:
+        ag = Agent(
+            goal=goal or "Analyze vulnerability, understand root cause, generate reproducer and exploit",
+            cfg=cfg,
+        )
+
     ctx = ag.run(
         input_value,
         ctx=ctx,
@@ -126,6 +183,7 @@ def agent(
 
     _print_agent_result(ctx)
     _print_execution_trace(ctx)
+    _print_llm_usage()
     _print_report_paths(ctx)
 
 
@@ -146,8 +204,11 @@ def pipeline(
     skip_analysis: bool = typer.Option(False, "--skip-analysis", help="Skip analysis stage"),
     skip_reproducer: bool = typer.Option(False, "--skip-reproducer", help="Skip reproducer stage"),
     skip_exploit: bool = typer.Option(False, "--skip-exploit", help="Skip exploit stage"),
+    skip_verify: bool = typer.Option(False, "--skip-verify", help="Skip verification stage (deploy + run on target)"),
     # Input context
     blog_url: Optional[List[str]] = typer.Option(None, "--blog-url", help="Blog / write-up URL(s) for context (repeatable)"),
+    reference_exploit: Optional[str] = typer.Option(None, "--reference-exploit", help="Path to a reference exploit file or directory to guide generation"),
+    extra_context: Optional[str] = typer.Option(None, "--extra-context", help="Free-form text or file path with additional context for the LLM"),
     # Infrastructure
     ssh_host: Optional[str] = typer.Option(None, "--ssh-host", help="SSH host"),
     ssh_port: int = typer.Option(22, "--ssh-port", help="SSH port"),
@@ -198,11 +259,27 @@ def pipeline(
         setup_tunnels=setup_tunnels, persistent=persistent, blog_urls=blog_url,
     )
 
+    # Populate reference exploit and extra context
+    if reference_exploit:
+        ref_path = Path(reference_exploit).resolve()
+        if ref_path.exists():
+            ctx.reference_exploit_path = str(ref_path)
+        else:
+            console.print(f"[yellow]Warning: --reference-exploit path not found: {reference_exploit}[/]")
+    if extra_context:
+        ec_path = Path(extra_context)
+        if ec_path.exists() and ec_path.is_file():
+            ctx.extra_context = ec_path.read_text()[:50000]
+            console.print(f"  Loaded extra context from {ec_path} ({len(ctx.extra_context)} chars)")
+        else:
+            ctx.extra_context = extra_context
+
     result = run_pipeline(
         input_value,
         skip_analysis=skip_analysis,
         skip_reproducer=skip_reproducer,
         skip_exploit=skip_exploit,
+        skip_verify=skip_verify,
         cfg=cfg,
         ctx=ctx,
     )
@@ -237,6 +314,80 @@ def analyze_cve(
             filename=out_path.name,
             metadata={"cve_id": cve_id},
         )
+
+
+@app.command()
+def investigate(
+    cve_id: str = typer.Argument(help="CVE identifier (e.g., CVE-2023-20938)"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write investigation JSON to file"),
+    blog_url: Optional[List[str]] = typer.Option(None, "--blog-url", help="Blog / write-up URL(s) for extra context (repeatable)"),
+    no_blogs: bool = typer.Option(False, "--no-blogs", help="Skip blog scraping"),
+    no_source: bool = typer.Option(False, "--no-source", help="Skip kernel source fetching"),
+    max_blogs: int = typer.Option(5, "--max-blogs", help="Maximum blog posts to scrape"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug output"),
+) -> None:
+    """Investigate a CVE: scrape exploits, blogs, patches, and source code.
+
+    Performs comprehensive web scraping and analysis for a given CVE,
+    searching for existing exploits, blog write-ups, patch notes, and
+    pulling the affected kernel source code automatically.
+
+    Example::
+
+        syzploit investigate CVE-2023-20938
+        syzploit investigate CVE-2024-36971 -o investigation.json
+    """
+    from ..analysis.investigate import investigate_cve as _investigate
+
+    cfg = _build_config(llm_model=model, debug=debug)
+    report = _investigate(
+        cve_id,
+        cfg=cfg,
+        scrape_blogs=not no_blogs,
+        fetch_source=not no_source,
+        max_blogs=max_blogs,
+        blog_urls=list(blog_url) if blog_url else None,
+    )
+
+    # Print the root cause if available
+    if report.root_cause:
+        _print_root_cause(report.root_cause)
+
+    # Print exploit references
+    if report.exploit_references:
+        console.print(f"\n[bold]═══ Existing Exploits ({len(report.exploit_references)}) ═══[/]")
+        for ref in report.exploit_references:
+            console.print(f"  [{ref.source}] {ref.title}")
+            console.print(f"    {ref.url}")
+            if ref.description:
+                console.print(f"    {ref.description[:100]}")
+            if ref.stars:
+                console.print(f"    ★ {ref.stars}")
+
+    # Print patch info
+    if report.patch_info:
+        console.print(f"\n[bold]═══ Patches ({len(report.patch_info)}) ═══[/]")
+        for patch in report.patch_info:
+            console.print(f"  {patch.commit_hash[:12] or '(no hash)'} [{patch.patch_source}]")
+            console.print(f"    {patch.commit_url}")
+            if patch.files_changed:
+                console.print(f"    Files: {', '.join(patch.files_changed[:5])}")
+
+    # Print source contexts
+    if report.source_contexts:
+        console.print(f"\n[bold]═══ Source Code ({len(report.source_contexts)}) ═══[/]")
+        for src in report.source_contexts:
+            label = f"{src.file_path}"
+            if src.function_name:
+                label += f":{src.function_name}"
+            console.print(f"  {label} ({len(src.source_code)} chars)")
+
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(report.to_dict(), indent=2, default=str))
+        console.print(f"\n  Written to {out_path}")
 
 
 @app.command()
@@ -510,79 +661,123 @@ def compare_runs(
 @app.command(name="verify-exploit")
 def verify_exploit_cmd(
     binary: str = typer.Argument(help="Path to the compiled exploit binary"),
-    # Infrastructure
-    ssh_host: str = typer.Option(..., "--ssh-host", help="SSH host for target device"),
-    ssh_port: int = typer.Option(22, "--ssh-port", help="SSH port"),
+    # Infrastructure — all options fall back to Config / .env defaults
+    ssh_host: Optional[str] = typer.Option(None, "--ssh-host", help="SSH host (env: SYZPLOIT_SSH_HOST)"),
+    ssh_port: Optional[int] = typer.Option(None, "--ssh-port", help="SSH port (env: SYZPLOIT_SSH_PORT)"),
     ssh_user: str = typer.Option("root", "--ssh-user", help="SSH user"),
     ssh_key: Optional[str] = typer.Option(None, "--ssh-key", help="SSH private key path"),
-    instance: Optional[int] = typer.Option(None, "--instance", help="Cuttlefish instance number"),
-    persistent: Optional[bool] = typer.Option(None, "--persistent/--no-persistent", help="Keep VM running"),
-    setup_tunnels: bool = typer.Option(False, "--setup-tunnels", help="Set up ADB/SSH tunnels"),
-    start_cmd: Optional[str] = typer.Option(None, "--start-cmd", help="Command to start the VM"),
-    stop_cmd: Optional[str] = typer.Option(None, "--stop-cmd", help="Command to stop the VM"),
-    exploit_start_cmd: Optional[str] = typer.Option(None, "--exploit-start-cmd", help="VM start command without GDB"),
-    gdb_port: int = typer.Option(1234, "--gdb-port", help="GDB port on crosvm (used with gdb_run.sh starts)"),
+    instance: Optional[int] = typer.Option(None, "--instance", help="Cuttlefish instance (env: SYZPLOIT_INSTANCE)"),
+    persistent: Optional[bool] = typer.Option(None, "--persistent/--no-persistent", help="Keep VM running (env: SYZPLOIT_PERSISTENT)"),
+    setup_tunnels: Optional[bool] = typer.Option(None, "--setup-tunnels/--no-setup-tunnels", help="Set up ADB/SSH tunnels (env: SYZPLOIT_SETUP_TUNNELS)"),
+    start_cmd: Optional[str] = typer.Option(None, "--start-cmd", help="Command to start the VM (env: SYZPLOIT_START_CMD)"),
+    stop_cmd: Optional[str] = typer.Option(None, "--stop-cmd", help="Command to stop the VM (env: SYZPLOIT_STOP_CMD)"),
+    exploit_start_cmd: Optional[str] = typer.Option(None, "--exploit-start-cmd", help="VM start command without GDB (env: SYZPLOIT_EXPLOIT_START_CMD)"),
+    gdb_port: Optional[int] = typer.Option(None, "--gdb-port", help="GDB port on crosvm (env: SYZPLOIT_GDB_PORT)"),
     use_adb: bool = typer.Option(False, "--use-adb", help="Use ADB to push binary instead of SCP"),
-    adb_port: int = typer.Option(6520, "--adb-port", help="ADB port for the Cuttlefish instance"),
+    adb_port: Optional[int] = typer.Option(None, "--adb-port", help="ADB port (env: SYZPLOIT_ADB_PORT)"),
     timeout: int = typer.Option(120, "--timeout", help="Execution timeout in seconds"),
     remote_dir: str = typer.Option("/data/local/tmp", "--remote-dir", help="Remote directory to push binary to"),
+    # GDB monitoring
+    kallsyms_path: Optional[str] = typer.Option(None, "--kallsyms-path", help="Path to kallsyms file for GDB monitoring"),
+    vmlinux_path: Optional[str] = typer.Option(None, "--vmlinux-path", help="Path to vmlinux for GDB symbols"),
 ) -> None:
     """Manually verify an exploit binary on a target device.
 
     Deploys the binary to the device via SSH/ADB, runs it with a UID-checking
     wrapper, and reports whether privilege escalation occurred.
 
-    Example::
+    All infrastructure options can be set via environment variables or .env
+    file so you only need to pass the binary path.
 
-        syzploit verify-exploit ./analysis_CVE-2023-20938/exploit \\
+    Example (minimal, with .env configured)::
+
+        syzploit verify-exploit ./analysis_CVE-2023-20938/exploit
+
+    Example (all flags)::
+
+        syzploit verify-exploit ./exploit \\
             --ssh-host cuttlefish2 --no-persistent --setup-tunnels --instance 5 \\
-            --start-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./run.sh 5" \\
-            --stop-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./stop.sh 5"
+            --start-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./gdb_run.sh 5" \\
+            --stop-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./stop.sh 5" \\
+            --exploit-start-cmd "cd /home/jack/challenge-4/challenge-4.1 && ./run.sh 5" \\
+            --gdb-port 1234 --use-adb --adb-port 6524 --timeout 120
     """
     from ..infra.verification import verify_exploit
+
+    # Load config from .env — CLI flags override config values
+    cfg = _build_config()
+
+    # Resolve each option: CLI flag > Config > hardcoded default
+    ssh_host_r = ssh_host or cfg.ssh_host
+    ssh_port_r = ssh_port if ssh_port is not None else cfg.ssh_port
+    instance_r = instance if instance is not None else cfg.instance
+    setup_tunnels_r = setup_tunnels if setup_tunnels is not None else cfg.setup_tunnels
+    start_cmd_r = start_cmd or cfg.start_cmd
+    stop_cmd_r = stop_cmd or cfg.stop_cmd
+    exploit_start_cmd_r = exploit_start_cmd or cfg.exploit_start_cmd
+    gdb_port_r = gdb_port if gdb_port is not None else cfg.gdb_port
+    adb_port_r = adb_port if adb_port is not None else cfg.adb_port
+    is_persistent = persistent if persistent is not None else cfg.persistent
+    kallsyms_r = kallsyms_path or cfg.kallsyms_path
+    vmlinux_r = vmlinux_path or cfg.vmlinux_path
+
+    # Auto-detect kallsyms from work directory (sibling of binary)
+    if not kallsyms_r:
+        for candidate in [
+            Path(binary).resolve().parent / "kallsyms",
+            Path(binary).resolve().parent.parent / "kallsyms",
+        ]:
+            if candidate.exists():
+                kallsyms_r = str(candidate)
+                break
 
     binary_path = Path(binary).resolve()
     if not binary_path.exists():
         console.print(f"[red]Binary not found: {binary_path}[/]")
         raise typer.Exit(1)
 
-    use_adb_resolved = use_adb or (instance is not None)
-    is_persistent = persistent if persistent is not None else True
+    use_adb_resolved = use_adb or (instance_r is not None)
 
     # Show computed ADB port
     from ..infra.verification import _calc_adb_port
-    resolved_adb_port = _calc_adb_port(instance, adb_port)
+    resolved_adb_port = _calc_adb_port(instance_r, adb_port_r)
 
     console.print(f"[bold]═══ Manual Exploit Verification ═══[/]")
     console.print(f"  Binary:    {binary_path}")
-    console.print(f"  SSH host:  {ssh_host}:{ssh_port} (build host)")
-    console.print(f"  Instance:  {instance or '(none)'}")
+    console.print(f"  SSH host:  {ssh_host_r}:{ssh_port_r} (build host)")
+    console.print(f"  Instance:  {instance_r or '(none)'}")
     console.print(f"  Persistent: {is_persistent}")
     console.print(f"  ADB:       {use_adb_resolved} (port {resolved_adb_port})")
-    console.print(f"  Tunnels:   {setup_tunnels}")
+    console.print(f"  Tunnels:   {setup_tunnels_r}")
     # Show GDB info when start command looks like a GDB launch
-    actual_start = exploit_start_cmd or start_cmd
+    actual_start = exploit_start_cmd_r or start_cmd_r
     if actual_start and "gdb" in actual_start.lower():
-        console.print(f"  GDB:       [bold yellow]enabled[/] (port {gdb_port})")
+        console.print(f"  GDB:       [bold yellow]enabled[/] (port {gdb_port_r})")
+    if kallsyms_r:
+        console.print(f"  Kallsyms:  {kallsyms_r}")
+    if vmlinux_r:
+        console.print(f"  Vmlinux:   {vmlinux_r}")
     console.print()
 
     result = verify_exploit(
         str(binary_path),
-        ssh_host=ssh_host,
-        ssh_port=ssh_port,
+        ssh_host=ssh_host_r,
+        ssh_port=ssh_port_r,
         ssh_user=ssh_user,
         ssh_key=ssh_key,
-        instance=instance,
-        start_cmd=start_cmd or "",
-        stop_cmd=stop_cmd or "",
-        exploit_start_cmd=exploit_start_cmd or "",
-        gdb_port=gdb_port,
-        setup_tunnels=setup_tunnels,
+        instance=instance_r,
+        start_cmd=start_cmd_r or "",
+        stop_cmd=stop_cmd_r or "",
+        exploit_start_cmd=exploit_start_cmd_r or "",
+        gdb_port=gdb_port_r,
+        setup_tunnels=setup_tunnels_r,
         persistent=is_persistent,
         timeout=timeout,
         remote_dir=remote_dir,
         use_adb=use_adb_resolved,
-        adb_port=adb_port,
+        adb_port=adb_port_r,
+        kallsyms_path=kallsyms_r,
+        vmlinux_path=vmlinux_r,
     )
 
     # Pretty-print results
@@ -789,6 +984,29 @@ def _print_execution_trace(ctx) -> None:
         console.print(table)
 
 
+def _print_llm_usage() -> None:
+    """Print token usage statistics for the run."""
+    try:
+        from ..core.llm import LLMClient
+        usage = LLMClient.get_usage_summary()
+        if usage.get("total_calls", 0) == 0:
+            return
+        console.print("\n[bold]═══ LLM Usage ═══[/]")
+        console.print(f"  Total calls: {usage['total_calls']}")
+        console.print(
+            f"  Total tokens: {usage['total_tokens']:,} "
+            f"(prompt: {usage['total_prompt_tokens']:,}, "
+            f"completion: {usage['total_completion_tokens']:,})"
+        )
+        for model, stats in usage.get("by_model", {}).items():
+            console.print(
+                f"  {model}: {stats['calls']} calls, "
+                f"{stats['prompt_tokens'] + stats['completion_tokens']:,} tokens"
+            )
+    except Exception:
+        pass
+
+
 def _print_report_paths(ctx) -> None:
     """List the JSON report files written to the work directory."""
     work_dir = getattr(ctx, "work_dir", None)
@@ -807,6 +1025,98 @@ def _print_report_paths(ctx) -> None:
     console.print("\n[bold]═══ Reports ═══[/]")
     for f in report_files:
         console.print(f"  📄 {f}")
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  Hunt (autonomous CVE hunting mode)
+# ═════════════════════════════════════════════════════════════════════
+
+
+@app.command()
+def hunt(
+    kernel_version: str = typer.Argument(help="Target kernel version (e.g. 5.10.107)"),
+    # Target
+    arch: str = typer.Option("arm64", "--arch", "-a", help="Target architecture (arm64/x86_64)"),
+    platform: str = typer.Option("android", "--platform", "-p", help="Target platform (linux/android)"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output base directory"),
+    max_targets: int = typer.Option(10, "--max-targets", "-n", help="Maximum CVEs to attempt"),
+    max_iterations: int = typer.Option(20, "--max-iterations", help="Soft cap for agent iterations (continues past this until exploit is verified, hard cap at 2x)"),
+    goal: Optional[str] = typer.Option(None, "--goal", "-g", help="Custom goal for each agent run"),
+    # Discovery options
+    skip_discovery: bool = typer.Option(False, "--resume", help="Resume from previous hunt_candidates.json"),
+    # Infrastructure
+    ssh_host: Optional[str] = typer.Option(None, "--ssh-host", help="SSH host for Cuttlefish / QEMU"),
+    ssh_port: int = typer.Option(22, "--ssh-port", help="SSH port"),
+    instance: Optional[int] = typer.Option(None, "--instance", help="Cuttlefish instance number"),
+    persistent: Optional[bool] = typer.Option(None, "--persistent/--no-persistent", help="Keep VM running"),
+    setup_tunnels: bool = typer.Option(False, "--setup-tunnels", help="Set up ADB/SSH tunnels"),
+    start_cmd: Optional[str] = typer.Option(None, "--start-cmd", help="Command to start the VM"),
+    stop_cmd: Optional[str] = typer.Option(None, "--stop-cmd", help="Command to stop the VM"),
+    exploit_start_cmd: Optional[str] = typer.Option(None, "--exploit-start-cmd", help="VM start for exploit testing"),
+    gdb_port: int = typer.Option(1234, "--gdb-port", help="GDB port on crosvm"),
+    kernel_image: Optional[str] = typer.Option(None, "--kernel-image", help="Path to kernel Image"),
+    # LLM
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model"),
+    decision_model: Optional[str] = typer.Option(None, "--decision-model", help="Model for agent routing"),
+    analysis_model: Optional[str] = typer.Option(None, "--analysis-model", help="Model for analysis"),
+    codegen_model: Optional[str] = typer.Option(None, "--codegen-model", help="Model for code generation"),
+    planning_model: Optional[str] = typer.Option(None, "--planning-model", help="Model for planning"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug output"),
+) -> None:
+    """Autonomous CVE hunter — discover and exploit kernel vulnerabilities.
+
+    Searches NVD, Android bulletins, GitHub, and PoC aggregators for CVEs
+    affecting the target kernel. Ranks by exploitability, then runs the
+    full agent pipeline on each, creating a per-CVE work directory.
+
+    Example:
+        syzploit hunt 5.10.107 --platform android --max-targets 5
+    """
+    from ..orchestrator.hunter import HunterOrchestrator
+
+    cfg = _build_config(
+        llm_model=model,
+        llm_decision_model=decision_model,
+        llm_analysis_model=analysis_model,
+        llm_codegen_model=codegen_model,
+        llm_planning_model=planning_model,
+        debug=debug,
+    )
+
+    hunter = HunterOrchestrator(
+        kernel_version=kernel_version,
+        platform=platform,
+        arch=arch,
+        max_targets=max_targets,
+        max_iterations_per_target=max_iterations,
+        output_dir=Path(output_dir) if output_dir else None,
+        cfg=cfg,
+        ssh_host=ssh_host or "",
+        ssh_port=ssh_port,
+        instance=instance,
+        start_cmd=start_cmd or "",
+        stop_cmd=stop_cmd or "",
+        exploit_start_cmd=exploit_start_cmd or "",
+        gdb_port=gdb_port,
+        setup_tunnels=setup_tunnels,
+        persistent=persistent if persistent is not None else False,
+        kernel_image=kernel_image or "",
+        goal=goal or "",
+    )
+
+    results = hunter.run(skip_discovery=skip_discovery)
+
+    # Final tally
+    successes = sum(1 for r in results if r["outcome"] == "exploit_success")
+    if successes:
+        console.print(
+            f"\n[bold green]🎯 {successes} exploit(s) succeeded![/]"
+        )
+    else:
+        console.print(
+            f"\n[bold yellow]No successful exploits this run. "
+            f"Review individual analysis directories for partial results.[/]"
+        )
 
 
 def main() -> None:

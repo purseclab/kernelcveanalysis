@@ -31,6 +31,125 @@ from ..core.log import console
 from .ssh import SSHSession
 
 
+# ── vmlinux extraction from kernel Image ──────────────────────────────
+
+def _extract_vmlinux_from_image(
+    kernel_image: str,
+    ssh_host: Optional[str] = None,
+    ssh_port: int = 22,
+    work_dir: Optional[str] = None,
+) -> Optional[tuple]:
+    """Extract vmlinux ELF + kallsyms from a raw kernel Image.
+
+    Uses ``vmlinux-to-elf``'s :class:`KallsymsFinder` and
+    :class:`ElfSymbolizer` to recover the full symbol table embedded
+    in the ARM64/x86 kernel binary.  Works even when ``/proc/kallsyms``
+    is restricted by ``kptr_restrict``.
+
+    If *kernel_image* is a remote path, it is first fetched via SCP.
+
+    Returns ``(vmlinux_path, kallsyms_path, symbol_count)`` on success,
+    or ``None`` on failure.
+    """
+    try:
+        from vmlinux_to_elf.core.kallsyms import KallsymsFinder
+        from vmlinux_to_elf.core.elf_symbolizer import ElfSymbolizer
+    except ImportError:
+        console.print(
+            "  [dim]vmlinux-to-elf not installed — skipping Image extraction[/]"
+        )
+        return None
+
+    save_dir = work_dir or tempfile.mkdtemp(prefix="syzploit_vmlinux_")
+
+    # If the Image is remote (doesn't exist locally), fetch it via SCP
+    local_image = kernel_image
+    if not Path(kernel_image).is_file() and ssh_host:
+        console.print(
+            f"  [dim]Fetching kernel Image from {ssh_host}:{kernel_image}…[/]"
+        )
+        local_image = os.path.join(save_dir, "kernel_Image")
+        try:
+            scp_cmd = ["scp", "-o", "StrictHostKeyChecking=no"]
+            if ssh_port != 22:
+                scp_cmd += ["-P", str(ssh_port)]
+            scp_cmd += [f"{ssh_host}:{kernel_image}", local_image]
+            r = subprocess.run(scp_cmd, capture_output=True, timeout=120)
+            if r.returncode != 0 or not Path(local_image).is_file():
+                console.print("  [dim]  SCP failed — cannot fetch Image[/]")
+                return None
+        except Exception as e:
+            console.print(f"  [dim]  SCP error: {e}[/]")
+            return None
+
+    if not Path(local_image).is_file():
+        return None
+
+    console.print(
+        "  [dim]Extracting symbols from kernel Image via vmlinux-to-elf…[/]"
+    )
+
+    try:
+        with open(local_image, "rb") as f:
+            data = f.read()
+
+        # Monkey-patch version check for non-standard kernel Images
+        import logging as _logging
+        _logging.disable(_logging.WARNING)
+
+        orig_find_ver = KallsymsFinder.find_linux_kernel_version
+
+        def _patched_find_ver(self):
+            import re as _re
+            m = _re.search(
+                rb'Linux version (\d+\.[\d.]*\d)[ -~]+', self.kernel_img
+            )
+            if m:
+                self.version_string = m.group(0).decode("ascii")
+                self.version_number = m.group(1).decode("ascii")
+            else:
+                # Fallback: allow extraction to proceed without version
+                self.version_string = "Linux version (unknown)"
+                self.version_number = "0.0.0"
+
+        KallsymsFinder.find_linux_kernel_version = _patched_find_ver
+
+        try:
+            # Create vmlinux ELF with symbols
+            vmlinux_path = os.path.join(save_dir, "vmlinux")
+            ElfSymbolizer(data, vmlinux_path, bit_size=64)
+
+            # Also extract kallsyms text file for our symbol resolver
+            ks = KallsymsFinder(data, bit_size=64)
+            type_map = {
+                "TEXT": "T", "LOCAL_TEXT": "t",
+                "DATA": "D", "LOCAL_DATA": "d",
+                "BSS": "B", "LOCAL_BSS": "b",
+                "RODATA": "R", "LOCAL_RODATA": "r",
+                "WEAK": "W", "ABSOLUTE": "A", "UNKNOWN": "?",
+            }
+            kallsyms_path = os.path.join(save_dir, "kallsyms")
+            with open(kallsyms_path, "w") as f:
+                for s in ks.symbols:
+                    stype = type_map.get(s.symbol_type.name, "?")
+                    f.write(f"{s.virtual_address:016x} {stype} {s.name}\n")
+
+            sym_count = len(ks.symbols)
+            console.print(
+                f"  [dim]  Extracted vmlinux ELF + {sym_count} symbols[/]"
+            )
+            return (vmlinux_path, kallsyms_path, sym_count)
+        finally:
+            KallsymsFinder.find_linux_kernel_version = orig_find_ver
+            _logging.disable(_logging.NOTSET)
+
+    except Exception as e:
+        console.print(
+            f"  [yellow]vmlinux extraction failed: {e}[/]"
+        )
+        return None
+
+
 # ── ADB port calculation ─────────────────────────────────────────────
 
 ADB_BASE_PORT = 6520
@@ -112,8 +231,11 @@ def _adb_run(
     try:
         r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout, r.stderr
-    except subprocess.TimeoutExpired:
-        return -1, "", "adb command timed out"
+    except subprocess.TimeoutExpired as exc:
+        # Capture any partial output produced before the timeout.
+        partial_out = (exc.stdout or "") if isinstance(exc.stdout, str) else (exc.stdout.decode(errors="replace") if exc.stdout else "")
+        partial_err = (exc.stderr or "") if isinstance(exc.stderr, str) else (exc.stderr.decode(errors="replace") if exc.stderr else "")
+        return -1, partial_out, partial_err or "adb command timed out"
     except Exception as exc:
         return -1, "", str(exc)
 
@@ -184,12 +306,29 @@ def _check_remote_port(
         return None
 
 
+# Track when we first saw an "offline" state to decide when to force
+# a transport reset (disconnect + reconnect).
+_offline_first_seen: float = 0.0
+
+
 def _adb_is_alive(adb_port: int) -> bool:
-    """Check if the device is reachable via ADB (connect + shell echo)."""
+    """Check if the device is reachable via ADB (connect + shell echo).
+
+    IMPORTANT: when the device is "offline" (VM booting, adbd
+    initialising), we do NOT disconnect the ADB transport.  ADB needs
+    the transport to stay alive so the ``CNXN`` / ``AUTH`` handshake can
+    complete in the background.  Disconnecting on every poll resets the
+    state machine and prevents the "offline → device" transition.
+
+    A forced transport reset is only done after the device has been
+    "offline" for >90 s, to handle genuinely stuck transports.
+    """
+    global _offline_first_seen  # noqa: PLW0603
     target = _adb_target(adb_port)
     adb = _adb_exe()
     try:
-        # Try to connect first (idempotent)
+        # Try to connect first (idempotent — returns "already connected"
+        # if the transport exists)
         conn = subprocess.run(
             [adb, "connect", target],
             capture_output=True, text=True, timeout=10,
@@ -214,13 +353,36 @@ def _adb_is_alive(adb_port: int) -> bool:
             dev_lines = [l for l in devs.stdout.strip().splitlines() if target in l]
             if dev_lines:
                 console.print(f"  [dim]  adb device status: {dev_lines[0].strip()}[/]")
-            # Device offline — try disconnect + reconnect
-            subprocess.run(
-                [adb, "disconnect", target],
-                capture_output=True, text=True, timeout=5,
-            )
-            time.sleep(1)
+
+            # ── Offline handling: be patient during boot ──────────────
+            now = time.time()
+            if _offline_first_seen == 0.0:
+                _offline_first_seen = now
+
+            elapsed = now - _offline_first_seen
+            if elapsed > 90:
+                # Stuck offline for >90s — force a transport reset.
+                console.print(
+                    f"  [dim]  offline for {int(elapsed)}s — "
+                    f"resetting ADB transport[/]"
+                )
+                subprocess.run(
+                    [adb, "disconnect", target],
+                    capture_output=True, text=True, timeout=5,
+                )
+                time.sleep(2)
+                # Try 'adb reconnect offline' if supported
+                subprocess.run(
+                    [adb, "reconnect", "offline"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                _offline_first_seen = now  # reset timer
+            # Else: leave transport in place — ADB will transition
+            # from "offline" → "device" once boot completes.
             return False
+
+        # Device is online — reset offline tracker
+        _offline_first_seen = 0.0
 
         # Then verify with a simple command
         r = subprocess.run(
@@ -242,7 +404,27 @@ def _kill_stale_tunnels(port: int) -> None:
     Previous runs may leave behind ``ssh -N -L <port>:...`` processes
     that hold the local port.  If we don't clean them up, the new tunnel
     immediately exits with "Address already in use".
+
+    Tries multiple strategies (lsof, fuser, ss+kill, pkill) because not
+    all tools are available in every environment (e.g. Docker).
+    Each strategy runs regardless of whether a previous one killed
+    something — multiple processes may hold the port.
     """
+    killed = False
+
+    def _port_still_held() -> bool:
+        """Check if port is still bound (quick socket probe)."""
+        import socket as _s
+        try:
+            s = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
+            s.setsockopt(_s.SOL_SOCKET, _s.SO_REUSEADDR, 1)
+            s.bind(("127.0.0.1", port))
+            s.close()
+            return False  # port is free
+        except OSError:
+            return True  # port is still held
+
+    # ── Strategy 1: lsof ──────────────────────────────────────────────
     try:
         result = subprocess.run(
             ["lsof", "-ti", f":{port}"],
@@ -251,89 +433,252 @@ def _kill_stale_tunnels(port: int) -> None:
         pids = [p.strip() for p in result.stdout.strip().splitlines() if p.strip()]
         if pids:
             console.print(
-                f"  [dim]Killing {len(pids)} stale process(es) on port {port}…[/]"
+                f"  [dim]Killing {len(pids)} stale process(es) on port {port} (lsof)…[/]"
             )
             for pid in pids:
                 try:
                     os.kill(int(pid), 9)
+                    killed = True
                 except (ValueError, ProcessLookupError, PermissionError):
                     pass
-            time.sleep(1)
+            if killed:
+                time.sleep(0.5)
+                if not _port_still_held():
+                    return
     except FileNotFoundError:
-        # lsof not available — try fuser
-        try:
-            subprocess.run(
-                ["fuser", "-k", f"{port}/tcp"],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(1)
-        except Exception:
-            pass
+        pass  # lsof not installed
     except Exception:
         pass
+
+    # ── Strategy 2: fuser ─────────────────────────────────────────────
+    try:
+        r = subprocess.run(
+            ["fuser", "-k", f"{port}/tcp"],
+            capture_output=True, timeout=5,
+        )
+        if r.returncode == 0:
+            killed = True
+            time.sleep(0.5)
+            if not _port_still_held():
+                return
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    # ── Strategy 3: ss + manual kill ──────────────────────────────────
+    try:
+        r = subprocess.run(
+            ["ss", "-tlnp", f"sport = :{port}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        import re as _re
+        for pid_match in _re.finditer(r"pid=(\d+)", r.stdout):
+            try:
+                os.kill(int(pid_match.group(1)), 9)
+                killed = True
+            except (ProcessLookupError, PermissionError):
+                pass
+        if killed and not _port_still_held():
+            return
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    # ── Strategy 4: pkill SSH tunnels matching the port ───────────────
+    try:
+        subprocess.run(
+            ["pkill", "-9", "-f", f"ssh.*-L.*{port}"],
+            capture_output=True, timeout=5,
+        )
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    # ── Strategy 5: brute-force grep /proc (works in any Linux) ──────
+    try:
+        r = subprocess.run(
+            ["sh", "-c",
+             f"grep -rl 'ssh.*-L.*{port}' /proc/*/cmdline 2>/dev/null "
+             f"| head -20 | grep -oP '/proc/\\K\\d+'"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for pid_s in r.stdout.strip().splitlines():
+            try:
+                os.kill(int(pid_s.strip()), 9)
+                killed = True
+            except (ValueError, ProcessLookupError, PermissionError):
+                pass
+    except Exception:
+        pass
+
+    if killed:
+        time.sleep(1)
+
+
+def _strip_ssh_banner(stderr_text: str) -> str:
+    """Strip common SSH MOTD / banner text to expose the real error.
+
+    Many SSH servers print multi-line banners like::
+
+        ==================== ATTENTION ====================
+        This is a private computing system …
+
+    which fills the truncation budget and hides the actual error.
+    """
+    import re
+    # Remove lines that look like banner decoration or generic warnings
+    lines = stderr_text.splitlines()
+    filtered: List[str] = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip decorative separator lines (=== / --- / ***)
+        if stripped and all(c in "=-*#~ " for c in stripped):
+            continue
+        # Skip common banner phrases
+        lower = stripped.lower()
+        _banner_phrases = (
+            "private computing system",
+            "authorized users only",
+            "you are warned",
+            "disconnect at once",
+            "unauthorized access",
+            "monitored and recorded",
+            "subject to audit",
+            "by continuing",
+            "you consent",
+        )
+        if any(bp in lower for bp in _banner_phrases):
+            continue
+        if stripped:
+            filtered.append(stripped)
+    return "\n".join(filtered)
+
+
+def _port_is_free(port: int) -> bool:
+    """Return True if we can bind to *port* on localhost."""
+    import socket as _socket
+    try:
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        s.bind(("127.0.0.1", port))
+        s.close()
+        return True
+    except OSError:
+        return False
 
 
 def _setup_adb_tunnel(
     adb_port: int,
     ssh_host: str,
     ssh_port: int = 22,
+    _max_attempts: int = 3,
 ) -> Optional[subprocess.Popen]:
     """Set up an SSH port-forward tunnel for ADB access to a remote
     Cuttlefish instance.
 
     Creates:  ``ssh -N -L <adb_port>:localhost:<adb_port> <ssh_host>``
 
+    Retries up to *_max_attempts* times on transient failures (port
+    conflicts, SSH protocol issues).
+
     Returns the tunnel ``Popen`` handle (caller must kill it later).
     """
-    # Kill stale tunnels from previous runs that may hold the port
-    _kill_stale_tunnels(adb_port)
-
-    # Kill local ADB server for a clean state (avoids stale device entries)
     adb = _adb_exe()
-    console.print("  [dim]Restarting local ADB server…[/]")
-    subprocess.run(
-        [adb, "kill-server"],
-        capture_output=True, text=True, timeout=10,
-    )
-    time.sleep(1)
-    subprocess.run(
-        [adb, "start-server"],
-        capture_output=True, text=True, timeout=10,
-    )
-    time.sleep(1)
 
-    argv = [
-        "ssh", "-N",
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "ExitOnForwardFailure=yes",
-        "-p", str(ssh_port),
-        "-L", f"{adb_port}:localhost:{adb_port}",
-        ssh_host,
-    ]
-    console.print(
-        f"  [dim]Setting up ADB tunnel: "
-        f"localhost:{adb_port} → {ssh_host}:{adb_port}[/]"
-    )
-    try:
-        proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        # Give tunnel a moment to establish
-        time.sleep(3)
-        if proc.poll() is not None:
-            _, stderr_bytes = proc.communicate(timeout=5)
-            err_msg = stderr_bytes.decode(errors="replace").strip() if stderr_bytes else "unknown"
-            console.print(
-                f"  [red]ADB tunnel exited immediately: {err_msg[:200]}[/]"
+    for attempt in range(1, _max_attempts + 1):
+        # Kill stale tunnels from previous runs that may hold the port
+        _kill_stale_tunnels(adb_port)
+
+        if attempt == 1:
+            # Kill local ADB server for a clean state (avoids stale
+            # device entries).  Only on first attempt to avoid
+            # repeatedly cycling the server.
+            console.print("  [dim]Restarting local ADB server…[/]")
+            subprocess.run(
+                [adb, "kill-server"],
+                capture_output=True, text=True, timeout=10,
             )
+            time.sleep(1)
+            subprocess.run(
+                [adb, "start-server"],
+                capture_output=True, text=True, timeout=10,
+            )
+            time.sleep(1)
+
+        # Quick-check whether the port is free.
+        # If still held after kill, try one more aggressive pass.
+        if not _port_is_free(adb_port):
+            console.print(
+                f"  [dim]Port {adb_port} still held after cleanup, "
+                f"retrying kill…[/]"
+            )
+            _kill_stale_tunnels(adb_port)
+            time.sleep(2)
+            if not _port_is_free(adb_port):
+                console.print(
+                    f"  [dim]Port {adb_port} still in use "
+                    f"(attempt {attempt}/{_max_attempts}), "
+                    f"trying tunnel anyway…[/]"
+                )
+
+        argv = [
+            "ssh", "-N",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=3",
+            "-p", str(ssh_port),
+            "-L", f"{adb_port}:localhost:{adb_port}",
+            ssh_host,
+        ]
+        console.print(
+            f"  [dim]Setting up ADB tunnel: "
+            f"localhost:{adb_port} → {ssh_host}:{adb_port}"
+            f" (attempt {attempt}/{_max_attempts})[/]"
+        )
+        try:
+            proc = subprocess.Popen(
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            # Give tunnel a moment to establish
+            time.sleep(4)
+            if proc.poll() is not None:
+                rc = proc.returncode
+                _, stderr_bytes = proc.communicate(timeout=5)
+                raw_err = (
+                    stderr_bytes.decode(errors="replace").strip()
+                    if stderr_bytes else ""
+                )
+                # Strip SSH banner text so the real error is visible
+                real_err = _strip_ssh_banner(raw_err) or raw_err
+                console.print(
+                    f"  [red]ADB tunnel exited (rc={rc}, "
+                    f"attempt {attempt}/{_max_attempts}): "
+                    f"{real_err[:500]}[/]"
+                )
+                if attempt < _max_attempts:
+                    time.sleep(2)
+                    continue
+                return None
+            # Tunnel is alive
+            return proc
+        except Exception as exc:
+            console.print(
+                f"  [red]Failed to set up ADB tunnel "
+                f"(attempt {attempt}/{_max_attempts}): {exc}[/]"
+            )
+            if attempt < _max_attempts:
+                time.sleep(2)
+                continue
             return None
-        return proc
-    except Exception as exc:
-        console.print(f"  [red]Failed to set up ADB tunnel: {exc}[/]")
-        return None
+
+    return None  # all attempts exhausted
 
 
 def _kill_proc(proc: Optional[subprocess.Popen]) -> None:
@@ -349,33 +694,66 @@ def _kill_proc(proc: Optional[subprocess.Popen]) -> None:
 
 # ── Crash pattern detection ───────────────────────────────────────────
 
-CRASH_PATTERNS: List[str] = [
-    "BUG:",
+# Severity tiers: FATAL definitely means the kernel is dead/corrupt,
+# SANITIZER means an instrumention check fired (KASAN etc.), WARNING
+# is a non-fatal kernel diagnostic that does NOT indicate the exploit
+# worked or caused instability.
+
+FATAL_CRASH_PATTERNS: List[str] = [
     "kernel panic",
     "Oops:",
+    "BUG:",
     "general protection fault",
-    "KASAN:",
-    "UBSAN:",
-    "Segfault",
-    "lockdep warning",
     "unable to handle kernel",
-    "Call Trace:",
-    "WARNING: CPU:",
+    "Kernel panic - not syncing",
+    "Internal error:",
+    "Bad mode in",
 ]
 
+SANITIZER_PATTERNS: List[str] = [
+    "KASAN:",
+    "UBSAN:",
+    "KMSAN:",
+    "KCSAN:",
+    "KFENCE:",
+]
+
+# These appear frequently in normal kernel operation or non-fatal
+# paths.  They are logged but do NOT count as "crash_occurred".
+WARNING_PATTERNS: List[str] = [
+    "WARNING: CPU:",
+    "Call Trace:",
+    "lockdep warning",
+    "Segfault",  # userspace segfault, not kernel crash
+]
+
+# Legacy flat list kept for backward-compat with code that imports it.
+CRASH_PATTERNS: List[str] = (
+    FATAL_CRASH_PATTERNS + SANITIZER_PATTERNS + WARNING_PATTERNS
+)
+
 SUCCESS_INDICATORS: List[str] = [
-    "uid=0",
     "got root",
     "privilege escalation successful",
     "exploit succeeded",
     "now running as root",
-    "euid=0",
     "[+] SUCCESS",
     "we are root",
     "root shell",
     "SYZPLOIT_UID_AFTER=0",
     "setresuid(0,0,0) succeeded",
     "running root payload",
+    "made process root",
+    "root payload:",
+    "listening shell on port",
+]
+
+# Strings that look like success but often appear inside error
+# messages.  Only trusted when coming from the verification wrapper's
+# own tags, never from raw exploit output substring matching.
+_AMBIGUOUS_SUCCESS_STRINGS = [
+    "uid=0",
+    "euid=0",
 ]
 
 
@@ -383,15 +761,53 @@ def _detect_crash(logs: str) -> Tuple[bool, str]:
     """Check if dmesg / output contains kernel crash patterns.
 
     Returns ``(crash_detected, matched_pattern)``.
+
+    Only FATAL and SANITIZER patterns count as crashes.  WARNING
+    patterns are logged separately but do not set crash_detected.
     """
-    for pat in CRASH_PATTERNS:
-        if pat.lower() in logs.lower():
+    lower = logs.lower()
+    for pat in FATAL_CRASH_PATTERNS:
+        if pat.lower() in lower:
+            return True, pat
+    for pat in SANITIZER_PATTERNS:
+        if pat.lower() in lower:
             return True, pat
     return False, ""
 
 
+def _detect_warnings(logs: str) -> List[str]:
+    """Return non-fatal warning patterns found in *logs*."""
+    lower = logs.lower()
+    return [p for p in WARNING_PATTERNS if p.lower() in lower]
+
+
+def _classify_crash_severity(logs: str) -> str:
+    """Classify the severity of kernel log output.
+
+    Returns one of: 'fatal', 'sanitizer', 'warning', 'none'.
+    """
+    lower = logs.lower()
+    for pat in FATAL_CRASH_PATTERNS:
+        if pat.lower() in lower:
+            return "fatal"
+    for pat in SANITIZER_PATTERNS:
+        if pat.lower() in lower:
+            return "sanitizer"
+    for pat in WARNING_PATTERNS:
+        if pat.lower() in lower:
+            return "warning"
+    return "none"
+
+
 def _detect_success(output: str) -> bool:
-    """Check if exploit output contains privilege-escalation success markers."""
+    """Check if exploit output contains **reliable** privilege-escalation
+    success markers.
+
+    Only trusts structured tags (SYZPLOIT_UID_AFTER=0) and explicit
+    success phrases.  Ambiguous strings like bare 'uid=0' are NOT
+    checked here — they can appear in error messages, usage text, or
+    other non-success contexts and cause false positives.
+    """
     lower = output.lower()
     return any(ind.lower() in lower for ind in SUCCESS_INDICATORS)
 
@@ -423,14 +839,187 @@ def _parse_uid(output: str, marker: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _capture_kernel_state(
+    *,
+    use_adb: bool = False,
+    adb_port: int = 6520,
+    ssh: Optional["SSHSession"] = None,
+) -> Dict[str, Any]:
+    """Capture kernel state that's useful for pre/post exploit comparison.
+
+    Gathers:
+    - Slab cache statistics (/proc/slabinfo or /sys/kernel/slab/)
+    - Security context (SELinux enforcing state)
+    - Process UID/GID namespace info
+    - Kernel version
+    - Key kernel memory stats (/proc/meminfo)
+
+    Returns a dict of captured state, or empty dict on failure.
+    """
+    state: Dict[str, Any] = {}
+
+    def _run(cmd: str, timeout: int = 10) -> str:
+        """Run a command and return stdout."""
+        try:
+            if use_adb:
+                _, out, _ = _adb_run(cmd, adb_port, timeout=timeout)
+                return out or ""
+            elif ssh:
+                _, out, _ = ssh.run(cmd, timeout=timeout)
+                return out or ""
+        except Exception:
+            pass
+        return ""
+
+    # Slab cache info — parse the caches most relevant to exploits
+    slabinfo = _run("cat /proc/slabinfo 2>/dev/null || true")
+    if slabinfo and "slabdata" in slabinfo.lower():
+        slab_caches: Dict[str, Dict[str, int]] = {}
+        for line in slabinfo.strip().splitlines()[2:]:  # skip 2 header lines
+            parts = line.split()
+            if len(parts) >= 6:
+                name = parts[0]
+                try:
+                    slab_caches[name] = {
+                        "active_objs": int(parts[1]),
+                        "num_objs": int(parts[2]),
+                        "objsize": int(parts[3]),
+                        "objperslab": int(parts[4]),
+                        "pagesperslab": int(parts[5]),
+                    }
+                except (ValueError, IndexError):
+                    pass
+        # Store the full dict but also extract key exploit caches
+        _key_caches = [
+            "kmalloc-64", "kmalloc-128", "kmalloc-192", "kmalloc-256",
+            "kmalloc-512", "kmalloc-1k", "kmalloc-2k", "kmalloc-4k",
+            "cred_jar", "files_cache", "task_struct", "signal_cache",
+            "pid", "mm_struct", "inode_cache", "dentry",
+            "ip6_dst_cache", "ip_dst_cache", "skbuff_head_cache",
+        ]
+        state["slab_key_caches"] = {
+            k: v for k, v in slab_caches.items() if k in _key_caches
+        }
+        state["slab_total_caches"] = len(slab_caches)
+
+    # SELinux state
+    selinux = _run("cat /sys/fs/selinux/enforce 2>/dev/null || echo -1")
+    if selinux.strip() in ("0", "1"):
+        state["selinux_enforcing"] = int(selinux.strip())
+
+    # Kernel version
+    version = _run("uname -r 2>/dev/null || true")
+    if version.strip():
+        state["kernel_version"] = version.strip()
+
+    # Memory overview (active slab, total slab, freeable pages)
+    meminfo = _run(
+        "grep -E '^(Slab|SReclaimable|SUnreclaim|MemFree|MemAvailable):' "
+        "/proc/meminfo 2>/dev/null || true"
+    )
+    if meminfo.strip():
+        mem: Dict[str, int] = {}
+        for line in meminfo.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    mem[parts[0].rstrip(":")] = int(parts[1])
+                except ValueError:
+                    pass
+        state["meminfo"] = mem
+
+    # Current process security context
+    ctx_str = _run("id 2>/dev/null || true")
+    if ctx_str.strip():
+        state["security_context"] = ctx_str.strip()[:200]
+
+    return state
+
+
+def _diff_kernel_state(
+    pre: Dict[str, Any],
+    post: Dict[str, Any],
+) -> str:
+    """Generate a human-readable diff of kernel state before/after exploit.
+
+    Focuses on changes meaningful for exploit verification:
+    - Slab cache object count changes (indicates alloc/free activity)
+    - SELinux enforcement changes
+    - Memory pressure changes
+    """
+    parts: List[str] = ["=== Kernel State Diff (pre → post exploit) ==="]
+
+    # Slab cache diff
+    pre_slabs = pre.get("slab_key_caches", {})
+    post_slabs = post.get("slab_key_caches", {})
+    slab_changes: List[str] = []
+    for cache in sorted(set(pre_slabs) | set(post_slabs)):
+        pre_active = pre_slabs.get(cache, {}).get("active_objs", 0)
+        post_active = post_slabs.get(cache, {}).get("active_objs", 0)
+        delta = post_active - pre_active
+        if delta != 0:
+            slab_changes.append(
+                f"  {cache}: {pre_active} → {post_active} ({delta:+d} objects)"
+            )
+    if slab_changes:
+        parts.append(f"\n[SLAB CHANGES] ({len(slab_changes)} caches changed)")
+        parts.extend(slab_changes)
+    else:
+        parts.append("\n[SLAB] No slab cache object count changes detected")
+
+    # SELinux
+    pre_sel = pre.get("selinux_enforcing")
+    post_sel = post.get("selinux_enforcing")
+    if pre_sel is not None and post_sel is not None and pre_sel != post_sel:
+        parts.append(
+            f"\n[SELINUX] Enforcement changed: {pre_sel} → {post_sel}"
+        )
+        if post_sel == 0:
+            parts.append("  ** SELinux DISABLED — exploit may have toggled enforcement **")
+
+    # Memory
+    pre_mem = pre.get("meminfo", {})
+    post_mem = post.get("meminfo", {})
+    for key in ["Slab", "SReclaimable", "MemFree"]:
+        pv = pre_mem.get(key, 0)
+        av = post_mem.get(key, 0)
+        if pv and av and abs(av - pv) > 100:  # >100 kB change
+            parts.append(f"[MEM] {key}: {pv} → {av} kB ({av - pv:+d} kB)")
+
+    return "\n".join(parts)
+
+
 def _dmesg_diff(before: str, after: str) -> str:
-    """Return only the new lines in *after* that don't appear in *before*."""
-    before_lines = set(before.strip().splitlines())
-    new = [
-        line
-        for line in after.strip().splitlines()
-        if line not in before_lines
-    ]
+    """Return only the new lines in *after* that don't appear in *before*.
+
+    Uses the dmesg timestamp prefix to anchor the diff rather than a
+    naive set-membership check (which silently drops repeated messages).
+    Falls back to suffix matching when timestamps are absent.
+    """
+    before_lines = before.strip().splitlines()
+    after_lines = after.strip().splitlines()
+
+    if not after_lines:
+        return ""
+    if not before_lines:
+        return "\n".join(after_lines)
+
+    # Try to find the last *before* line in the *after* output.
+    # dmesg is append-only so everything after that anchor is new.
+    last_before = before_lines[-1].strip()
+    anchor_idx = -1
+    for i in range(len(after_lines) - 1, -1, -1):
+        if after_lines[i].strip() == last_before:
+            anchor_idx = i
+            break
+
+    if anchor_idx >= 0:
+        new = after_lines[anchor_idx + 1:]
+    else:
+        # Fallback: simple set diff (preserves duplicates in `after`)
+        before_set = set(before_lines)
+        new = [l for l in after_lines if l not in before_set]
+
     return "\n".join(new)
 
 
@@ -550,37 +1139,153 @@ def _is_gdb_start(start_cmd: Optional[str]) -> bool:
     return bool(start_cmd and "gdb" in start_cmd.lower())
 
 
+def _qmp_check_running(
+    ssh_host: Optional[str],
+    ssh_port: int = 22,
+    instance: int = 20,
+) -> Optional[bool]:
+    """Check if QEMU is running via QMP socket on the remote host.
+
+    Returns ``True`` if running, ``False`` if paused, ``None`` if QMP
+    is unavailable (socket not found, SSH error, etc.).
+    """
+    if not ssh_host or not _is_remote_host(ssh_host):
+        return None
+    # Cuttlefish convention: QMP socket path
+    qmp_script = (
+        "import socket, json, time, glob, sys\n"
+        f"paths = glob.glob('/home/*/challenge-*/challenge-*/cuttlefish/instances/cvd-{instance}/internal/qemu_monitor.sock')\n"
+        "if not paths:\n"
+        "    print('NO_SOCKET')\n"
+        "    sys.exit(0)\n"
+        "try:\n"
+        "    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+        "    s.connect(paths[0])\n"
+        "    s.settimeout(3)\n"
+        "    s.recv(4096)\n"
+        '    s.send(json.dumps({"execute": "qmp_capabilities"}).encode() + b"\\n")\n'
+        "    time.sleep(0.3)\n"
+        "    s.recv(4096)\n"
+        '    s.send(json.dumps({"execute": "query-status"}).encode() + b"\\n")\n'
+        "    time.sleep(0.5)\n"
+        "    data = s.recv(4096).decode()\n"
+        "    s.close()\n"
+        '    if "running" in data and "true" in data.lower():\n'
+        "        print('RUNNING')\n"
+        "    else:\n"
+        "        print('PAUSED')\n"
+        "except Exception as e:\n"
+        "    print(f'ERROR:{e}')\n"
+    )
+    try:
+        r = subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=no",
+             "-p", str(ssh_port), ssh_host,
+             "python3", "-"],
+            input=qmp_script,
+            capture_output=True, text=True, timeout=15,
+        )
+        out = r.stdout.strip()
+        if "RUNNING" in out:
+            return True
+        if "PAUSED" in out:
+            return False
+        return None
+    except Exception:
+        return None
+
+
 def _send_gdb_continue(
     gdb_port: int = 1234,
     *,
     ssh_host: Optional[str] = None,
     ssh_port: int = 22,
     setup_tunnels: bool = False,
+    max_retries: int = 5,
+    remote_wait_timeout: int = 90,
+    instance: int = 20,
 ) -> bool:
     """Send GDB 'continue' to the kernel via raw GDB-RSP protocol.
 
-    When the VM is launched with ``gdb_run.sh``, crosvm waits for a
+    When the VM is launched with ``gdb_run.sh``, QEMU waits for a
     debugger to connect and send *continue* before the kernel boots.
-    This function:
 
-    1. Optionally creates an SSH tunnel for the GDB port.
-    2. Waits up to 30 s for the GDB stub to accept connections.
-    3. Sends the RSP ``$c#63`` (continue) packet.
-    4. Cleans up the GDB tunnel (separate from the ADB tunnel).
+    Key insight: when using an SSH tunnel, ``create_connection`` to the
+    *local* tunnel port succeeds immediately (SSH accepts locally) even
+    when the *remote* GDB port isn't open yet.  This causes
+    ``BrokenPipeError`` when we try to send data.  To avoid this, we
+    first wait for the GDB port to open *on the remote host* via an SSH
+    ``nc -z`` probe, then set up the tunnel and connect.
+
+    Protocol observed from QEMU's GDB stub:
+    - No initial stop-reply packet (recv times out).
+    - Send ``+`` (ACK sync) then ``$c#63`` (continue).
+    - Stub replies with ``+`` (ACK).
+
+    After sending continue, verifies QEMU state via QMP to confirm the
+    VM is actually running.  If paused, retries.
     """
     import socket
 
     tunnel_proc: Optional[subprocess.Popen] = None
-    # Use a high local port to avoid clashing with the ADB tunnel
     local_port = gdb_port if not setup_tunnels else 11234 + (gdb_port % 1000)
 
     try:
-        # ── 1. Set up GDB SSH tunnel if remote ───────────────────────
-        if (
-            ssh_host
-            and _is_remote_host(ssh_host)
-            and setup_tunnels
-        ):
+        # ── 1. Wait for GDB port on the remote host ─────────────────
+        # This is critical: the SSH tunnel will accept local connections
+        # even if the remote port isn't open, causing BrokenPipe.  We
+        # probe the remote port directly via SSH before proceeding.
+        if ssh_host and _is_remote_host(ssh_host) and setup_tunnels:
+            console.print(
+                f"  [dim]Waiting for GDB port {gdb_port} on "
+                f"{ssh_host} (up to {remote_wait_timeout}s)…[/]"
+            )
+            probe_cmd = (
+                f"for i in $(seq 1 {remote_wait_timeout}); do "
+                f"  if nc -z localhost {gdb_port} 2>/dev/null; then "
+                f"    echo OPEN; exit 0; "
+                f"  fi; "
+                f"  sleep 1; "
+                f"done; echo TIMEOUT; exit 1"
+            )
+            try:
+                probe_result = subprocess.run(
+                    ["ssh", "-o", "StrictHostKeyChecking=no",
+                     "-p", str(ssh_port), ssh_host,
+                     probe_cmd],
+                    capture_output=True, text=True,
+                    timeout=remote_wait_timeout + 15,
+                )
+                probe_out = probe_result.stdout.strip()
+                if "OPEN" in probe_out:
+                    console.print(
+                        f"  [green]GDB port {gdb_port} is open on "
+                        f"{ssh_host}[/]"
+                    )
+                else:
+                    console.print(
+                        f"  [red]GDB port {gdb_port} did NOT open on "
+                        f"{ssh_host} within {remote_wait_timeout}s[/]"
+                    )
+                    return False
+            except subprocess.TimeoutExpired:
+                console.print(
+                    f"  [red]Timeout probing GDB port on {ssh_host}[/]"
+                )
+                return False
+            except Exception as exc:
+                console.print(
+                    f"  [yellow]Cannot probe remote GDB port: {exc} "
+                    f"— will attempt tunnel anyway[/]"
+                )
+
+        # ── 2. Set up SSH tunnel ─────────────────────────────────────
+        if ssh_host and _is_remote_host(ssh_host) and setup_tunnels:
+            # Kill any stale SSH tunnel occupying the local port.
+            # Previous runs may leave zombie tunnels that prevent
+            # the new tunnel from binding and forward to a dead stub.
+            _kill_stale_tunnels(local_port)
+
             console.print(
                 f"  [dim]Setting up GDB tunnel: "
                 f"localhost:{local_port} → {ssh_host}:{gdb_port}[/]"
@@ -593,68 +1298,160 @@ def _send_gdb_continue(
             tunnel_proc = subprocess.Popen(
                 tunnel_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
-            time.sleep(2)  # let the tunnel establish
-
-        # ── 2. Wait for GDB port to open ─────────────────────────────
-        console.print(
-            f"  [dim]Waiting for GDB stub at localhost:{local_port}…[/]"
-        )
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            try:
-                probe = socket.create_connection(
-                    ("localhost", local_port), timeout=2,
-                )
-                probe.close()
-                console.print("  [dim]GDB port is open[/]")
-                break
-            except (socket.timeout, ConnectionRefusedError, OSError):
-                time.sleep(1)
-        else:
-            console.print("  [yellow]Timeout waiting for GDB port[/]")
-            return False
-
-        # ── 3. Connect and send continue ──────────────────────────────
-        console.print(
-            f"  [dim]Connecting to GDB stub at localhost:{local_port}…[/]"
-        )
-        sock = socket.create_connection(("localhost", local_port), timeout=10)
-        sock.settimeout(5)
-
-        # Sync with ACK then send continue packet ($c#63)
-        sock.send(b"+")
-        time.sleep(0.2)
-        sock.send(b"$c#63")
-
-        # Wait briefly for ACK
-        try:
-            response = sock.recv(1)
-            if response == b"+":
-                console.print("  [green]GDB stub acknowledged continue[/]")
-            elif response == b"":
-                console.print(
-                    "  [dim]Empty GDB response (VM likely continuing)[/]"
-                )
-            else:
-                console.print(f"  [dim]GDB response: {response!r}[/]")
-        except socket.timeout:
+            time.sleep(2)
+        elif not setup_tunnels:
+            # Local connection — wait for port directly
             console.print(
-                "  [dim]No ACK (stub may have continued anyway)[/]"
+                f"  [dim]Waiting for GDB port localhost:{local_port}…[/]"
             )
+            deadline = time.time() + remote_wait_timeout
+            while time.time() < deadline:
+                try:
+                    probe = socket.create_connection(
+                        ("localhost", local_port), timeout=2,
+                    )
+                    probe.close()
+                    console.print("  [dim]GDB port is open[/]")
+                    break
+                except (ConnectionRefusedError, OSError):
+                    time.sleep(1)
+            else:
+                console.print("  [yellow]Timeout waiting for GDB port[/]")
+                return False
+            time.sleep(1)  # brief settle after port opens
 
-        sock.close()
-        console.print("  [green]GDB continue sent successfully[/]")
-        return True
+        # ── 3. Connect and send continue (with retries) ──────────────
+        for attempt in range(1, max_retries + 1):
+            continue_sent = False
+            sock: Optional[socket.socket] = None
+            try:
+                console.print(
+                    f"  [dim]Connecting to GDB stub at "
+                    f"localhost:{local_port} "
+                    f"(attempt {attempt}/{max_retries})…[/]"
+                )
+                sock = socket.create_connection(
+                    ("localhost", local_port), timeout=10,
+                )
+                sock.settimeout(5)
 
-    except ConnectionResetError:
-        # crosvm may RST after accepting the continue — that's OK
+                # Read any initial data from the stub.  QEMU on
+                # Cuttlefish typically sends nothing (timeout), but
+                # some builds send a stop-reply like $T05...#XX.
+                try:
+                    initial_data = sock.recv(512)
+                    if initial_data:
+                        console.print(
+                            f"  [dim]GDB stub initial: "
+                            f"{initial_data[:80]!r}[/]"
+                        )
+                except socket.timeout:
+                    pass  # expected — no initial packet
+
+                # Sync ACK then continue
+                sock.send(b"+")
+                time.sleep(0.1)
+                sock.send(b"$c#63")
+                continue_sent = True
+
+                # Wait for ACK
+                got_ack = False
+                try:
+                    response = sock.recv(64)
+                    if response and b"+" in response:
+                        console.print(
+                            "  [green]GDB stub acknowledged "
+                            "continue (+)[/]"
+                        )
+                        got_ack = True
+                    elif response:
+                        console.print(
+                            f"  [dim]GDB response: "
+                            f"{response[:60]!r}[/]"
+                        )
+                    else:
+                        console.print(
+                            "  [dim]Empty response[/]"
+                        )
+                except socket.timeout:
+                    console.print(
+                        "  [dim]No ACK received (timeout)[/]"
+                    )
+
+                # Just close the socket — do NOT send $D#44 detach.
+                # QEMU 6.2 re-pauses the VM when it receives a detach
+                # packet, which prevents the kernel from booting.
+                sock.close()
+
+                # ── Verify QEMU is actually running via QMP ──────
+                # If no ACK was received the continue may not have
+                # taken effect.  Check QMP and retry if paused.
+                if not got_ack:
+                    time.sleep(2)
+                    qmp_state = _qmp_check_running(
+                        ssh_host, ssh_port, instance,
+                    )
+                    if qmp_state is True:
+                        console.print(
+                            "  [green]QMP confirms VM is running[/]"
+                        )
+                        return True
+                    elif qmp_state is False:
+                        console.print(
+                            "  [yellow]QMP says VM is paused — "
+                            "retrying continue…[/]"
+                        )
+                        time.sleep(2)
+                        continue  # retry loop
+                    else:
+                        # QMP unavailable — trust the send
+                        console.print(
+                            "  [dim]QMP unavailable — "
+                            "assuming continue worked[/]"
+                        )
+                        return True
+
+                console.print(
+                    "  [green]GDB continue sent successfully[/]"
+                )
+                return True
+
+            except (ConnectionResetError, BrokenPipeError) as exc:
+                kind = type(exc).__name__
+                if continue_sent:
+                    console.print(
+                        f"  [dim]{kind} after continue "
+                        f"(VM likely resumed)[/]"
+                    )
+                    return True
+                else:
+                    backoff = min(2 ** attempt, 10)
+                    console.print(
+                        f"  [yellow]{kind} before continue "
+                        f"(attempt {attempt}/{max_retries}, "
+                        f"retrying in {backoff}s)[/]"
+                    )
+                    time.sleep(backoff)
+            except Exception as exc:
+                backoff = min(2 ** attempt, 10)
+                console.print(
+                    f"  [yellow]GDB attempt {attempt} failed: "
+                    f"{exc} (retrying in {backoff}s)[/]"
+                )
+                time.sleep(backoff)
+            finally:
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+
         console.print(
-            "  [dim]Connection reset (stub likely continued)[/]"
+            f"  [red]All GDB continue attempts failed "
+            f"({max_retries} retries exhausted)[/]"
         )
-        return True
-    except Exception as exc:
-        console.print(f"  [yellow]GDB continue failed: {exc}[/]")
         return False
+
     finally:
         if tunnel_proc is not None:
             tunnel_proc.terminate()
@@ -679,6 +1476,8 @@ def collect_target_system_info(
     gdb_port: int = 1234,
     setup_tunnels: bool = True,
     work_dir: Optional[str] = None,
+    keep_alive: bool = False,
+    kernel_image: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Boot the target VM and collect system information.
 
@@ -707,6 +1506,18 @@ def collect_target_system_info(
     adb_tunnel: Optional[subprocess.Popen] = None
 
     try:
+        # ── Step 0: Stop any stale instance ──────────────────────────
+        # A previous run (or Ctrl+C) may have left the VM running.
+        # If we start a new one without stopping first, the GDB port
+        # (1234) and ADB port may still be held by the old process,
+        # causing the new instance to fail silently.
+        if start_cmd and stop_cmd:
+            console.print("  [dim]collect_target_info: stopping stale instance…[/]")
+            _run_stop_cmd(
+                stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port, timeout=30,
+            )
+            time.sleep(2)
+
         # ── Step 1: Start VM ─────────────────────────────────────────
         if start_cmd:
             console.print("  [dim]collect_target_info: starting VM…[/]")
@@ -724,10 +1535,11 @@ def collect_target_system_info(
             gdb_ok = _send_gdb_continue(
                 gdb_port, ssh_host=ssh_host, ssh_port=ssh_port,
                 setup_tunnels=setup_tunnels,
+                instance=instance or 20,
             )
             if gdb_ok:
                 console.print("  [dim]collect_target_info: waiting for boot…[/]")
-                time.sleep(60)
+                time.sleep(30)
             else:
                 info["notes"] = ["GDB continue failed — VM may not boot"]
 
@@ -739,15 +1551,23 @@ def collect_target_system_info(
                 time.sleep(3)
 
         # ── Step 4: Wait for ADB ─────────────────────────────────────
+        # GDB-started VMs use 1 CPU and boot slowly (~7 min wall clock
+        # on ARM64 QEMU).  Allow up to 10 min for GDB boots and 4 min
+        # for normal boots.
+        gdb_boot = bool(start_cmd and _is_gdb_start(start_cmd) and gdb_port)
+        max_adb_polls = 60 if gdb_boot else 24  # 10 min vs 4 min
         adb_alive = False
         if use_adb:
-            console.print("  [dim]collect_target_info: waiting for ADB…[/]")
-            for attempt in range(24):  # up to 4 min
+            console.print(
+                f"  [dim]collect_target_info: waiting for ADB "
+                f"(up to {max_adb_polls * 10}s)…[/]"
+            )
+            for attempt in range(max_adb_polls):
                 if _adb_is_alive(actual_adb_port):
                     adb_alive = True
                     console.print("  [dim]collect_target_info: ADB connected[/]")
                     break
-                if attempt % 3 == 2:
+                if attempt % 6 == 5:
                     console.print(
                         f"  [dim]  still waiting… ({(attempt + 1) * 10}s)[/]"
                     )
@@ -1010,6 +1830,36 @@ def collect_target_system_info(
                 "kallsyms not readable (kernel may restrict /proc/kallsyms to root)"
             ]
 
+        # ── Fallback: Extract kallsyms from kernel Image via vmlinux-to-elf ──
+        # If we have no usable kallsyms but have a kernel Image file,
+        # try to extract the embedded kallsyms table using vmlinux-to-elf.
+        if (
+            not info.get("kallsyms_available")
+            and kernel_image
+        ):
+            extracted = _extract_vmlinux_from_image(
+                kernel_image, ssh_host, ssh_port, work_dir
+            )
+            if extracted:
+                vmlinux_p, kallsyms_p, sym_count = extracted
+                info["kallsyms_available"] = True
+                info["symbol_count"] = sym_count
+                info["kallsyms_path"] = kallsyms_p
+                info["vmlinux_path"] = vmlinux_p
+                info.setdefault("notes", [])
+                info["notes"] = [
+                    n for n in info.get("notes", [])
+                    if "kallsyms not readable" not in n
+                ]
+                info["notes"].append(
+                    f"Symbols extracted from kernel Image via vmlinux-to-elf "
+                    f"({sym_count} symbols)"
+                )
+                console.print(
+                    f"  [dim]collect_target_info: extracted {sym_count} "
+                    f"symbols from kernel Image[/]"
+                )
+
         # Save config.gz if available
         if info.get("config_gz_available") and adb_alive:
             save_dir = work_dir or os.path.dirname(info.get("kallsyms_path", "")) or tempfile.mkdtemp(prefix="syzploit_target_info_")
@@ -1028,13 +1878,31 @@ def collect_target_system_info(
 
     finally:
         # ── Cleanup ──────────────────────────────────────────────────
-        if adb_tunnel is not None:
-            _kill_proc(adb_tunnel)
-        if vm_proc is not None:
-            if stop_cmd:
-                _run_stop_cmd(stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port)
-            else:
-                _kill_proc(vm_proc)
+        # When keep_alive=True, leave the VM and ADB tunnel running
+        # so subsequent run_target_command calls can reuse them.
+        if keep_alive:
+            # Export to source_tools module globals for reuse
+            try:
+                from ..orchestrator import source_tools as _st
+                if adb_tunnel is not None:
+                    _st._adb_tunnel_proc = adb_tunnel
+                if vm_proc is not None:
+                    _st._vm_proc = vm_proc
+                _st._adb_port_active = actual_adb_port
+            except Exception:
+                pass  # best-effort
+            console.print(
+                "  [dim]collect_target_info: VM and ADB tunnel "
+                "kept alive for further investigation[/]"
+            )
+        else:
+            if adb_tunnel is not None:
+                _kill_proc(adb_tunnel)
+            if vm_proc is not None:
+                if stop_cmd:
+                    _run_stop_cmd(stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port)
+                else:
+                    _kill_proc(vm_proc)
 
     return info
 
@@ -1091,16 +1959,17 @@ EXPLOIT_PID=$!
 # Poll the exploit's UID from /proc — this reflects the kernel's
 # view of the process's cred struct, which is what privesc changes.
 # We check ALL FOUR uid fields: real, effective, saved, fs.
+# Also check child processes — many exploits fork() and change
+# credentials in a child rather than the parent.
 LAST_UID="$BEFORE_UID"
 while kill -0 "$EXPLOIT_PID" 2>/dev/null; do
+    # Check the main exploit process
     if [ -f "/proc/$EXPLOIT_PID/status" ]; then
-        # Uid line has: real effective saved fs
         UID_LINE=$(grep '^Uid:' /proc/$EXPLOIT_PID/status 2>/dev/null || true)
         if [ -n "$UID_LINE" ]; then
             PROC_REAL=$(echo "$UID_LINE" | awk '{{print $2}}')
             PROC_EFF=$(echo "$UID_LINE" | awk '{{print $3}}')
             PROC_SAVED=$(echo "$UID_LINE" | awk '{{print $4}}')
-            # ANY of the uid fields being 0 means the exploit is working
             if [ "$PROC_REAL" = "0" ] || [ "$PROC_EFF" = "0" ] || [ "$PROC_SAVED" = "0" ]; then
                 if [ "$BEFORE_UID" != "0" ]; then
                     echo "SYZPLOIT_UID_AFTER=0"
@@ -1113,7 +1982,51 @@ while kill -0 "$EXPLOIT_PID" 2>/dev/null; do
             fi
         fi
     fi
-    sleep 0.1
+    # Also check child processes (forking exploits)
+    # Method 1: /proc/PID/task/PID/children (needs CONFIG_PROC_CHILDREN)
+    # Method 2: pgrep -P (works on all Linux/Android)
+    # Method 3: check for listening root shell port (exploit-specific)
+    if [ "$LAST_UID" != "0" ]; then
+        # Try children file first
+        CHILDREN=$(cat /proc/$EXPLOIT_PID/task/$EXPLOIT_PID/children 2>/dev/null || true)
+        # Fallback: pgrep for child processes
+        if [ -z "$CHILDREN" ]; then
+            CHILDREN=$(pgrep -P $EXPLOIT_PID 2>/dev/null || true)
+        fi
+        # Also check grandchildren (exploit forks multiple levels)
+        ALL_CHILDREN="$CHILDREN"
+        for C in $CHILDREN; do
+            GC=$(pgrep -P $C 2>/dev/null || true)
+            ALL_CHILDREN="$ALL_CHILDREN $GC"
+        done
+        for CHILD in $ALL_CHILDREN; do
+            if [ -f "/proc/$CHILD/status" ]; then
+                CHILD_UID=$(grep '^Uid:' /proc/$CHILD/status 2>/dev/null || true)
+                if [ -n "$CHILD_UID" ]; then
+                    C_REAL=$(echo "$CHILD_UID" | awk '{{print $2}}')
+                    C_EFF=$(echo "$CHILD_UID" | awk '{{print $3}}')
+                    if [ "$C_REAL" = "0" ] || [ "$C_EFF" = "0" ]; then
+                        if [ "$BEFORE_UID" != "0" ]; then
+                            echo "SYZPLOIT_UID_AFTER=0"
+                            echo "[+] Detected UID change to 0 in child/grandchild $CHILD"
+                            echo "[+] Child Uid line: $CHILD_UID"
+                            LAST_UID=0
+                            break
+                        fi
+                    fi
+                fi
+            fi
+        done
+        # Method 3: check for listening root shell port (common in exploit payloads)
+        if [ "$LAST_UID" != "0" ]; then
+            if ss -tlnp 2>/dev/null | grep -q ':1340 '; then
+                echo "SYZPLOIT_UID_AFTER=0"
+                echo "[+] Detected root shell listening on port 1340"
+                LAST_UID=0
+            fi
+        fi
+    fi
+    sleep 1
 done
 
 # Collect exit status — use || true so the script doesn't abort
@@ -1160,6 +2073,9 @@ def verify_exploit(
     kallsyms_path: Optional[str] = None,
     monitor_functions: Optional[List[str]] = None,
     arch: str = "arm64",
+    # ExploitMonitor integration
+    keep_alive: bool = False,
+    monitor_script_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Deploy and run an exploit binary, checking for privilege escalation.
 
@@ -1189,6 +2105,9 @@ def verify_exploit(
         "privilege_escalated": False,
         "crash_occurred": False,
         "crash_pattern": "",
+        "crash_severity": "none",  # "fatal", "sanitizer", "warning", "none"
+        "kernel_warnings": [],
+        "kernel_log": "",  # logcat -b kernel / cuttlefish kernel.log
         "exploit_output": "",
         "dmesg_new": "",
         "device_stable": True,
@@ -1198,6 +2117,12 @@ def verify_exploit(
         "gdb_functions_hit": [],
         "gdb_functions_missed": [],
         "gdb_crash_info": None,
+        # Pre/post kernel state (new)
+        "kernel_state_pre": {},
+        "kernel_state_post": {},
+        "kernel_state_diff": "",
+        # ExploitMonitor rich diagnostics (new)
+        "monitor_results": {},
     }
 
     binary = Path(binary_path)
@@ -1213,6 +2138,7 @@ def verify_exploit(
     start_proc: Optional[subprocess.Popen] = None
     tunnel_proc: Optional[subprocess.Popen] = None
     gdb_monitor = None  # must be set before try so finally can always reference it
+    gdb_tunnel_proc: Optional[subprocess.Popen] = None
 
     try:  # Ensure cleanup even on exceptions
         # ── 1. Optionally restart instance ────────────────────────────
@@ -1221,7 +2147,17 @@ def verify_exploit(
             _run_stop_cmd(stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port)
             time.sleep(2)
 
-        actual_start = exploit_start_cmd or start_cmd
+        # When GDB monitoring is requested (kallsyms/vmlinux available),
+        # prefer start_cmd (gdb_run.sh) so the GDB stub is present.
+        # If no GDB monitoring, use exploit_start_cmd (run.sh) for speed.
+        want_gdb = bool(kallsyms_path or vmlinux_path) and bool(monitor_functions)
+        if want_gdb and start_cmd and _is_gdb_start(start_cmd):
+            actual_start = start_cmd
+            console.print(
+                "  [dim]Using GDB-enabled start (for kernel path monitoring)…[/]"
+            )
+        else:
+            actual_start = exploit_start_cmd or start_cmd
         if not persistent and actual_start:
             console.print("  [dim]Starting instance…[/]")
             ok, start_proc = _run_start_cmd(
@@ -1261,12 +2197,13 @@ def verify_exploit(
                 ssh_host=ssh_host,
                 ssh_port=ssh_port,
                 setup_tunnels=setup_tunnels,
+                instance=instance or 20,
             )
             if gdb_ok:
                 console.print(
-                    "  [dim]Waiting 60 s for VM to boot after GDB continue…[/]"
+                    "  [dim]Waiting 30 s for VM to start booting…[/]"
                 )
-                time.sleep(60)
+                time.sleep(30)
             else:
                 console.print(
                     "  [yellow]GDB continue may have failed — "
@@ -1437,40 +2374,115 @@ def verify_exploit(
                 return result
             ssh.run(f"chmod 755 {remote_path}")
 
+        # ── 3b. Generate and push wrapper script ─────────────────────
+        # Push the wrapper BEFORE setting GDB breakpoints.  GDB hardware
+        # breakpoints cause constant stop/continue cycles on monitored
+        # kernel functions which can make ADB unresponsive.  By pushing
+        # everything first, we guarantee scripts are on-device before
+        # the VM slows down from breakpoint overhead.
+        verify_wrapper = _build_verify_wrapper(remote_path, remote_dir, timeout)
+        wrapper_path = f"{remote_dir}/verify_wrapper.sh"
+        _wrapper_pushed = False
+
+        if use_adb:
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".sh", delete=False
+            ) as f:
+                f.write(verify_wrapper)
+                _tmp_wrapper_path = f.name
+            if _adb_push(_tmp_wrapper_path, wrapper_path, adb_port, timeout=60):
+                _wrapper_pushed = True
+                _adb_run(f"chmod 755 {wrapper_path}", adb_port, timeout=10)
+                console.print("  [dim]Wrapper script pushed (before GDB setup)[/]")
+            else:
+                console.print(
+                    "  [yellow]Wrapper pre-push failed — will retry after "
+                    "GDB setup[/]"
+                )
+            Path(_tmp_wrapper_path).unlink(missing_ok=True)
+        else:
+            ssh.run(
+                f"cat > {wrapper_path} << 'SYZPLOIT_WRAPPER_EOF'\n"
+                f"{verify_wrapper}\nSYZPLOIT_WRAPPER_EOF"
+            )
+            ssh.run(f"chmod 755 {wrapper_path}")
+            _wrapper_pushed = True
+            console.print("  [dim]Wrapper script pushed (before GDB setup)[/]")
+
         # ── 4. Capture dmesg BEFORE ──────────────────────────────────
         if use_adb:
             _, dmesg_before, _ = _adb_run("dmesg", adb_port, timeout=30)
         else:
             _, dmesg_before, _ = ssh.run("dmesg", timeout=30)
 
+        # ── 4a. Capture pre-exploit kernel state ─────────────────────
+        # Collect kernel state BEFORE the exploit runs so we can diff
+        # slab caches, security context, and object counts afterward.
+        kernel_state_pre = _capture_kernel_state(
+            use_adb=use_adb, adb_port=adb_port,
+            ssh=ssh if not use_adb else None,
+        )
+        if kernel_state_pre:
+            result["kernel_state_pre"] = kernel_state_pre
+            console.print(
+                f"  [dim]Pre-exploit kernel state captured "
+                f"({len(kernel_state_pre)} fields)[/]"
+            )
+
         # ── 4b. Start GDB monitoring (if configured) ─────────────────
         _exploit_gdb_functions = monitor_functions
         if _exploit_gdb_functions is None:
-            # Default: monitor exploit-relevant kernel functions
+            # Default: monitor exploit-relevant kernel functions.
+            # NOTE: copy_creds is intentionally excluded — it fires on
+            # every fork/clone in the kernel, producing hundreds of
+            # noise hits that overwhelm GDB and make ADB unresponsive.
             _exploit_gdb_functions = [
                 "commit_creds",
                 "prepare_kernel_cred",
                 "override_creds",
                 "revert_creds",
-                "copy_creds",
                 "sel_write_enforce",        # SELinux disable
                 "selinux_state",
                 "__sys_setresuid",
                 "__sys_setresgid",
             ]
 
-        if _exploit_gdb_functions and (kallsyms_path or vmlinux_path):
+        gdb_tunnel_proc: Optional[subprocess.Popen] = None
+        if (
+            _exploit_gdb_functions
+            and (kallsyms_path or vmlinux_path)
+            and _is_gdb_start(actual_start)
+        ):
+            console.print(
+                "  [dim]Setting up GDB breakpoint monitoring before "
+                "running exploit…[/]"
+            )
             try:
                 from .gdb import GDBController
                 gdb_host = "localhost"
                 gdb_actual_port = gdb_port
 
-                # Set up GDB tunnel if needed
-                gdb_tunnel_proc = None
+                # Set up GDB tunnel if remote
                 if setup_tunnels and _is_remote_host(ssh_host):
-                    gdb_tunnel_proc = _setup_gdb_tunnel(
-                        gdb_port, ssh_host, ssh_port,
-                    ) if hasattr(_setup_gdb_tunnel, '__call__') else None
+                    gdb_actual_port = 11234 + (gdb_port % 1000)
+                    console.print(
+                        f"  [dim]Setting up GDB tunnel for monitor: "
+                        f"localhost:{gdb_actual_port} → "
+                        f"{ssh_host}:{gdb_port}[/]"
+                    )
+                    gdb_tunnel_proc = subprocess.Popen(
+                        [
+                            "ssh", "-o", "StrictHostKeyChecking=no",
+                            "-N", "-L",
+                            f"{gdb_actual_port}:localhost:{gdb_port}",
+                            ssh_host,
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    time.sleep(2)  # let tunnel establish
 
                 gdb_ctrl = GDBController(
                     vmlinux=vmlinux_path,
@@ -1481,6 +2493,7 @@ def verify_exploit(
                     host=gdb_host,
                     port=gdb_actual_port,
                     kallsyms_path=kallsyms_path,
+                    custom_script_dir=monitor_script_dir,
                 )
                 if ok:
                     gdb_monitor = gdb_ctrl
@@ -1488,39 +2501,103 @@ def verify_exploit(
                         f"  [dim]GDB monitoring {len(_exploit_gdb_functions)} "
                         f"exploit-relevant functions…[/]"
                     )
+                    # Give the kernel a moment to resume after GDB continue
+                    time.sleep(3)
+                    # Re-check ADB connectivity (GDB pauses VM briefly)
+                    if use_adb:
+                        for _retry in range(10):
+                            if _adb_is_alive(adb_port):
+                                break
+                            time.sleep(2)
                 else:
                     console.print("  [dim]GDB monitoring setup failed, continuing without[/]")
+                    # The failed GDB connection may have left the kernel
+                    # paused.  Send a bare continue via a throwaway GDB
+                    # session so the VM resumes and ADB stays reachable.
+                    try:
+                        _recovery_port = gdb_actual_port  # type: ignore[possibly-undefined]
+                        console.print(
+                            f"  [dim]Sending recovery continue to GDB stub "
+                            f"(port {_recovery_port})…[/]"
+                        )
+                        subprocess.run(
+                            [
+                                "gdb-multiarch", "-batch", "-nx",
+                                "-ex", f"target remote localhost:{_recovery_port}",
+                                "-ex", "set architecture aarch64",
+                                "-ex", "continue",
+                                "-ex", "disconnect",
+                                "-ex", "quit",
+                            ],
+                            capture_output=True, timeout=15,
+                        )
+                        time.sleep(5)  # let kernel resume
+                        # Re-check ADB after recovery
+                        if use_adb:
+                            for _retry in range(10):
+                                if _adb_is_alive(adb_port):
+                                    break
+                                time.sleep(2)
+                    except Exception as _re:
+                        console.print(f"  [dim]Recovery continue failed: {_re}[/]")
             except Exception as exc:
                 console.print(f"  [dim]GDB monitoring unavailable: {exc}[/]")
+        elif _exploit_gdb_functions and (kallsyms_path or vmlinux_path):
+            console.print(
+                "  [dim]GDB monitoring skipped — VM not started with "
+                "gdb_run.sh (no GDB stub available)[/]"
+            )
 
-        # ── 5. Push wrapper & execute exploit ─────────────────────────
-        verify_wrapper = _build_verify_wrapper(remote_path, remote_dir, timeout)
-        wrapper_path = f"{remote_dir}/verify_wrapper.sh"
+        # ── 5. Execute exploit ─────────────────────────────────────────
+        # The wrapper was already pushed in step 3b (before GDB setup).
+        # If that push failed (rare), retry here with tolerance for the
+        # GDB-induced slowdown.
 
         if use_adb:
-            # Push wrapper via a heredoc through adb shell
-            # (adb push requires a local file, so write to a tmp file)
-            import tempfile
+            if not _wrapper_pushed:
+                import tempfile
 
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".sh", delete=False
-            ) as f:
-                f.write(verify_wrapper)
-                tmp_wrapper = f.name
-            _adb_push(tmp_wrapper, wrapper_path, adb_port)
-            Path(tmp_wrapper).unlink(missing_ok=True)
-            _adb_run(f"chmod 755 {wrapper_path}", adb_port, timeout=10)
+                console.print(
+                    "  [dim]Retry-pushing wrapper (pre-push failed)…[/]"
+                )
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".sh", delete=False
+                ) as f:
+                    f.write(verify_wrapper)
+                    _tmp_wrapper_retry = f.name
+                _push_ok = False
+                for _push_try in range(3):
+                    if _adb_push(
+                        _tmp_wrapper_retry, wrapper_path,
+                        adb_port, timeout=60,
+                    ):
+                        _push_ok = True
+                        break
+                    console.print(
+                        f"  [dim]Push attempt {_push_try + 1}/3 failed, "
+                        f"retrying in 5s...[/]"
+                    )
+                    time.sleep(5)
+                    if not _adb_is_alive(adb_port):
+                        time.sleep(10)
+                Path(_tmp_wrapper_retry).unlink(missing_ok=True)
+                if not _push_ok:
+                    console.print(
+                        "  [red]Failed to push wrapper after 3 attempts[/]"
+                    )
+                _adb_run(f"chmod 755 {wrapper_path}", adb_port, timeout=10)
 
             console.print("  [bold]Running exploit on target (via ADB)…[/]")
             rc, stdout, stderr = _adb_run(
                 wrapper_path, adb_port, timeout=timeout + 60,
             )
         else:
-            ssh.run(
-                f"cat > {wrapper_path} << 'SYZPLOIT_WRAPPER_EOF'\n"
-                f"{verify_wrapper}\nSYZPLOIT_WRAPPER_EOF"
-            )
-            ssh.run(f"chmod 755 {wrapper_path}")
+            if not _wrapper_pushed:
+                ssh.run(
+                    f"cat > {wrapper_path} << 'SYZPLOIT_WRAPPER_EOF'\n"
+                    f"{verify_wrapper}\nSYZPLOIT_WRAPPER_EOF"
+                )
+                ssh.run(f"chmod 755 {wrapper_path}")
 
             console.print("  [bold]Running exploit on target…[/]")
             rc, stdout, stderr = ssh.run(wrapper_path, timeout=timeout + 60)
@@ -1574,6 +2651,14 @@ def verify_exploit(
             result["device_stable"] = True
             if use_adb:
                 _, dmesg_after, _ = _adb_run("dmesg", adb_port, timeout=30)
+                # Also try logcat kernel buffer for extra coverage
+                # Cuttlefish QEMU pipes serial console through logcat
+                _, _klog, _ = _adb_run(
+                    "logcat -b kernel -d -t 200 2>/dev/null || cat /proc/last_kmsg 2>/dev/null || true",
+                    adb_port, timeout=15,
+                )
+                if _klog and _klog.strip():
+                    result["kernel_log"] = _klog[-3000:]
             else:
                 _, dmesg_after, _ = ssh.run("dmesg", timeout=30)
             new_dmesg = _dmesg_diff(dmesg_before, dmesg_after)
@@ -1581,11 +2666,58 @@ def verify_exploit(
             crash, pattern = _detect_crash(new_dmesg)
             result["crash_occurred"] = crash
             result["crash_pattern"] = pattern
+            result["crash_severity"] = _classify_crash_severity(new_dmesg)
+            # Also capture non-fatal warnings for diagnostic context
+            result["kernel_warnings"] = _detect_warnings(new_dmesg)
+            # Check kernel log too for crash evidence dmesg may have missed
+            if not crash and result.get("kernel_log"):
+                klog_crash, klog_pat = _detect_crash(result["kernel_log"])
+                if klog_crash:
+                    result["crash_occurred"] = True
+                    result["crash_pattern"] = f"{klog_pat} (from kernel log)"
+                    result["crash_severity"] = _classify_crash_severity(
+                        result["kernel_log"]
+                    )
         else:
             result["device_stable"] = False
             result["crash_occurred"] = True
             result["crash_pattern"] = "device unreachable after exploit"
+            result["crash_severity"] = "fatal"
             result["dmesg_new"] = "(device not reachable)"
+
+            # Try to grab kernel log from the host if Cuttlefish runtime
+            # directory is accessible (the kernel log survives VM crash)
+            if ssh_host and instance:
+                try:
+                    _cf_logdir = f"/tmp/cf_avd_{instance}"
+                    _, _cf_klog, _ = SSHSession(
+                        host=ssh_host, port=ssh_port,
+                    ).run(
+                        f"tail -200 {_cf_logdir}/kernel.log 2>/dev/null "
+                        f"|| tail -200 {_cf_logdir}/cuttlefish_kernel.log 2>/dev/null "
+                        f"|| tail -200 /tmp/android-cuttlefish/instances/cvd-{instance}/logs/kernel.log 2>/dev/null "
+                        f"|| echo '(no cuttlefish kernel log found)'",
+                        timeout=15,
+                    )
+                    if _cf_klog and "(no cuttlefish" not in _cf_klog:
+                        result["kernel_log"] = _cf_klog[-3000:]
+                        # Re-check for specific crash patterns in kernel log
+                        klog_crash, klog_pat = _detect_crash(_cf_klog)
+                        if klog_crash:
+                            result["crash_pattern"] = klog_pat
+                            result["crash_severity"] = _classify_crash_severity(
+                                _cf_klog
+                            )
+                        result["dmesg_new"] = _cf_klog[-2000:]
+                        console.print(
+                            f"  [yellow]Recovered kernel log from "
+                            f"Cuttlefish runtime dir[/]"
+                        )
+                except Exception as _kl_exc:
+                    console.print(
+                        f"  [dim]Cuttlefish kernel log recovery "
+                        f"failed: {_kl_exc}[/]"
+                    )
 
             # Attempt crash-site capture via GDB stub on halted kernel
             if gdb_monitor:
@@ -1604,6 +2736,52 @@ def verify_exploit(
                     console.print(
                         f"  [dim]GDB crash capture failed: {exc}[/]"
                     )
+
+        # ── 7b. Capture post-exploit kernel state and compute diff ────
+        if alive:
+            kernel_state_post = _capture_kernel_state(
+                use_adb=use_adb, adb_port=adb_port,
+                ssh=ssh if not use_adb else None,
+            )
+            if kernel_state_post:
+                result["kernel_state_post"] = kernel_state_post
+            # Compute kernel state diff (slab changes, security context, etc.)
+            if kernel_state_pre and kernel_state_post:
+                diff_text = _diff_kernel_state(kernel_state_pre, kernel_state_post)
+                if diff_text:
+                    result["kernel_state_diff"] = diff_text
+                    console.print(
+                        f"  [dim]Kernel state diff ({len(diff_text)} chars)[/]"
+                    )
+
+        # ── 7c. Parse ExploitMonitor results (heap/phase/snapshot) ────
+        if monitor_script_dir:
+            try:
+                from ..exploit.gdb_exploit_monitor import ExploitMonitor
+                _parser = ExploitMonitor(arch=arch)
+                _monitor_results = _parser.parse_monitor_results(
+                    monitor_script_dir,
+                )
+                if _monitor_results and (
+                    _monitor_results.get("bp_hits")
+                    or _monitor_results.get("snapshots")
+                    or _monitor_results.get("events")
+                ):
+                    result["monitor_results"] = _monitor_results
+                    _monitor_text = _parser.format_results_for_prompt(
+                        _monitor_results,
+                    )
+                    result["monitor_feedback"] = _monitor_text
+                    console.print(
+                        f"  [dim]ExploitMonitor: "
+                        f"{len(_monitor_results.get('events', []))} events, "
+                        f"{len(_monitor_results.get('snapshots', []))} snapshots, "
+                        f"phases: {_monitor_results.get('phase_history', [])}[/]"
+                    )
+            except Exception as _me:
+                console.print(
+                    f"  [dim]ExploitMonitor result parsing failed: {_me}[/]"
+                )
 
         # ── 8. Determine overall success and generate feedback ────────
         # Helper: build GDB diagnostic summary for feedback
@@ -1630,7 +2808,51 @@ def verify_exploit(
                 _gdb_diag_parts.append(
                     f"Registers:\n{ci['registers'][:500]}"
                 )
+        if result.get("kernel_warnings"):
+            _gdb_diag_parts.append(
+                f"Kernel warnings (non-fatal): {', '.join(result['kernel_warnings'])}"
+            )
+        if result.get("kernel_log"):
+            _gdb_diag_parts.append(
+                f"Kernel log (last 500 chars):\n"
+                f"{result['kernel_log'][-500:]}"
+            )
+        # Append pre/post kernel state diff (slab, SELinux, memory)
+        if result.get("kernel_state_diff"):
+            _gdb_diag_parts.append(result["kernel_state_diff"])
+        # Append ExploitMonitor rich diagnostics (heap, phases, snapshots)
+        if result.get("monitor_feedback"):
+            _gdb_diag_parts.append(result["monitor_feedback"])
         _gdb_diag = "\n".join(_gdb_diag_parts)
+
+        # ── 8a. Sanity-check privilege_escalated against crash state ──
+        # If the device crashed / became unreachable, the UID data is
+        # unreliable (could be garbled output, stale /proc reads, etc.).
+        # Do NOT claim success if the device is dead.
+        if result["privilege_escalated"] and not result["device_stable"]:
+            console.print(
+                "  [yellow]UID=0 detected but device crashed — "
+                "NOT counting as success (unreliable)[/]"
+            )
+            result["privilege_escalated"] = False
+            result["success"] = False
+
+        # Also require at least one of the structured UID tags to be
+        # present in the output.  Bare "uid=0" from error messages,
+        # usage text, or unrelated output must not trigger success.
+        if result["privilege_escalated"]:
+            _has_structured_uid = (
+                "SYZPLOIT_UID_AFTER=0" in exploit_output
+                or (uid_before is not None and uid_after == 0
+                    and uid_before != 0)
+            )
+            _has_success_phrase = _detect_success(exploit_output)
+            if not _has_structured_uid and not _has_success_phrase:
+                console.print(
+                    "  [yellow]privilege_escalated set but no structured "
+                    "UID tag or success phrase found — demoting[/]"
+                )
+                result["privilege_escalated"] = False
 
         if result["privilege_escalated"]:
             result["success"] = True
@@ -1642,21 +2864,41 @@ def verify_exploit(
                 fb += f"\n\n{_gdb_diag}"
             result["feedback"] = fb
         elif not result["device_stable"]:
-            result["failure_reason"] = "Device crashed / became unreachable"
+            result["failure_reason"] = (
+                f"Device crashed / became unreachable "
+                f"(severity: {result['crash_severity']})"
+            )
             fb = (
                 "The exploit caused the device to crash or become unreachable. "
-                "The vulnerability is being triggered, but the exploit needs "
-                "to be more stable. Consider: (1) improving heap spray timing, "
-                "(2) adding delay before critical write, (3) using a safer "
-                "exploitation technique that avoids kernel panics. "
-                f"Crash pattern: {result['crash_pattern']}"
+                f"Crash severity: {result['crash_severity']}. "
+                f"Crash pattern: {result['crash_pattern']}. "
             )
+            # Give targeted advice based on whether the vuln was reached
+            if result["gdb_functions_hit"]:
+                fb += (
+                    "The vulnerable code path WAS reached (good), but the "
+                    "exploit destabilised the kernel. Consider: "
+                    "(1) improving heap spray timing / count, "
+                    "(2) adding delay between free and reclaim, "
+                    "(3) using a data-only attack (overwrite cred) instead "
+                    "of control-flow hijacking. "
+                )
+            else:
+                fb += (
+                    "The vulnerable code path was NOT reached according to "
+                    "GDB. The crash is likely unrelated to the target CVE — "
+                    "the exploit is hitting something else. Consider: "
+                    "(1) verify the trigger mechanism is correct for this CVE, "
+                    "(2) check that the right subsystem/syscall is being used, "
+                    "(3) review the root cause analysis. "
+                )
             if _gdb_diag:
                 fb += f"\n\n{_gdb_diag}"
             result["feedback"] = fb
         elif result["crash_occurred"]:
             result["failure_reason"] = (
-                f"Kernel crash detected: {result['crash_pattern']}"
+                f"Kernel crash detected ({result['crash_severity']}): "
+                f"{result['crash_pattern']}"
             )
             fb = (
                 "The exploit triggered a kernel crash but did not achieve "
@@ -1704,7 +2946,7 @@ def verify_exploit(
                     "likely blocked on a syscall (e.g. ioctl on binder, "
                     "read on pipe). Add timeout handling and debug printf()."
                 )
-                result["feedback"] = (
+                fb = (
                     "The exploit appears to have HUNG — it did not produce "
                     "SYZPLOIT_UID markers and output was minimal. Common "
                     "causes: (1) binder ioctl blocked indefinitely — add "
@@ -1716,11 +2958,14 @@ def verify_exploit(
                     f"\nRaw output (last 500 chars):\n"
                     f"{exploit_output[-500:]}"
                 )
+                if _gdb_diag:
+                    fb += f"\n\n{_gdb_diag}"
+                result["feedback"] = fb
             else:
                 result["failure_reason"] = (
                     "Could not determine UID — output parsing failed"
                 )
-                result["feedback"] = (
+                fb = (
                     "Could not parse UID from exploit output. The exploit "
                     "ran but did not print the expected SYZPLOIT_UID_BEFORE "
                     "and SYZPLOIT_UID_AFTER tags. Ensure both tags are "
@@ -1730,6 +2975,9 @@ def verify_exploit(
                     "being on stderr instead of stdout."
                     f"\nRaw output:\n{exploit_output[:1000]}"
                 )
+                if _gdb_diag:
+                    fb += f"\n\n{_gdb_diag}"
+                result["feedback"] = fb
 
     finally:
         # ── 9. Cleanup ──────────────────────────────────────────────
@@ -1738,10 +2986,26 @@ def verify_exploit(
                 gdb_monitor.stop_monitoring()
             except Exception:
                 pass
-        if not persistent and stop_cmd:
-            _run_stop_cmd(stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port)
-        _kill_proc(start_proc)
-        _kill_proc(tunnel_proc)
+        _kill_proc(gdb_tunnel_proc)
+        if keep_alive:
+            try:
+                from ..orchestrator import source_tools as _st
+                if start_proc is not None:
+                    _st._vm_proc = start_proc
+                if tunnel_proc is not None:
+                    _st._adb_tunnel_proc = tunnel_proc
+                _st._adb_port_active = adb_port
+            except Exception:
+                pass
+            console.print(
+                "  [dim]verify_exploit: VM kept alive for "
+                "interactive investigation[/]"
+            )
+        else:
+            if not persistent and stop_cmd:
+                _run_stop_cmd(stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port)
+            _kill_proc(start_proc)
+            _kill_proc(tunnel_proc)
 
     return result
 
@@ -1768,6 +3032,7 @@ def verify_reproducer(
     vmlinux_path: Optional[str] = None,
     kallsyms_path: Optional[str] = None,
     arch: str = "arm64",
+    keep_alive: bool = False,
 ) -> Dict[str, Any]:
     """Deploy and run a reproducer, checking for expected crash.
 
@@ -1842,12 +3107,13 @@ def verify_reproducer(
                 ssh_host=ssh_host,
                 ssh_port=ssh_port,
                 setup_tunnels=setup_tunnels,
+                instance=instance or 20,
             )
             if gdb_ok:
                 console.print(
-                    "  [dim]Waiting 60 s for VM to boot after GDB continue…[/]"
+                    "  [dim]Waiting 30 s for VM to start booting…[/]"
                 )
-                time.sleep(60)
+                time.sleep(30)
             else:
                 console.print(
                     "  [yellow]GDB continue may have failed — "
@@ -1856,11 +3122,14 @@ def verify_reproducer(
                 time.sleep(30)
 
         # Wait for connectivity
+        # GDB-started VMs use 1 CPU and boot slowly (~7 min wall clock).
         if use_adb:
+            max_polls = 120 if _is_gdb_start(start_cmd) else 30
             console.print(
-                f"  [dim]Waiting for ADB device at localhost:{adb_port}…[/]"
+                f"  [dim]Waiting for ADB device at localhost:{adb_port} "
+                f"(up to {max_polls * 5}s)…[/]"
             )
-            for attempt in range(30):
+            for attempt in range(max_polls):
                 if _adb_is_alive(adb_port):
                     console.print(
                         f"  [green]ADB connected (attempt {attempt + 1})[/]"
@@ -2155,9 +3424,26 @@ def verify_reproducer(
             except Exception:
                 pass
         _kill_proc(gdb_tunnel_proc)
-        if not persistent and stop_cmd:
-            _run_stop_cmd(stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port)
-        _kill_proc(start_proc)
-        _kill_proc(tunnel_proc)
+        if keep_alive:
+            # Export VM and tunnel procs to source_tools module globals
+            # so run_target_command / gdb_session can reuse them.
+            try:
+                from ..orchestrator import source_tools as _st
+                if start_proc is not None:
+                    _st._vm_proc = start_proc
+                if tunnel_proc is not None:
+                    _st._adb_tunnel_proc = tunnel_proc
+                _st._adb_port_active = adb_port
+            except Exception:
+                pass
+            console.print(
+                "  [dim]verify_reproducer: VM kept alive for "
+                "interactive investigation[/]"
+            )
+        else:
+            if not persistent and stop_cmd:
+                _run_stop_cmd(stop_cmd, ssh_host=ssh_host, ssh_port=ssh_port)
+            _kill_proc(start_proc)
+            _kill_proc(tunnel_proc)
 
     return result

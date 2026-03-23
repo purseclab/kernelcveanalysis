@@ -17,3 +17,32 @@ chromium/CVE-2020-16045/weblayer
 chromium/CVE-2020-16045/mojo_bindings.js
 Innocent_chained/app/build
 Innocent/app/build
+
+# Syzploit generated outputs
+analysis_CVE-*/
+syzploit/analysis_CVE-*/
+syzploit/demo_CVE-*/
+syzploit/syzploit_output/
+syzploit/hunt_*/
+
+# Binaries and large files
+*.o
+*.pyc
+__pycache__/
+*.egg-info/
+syzploit/badbinder
+syzploit/badnode_working/badnode
+syzploit/badnode_cve-2023-20938/adapted/*/badnode
+syzploit/kernel_Image
+syzploit/vmlinux_extracted
+syzploit/initramfs_check.img
+syzploit/core.*
+
+# Logs
+nohup.out
+syzploit/nohup.out
+syzploit/run*.log
+
+# Environment
+syzploit/.env
+syzploit/.venv/

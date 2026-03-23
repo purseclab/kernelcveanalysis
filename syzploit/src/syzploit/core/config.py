@@ -90,9 +90,9 @@ class Config(BaseModel):
         ),
     )
     llm_temperature: float = 0.2
-    llm_max_tokens: int = 8192
+    llm_max_tokens: int = 16384
     llm_decision_max_tokens: int = Field(
-        default=4096,
+        default=8192,
         description="Max tokens for agent decision calls (JSON output)",
     )
     api_key: Optional[str] = None  # resolved at load time
@@ -118,12 +118,38 @@ class Config(BaseModel):
     stop_cmd: Optional[str] = None
     exploit_start_cmd: Optional[str] = None
     gdb_port: int = 1234
+    adb_port: int = 6520
     kernel_image: Optional[str] = None
     vmlinux_path: Optional[str] = None
+    kallsyms_path: Optional[str] = None
     system_map: Optional[str] = None
+
+    # ── kexploit integration (BTF / CodeQL) ──────────────────────────
+    btf_json_path: Optional[str] = Field(
+        default=None,
+        description="Path to btf_types.json for struct layout queries",
+    )
+    kexploit_kernel_name: Optional[str] = Field(
+        default=None,
+        description="kexploit kernel identifier for BTF/CodeQL lookups",
+    )
+    codeql_db_path: Optional[str] = Field(
+        default=None,
+        description="Path to CodeQL database for allocation site queries",
+    )
+    kernel_tree_path: Optional[str] = Field(
+        default=None,
+        description="Path to kernel source tree for source navigation",
+    )
 
     # ── Compilation ──────────────────────────────────────────────────
     compile_timeout: int = 120
+
+    # ── External APIs ────────────────────────────────────────────────
+    github_token: Optional[str] = Field(
+        default=None,
+        description="GitHub personal access token for API rate limits (GITHUB_TOKEN)",
+    )
 
     # ── Debug ────────────────────────────────────────────────────────
     debug: bool = False
@@ -172,12 +198,55 @@ def load_config(**overrides: object) -> Config:
     planning_model_env = os.environ.get("SYZPLOIT_LLM_PLANNING_MODEL")
     if planning_model_env:
         defaults["llm_planning_model"] = planning_model_env
-    # SSH from env
+    max_tokens_env = os.environ.get("SYZPLOIT_LLM_MAX_TOKENS")
+    if max_tokens_env:
+        defaults["llm_max_tokens"] = int(max_tokens_env)
+    # SSH / infra from env
     ssh_host = os.environ.get("SYZPLOIT_SSH_HOST")
     if ssh_host:
         defaults.setdefault("ssh_host", ssh_host)
     ssh_port = os.environ.get("SYZPLOIT_SSH_PORT")
     if ssh_port:
         defaults.setdefault("ssh_port", int(ssh_port))
+    _instance = os.environ.get("SYZPLOIT_INSTANCE")
+    if _instance:
+        defaults.setdefault("instance", int(_instance))
+    _start_cmd = os.environ.get("SYZPLOIT_START_CMD")
+    if _start_cmd:
+        defaults.setdefault("start_cmd", _start_cmd)
+    _stop_cmd = os.environ.get("SYZPLOIT_STOP_CMD")
+    if _stop_cmd:
+        defaults.setdefault("stop_cmd", _stop_cmd)
+    _exploit_start_cmd = os.environ.get("SYZPLOIT_EXPLOIT_START_CMD")
+    if _exploit_start_cmd:
+        defaults.setdefault("exploit_start_cmd", _exploit_start_cmd)
+    _gdb_port = os.environ.get("SYZPLOIT_GDB_PORT")
+    if _gdb_port:
+        defaults.setdefault("gdb_port", int(_gdb_port))
+    _adb_port = os.environ.get("SYZPLOIT_ADB_PORT")
+    if _adb_port:
+        defaults.setdefault("adb_base_port", int(_adb_port))
+    if os.environ.get("SYZPLOIT_SETUP_TUNNELS", "").lower() in ("1", "true", "yes"):
+        defaults.setdefault("setup_tunnels", True)
+    if os.environ.get("SYZPLOIT_PERSISTENT", "").lower() in ("0", "false", "no"):
+        defaults.setdefault("persistent", False)
+    _vmlinux = os.environ.get("SYZPLOIT_VMLINUX_PATH")
+    if _vmlinux:
+        defaults.setdefault("vmlinux_path", _vmlinux)
+    _btf = os.environ.get("SYZPLOIT_BTF_JSON_PATH")
+    if _btf:
+        defaults.setdefault("btf_json_path", _btf)
+    _kname = os.environ.get("SYZPLOIT_KEXPLOIT_KERNEL_NAME")
+    if _kname:
+        defaults.setdefault("kexploit_kernel_name", _kname)
+    _codeql = os.environ.get("SYZPLOIT_CODEQL_DB_PATH")
+    if _codeql:
+        defaults.setdefault("codeql_db_path", _codeql)
+    _ktree = os.environ.get("SYZPLOIT_KERNEL_TREE_PATH")
+    if _ktree:
+        defaults.setdefault("kernel_tree_path", _ktree)
+    _gh_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if _gh_token:
+        defaults.setdefault("github_token", _gh_token)
     defaults.update(overrides)
     return Config(**defaults)  # type: ignore[arg-type]

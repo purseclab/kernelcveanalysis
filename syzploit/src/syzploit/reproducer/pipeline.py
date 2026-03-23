@@ -127,8 +127,8 @@ def generate_reproducer(ctx: TaskContext, cfg: Config) -> TaskContext:
 
     ctx.reproducer = result
 
-    # Step 4: Verify on target (if SSH is configured)
-    if success and ctx.ssh_host:
+    # Step 4: Verify on target (if SSH is configured and not static-only)
+    if success and ctx.ssh_host and not ctx.static_only:
         console.print("  [bold]Verifying reproducer on target…[/]")
         ctx = _verify_reproducer_step(ctx, cfg, str(binary_path))
 
@@ -160,6 +160,8 @@ def _verify_reproducer_step(ctx: TaskContext, cfg: Config, binary_path: str) -> 
 
     # Pass vmlinux/kallsyms for GDB-based path verification
     vmlinux = getattr(cfg, "vmlinux_path", None)
+    if not vmlinux:
+        vmlinux = ctx.analysis_data.get("vmlinux_path")
     kallsyms = None
     if ctx.target_system_info and ctx.target_system_info.kallsyms_path:
         kallsyms = ctx.target_system_info.kallsyms_path
@@ -179,6 +181,7 @@ def _verify_reproducer_step(ctx: TaskContext, cfg: Config, binary_path: str) -> 
         use_adb=use_adb,
         vmlinux_path=vmlinux,
         kallsyms_path=kallsyms,
+        keep_alive=True,
     )
 
     # Consider path_reached as a partial success (the bug is triggered)

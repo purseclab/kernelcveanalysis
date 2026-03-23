@@ -186,6 +186,12 @@ def save_pipeline_summary(
             v.model_dump(mode="json") for v in ctx.verification_history
         ]
 
+    if getattr(ctx, "vuln_conditions", None):
+        try:
+            summary["components"]["vuln_conditions"] = ctx.vuln_conditions.to_dict()
+        except Exception:
+            pass
+
     # Include the execution trace tool sequence for quick inspection
     trace = getattr(ctx, "execution_trace", None)
     if trace is not None:
@@ -197,6 +203,15 @@ def save_pipeline_summary(
             "total_duration_ms": trace.total_duration_ms,
             "final_outcome": trace.final_outcome,
         }
+
+    # Include LLM token usage statistics
+    try:
+        from .llm import LLMClient
+        usage = LLMClient.get_usage_summary()
+        if usage.get("total_calls", 0) > 0:
+            summary["llm_usage"] = usage
+    except Exception:
+        pass
 
     path = resolved_dir / "pipeline_summary.json"
     path.write_text(json.dumps(summary, indent=2, default=str))

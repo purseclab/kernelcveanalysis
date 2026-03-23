@@ -135,6 +135,7 @@ def root_cause_analysis(
         affected_structs=result.get("affected_structs", []),
         affected_fields=result.get("affected_fields", []),
         fix_commit=result.get("fix_commit"),
+        source_snippets=source_snippets or {},
         control_classification=ControlClassification(
             result.get("control_classification", "none")
         )

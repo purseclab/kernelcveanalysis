@@ -16,6 +16,8 @@ import time
 from typing import Any, Dict, List, Optional, Union
 
 from litellm import completion as litellm_completion
+import litellm
+litellm.suppress_debug_info = True
 
 from .config import Config, load_config
 
@@ -175,12 +177,43 @@ class LLMClient:
     - Per-task model routing via :meth:`for_task`
     """
 
+    # Class-level accumulator shared across all instances
+    _usage_log: List[Dict[str, Any]] = []
+
     def __init__(self, cfg: Optional[Config] = None) -> None:
         self.cfg = cfg or load_config()
         self.model = self.cfg.llm_model
         self.temperature = self.cfg.llm_temperature
         self.max_tokens = self.cfg.llm_max_tokens
         self.router = ModelRouter(self.cfg)
+
+    @classmethod
+    def get_usage_summary(cls) -> Dict[str, Any]:
+        """Return aggregate token usage across all LLM calls in this run."""
+        if not cls._usage_log:
+            return {"total_calls": 0, "total_tokens": 0, "by_model": {}}
+        total_prompt = sum(e["prompt_tokens"] for e in cls._usage_log)
+        total_completion = sum(e["completion_tokens"] for e in cls._usage_log)
+        by_model: Dict[str, Dict[str, int]] = {}
+        for e in cls._usage_log:
+            m = e["model"]
+            if m not in by_model:
+                by_model[m] = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+            by_model[m]["calls"] += 1
+            by_model[m]["prompt_tokens"] += e["prompt_tokens"]
+            by_model[m]["completion_tokens"] += e["completion_tokens"]
+        return {
+            "total_calls": len(cls._usage_log),
+            "total_prompt_tokens": total_prompt,
+            "total_completion_tokens": total_completion,
+            "total_tokens": total_prompt + total_completion,
+            "by_model": by_model,
+        }
+
+    @classmethod
+    def reset_usage(cls) -> None:
+        """Reset the usage log (call at the start of a new run)."""
+        cls._usage_log.clear()
 
     def for_task(self, task: str) -> "LLMClient":
         """Return a clone of this client configured for *task*.
@@ -244,6 +277,16 @@ class LLMClient:
                 text: str = resp.choices[0].message.content or ""  # type: ignore[union-attr]
                 last_text = text
                 network_attempt = 0  # Reset network counter on success
+
+                # Track token usage for cost analysis
+                usage = getattr(resp, "usage", None)
+                if usage:
+                    LLMClient._usage_log.append({
+                        "model": model,
+                        "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(usage, "completion_tokens", 0),
+                        "total_tokens": getattr(usage, "total_tokens", 0),
+                    })
 
                 if retry_on_refusal and (_is_refusal(text) or _has_stub_bodies(text)):
                     if attempt < max_retries:

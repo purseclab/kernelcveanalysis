@@ -21,6 +21,7 @@ from .tools import ToolRegistry, default_registry
 
 # Import builtin tools to auto-register them in default_registry
 from . import builtin_tools as _builtin_tools  # noqa: F401
+from . import source_tools as _source_tools    # noqa: F401
 
 __all__ = [
     "Agent",

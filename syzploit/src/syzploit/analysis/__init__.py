@@ -34,6 +34,7 @@ from .slab_oracle import SlabOracle, SPRAY_OBJECTS
 from .kernel_source import KernelSourceContext
 from . import kexploit_bridge
 from .kaslr_oracle import KASLROracle
+from .investigate import investigate_cve, InvestigationReport
 
 __all__ = [
     "analyze_input",
@@ -46,6 +47,8 @@ __all__ = [
     "assess_feasibility_static",
     "assess_feasibility_dynamic",
     "extract_vuln_info",
+    "investigate_cve",
+    "InvestigationReport",
     "SlabOracle",
     "SPRAY_OBJECTS",
     "KernelSourceContext",

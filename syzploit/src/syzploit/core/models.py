@@ -167,6 +167,9 @@ class RootCauseAnalysis(BaseModel):
     # Detailed exploitation technique info (from blog analysis)
     exploitation_details: Dict[str, Any] = Field(default_factory=dict)
 
+    # Key insights extracted from blogs/PoCs during investigation synthesis
+    key_insights: List[str] = Field(default_factory=list)
+
 
 # ── Target system information ─────────────────────────────────────────
 
@@ -494,10 +497,15 @@ class VerificationAttempt(BaseModel):
     # Crash-specific (reproducer or exploit side-effect)
     crash_occurred: bool = False
     crash_pattern: str = ""
+    crash_severity: str = "none"  # "fatal", "sanitizer", "warning", "none"
     crash_log_excerpt: str = ""
 
     # Device health
     device_stable: bool = True
+
+    # Kernel diagnostics
+    kernel_warnings: List[str] = Field(default_factory=list)
+    kernel_log: str = ""  # logcat kernel / cuttlefish kernel.log
 
     # Actionable feedback for the agent
     failure_reason: str = ""
@@ -512,6 +520,10 @@ class VerificationAttempt(BaseModel):
     gdb_functions_missed: List[str] = Field(default_factory=list)
     gdb_crash_info: Optional[Dict[str, Any]] = None  # registers, backtrace at crash
 
+    # Pre/post kernel state verification
+    kernel_state_diff: str = ""  # slab cache, SELinux, memory diffs
+    monitor_feedback: str = ""  # ExploitMonitor rich diagnostics (heap/phase/snapshot)
+
 
 class ExploitResult(BaseModel):
     """Result of exploit generation + verification."""
@@ -520,6 +532,7 @@ class ExploitResult(BaseModel):
     plan: Optional[ExploitPlan] = None
     source_code: Optional[str] = None
     source_path: Optional[str] = None
+    source_files: Dict[str, str] = Field(default_factory=dict)
     binary_path: Optional[str] = None
     privilege_escalation_confirmed: bool = False
     uid_before: Optional[int] = None

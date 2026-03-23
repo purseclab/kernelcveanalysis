@@ -68,6 +68,21 @@ def _strip_symbol_decorations(name: str) -> str:
     return base.strip()
 
 
+def _run_nm(vmlinux_path: str) -> Optional[str]:
+    """Run ``nm`` on a vmlinux, with cross-tool fallbacks."""
+    for nm_cmd in ("nm", "aarch64-linux-gnu-nm", "aarch64-linux-android-nm"):
+        try:
+            out = subprocess.run(
+                [nm_cmd, vmlinux_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            if out.returncode == 0 and out.stdout:
+                return out.stdout
+        except Exception:
+            continue
+    return None
+
+
 def check_symbols(
     symbols: List[str],
     *,
@@ -84,53 +99,65 @@ def check_symbols(
     Uses **fuzzy matching**: ``.isra`` / ``.constprop`` / ``+offset``
     suffixes are stripped before comparison.
 
-    Tries (in order): remote ``/proc/kallsyms`` via SSH, local kallsyms
-    file, System.map, vmlinux via ``nm``.
+    Sources are tried in order: remote ``/proc/kallsyms`` via SSH,
+    local kallsyms file, System.map, vmlinux via ``nm``.
+
+    **Important**: if an earlier source resolves *some* symbols but not
+    all, later sources are also tried to fill in the gaps.  This is
+    critical for static (``t``-type) functions that are absent from
+    ``/proc/kallsyms`` but present in vmlinux.
     """
     result = SymbolCheckResult(symbols_checked=list(symbols))
     all_syms: set[str] = set()
+    sources_used: List[str] = []
 
     # --- Remote kallsyms via SSH ---
-    if ssh_host and not all_syms:
+    if ssh_host:
         text = _read_remote_kallsyms(ssh_host, ssh_port, ssh_user, ssh_key)
         if text:
             _parse_symbol_text(text, all_syms)
             if all_syms:
-                result.source = "remote_kallsyms"
+                sources_used.append("remote_kallsyms")
 
     # --- Local kallsyms file ---
-    if not all_syms and kallsyms_path:
+    if kallsyms_path:
         p = Path(kallsyms_path)
         if p.exists():
+            before = len(all_syms)
             _parse_symbol_text(p.read_text(), all_syms)
-            if all_syms:
-                result.source = "local_kallsyms"
+            if len(all_syms) > before:
+                sources_used.append("local_kallsyms")
 
     # --- System.map ---
-    if not all_syms and system_map_path:
+    if system_map_path:
         p = Path(system_map_path)
         if p.exists():
+            before = len(all_syms)
             _parse_symbol_text(p.read_text(), all_syms)
-            if all_syms:
-                result.source = "system_map"
+            if len(all_syms) > before:
+                sources_used.append("system_map")
 
     # --- vmlinux via nm ---
-    if not all_syms and vmlinux_path:
-        try:
-            out = subprocess.run(
-                ["nm", vmlinux_path], capture_output=True, text=True, timeout=120,
-            )
-            if out.returncode == 0:
-                _parse_symbol_text(out.stdout, all_syms)
-                if all_syms:
-                    result.source = "vmlinux_nm"
-        except Exception:
-            pass
+    # Always try vmlinux if there are still-missing symbols (static
+    # functions like __dst_negative_advice won't be in kallsyms but
+    # are in the vmlinux ELF).
+    if vmlinux_path:
+        wanted_bases = {_strip_symbol_decorations(s) for s in symbols}
+        still_missing = wanted_bases - all_syms
+        if still_missing:
+            nm_output = _run_nm(vmlinux_path)
+            if nm_output:
+                before = len(all_syms)
+                _parse_symbol_text(nm_output, all_syms)
+                if len(all_syms) > before:
+                    sources_used.append("vmlinux_nm")
 
     if not all_syms:
         result.source = "none"
         result.verdict = "unknown"
         return result
+
+    result.source = "+".join(sources_used) if sources_used else "unknown"
 
     # --- Fuzzy match ---
     for sym in symbols:
@@ -1055,10 +1082,32 @@ def _run_repro_remote(
 
 
 def _dmesg_diff(before: str, after: str) -> str:
-    """Return lines in *after* that were not in *before*."""
-    before_lines = set(before.splitlines())
-    new_lines = [line for line in after.splitlines() if line not in before_lines]
-    return "\n".join(new_lines)
+    """Return lines in *after* that were not in *before*.
+
+    Uses the last line of *before* as an anchor in *after* to find only
+    truly new lines.  Falls back to set diff when the anchor isn't found.
+    """
+    before_lines = before.strip().splitlines()
+    after_lines = after.strip().splitlines()
+
+    if not after_lines:
+        return ""
+    if not before_lines:
+        return "\n".join(after_lines)
+
+    last_before = before_lines[-1].strip()
+    anchor_idx = -1
+    for i in range(len(after_lines) - 1, -1, -1):
+        if after_lines[i].strip() == last_before:
+            anchor_idx = i
+            break
+
+    if anchor_idx >= 0:
+        new = after_lines[anchor_idx + 1:]
+    else:
+        before_set = set(before_lines)
+        new = [l for l in after_lines if l not in before_set]
+    return "\n".join(new)
 
 
 def _cleanup_dir(path: str) -> None:

@@ -144,7 +144,7 @@ def analyze_blog(
         text = text[:max_text] + "\n\n[…truncated…]"
 
     code_text = "\n\n".join(
-        f"```{b.get('language', '')}\n{b['code'][:3000]}\n```"
+        f"```{b.get('language', '')}\n{b['code'][:6000]}\n```"
         for b in code_blocks[:15]
     ) or "(none found)"
 
