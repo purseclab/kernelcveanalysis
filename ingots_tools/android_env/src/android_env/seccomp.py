@@ -6,17 +6,21 @@ import argparse
 from pathlib import Path
 import json
 
-from libadb import get_single_process_by_name, Strace, start_activity_action, start_activity_name, install_app, AdbProcess, Tools, Process, upload_tools
+from libadb import AdbClient, AdbProcess, Process, Tools
 from .syscalls import get_syscall_map
+
+adb = AdbClient()
 
 class SeccompDumper:
     command: AdbProcess
 
     def __init__(self, process: Process, mode: str):
-        self.command = AdbProcess(f'{Tools.DUMP_SECCOMP_FILTER} {process.pid} {mode}', root=True)
+        self.command = AdbProcess(adb, f'{Tools.DUMP_SECCOMP_FILTER} {process.pid} {mode}', root=True)
     
     def get_filter(self) -> Optional[bytes]:
-        output = self.command.stop().strip()
+        output = self.command.stop()
+        assert output is not None
+        output = output.strip()
         if len(output) == 0:
             return None
         else:
@@ -36,7 +40,8 @@ def extract_seccomp_allowed_syscalls(dumper: SeccompDumper) -> Optional[dict[str
         for syscall, number in get_syscall_map().items():
             allowed = eval_filter(filter, number)
             allowed_syscalls[syscall] = allowed
-            print(f'{syscall}: {'ALLOWED' if allowed else 'BLOCKED'}')
+            status = 'ALLOWED' if allowed else 'BLOCKED'
+            print(f'{syscall}: {status}')
     
         return allowed_syscalls
 
@@ -80,21 +85,21 @@ def eval_filter(filter: bytes, syscall_number: int) -> bool:
             return False
 
 def get_allowed_syscalls_for_app(app_name: str, start_app: Callable[[], None]) -> Optional[dict[str, bool]]:
-    zygote32 = get_single_process_by_name('zygote')
-    zygote64 = get_single_process_by_name('zygote64')
+    zygote32 = adb.get_single_process_by_name('zygote')
+    zygote64 = adb.get_single_process_by_name('zygote64')
 
     dumper32 = SeccompDumper(zygote32, 'arm32')
     dumper64 = SeccompDumper(zygote64, 'arm64')
 
     # kill app if it exists
-    settings = get_single_process_by_name(app_name)
+    settings = adb.get_single_process_by_name(app_name)
     if settings is not None:
         settings.await_kill(force=True)
 
     # start app to trigger zygote to spawn it
     start_app()
     # wait for it to start
-    while get_single_process_by_name(app_name) is None:
+    while adb.get_single_process_by_name(app_name) is None:
         sleep(0.5)
     
     allowed_syscalls32 = extract_seccomp_allowed_syscalls(dumper32)
@@ -105,17 +110,17 @@ def get_allowed_syscalls_for_app(app_name: str, start_app: Callable[[], None]) -
 
 
 def dump_seccomp(save_file: Path):
-    upload_tools()
+    adb.upload_tools()
 
     system_app_allowed_syscalls = get_allowed_syscalls_for_app(
         'com.android.settings',
-        lambda: start_activity_action('android.settings.SETTINGS')
+        lambda: adb.start_activity_action('android.settings.SETTINGS')
     )
 
-    install_app(Path('tools/test_app.apk'))
+    adb.install_app(Path('tools/test_app.apk'))
     unprivileged_app_allowed_syscalls = get_allowed_syscalls_for_app(
         'com.example.testapp',
-        lambda: start_activity_name('com.example.testapp/.MainActivity')
+        lambda: adb.start_activity_name('com.example.testapp/.MainActivity')
     )
 
     if system_app_allowed_syscalls is None:

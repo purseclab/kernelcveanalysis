@@ -5,12 +5,13 @@ import tempfile
 from elftools.elf.elffile import ELFFile
 import typer
 
-from libadb import upload_file, upload_tools, expand_binary as adb_expand_binary
+from libadb import AdbClient
 
 app = typer.Typer()
+adb = AdbClient()
 
-def expand_binary(binary_path: Path, expand_path: Path):
-    upload_tools()
+def do_expand_binary(binary_path: Path, expand_path: Path):
+    adb.upload_tools()
 
     elf = ELFFile.load_from_path(binary_path)
 
@@ -44,14 +45,14 @@ def expand_binary(binary_path: Path, expand_path: Path):
     with tempfile.NamedTemporaryFile() as tmp:
         tmp.write(modified_binary)
         tmp.flush()
-        upload_file(Path(tmp.name), Path(binary_dst), executable=True)
+        adb.upload_file(Path(tmp.name), Path(binary_dst), executable=True)
     
-    expand_result = adb_expand_binary(binary_dst)
+    expand_result = adb.expand_binary(binary_dst)
     changed_offset = entry - expand_result.load_addr
-    expand_binary = expand_result.expanded_binary[:changed_offset] + original_instr + expand_result.expanded_binary[changed_offset+len(original_instr):]
+    expanded_binary = expand_result.expanded_binary[:changed_offset] + original_instr + expand_result.expanded_binary[changed_offset+len(original_instr):]
     
     with open(expand_path, 'wb') as f:
-        f.write(expand_binary)
+        f.write(expanded_binary)
     
     print(f'loaded at: {hex(expand_result.load_addr)}')
     print(f'entry point at: {hex(entry)}')

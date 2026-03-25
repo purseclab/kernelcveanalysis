@@ -11,11 +11,12 @@ import re
 import exrex
 import rich
 
-from libadb import read_file, run_adb_command, runas, Permissions, upload_tools
+from libadb import AdbClient, Permissions
 from .util import config_lines
 from .codeql import CodeqlQuery, CodeqlContext
 
 T = TypeVar('T')
+adb = AdbClient()
 
 # possible locations of selinux policy
 # obtained from `strace restorecon /data/local/tmp &>&1 | grep open`
@@ -46,7 +47,7 @@ def read_selinux_configs(config_name: str) -> str:
     '''
 
     return '\n'.join(
-        read_file(prefix + config_name).decode('utf-8')
+        adb.read_file(prefix + config_name).decode('utf-8')
         for prefix in SELINUX_CONFIG_PREFIXES
     )
 
@@ -289,7 +290,7 @@ class SePolicy:
     attributes: dict[str, SeAttribute]
 
     def __init__(self):
-        self.policy = read_file('/sys/fs/selinux/policy')
+        self.policy = adb.read_file('/sys/fs/selinux/policy')
         self.attributes = self.collect_attributes()
 
     def with_policy_file(self, callback: Callable[[Path], T]) -> T:
@@ -437,7 +438,9 @@ class ServiceInfo:
 def get_services_for_permissions(permissions: Permissions) -> list[ServiceInfo]:
     out = []
 
-    for line in runas('service list', permissions).splitlines():
+    output = adb.runas('service list', permissions)
+    assert output is not None
+    for line in output.splitlines():
         parts = line.split()
 
         # skip first line
@@ -761,13 +764,13 @@ class SelinuxContext:
         self.diff_accesible_files_for_domain(domain1, domain2)
         
 def dump_selinux_info(setype: str):
-    upload_tools()
+    adb.upload_tools()
 
     context = SelinuxContext()
     context.print_info_for_domain(SeType(setype))
 
 def diff_selinux_info(setype1: str, setype2: str):
-    upload_tools()
+    adb.upload_tools()
 
     context = SelinuxContext()
     context.diff_info_for_domain(SeType(setype1), SeType(setype2))

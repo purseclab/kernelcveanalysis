@@ -1,0 +1,10 @@
+[project]
+name = "android_app_mcp"
+version = "0.1.0"
+description = "Mcp server for developing app exploits"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+package = true
