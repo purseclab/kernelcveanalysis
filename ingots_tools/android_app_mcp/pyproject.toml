@@ -4,7 +4,17 @@ version = "0.1.0"
 description = "Mcp server for developing app exploits"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "libadb",
+    "mcp[cli]>=1.26.0",
+    "typer>=0.21.1",
+]
 
 [tool.uv]
 package = true
+
+[tool.uv.sources]
+libadb = { workspace = true }
+
+[project.scripts]
+android_app_mcp = "android_app_mcp.cli:main"

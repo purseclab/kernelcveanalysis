@@ -2,11 +2,13 @@ import subprocess
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from shlex import quote
 from time import sleep
 from typing import Optional, Self
 
 
 DEFAULT_REMOTE_ADDR = "0.0.0.0:6532"
+TOOLS_PATH = Path(__file__).parent.parent.parent / 'tools'
 
 
 class Tools(StrEnum):
@@ -37,23 +39,59 @@ class ExpandBinaryResult:
     expanded_binary: bytes
 
 
+class AdbCommandError(RuntimeError):
+    def __init__(self, command: str, stdout: bytes | str = b"", stderr: bytes | str = b""):
+        self.command = command
+        self.stdout = stdout
+        self.stderr = stderr
+
+        stdout_text = stdout if isinstance(stdout, str) else stdout.decode("utf-8", errors="replace")
+        stderr_text = stderr if isinstance(stderr, str) else stderr.decode("utf-8", errors="replace")
+        super().__init__(
+            f"ADB command failed: {command}\nstdout: {stdout_text}\nstderr: {stderr_text}"
+        )
+
+
 class AdbClient:
     remote_addr: str
 
     def __init__(self, remote_addr: str = DEFAULT_REMOTE_ADDR):
         self.remote_addr = remote_addr
 
+    def adb_args(self, *args: str) -> list[str]:
+        return ["adb", "-s", self.remote_addr, *args]
+
+    def run_adb(self, *args: str, check: bool = True, text: bool = False) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            self.adb_args(*args),
+            check=check,
+            capture_output=True,
+            text=text,
+        )
+
+    def run_shell(
+        self,
+        command: str,
+        root: bool = False,
+        check: bool = True,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess:
+        remote_command = f"su root sh -c {quote(command)}" if root else command
+        return self.run_adb("shell", remote_command, check=check, text=text)
+
+    def shell_bytes(self, command: str, root: bool = False) -> bytes:
+        result = self.run_shell(command, root=root, check=False, text=False)
+        if result.returncode != 0:
+            raise AdbCommandError(command, result.stdout or b"", result.stderr or b"")
+        return result.stdout or b""
+
+    def shell_text(self, command: str, root: bool = False) -> str:
+        return self.shell_bytes(command, root=root).decode("utf-8", errors="replace")
+
     def run_adb_command(self, command: str, root: bool = False) -> Optional[str]:
         """Executes an ADB command and returns its output."""
         try:
-            command = f"su root {command}" if root else command
-            result = subprocess.run(
-                f'adb -s {self.remote_addr} shell "{command}" 2>&1',
-                shell=True,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            result = self.run_shell(command, root=root, check=True, text=True)
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
             print(f"Error executing ADB command `{command}`, root={root}: {e.stderr}")
@@ -79,10 +117,10 @@ class AdbClient:
 
     def upload_tools(self):
         self.run_adb_command("mkdir -p /data/local/tmp/tools")
-        self.upload_file(Path("./tools/read_file"), Path(Tools.READ_FILE), executable=True)
-        self.upload_file(Path("./tools/dump_seccomp_filter"), Path(Tools.DUMP_SECCOMP_FILTER), executable=True)
-        self.upload_file(Path("./tools/runas"), Path(Tools.RUNAS), executable=True)
-        self.upload_file(Path("./tools/expand_binary"), Path(Tools.EXPAND_BINARY), executable=True)
+        self.upload_file(TOOLS_PATH / "read_file", Path(Tools.READ_FILE), executable=True)
+        self.upload_file(TOOLS_PATH / "dump_seccomp_filter", Path(Tools.DUMP_SECCOMP_FILTER), executable=True)
+        self.upload_file(TOOLS_PATH / "runas", Path(Tools.RUNAS), executable=True)
+        self.upload_file(TOOLS_PATH / "expand_binary", Path(Tools.EXPAND_BINARY), executable=True)
 
     def read_file(self, file: str, offset: int = 0, count: int = -1) -> bytes:
         out = self.run_adb_command(f"{Tools.READ_FILE} {file} {offset} {count}", root=True)

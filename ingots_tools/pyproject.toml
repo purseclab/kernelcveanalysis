@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "android_env",
+    "android_app_mcp",
     "kexploit",
     "libadb",
     "scripts",
@@ -15,18 +16,20 @@ dependencies = [
 
 [tool.uv.workspace]
 members = [
-  "android_env",
-  "kexploit",
-  "libadb",
-  "scripts",
-  "kexploit_agent",
-  "kexploit_utils",
-  "primitives",
-  "object_db",
+    "android_env",
+    "android_app_mcp",
+    "kexploit",
+    "libadb",
+    "scripts",
+    "kexploit_agent",
+    "kexploit_utils",
+    "primitives",
+    "object_db",
 ]
 
 [tool.uv.sources]
 android_env = { workspace = true }
+android_app_mcp = { workspace = true }
 kexploit = { workspace = true }
 libadb = { workspace = true }
 scripts = { workspace = true }

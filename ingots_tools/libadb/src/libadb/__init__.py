@@ -1,5 +1,6 @@
 from .adb import (
     AdbClient,
+    AdbCommandError,
     AdbProcess,
     ExpandBinaryResult,
     Permissions,
@@ -11,6 +12,7 @@ from .adb import (
 
 __all__ = [
     "AdbClient",
+    "AdbCommandError",
     "AdbProcess",
     "ExpandBinaryResult",
     "Permissions",

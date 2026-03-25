@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from libadb import AdbClient, AdbProcess, Process
+from libadb import AdbClient, AdbCommandError, AdbProcess, Process
 
 
 class AdbClientTests(unittest.TestCase):
@@ -17,12 +17,51 @@ class AdbClientTests(unittest.TestCase):
 
         self.assertEqual(output, "ok")
         run.assert_called_once_with(
-            'adb -s 127.0.0.1:5555 shell "id" 2>&1',
-            shell=True,
+            ["adb", "-s", "127.0.0.1:5555", "shell", "id"],
             capture_output=True,
             text=True,
             check=True,
         )
+
+    def test_run_adb_uses_client_remote_addr(self):
+        adb = AdbClient("127.0.0.1:5555")
+
+        with patch("libadb.adb.subprocess.run") as run:
+            adb.run_adb("shell", "id")
+
+        run.assert_called_once_with(
+            ["adb", "-s", "127.0.0.1:5555", "shell", "id"],
+            capture_output=True,
+            text=False,
+            check=True,
+        )
+
+    def test_run_shell_wraps_root_command(self):
+        adb = AdbClient("127.0.0.1:5555")
+
+        with patch("libadb.adb.subprocess.run") as run:
+            adb.run_shell("id", root=True, check=False)
+
+        run.assert_called_once_with(
+            ["adb", "-s", "127.0.0.1:5555", "shell", "su root sh -c id"],
+            capture_output=True,
+            text=False,
+            check=False,
+        )
+
+    def test_shell_text_raises_structured_error(self):
+        adb = AdbClient("127.0.0.1:5555")
+
+        with patch.object(
+            adb,
+            "run_shell",
+            return_value=subprocess.CompletedProcess(args=[], returncode=1, stdout=b"out", stderr=b"err"),
+        ):
+            with self.assertRaises(AdbCommandError) as ctx:
+                adb.shell_text("id")
+
+        self.assertIn("stdout: out", str(ctx.exception))
+        self.assertIn("stderr: err", str(ctx.exception))
 
     def test_upload_file_uses_client_remote_addr(self):
         adb = AdbClient("192.0.2.10:4444")
