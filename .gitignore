@@ -24,11 +24,6 @@ syzploit/analysis_CVE-*/
 syzploit/demo_CVE-*/
 syzploit/syzploit_output/
 syzploit/hunt_*/
-syzploit/test_results/
-syzploit/test_pipeline_*/
-syzploit/test_final_*/
-syzploit/app_audit_*/
-syzploit/device_audit_*/
 
 # Binaries and large files
 *.o
@@ -38,7 +33,6 @@ __pycache__/
 syzploit/badbinder
 syzploit/badnode_working/badnode
 syzploit/badnode_cve-2023-20938/adapted/*/badnode
-syzploit/challenge_apks/
 syzploit/kernel_Image
 syzploit/vmlinux_extracted
 syzploit/initramfs_check.img
@@ -48,7 +42,6 @@ syzploit/core.*
 nohup.out
 syzploit/nohup.out
 syzploit/run*.log
-syzploit/queue_master.log
 
 # Environment
 syzploit/.env
