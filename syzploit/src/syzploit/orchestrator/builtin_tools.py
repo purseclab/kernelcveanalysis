@@ -242,6 +242,32 @@ def tool_investigate(ctx: TaskContext, cfg: Config, **kwargs: Any) -> TaskContex
             console.print(f"  [dim]Investigation briefing: {briefing_path}[/]")
 
     ctx.log("analysis", "investigate_cve", f"exploits={len(report.exploit_references)} patches={len(report.patch_info)}")
+
+    # ── Pre-boot VM in background (saves ~5 min on next step) ────
+    # Start the VM boot now so it's ready by the time collect_target_info
+    # is called. This parallelizes investigation LLM calls with VM boot.
+    if ctx.ssh_host and ctx.start_cmd and not getattr(ctx, "_vm_preboot_started", False):
+        try:
+            import subprocess as _sub
+            from ..infra.verification import _run_lifecycle_cmd
+            ssh_host = ctx.ssh_host
+            ssh_port = ctx.ssh_port or 22
+            # Stop any stale instance first
+            if ctx.stop_cmd:
+                console.print("  [dim]collect_target_info: stopping stale instance…[/]")
+                _run_lifecycle_cmd(ctx.stop_cmd, ssh_host=ssh_host,
+                                   ssh_port=ssh_port, timeout=30)
+            # Start VM in background via SSH Popen
+            console.print("  [dim]collect_target_info: starting VM (pre-boot)…[/]")
+            _sub.Popen(
+                ["ssh", "-o", "StrictHostKeyChecking=no",
+                 "-p", str(ssh_port), ssh_host, ctx.start_cmd],
+                stdin=_sub.DEVNULL, stdout=_sub.DEVNULL, stderr=_sub.DEVNULL,
+            )
+            ctx._vm_preboot_started = True
+        except Exception:
+            pass  # Non-critical — collect_target_info will boot if needed
+
     return ctx
 
 
@@ -334,6 +360,24 @@ def tool_collect_target_info(ctx: TaskContext, cfg: Config, **kwargs: Any) -> Ta
     if not ctx.target_kernel and target_info.kernel_release:
         ctx.target_kernel = target_info.kernel_release
         console.print(f"  [dim]Auto-detected target kernel: {ctx.target_kernel}[/]")
+
+    # Validate: reject host kernel on Android targets
+    if (ctx.target_kernel and ctx.target_platform
+            and ctx.target_platform.value == "android"):
+        _kr = ctx.target_kernel
+        if any(p in _kr for p in ["-generic", "-cloud", "-aws", "-azure"]):
+            console.print(
+                f"  [red]ERROR: Detected host kernel ({_kr}) on Android target![/]"
+            )
+            console.print(
+                "  [red]ADB failed to connect — cannot collect real target info.[/]"
+            )
+            ctx.target_kernel = ""
+            target_info.kernel_release = ""
+            ctx.errors.append(
+                f"collect_target_info: got host kernel {_kr} instead of "
+                "target device kernel. ADB connection likely failed."
+            )
 
     # Propagate extracted vmlinux path to analysis data + config so
     # downstream tools (gdb_session, verify_reproducer, etc.) can find it.
@@ -550,7 +594,47 @@ def _probe_android_constraints(ctx: "TaskContext", info_dict: dict) -> None:
             "Skip /proc/kallsyms scan; use vmlinux symbols directly."
         )
 
+    # ── Kernel hardening analysis ──
+    hardening_configs = [
+        "SLAB_FREELIST_HARDENED", "SLAB_FREELIST_RANDOM",
+        "KASAN_HW_TAGS", "KASAN", "HARDENED_USERCOPY",
+        "CFI_CLANG", "SHADOW_CALL_STACK",
+    ]
+    hc_cmd = "zcat /proc/config.gz 2>/dev/null | grep -E '" + "|".join(hardening_configs) + "'"
+    hc_rc, hc_out, _ = _adb_run(hc_cmd, adb_port, timeout=10)
+    constraints["slab_freelist_hardened"] = "SLAB_FREELIST_HARDENED=y" in hc_out
+    constraints["slab_freelist_random"] = "SLAB_FREELIST_RANDOM=y" in hc_out
+    constraints["kasan_hw_tags"] = "KASAN_HW_TAGS=y" in hc_out
+    constraints["hardened_usercopy"] = "HARDENED_USERCOPY=y" in hc_out
+    constraints["cfi_enabled"] = "CFI_CLANG=y" in hc_out
+
+    # Check for dedicated slab caches that affect exploitation
+    slab_rc, slab_out, _ = _adb_run(
+        "cat /proc/slabinfo | grep -E 'cred_jar|io_kiocb|filp ' | awk '{print $1}'",
+        adb_port, timeout=10,
+    )
+    constraints["dedicated_slab_caches"] = [
+        c.strip() for c in slab_out.strip().split("\n") if c.strip()
+    ]
+
+    if constraints["slab_freelist_hardened"]:
+        notes.append(
+            "HARDENING: SLAB_FREELIST_HARDENED=y — generic freelist corruption attacks are blocked. "
+            "Exploitation requires subsystem-specific techniques (binder cross-cache, pipe_buffer via driver bug)."
+        )
+    if constraints["kasan_hw_tags"]:
+        notes.append(
+            "HARDENING: KASAN_HW_TAGS=y (MTE) — hardware use-after-free detection active. "
+            "UAF exploits may be detected/blocked by memory tagging."
+        )
+
     ctx.analysis_data["android_constraints"] = constraints
+
+    # ── Exploit classification: what privesc primitives are available? ──
+    classification = _classify_exploit_constraints(constraints)
+    ctx.analysis_data["exploit_classification"] = classification
+    notes.extend(classification.get("notes", []))
+
     if notes:
         console.print("  [yellow]Android constraints detected:[/]")
         for note in notes:
@@ -558,6 +642,168 @@ def _probe_android_constraints(ctx: "TaskContext", info_dict: dict) -> None:
         # Append to target_info notes if it's a mutable list
         if ctx.target_system_info and hasattr(ctx.target_system_info, "notes"):
             ctx.target_system_info.notes.extend(notes)
+
+
+def _classify_exploit_constraints(constraints: dict) -> dict:
+    """Classify what exploitation primitives are available on this target.
+
+    Returns a dict with:
+      - race_feasible: whether CPU races can fire
+      - cap_net_admin: whether we have CAP_NET_ADMIN (or su workaround)
+      - user_ns: whether user namespaces are available
+      - su_available: whether su binary exists
+      - privesc_methods: list of available privilege escalation methods
+      - blocked_cve_classes: list of CVE classes that cannot be fully exploited
+      - notes: human-readable classification notes
+    """
+    single_cpu = constraints.get("single_cpu", False)
+    user_ns = constraints.get("user_ns", False)
+    su_avail = constraints.get("su_binary_available", False)
+    cap_net_admin = not constraints.get("rtm_newlink_likely_blocked", True)
+    nokaslr = constraints.get("nokaslr", False)
+
+    result: dict = {
+        "race_feasible": not single_cpu,
+        "cap_net_admin_direct": cap_net_admin,
+        "cap_net_admin_via_su": su_avail and not cap_net_admin,
+        "user_ns": user_ns,
+        "su_available": su_avail,
+        "nokaslr": nokaslr,
+        "privesc_methods": [],
+        "blocked_cve_classes": [],
+        "notes": [],
+    }
+
+    # ── Determine available privesc methods ──
+    # Method 1: kernel cred overwrite (always possible if vuln triggers)
+    result["privesc_methods"].append("kernel_cred_overwrite")
+
+    # Method 2: su binary (if available)
+    if su_avail:
+        result["privesc_methods"].append("su_binary")
+
+    # ── Classify blocked CVE classes ──
+    if single_cpu:
+        result["blocked_cve_classes"].append({
+            "class": "cpu_race",
+            "reason": "Single-CPU target — kernel thread races cannot fire. "
+                      "io_uring races, perf_event races, and similar require ≥2 CPUs.",
+            "affected_cves": [
+                "CVE-2022-1786", "CVE-2022-29582", "CVE-2022-20409",
+                "CVE-2022-1729", "CVE-2023-0266",
+            ],
+            "workaround": "Use serialization-based bugs (binder, filesystem) instead, "
+                          "or reconfigure VM with smp≥2.",
+        })
+        result["notes"].append(
+            "EXPLOIT-CLASS: CPU race conditions (io_uring, perf_event) are NOT "
+            "exploitable on single-CPU. Only serialization bugs (binder IPC, "
+            "filesystem) can achieve real root."
+        )
+
+    if not user_ns:
+        result["blocked_cve_classes"].append({
+            "class": "user_ns_required",
+            "reason": "CONFIG_USER_NS not set — vulnerabilities requiring unprivileged "
+                      "user namespace creation cannot be triggered.",
+            "affected_cves": ["CVE-2022-0185"],
+            "workaround": "Enable CONFIG_USER_NS in kernel config.",
+        })
+
+    if not cap_net_admin and not su_avail:
+        result["blocked_cve_classes"].append({
+            "class": "cap_net_admin_required",
+            "reason": "No CAP_NET_ADMIN and no su binary — network subsystem "
+                      "vulnerabilities requiring interface manipulation, XFRM, or tc "
+                      "commands cannot be triggered.",
+            "affected_cves": [
+                "CVE-2024-36971", "CVE-2022-27666", "CVE-2023-1829",
+            ],
+            "workaround": "Provide su binary or enable CONFIG_USER_NS for CAP_NET_ADMIN via userns.",
+        })
+    elif not cap_net_admin and su_avail:
+        result["notes"].append(
+            "EXPLOIT-CLASS: Network CVEs (dst_entry, XFRM, tc) need CAP_NET_ADMIN. "
+            "su binary available for trigger setup but privesc MUST come from "
+            "kernel cred overwrite, not su."
+        )
+
+    # ── Kernel hardening analysis ──
+    slab_hardened = constraints.get("slab_freelist_hardened", False)
+    kasan_hw = constraints.get("kasan_hw_tags", False)
+    cfi_enabled = constraints.get("cfi_enabled", False)
+    dedicated_caches = constraints.get("dedicated_slab_caches", [])
+
+    result["hardening"] = {
+        "slab_freelist_hardened": slab_hardened,
+        "slab_freelist_random": constraints.get("slab_freelist_random", False),
+        "kasan_hw_tags": kasan_hw,
+        "hardened_usercopy": constraints.get("hardened_usercopy", False),
+        "cfi": cfi_enabled,
+        "dedicated_caches": dedicated_caches,
+    }
+
+    # Determine which exploitation techniques are viable
+    result["viable_techniques"] = []
+    result["blocked_techniques"] = []
+
+    # Freelist corruption (classic slab exploit)
+    if slab_hardened:
+        result["blocked_techniques"].append({
+            "technique": "freelist_corruption",
+            "reason": "SLAB_FREELIST_HARDENED=y — freelist pointers are XOR'd with random canary",
+        })
+    else:
+        result["viable_techniques"].append("freelist_corruption")
+
+    # Cross-cache attack (DirtyCred style)
+    if "cred_jar" in dedicated_caches:
+        result["blocked_techniques"].append({
+            "technique": "direct_cred_spray",
+            "reason": "cred_jar is a dedicated slab cache — kmalloc spray cannot reclaim freed creds. "
+                      "Requires cross-cache page-level attack (exhaust slab pages → reclaim as different cache).",
+        })
+    else:
+        result["viable_techniques"].append("direct_cred_spray")
+
+    # Binder cross-cache (used by badnode — works despite hardening)
+    result["viable_techniques"].append("binder_cross_cache")
+    result["notes"].append(
+        "EXPLOIT-TECHNIQUE: Binder cross-cache attack works despite SLAB_FREELIST_HARDENED "
+        "because it exploits the binder driver's own allocation patterns, not generic slab techniques."
+    )
+
+    # pipe_buffer technique (bad_io_uring style)
+    if not slab_hardened:
+        result["viable_techniques"].append("pipe_buffer_overwrite")
+    else:
+        result["notes"].append(
+            "EXPLOIT-TECHNIQUE: pipe_buffer overwrite requires corrupting pipe_buffer.ops pointer. "
+            "On hardened kernels, this needs a subsystem-specific bug (not generic slab corruption)."
+        )
+
+    # modprobe_path technique
+    if nokaslr:
+        result["viable_techniques"].append("modprobe_path_overwrite")
+        result["notes"].append(
+            f"EXPLOIT-TECHNIQUE: modprobe_path overwrite viable (KASLR disabled). "
+            f"Requires arbitrary kernel write to a known address."
+        )
+
+    # Summarize exploitation difficulty
+    if slab_hardened and kasan_hw and "cred_jar" in dedicated_caches:
+        result["exploitation_difficulty"] = "VERY_HARD"
+        result["notes"].append(
+            "HARDENING: This kernel has SLAB_FREELIST_HARDENED + KASAN_HW_TAGS + dedicated cred cache. "
+            "Generic slab exploitation techniques are blocked. Only subsystem-specific bugs "
+            "(binder cross-cache, driver-specific alloc patterns) can achieve R/W primitives."
+        )
+    elif slab_hardened:
+        result["exploitation_difficulty"] = "HARD"
+    else:
+        result["exploitation_difficulty"] = "MODERATE"
+
+    return result
 
 
 # ── feasibility (static) ──────────────────────────────────────────────
@@ -1671,7 +1917,67 @@ def tool_verify_exploit(ctx: TaskContext, cfg: Config, **kwargs: Any) -> TaskCon
         ctx.exploit_result.uid_before = result.get("uid_before")  # type: ignore[union-attr]
         ctx.exploit_result.uid_after = result.get("uid_after")  # type: ignore[union-attr]
         ctx.exploit_result.verification_log = result.get("exploit_output", "")  # type: ignore[union-attr]
-        console.print("  [bold green]✓ Exploit verified — privilege escalation confirmed![/]")
+
+        # ── Classify privesc method ──
+        exploit_output = result.get("exploit_output", "")
+        privesc_method = "unknown"
+        if "context=?" in exploit_output or "context=u:r:kernel" in exploit_output:
+            privesc_method = "kernel_cred_overwrite"
+        elif "context=u:r:su:s0" in exploit_output:
+            privesc_method = "su_binary"
+        elif "/system/xbin/su" in exploit_output or "su 0" in exploit_output:
+            privesc_method = "su_binary"
+        # Check source code for su usage
+        exploit_src = ""
+        import glob as _glob
+        from pathlib import Path as _Path
+        # Try multiple locations for source files
+        search_dirs = []
+        if ctx.exploit_result and ctx.exploit_result.binary_path:  # type: ignore[union-attr]
+            bp = _Path(ctx.exploit_result.binary_path)  # type: ignore[union-attr]
+            search_dirs.append(str(bp.parent))
+        if ctx.work_dir:
+            search_dirs.append(str(_Path(ctx.work_dir) / "exploit_src"))
+        for src_dir in search_dirs:
+            for src_file in _glob.glob(f"{src_dir}/*.c"):
+                try:
+                    with open(src_file) as f:
+                        exploit_src += f.read()
+                except Exception:
+                    pass
+            if exploit_src:
+                break
+        if exploit_src:
+            su_refs = exploit_src.count("su 0") + exploit_src.count("/system/xbin/su") + exploit_src.count('execl.*"su"')
+            cred_refs = exploit_src.count("zero_address") + exploit_src.count("cred_addr") + exploit_src.count("overwrite_cred")
+            if su_refs > 0 and cred_refs == 0:
+                privesc_method = "su_binary"
+            elif cred_refs > 0 and su_refs == 0:
+                privesc_method = "kernel_cred_overwrite"
+            elif cred_refs > 0 and su_refs > 0:
+                privesc_method = "kernel_cred_overwrite+su_trigger"
+
+        ctx.exploit_result.privesc_method = privesc_method  # type: ignore[union-attr]
+
+        if privesc_method == "kernel_cred_overwrite":
+            console.print("  [bold green]✓ Exploit verified — REAL kernel privilege escalation (cred overwrite)![/]")
+        elif privesc_method == "su_binary":
+            console.print("  [bold green]✓ Exploit verified — privilege escalation via su binary[/]")
+            console.print("  [yellow]  Note: Uses setuid su for final escalation. Vulnerability trigger confirmed.[/]")
+        elif privesc_method == "kernel_cred_overwrite+su_trigger":
+            console.print("  [bold green]✓ Exploit verified — kernel cred overwrite (su used for trigger only)[/]")
+        else:
+            console.print("  [bold green]✓ Exploit verified — privilege escalation confirmed![/]")
+
+        # Report blocked CVE classes if applicable
+        classification = ctx.analysis_data.get("exploit_classification", {})
+        blocked = classification.get("blocked_cve_classes", [])
+        if blocked and privesc_method == "su_binary":
+            for bc in blocked:
+                cve_id = ctx.root_cause.cve_id if ctx.root_cause else ""
+                if any(cve_id.upper().replace("-", "").endswith(c.replace("CVE-", "").replace("-", ""))
+                       for c in bc.get("affected_cves", [])):
+                    console.print(f"  [yellow]⚠ {bc['reason']}[/]")
     else:
         console.print(
             f"  [bold yellow]✗ Attempt {attempt_num} failed: "

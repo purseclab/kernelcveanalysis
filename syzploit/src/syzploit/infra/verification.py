@@ -574,7 +574,7 @@ def _setup_adb_tunnel(
     adb_port: int,
     ssh_host: str,
     ssh_port: int = 22,
-    _max_attempts: int = 3,
+    _max_attempts: int = 5,
 ) -> Optional[subprocess.Popen]:
     """Set up an SSH port-forward tunnel for ADB access to a remote
     Cuttlefish instance.
@@ -587,6 +587,34 @@ def _setup_adb_tunnel(
     Returns the tunnel ``Popen`` handle (caller must kill it later).
     """
     adb = _adb_exe()
+
+    # Check if a tunnel already exists (e.g. from collect_target_info)
+    # If the local port is bound, an SSH tunnel process is alive.
+    # Don't kill it — the tunnel will reconnect when the VM comes back up.
+    try:
+        import socket as _sock
+        _s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        _s.settimeout(2)
+        _result = _s.connect_ex(("127.0.0.1", adb_port))
+        _s.close()
+        if _result == 0:
+            # Port is open — an SSH tunnel is already forwarding this port.
+            # Don't kill it — just reuse. ADB will reconnect when VM boots.
+            console.print(
+                f"  [dim]ADB tunnel on port {adb_port} already exists — reusing[/]"
+            )
+            # Return a sentinel "reused" Popen-like object so callers
+            # don't treat None as failure
+            class _ReusedTunnel:
+                pid = -1
+                def poll(self): return None
+                def kill(self): pass
+                def terminate(self): pass
+                def wait(self, timeout=None): pass
+            return _ReusedTunnel()
+            return None  # No new process to manage; existing tunnel works
+    except Exception:
+        pass
 
     for attempt in range(1, _max_attempts + 1):
         # Kill stale tunnels from previous runs that may hold the port
@@ -616,7 +644,11 @@ def _setup_adb_tunnel(
                 f"retrying kill…[/]"
             )
             _kill_stale_tunnels(adb_port)
-            time.sleep(2)
+            # Wait for TIME_WAIT to clear (up to 15s)
+            for _wait in range(5):
+                time.sleep(3)
+                if _port_is_free(adb_port):
+                    break
             if not _port_is_free(adb_port):
                 console.print(
                     f"  [dim]Port {adb_port} still in use "
@@ -1555,7 +1587,7 @@ def collect_target_system_info(
         # on ARM64 QEMU).  Allow up to 10 min for GDB boots and 4 min
         # for normal boots.
         gdb_boot = bool(start_cmd and _is_gdb_start(start_cmd) and gdb_port)
-        max_adb_polls = 60 if gdb_boot else 24  # 10 min vs 4 min
+        max_adb_polls = 80 if gdb_boot else 36  # 13 min vs 6 min (ARM64 QEMU is slow)
         adb_alive = False
         if use_adb:
             console.print(
@@ -1574,8 +1606,37 @@ def collect_target_system_info(
                 time.sleep(10)
             if not adb_alive:
                 console.print(
-                    "  [yellow]ADB failed — falling back to SSH via build host[/]"
+                    "  [red]ADB failed to connect after "
+                    f"{max_adb_polls * 10}s — retrying with fresh VM boot[/]"
                 )
+                # Try stopping and restarting the VM once
+                if stop_cmd:
+                    _run_lifecycle_cmd(stop_cmd, ssh_host=ssh_host,
+                                      ssh_port=ssh_port, timeout=30)
+                    time.sleep(3)
+                if start_cmd:
+                    _start_vm_background(start_cmd, ssh_host=ssh_host,
+                                         ssh_port=ssh_port)
+                    # Send GDB continue if needed
+                    if gdb_boot and gdb_port:
+                        time.sleep(10)
+                        _send_gdb_continue(ssh_host, ssh_port, gdb_port,
+                                           setup_tunnels)
+                    time.sleep(30)
+                    # Retry ADB for 5 more min
+                    for retry in range(30):
+                        if _adb_is_alive(actual_adb_port):
+                            adb_alive = True
+                            console.print(
+                                "  [green]ADB connected on retry![/]"
+                            )
+                            break
+                        time.sleep(10)
+                if not adb_alive:
+                    console.print(
+                        "  [yellow]ADB still failed after retry — falling "
+                        "back to SSH (WARNING: may get host kernel info)[/]"
+                    )
 
         # ── Step 5: Collect system info ──────────────────────────────
         # Use ADB if alive, otherwise fall back to SSH commands on build host
@@ -1603,6 +1664,24 @@ def collect_target_system_info(
         info["kernel_release"] = _run_cmd("uname -r")
         info["arch"] = _run_cmd("uname -m")
         info["kernel_version"] = _run_cmd("uname -v")
+
+        # Validate: if we're targeting an Android device via ADB but got a
+        # host kernel (e.g. -generic, -cloud, -aws), the ADB path failed
+        # silently and we fell back to SSH. In that case, clear the values
+        # so the pipeline doesn't use the wrong kernel offsets.
+        _kr = info.get("kernel_release", "")
+        if use_adb and not adb_alive and _kr:
+            _host_patterns = ["-generic", "-cloud", "-aws", "-azure", "-gcp"]
+            if any(p in _kr for p in _host_patterns):
+                console.print(
+                    f"  [yellow]WARNING: Detected host kernel ({_kr}) instead "
+                    f"of target device kernel — ADB was not connected. "
+                    f"System info may be incorrect.[/]"
+                )
+                info["kernel_release"] = ""
+                info["kernel_version"] = ""
+                info["uname_a"] = ""
+                info["_host_kernel_detected"] = True
 
         # Android properties
         info["android_version"] = _run_cmd("getprop ro.build.version.release")

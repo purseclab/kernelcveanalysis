@@ -156,6 +156,8 @@ def save_pipeline_summary(
             "reproducer_verified": ctx.has_verified_reproducer(),
             "has_exploit": ctx.has_exploit(),
             "exploit_verified": ctx.has_verified_exploit(),
+            "privesc_method": getattr(ctx.exploit_result, "privesc_method", "unknown")
+                if ctx.exploit_result else "none",
         },
         "errors": list(getattr(ctx, "errors", [])),
         "history": list(getattr(ctx, "history", [])),
@@ -191,6 +193,13 @@ def save_pipeline_summary(
             summary["components"]["vuln_conditions"] = ctx.vuln_conditions.to_dict()
         except Exception:
             pass
+
+    # Include exploit classification and android constraints
+    analysis_data = getattr(ctx, "analysis_data", {})
+    if analysis_data.get("exploit_classification"):
+        summary["exploit_classification"] = analysis_data["exploit_classification"]
+    if analysis_data.get("android_constraints"):
+        summary["android_constraints"] = analysis_data["android_constraints"]
 
     # Include the execution trace tool sequence for quick inspection
     trace = getattr(ctx, "execution_trace", None)

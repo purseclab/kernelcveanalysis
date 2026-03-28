@@ -535,6 +535,7 @@ class ExploitResult(BaseModel):
     source_files: Dict[str, str] = Field(default_factory=dict)
     binary_path: Optional[str] = None
     privilege_escalation_confirmed: bool = False
+    privesc_method: str = "unknown"  # kernel_cred_overwrite, su_binary, kernel_cred_overwrite+su_trigger
     uid_before: Optional[int] = None
     uid_after: Optional[int] = None
     verification_log: Optional[str] = None
