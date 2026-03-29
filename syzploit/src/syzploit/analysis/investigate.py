@@ -1625,9 +1625,12 @@ def investigate_cve(
                             break
 
     # ── Step 8: Fetch code from GitHub exploit repos ──────────────────
-    # Grab both the README AND actual exploit source files (.c, .py, .sh)
+    # Grab both the README AND actual exploit source files (.c, .h, .cpp, etc.)
     # from discovered GitHub exploit repos for later use in generation.
+    # Uses the recursive Trees API to discover ALL files, not just root dir.
     console.print("[dim]  → Fetching exploit code from GitHub repos…[/]")
+    _SOURCE_BYTE_BUDGET = 100_000  # 100 KB total budget for source files
+
     for ref in report.exploit_references:
         if ref.source != "github" or not ref.url:
             continue
@@ -1637,11 +1640,12 @@ def investigate_cve(
                 continue
             owner_repo = "/".join(parts[-2:])
 
-            # 1. List repo contents (root tree)
-            tree_url = f"https://api.github.com/repos/{owner_repo}/contents/"
+            # 1. Fetch full recursive tree (single API call for all files)
+            tree_url = f"https://api.github.com/repos/{owner_repo}/git/trees/HEAD?recursive=1"
             tree_data = _fetch_github_json(tree_url, cfg)
-            if not isinstance(tree_data, list):
-                # Fallback to just README
+            tree_entries = tree_data.get("tree", [])
+            if not isinstance(tree_entries, list) or not tree_entries:
+                # Fallback to just README if tree API fails
                 readme_url = f"https://api.github.com/repos/{owner_repo}/readme"
                 data = _fetch_github_json(readme_url, cfg)
                 if data.get("content"):
@@ -1652,55 +1656,110 @@ def investigate_cve(
                     ref.code_snippet = content[:5000]
                 continue
 
-            # 2. Find exploit-relevant source files
-            exploit_extensions = (".c", ".h", ".py", ".sh", ".cpp", ".cc")
-            source_files: List[Dict[str, Any]] = []
-            readme_file: Optional[Dict[str, Any]] = None
+            # 2. Determine default branch for raw URLs
+            #    Try HEAD ref first, fall back to "main" then "master"
+            default_branch = "main"
+            repo_info = _fetch_github_json(
+                f"https://api.github.com/repos/{owner_repo}", cfg
+            )
+            if repo_info.get("default_branch"):
+                default_branch = repo_info["default_branch"]
 
-            for item in tree_data:
-                name = item.get("name", "").lower()
+            # 3. Categorise files from the tree
+            exploit_extensions = (".c", ".h", ".cpp", ".cc")
+            build_files = ("makefile", "cmakelists.txt", "kbuild", "kconfig")
+            source_files: List[Dict[str, Any]] = []
+            readme_entry: Optional[Dict[str, Any]] = None
+            build_entries: List[Dict[str, Any]] = []
+
+            for item in tree_entries:
+                if item.get("type") != "blob":
+                    continue
+                path = item.get("path", "")
+                name = path.rsplit("/", 1)[-1].lower() if "/" in path else path.lower()
                 if name in ("readme.md", "readme.txt", "readme"):
-                    readme_file = item
+                    # Prefer root-level README; don't overwrite with a deeper one
+                    if readme_entry is None or "/" not in item.get("path", "/"):
+                        readme_entry = item
                 elif any(name.endswith(ext) for ext in exploit_extensions):
                     source_files.append(item)
+                elif name in build_files:
+                    build_entries.append(item)
 
-            # 3. Fetch README
+            # 4. Fetch README via raw URL
             collected_code: List[str] = []
-            if readme_file and readme_file.get("download_url"):
+            if readme_entry:
                 try:
-                    readme_text = _fetch_url(readme_file["download_url"], timeout=15)
+                    raw_readme = (
+                        f"https://raw.githubusercontent.com/{owner_repo}"
+                        f"/{default_branch}/{readme_entry['path']}"
+                    )
+                    readme_text = _fetch_url(raw_readme, timeout=15)
                     collected_code.append(
-                        f"=== README ({readme_file.get('name', 'README')}) ===\n"
+                        f"=== README ({readme_entry.get('path', 'README')}) ===\n"
                         f"{readme_text[:3000]}"
                     )
                 except Exception:
                     pass
 
-            # 4. Fetch actual exploit source files (up to 3, prioritise .c)
+            # 5. Fetch build files (Makefile / CMakeLists.txt) for context
+            for bf in build_entries[:2]:
+                try:
+                    raw_bf = (
+                        f"https://raw.githubusercontent.com/{owner_repo}"
+                        f"/{default_branch}/{bf['path']}"
+                    )
+                    bf_text = _fetch_url(raw_bf, timeout=15)
+                    collected_code.append(
+                        f"=== BUILD: {bf['path']} ===\n"
+                        f"{bf_text[:3000]}"
+                    )
+                    console.print(f"  [dim]  Fetched build file: {owner_repo}/{bf['path']}[/]")
+                except Exception:
+                    pass
+
+            # 6. Fetch exploit source files (up to 10, byte budget 100 KB)
+            #    Prioritise .c > .h > .cpp/.cc, shallow paths first
             source_files.sort(
                 key=lambda f: (
-                    0 if f.get("name", "").lower().endswith(".c") else
-                    1 if f.get("name", "").lower().endswith(".h") else 2
+                    0 if f.get("path", "").lower().endswith(".c") else
+                    1 if f.get("path", "").lower().endswith(".h") else 2,
+                    f.get("path", "").count("/"),  # prefer shallower paths
+                    f.get("path", ""),
                 )
             )
-            for src_file in source_files[:3]:
-                dl_url = src_file.get("download_url")
-                if not dl_url:
+            bytes_fetched = 0
+            for src_file in source_files[:10]:
+                if bytes_fetched >= _SOURCE_BYTE_BUDGET:
+                    break
+                file_path = src_file.get("path", "")
+                if not file_path:
                     continue
+                raw_src = (
+                    f"https://raw.githubusercontent.com/{owner_repo}"
+                    f"/{default_branch}/{file_path}"
+                )
                 try:
-                    src_text = _fetch_url(dl_url, timeout=15)
-                    fname = src_file.get("name", "unknown")
+                    src_text = _fetch_url(raw_src, timeout=15)
+                    # Respect per-file cap (8 KB) and total budget
+                    remaining = _SOURCE_BYTE_BUDGET - bytes_fetched
+                    truncated = src_text[:min(8000, remaining)]
+                    file_size = src_file.get("size", len(src_text))
                     collected_code.append(
-                        f"=== SOURCE: {fname} ({src_file.get('size', '?')} bytes) ===\n"
-                        f"{src_text[:8000]}"
+                        f"=== SOURCE: {file_path} ({file_size} bytes) ===\n"
+                        f"{truncated}"
                     )
-                    console.print(f"  [dim]  Fetched exploit source: {owner_repo}/{fname}[/]")
+                    bytes_fetched += len(truncated)
+                    console.print(f"  [dim]  Fetched exploit source: {owner_repo}/{file_path}[/]")
                 except Exception:
                     pass
 
             if collected_code:
                 ref.code_snippet = "\n\n".join(collected_code)[:15000]
-                ref.language = source_files[0].get("name", "").rsplit(".", 1)[-1] if source_files else ""
+                ref.language = (
+                    source_files[0].get("path", "").rsplit(".", 1)[-1]
+                    if source_files else ""
+                )
 
         except Exception:
             pass
