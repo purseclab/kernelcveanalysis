@@ -1923,10 +1923,9 @@ def tool_verify_exploit(ctx: TaskContext, cfg: Config, **kwargs: Any) -> TaskCon
         privesc_method = "unknown"
         if "context=?" in exploit_output or "context=u:r:kernel" in exploit_output:
             privesc_method = "kernel_cred_overwrite"
-        elif "context=u:r:su:s0" in exploit_output:
-            privesc_method = "su_binary"
-        elif "/system/xbin/su" in exploit_output or "su 0" in exploit_output:
-            privesc_method = "su_binary"
+        # Don't classify as su_binary just from SELinux context or su
+        # mentions in output — the source code analysis below is more
+        # accurate at distinguishing su-for-trigger vs su-for-privesc.
         # Check source code for su usage
         exploit_src = ""
         import glob as _glob
@@ -1948,33 +1947,60 @@ def tool_verify_exploit(ctx: TaskContext, cfg: Config, **kwargs: Any) -> TaskCon
             if exploit_src:
                 break
         if exploit_src:
-            su_refs = exploit_src.count("su 0") + exploit_src.count("/system/xbin/su") + exploit_src.count('execl.*"su"')
-            cred_refs = exploit_src.count("zero_address") + exploit_src.count("cred_addr") + exploit_src.count("overwrite_cred")
-            if su_refs > 0 and cred_refs == 0:
+            # Count su references that are ACTUALLY privesc (not setup/trigger).
+            # "su 0 ip ..." and "su 0 sysctl ..." are trigger/setup commands,
+            # not privilege escalation. Only count su used for shells/exec.
+            import re as _class_re
+            # su-for-privesc: su 0 sh, su 0 id, execl("su",...), su -c
+            su_privesc_refs = len(_class_re.findall(
+                r'su\s+0\s+(?:sh|id|/system/bin/sh)|execl\s*\([^)]*"su"',
+                exploit_src
+            ))
+            # su-for-trigger: su 0 ip ..., su 0 sysctl ..., su 0 echo
+            su_trigger_refs = len(_class_re.findall(
+                r'su\s+0\s+(?:ip\s|sysctl\s|echo\s|cat\s)',
+                exploit_src
+            ))
+            cred_refs = (exploit_src.count("zero_address")
+                         + exploit_src.count("cred_addr")
+                         + exploit_src.count("overwrite_cred")
+                         + exploit_src.count("swap_cred")
+                         + exploit_src.count("commit_creds")
+                         + exploit_src.count("prepare_kernel_cred"))
+            if su_privesc_refs > 0 and cred_refs == 0:
                 privesc_method = "su_binary"
-            elif cred_refs > 0 and su_refs == 0:
-                privesc_method = "kernel_cred_overwrite"
-            elif cred_refs > 0 and su_refs > 0:
+            elif cred_refs > 0:
+                if su_trigger_refs > 0:
+                    privesc_method = "kernel_cred_overwrite+su_trigger"
+                else:
+                    privesc_method = "kernel_cred_overwrite"
+            elif su_trigger_refs > 0 and su_privesc_refs == 0:
+                # su only used for trigger setup, not privesc
                 privesc_method = "kernel_cred_overwrite+su_trigger"
 
         ctx.exploit_result.privesc_method = privesc_method  # type: ignore[union-attr]
 
         if privesc_method == "kernel_cred_overwrite":
-            console.print("  [bold green]✓ Exploit verified — REAL kernel privilege escalation (cred overwrite)![/]")
-        elif privesc_method == "su_binary":
-            console.print("  [bold green]✓ Exploit verified — privilege escalation via su binary[/]")
-            console.print("  [yellow]  Note: Uses setuid su for final escalation. Vulnerability trigger confirmed.[/]")
+            console.print("  [bold green]✓ Exploit verified — kernel privilege escalation (cred overwrite)[/]")
         elif privesc_method == "kernel_cred_overwrite+su_trigger":
-            console.print("  [bold green]✓ Exploit verified — kernel cred overwrite (su used for trigger only)[/]")
+            console.print("  [bold green]✓ Exploit verified — kernel cred overwrite (su used for trigger setup only)[/]")
+        elif privesc_method == "su_binary":
+            # This is NOT a real exploit — su did the privesc, not the vulnerability
+            console.print("  [yellow]✗ Root achieved via su binary, NOT via kernel vulnerability[/]")
+            console.print("  [yellow]  The exploit must achieve privesc through kernel cred overwrite, not su.[/]")
+            result["success"] = False
+            ctx.exploit_result.privilege_escalation_confirmed = False  # type: ignore[union-attr]
         else:
-            console.print("  [bold green]✓ Exploit verified — privilege escalation confirmed![/]")
+            console.print("  [bold green]✓ Exploit verified — privilege escalation confirmed[/]")
 
         # Report blocked CVE classes if applicable
         classification = ctx.analysis_data.get("exploit_classification", {})
         blocked = classification.get("blocked_cve_classes", [])
         if blocked and privesc_method == "su_binary":
             for bc in blocked:
-                cve_id = ctx.root_cause.cve_id if ctx.root_cause else ""
+                cve_id = getattr(ctx.root_cause, "cve_id", "") or (
+                    getattr(ctx, "input_value", "") if ctx.root_cause else ""
+                )
                 if any(cve_id.upper().replace("-", "").endswith(c.replace("CVE-", "").replace("-", ""))
                        for c in bc.get("affected_cves", [])):
                     console.print(f"  [yellow]⚠ {bc['reason']}[/]")
