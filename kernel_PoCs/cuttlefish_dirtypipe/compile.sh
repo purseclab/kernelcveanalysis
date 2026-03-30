@@ -14,6 +14,6 @@ echo $CC
 
 cd "$(dirname $0)"
 
-nix-shell -p pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc --run "python gen_constants.py $1 $2"
-$CC -static -fno-pie dirtypipe.c -o dirtypipe
+nix-shell -p pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc -p 'python3.withPackages (ps: with ps; [ pwntools ])' --run "python gen_constants.py $1 $2"
+$CC -static -fno-pie dirtypipe.c -o dirtypipe $(../common/payload-flags --static --listening-shell --port 1340)
 
