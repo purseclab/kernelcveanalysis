@@ -509,6 +509,15 @@ class Agent:
                 )
                 break
 
+            # ── Early termination: exploit already verified ────────
+            if ctx.has_verified_exploit():
+                final_outcome = "done"
+                final_reason = (
+                    f"Exploit verified — privilege escalation confirmed "
+                    f"(step {step})"
+                )
+                break
+
             # ── Hard cap: absolute maximum real steps ─────────────
             if step >= _HARD_CAP:
                 final_reason = (

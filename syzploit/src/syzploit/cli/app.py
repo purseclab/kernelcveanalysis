@@ -1119,6 +1119,596 @@ def hunt(
         )
 
 
+@app.command(name="analyze-app")
+def analyze_app_cmd(
+    apk_path: str = typer.Argument(help="Path to APK file or package name on device"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
+    device: Optional[str] = typer.Option(None, "--device", "-d", help="ADB device serial (e.g. localhost:6538)"),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON"),
+) -> None:
+    """Analyze an Android APK for security vulnerabilities."""
+    from ..android.app_analyzer import analyze_apk, pull_apk_from_device
+
+    apk_file = apk_path
+
+    # If it looks like a package name (contains dots, no file extension), pull from device
+    if "." in apk_path and not apk_path.endswith(".apk") and device:
+        console.print(f"Pulling APK for {apk_path} from {device}...")
+        pulled = pull_apk_from_device(apk_path, f"/tmp/{apk_path}.apk",
+                                       adb_port=int(device.split(":")[-1]))
+        if pulled:
+            apk_file = pulled
+        else:
+            console.print(f"[red]Failed to pull APK for {apk_path}[/]")
+            raise typer.Exit(1)
+
+    console.print(f"\n[bold]═══ Analyzing {Path(apk_file).name} ═══[/]")
+    result = analyze_apk(apk_file)
+
+    # Display results
+    console.print(f"  Package: {result.package_name}")
+    console.print(f"  Version: {result.version_name} ({result.version_code})")
+    console.print(f"  SDK: min={result.min_sdk}, target={result.target_sdk}")
+    console.print(f"  Debuggable: {result.debuggable}")
+    console.print(f"  Permissions: {len(result.permissions)} ({len(result.dangerous_permissions)} dangerous)")
+    console.print(f"  Components: {len(result.components)} ({len(result.exported_components)} exported)")
+    console.print(f"  Native Libraries: {len(result.native_libraries)}")
+
+    if result.vulnerabilities:
+        console.print(f"\n[bold]═══ Vulnerabilities ({len(result.vulnerabilities)}) ═══[/]")
+        # Group by severity
+        for sev in ("critical", "high", "medium", "low", "info"):
+            vulns = [v for v in result.vulnerabilities if v.severity == sev]
+            if not vulns:
+                continue
+            color = {"critical": "red", "high": "red", "medium": "yellow",
+                     "low": "cyan", "info": "dim"}.get(sev, "white")
+            for v in vulns:
+                console.print(f"  [{color}][{sev.upper()}][/{color}] {v.name}")
+                if sev in ("critical", "high"):
+                    console.print(f"    {v.description[:120]}")
+
+    # Save results
+    if output_dir:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        report_path = out / "app_analysis_report.json"
+        report_path.write_text(json.dumps(result.to_dict(), indent=2))
+        console.print(f"\n  📄 Report saved: {report_path}")
+
+    if json_output:
+        print(json.dumps(result.to_dict(), indent=2))
+
+
+@app.command(name="decompile-app")
+def decompile_app_cmd(
+    apk_path: str = typer.Argument(help="Path to APK file"),
+    output_dir: str = typer.Option("./decompiled", "--output-dir", "-o", help="Output directory"),
+) -> None:
+    """Decompile an Android APK to Java source code."""
+    from ..android.decompiler import decompile_apk
+
+    console.print(f"[bold]Decompiling {Path(apk_path).name}…[/]")
+    result = decompile_apk(apk_path, output_dir)
+    if result:
+        java_count = sum(1 for _ in Path(result).rglob("*.java"))
+        console.print(f"  [green]Source extracted: {result} ({java_count} files)[/]")
+    else:
+        console.print(f"  [red]Decompilation failed[/]")
+
+
+@app.command(name="scan-app")
+def scan_app_cmd(
+    source_dir: str = typer.Argument(help="Path to decompiled source directory"),
+    mode: str = typer.Option("static", "--mode", "-m", help="Scan mode: static, llm, hybrid"),
+    focus: Optional[str] = typer.Option(None, "--focus", "-f", help="Focus areas (comma-separated: crypto,webview,ipc,storage,network,auth)"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
+) -> None:
+    """Scan decompiled Android app source for vulnerabilities."""
+    from ..android.vuln_scanner import scan_static, scan_with_llm, scan_hybrid
+
+    focus_areas = focus.split(",") if focus else None
+
+    console.print(f"[bold]Scanning {source_dir} (mode: {mode})…[/]")
+
+    if mode == "static":
+        vulns = scan_static(source_dir)
+    elif mode == "llm":
+        cfg = _build_config()
+        vulns = scan_with_llm(source_dir, focus_areas=focus_areas, cfg=cfg)
+    elif mode == "hybrid":
+        cfg = _build_config()
+        vulns = scan_hybrid(source_dir, cfg=cfg, focus_areas=focus_areas)
+    else:
+        console.print(f"[red]Unknown mode: {mode}[/]")
+        raise typer.Exit(1)
+
+    # Display results
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    vulns.sort(key=lambda v: severity_order.get(v.severity, 5))
+
+    console.print(f"\n[bold]═══ Vulnerabilities ({len(vulns)}) ═══[/]")
+    for v in vulns:
+        color = {"critical": "red", "high": "red", "medium": "yellow",
+                 "low": "cyan", "info": "dim"}.get(v.severity, "white")
+        console.print(f"  [{color}][{v.severity.upper()}][/{color}] {v.name}")
+        if v.evidence:
+            for line in v.evidence.strip().splitlines()[:2]:
+                console.print(f"    {line[:120]}")
+
+    if output_dir:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        report = [v.to_dict() for v in vulns]
+        (out / "vuln_scan_report.json").write_text(json.dumps(report, indent=2))
+        console.print(f"\n  📄 Report saved: {out / 'vuln_scan_report.json'}")
+
+
+@app.command(name="frida-hook")
+def frida_hook_cmd(
+    package_name: str = typer.Argument(help="Target app package name"),
+    script: str = typer.Option("ssl_pinning_bypass", "--script", "-s",
+                               help="Script name or path to .js file"),
+    device: str = typer.Option("localhost:6538", "--device", "-d", help="ADB device serial"),
+    timeout: int = typer.Option(30, "--timeout", "-t", help="Script execution timeout (seconds)"),
+    list_scripts: bool = typer.Option(False, "--list", help="List available built-in scripts"),
+) -> None:
+    """Run a Frida hook script on an Android app."""
+    from ..android.frida_tools import (
+        run_adb_frida_script, get_frida_script, list_frida_scripts,
+    )
+
+    if list_scripts:
+        console.print("[bold]Available Frida scripts:[/]")
+        for name in list_frida_scripts():
+            console.print(f"  - {name}")
+        return
+
+    # Load script
+    if Path(script).exists():
+        script_code = Path(script).read_text()
+        console.print(f"Loaded script from {script}")
+    else:
+        script_code = get_frida_script(script)
+        if not script_code:
+            console.print(f"[red]Unknown script: {script}[/]")
+            console.print(f"Available: {', '.join(list_frida_scripts())}")
+            raise typer.Exit(1)
+        console.print(f"Using built-in script: {script}")
+
+    console.print(f"[bold]Hooking {package_name} on {device}…[/]")
+    result = run_adb_frida_script(package_name, script_code, device, timeout=timeout)
+
+    if result.success:
+        console.print(f"[green]Script executed successfully ({result.duration_ms}ms)[/]")
+    else:
+        console.print(f"[red]Script failed ({result.duration_ms}ms)[/]")
+        for err in result.errors:
+            console.print(f"  Error: {err[:200]}")
+
+    if result.hooked_calls:
+        console.print(f"\n[bold]Hooked calls ({len(result.hooked_calls)}):[/]")
+        for call in result.hooked_calls[:20]:
+            console.print(f"  {json.dumps(call, default=str)}")
+
+    if result.messages:
+        console.print(f"\nMessages ({len(result.messages)}):")
+        for msg in result.messages[:10]:
+            console.print(f"  {json.dumps(msg, default=str)}")
+
+
+@app.command(name="test-intents")
+def test_intents_cmd(
+    apk_path: str = typer.Argument(help="Path to APK file to analyze and test"),
+    device: str = typer.Option("localhost:6538", "--device", "-d", help="ADB device serial"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
+) -> None:
+    """Test exported components of an Android app via crafted intents."""
+    from ..android.app_analyzer import analyze_apk
+    from ..android.intent_crafter import test_exported_components
+
+    console.print(f"[bold]Analyzing {Path(apk_path).name}…[/]")
+    analysis = analyze_apk(apk_path)
+
+    if not analysis.exported_components:
+        console.print("[yellow]No exported components found[/]")
+        return
+
+    console.print(f"Found {len(analysis.exported_components)} exported components")
+    console.print(f"[bold]Testing on {device}…[/]\n")
+
+    adb_port = int(device.split(":")[-1]) if ":" in device else 5555
+    # Find ADB binary — check common locations
+    import shutil
+    adb_bin = shutil.which("adb") or ""
+    if not adb_bin:
+        for candidate in [
+            Path.cwd() / "adb",
+            Path(__file__).parent.parent.parent.parent / "adb",  # syzploit/adb
+            Path("/home/gl055/research/ingots/kernelcveanalysis/syzploit/adb"),
+        ]:
+            if candidate.exists():
+                adb_bin = str(candidate)
+                break
+    if not adb_bin:
+        adb_bin = "adb"  # fallback to PATH
+    results = test_exported_components(
+        analysis.package_name,
+        [c.to_dict() for c in analysis.exported_components],
+        adb_serial=device,
+        adb_binary=adb_bin,
+    )
+
+    # Display results
+    for r in results:
+        status = "[green]OK[/]" if r.success else "[red]FAIL[/]"
+        console.print(f"  {status} [{r.intent_type}] {r.component}")
+        if r.output and r.success:
+            for line in r.output.strip().splitlines()[:3]:
+                console.print(f"    → {line[:120]}")
+
+    if output_dir:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        report = {"package": analysis.package_name, "results": [r.to_dict() for r in results]}
+        (out / "intent_test_report.json").write_text(json.dumps(report, indent=2))
+        console.print(f"\n  📄 Report saved: {out / 'intent_test_report.json'}")
+
+
+@app.command(name="audit-device")
+def audit_device_cmd(
+    # Target
+    ssh_host: str = typer.Option("", "--ssh-host", help="SSH host for Cuttlefish/QEMU"),
+    instance: int = typer.Option(18, "--instance", help="Cuttlefish instance number"),
+    # VM management
+    start_cmd: str = typer.Option("", "--start-cmd", help="Command to start VM with GDB"),
+    stop_cmd: str = typer.Option("", "--stop-cmd", help="Command to stop VM"),
+    exploit_start_cmd: str = typer.Option("", "--exploit-start-cmd", help="VM start command without GDB"),
+    kernel_image: str = typer.Option("", "--kernel-image", help="Path to kernel Image on remote host"),
+    # Kernel
+    kernel_cve: Optional[str] = typer.Option(None, "--kernel-cve", "-k", help="Kernel CVE to analyze (e.g. CVE-2023-20938)"),
+    # Apps
+    include_system: bool = typer.Option(True, "--system/--no-system", help="Include system apps"),
+    max_apps: int = typer.Option(0, "--max-apps", help="Max apps to analyze (0=all)"),
+    deep_scan: int = typer.Option(3, "--deep-scan", help="Deep-scan top N riskiest apps"),
+    fuzz: bool = typer.Option(True, "--fuzz/--no-fuzz", help="Fuzz during deep scan"),
+    traffic: bool = typer.Option(True, "--traffic/--no-traffic", help="Capture traffic"),
+    # LLM
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model for kernel analysis"),
+    # APKs to install
+    install_apks: Optional[List[str]] = typer.Option(None, "--install-apk", help="APK file(s) to install before scanning (repeatable)"),
+    # Output
+    output_dir: str = typer.Option("./device_audit", "--output-dir", "-o", help="Output directory"),
+) -> None:
+    """Full device security audit — kernel CVE analysis + all app scanning in one command.
+
+    Example:
+        syzploit audit-device --ssh-host INGOTS-ARM --instance 18
+            --kernel-cve CVE-2023-20938
+            --start-cmd "cd /path && ./gdb_run.sh 18"
+            --stop-cmd "cd /path && ./stop.sh 18"
+            --exploit-start-cmd "cd /path && ./run.sh 18"
+            --kernel-image /path/to/kernel/Image
+            --model openrouter/anthropic/claude-sonnet-4.6
+    """
+    from ..android.full_audit import run_full_audit, FullAuditConfig
+
+    config = FullAuditConfig(
+        ssh_host=ssh_host,
+        instance=instance,
+        start_cmd=start_cmd,
+        stop_cmd=stop_cmd,
+        exploit_start_cmd=exploit_start_cmd,
+        kernel_image=kernel_image,
+        kernel_cve=kernel_cve or "",
+        include_system_apps=include_system,
+        max_apps=max_apps,
+        deep_scan_top=deep_scan,
+        fuzz=fuzz,
+        traffic=traffic,
+        traffic_duration=10,
+        model=model or "",
+        output_dir=output_dir,
+        llm_cfg=_build_config(model=model) if model else None,
+        install_apks=list(install_apks) if install_apks else [],
+    )
+
+    run_full_audit(config)
+
+
+@app.command(name="scan-device")
+def scan_device_cmd(
+    device: str = typer.Option("localhost:6537", "--device", "-d", help="ADB device serial"),
+    output_dir: str = typer.Option("./device_audit", "--output-dir", "-o", help="Output directory"),
+    include_system: bool = typer.Option(True, "--system/--no-system", help="Include system apps"),
+    max_apps: int = typer.Option(0, "--max-apps", help="Max apps to analyze (0=all)"),
+    deep_scan: int = typer.Option(3, "--deep-scan", help="Deep-scan top N riskiest apps (0=skip)"),
+    fuzz: bool = typer.Option(True, "--fuzz/--no-fuzz", help="Fuzz during deep scan"),
+    traffic: bool = typer.Option(True, "--traffic/--no-traffic", help="Capture traffic during deep scan"),
+    kernel_cve: Optional[str] = typer.Option(None, "--kernel-cve", help="Kernel CVE for hybrid analysis"),
+    kernel_exploit: Optional[str] = typer.Option(None, "--kernel-exploit", help="Kernel exploit binary for hybrid chain"),
+) -> None:
+    """Autonomous full-device security scan — analyzes kernel + all installed apps.
+
+    One command does everything: pulls all APKs, analyzes each for vulnerabilities,
+    ranks by risk score, deep-dives the riskiest apps (fuzz, traffic, exploit gen),
+    and optionally chains with a kernel CVE for hybrid analysis.
+    """
+    from ..android.device_scanner import scan_device, full_device_audit
+
+    import shutil
+    adb_bin = shutil.which("adb") or ""
+    if not adb_bin:
+        for c in [Path.cwd() / "adb", Path(__file__).parent.parent.parent.parent / "adb"]:
+            if c.exists():
+                adb_bin = str(c)
+                break
+    if not adb_bin:
+        adb_bin = "adb"
+
+    console.print(f"\n[bold]═══ Syzploit Device Security Scanner ═══[/]")
+    console.print(f"  Device: {device}")
+    console.print(f"  System apps: {'yes' if include_system else 'no'}")
+    if max_apps:
+        console.print(f"  Max apps: {max_apps}")
+    console.print(f"  Deep scan: top {deep_scan} apps")
+    if kernel_cve:
+        console.print(f"  Kernel CVE: {kernel_cve}")
+
+    if deep_scan > 0:
+        result = full_device_audit(
+            serial=device, adb_bin=adb_bin, output_dir=output_dir,
+            include_system=include_system, max_apps=max_apps,
+            deep_scan_top=deep_scan, fuzz=fuzz, traffic=traffic,
+            kernel_cve=kernel_cve or "",
+            kernel_exploit_path=kernel_exploit or "",
+        )
+    else:
+        result = scan_device(
+            serial=device, adb_bin=adb_bin, output_dir=output_dir,
+            include_system=include_system, max_apps=max_apps,
+        )
+
+    if result.apps_with_vulns:
+        console.print(
+            f"\n[bold yellow]{result.apps_with_vulns} apps have vulnerabilities "
+            f"({result.total_critical} critical, {result.total_high} high)[/]"
+        )
+    else:
+        console.print("\n[green]No significant vulnerabilities found[/]")
+
+
+@app.command(name="app-agent")
+def app_agent_cmd(
+    apk_path: str = typer.Argument(help="Path to APK file"),
+    output_dir: str = typer.Option("./app_analysis", "--output-dir", "-o", help="Output directory"),
+    device: str = typer.Option("localhost:6537", "--device", "-d", help="ADB device serial"),
+    scan_mode: str = typer.Option("static", "--scan-mode", help="Scan mode: static, llm, hybrid"),
+    fuzz: bool = typer.Option(True, "--fuzz/--no-fuzz", help="Enable IPC fuzzing"),
+    traffic: bool = typer.Option(True, "--traffic/--no-traffic", help="Enable traffic capture"),
+    verify: bool = typer.Option(True, "--verify/--no-verify", help="Verify generated exploits"),
+    traffic_duration: int = typer.Option(15, "--traffic-duration", help="Traffic capture duration (sec)"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model (for hybrid/llm scan)"),
+    kernel_cve: Optional[str] = typer.Option(None, "--kernel-cve", help="Kernel CVE for hybrid exploit chain"),
+    kernel_exploit: Optional[str] = typer.Option(None, "--kernel-exploit", help="Path to kernel exploit binary for hybrid chain"),
+) -> None:
+    """Run the full agentic app security analysis pipeline."""
+    from ..android.app_agent import run_app_agent, AppAgentConfig
+
+    import shutil
+    adb_bin = shutil.which("adb") or ""
+    if not adb_bin:
+        for c in [Path.cwd() / "adb", Path(__file__).parent.parent.parent.parent / "adb"]:
+            if c.exists():
+                adb_bin = str(c)
+                break
+    if not adb_bin:
+        adb_bin = "adb"
+
+    cfg = None
+    if model and scan_mode in ("llm", "hybrid"):
+        cfg = _build_config(model=model)
+
+    config = AppAgentConfig(
+        apk_path=apk_path,
+        output_dir=output_dir,
+        adb_serial=device,
+        adb_binary=adb_bin,
+        scan_mode=scan_mode,
+        fuzz=fuzz,
+        capture_traffic=traffic,
+        traffic_duration=traffic_duration,
+        verify_exploits=verify,
+        llm_cfg=cfg,
+        kernel_cve=kernel_cve or "",
+        kernel_exploit_path=kernel_exploit or "",
+    )
+
+    console.print(f"\n[bold]═══ Syzploit App Security Agent ═══[/]")
+    console.print(f"  APK: {Path(apk_path).name}")
+    console.print(f"  Device: {device}")
+    console.print(f"  Scan mode: {scan_mode}")
+    console.print(f"  Fuzz: {fuzz}, Traffic: {traffic}, Verify: {verify}")
+
+    result = run_app_agent(config)
+
+    if result.errors:
+        console.print(f"\n[yellow]Completed with {len(result.errors)} error(s)[/]")
+
+
+@app.command(name="fuzz-app")
+def fuzz_app_cmd(
+    apk_path: str = typer.Argument(help="Path to APK file"),
+    device: str = typer.Option("localhost:6537", "--device", "-d", help="ADB device serial"),
+    max_per_component: int = typer.Option(20, "--max", help="Max fuzz tests per component"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
+) -> None:
+    """Fuzz exported components of an Android app."""
+    from ..android.app_analyzer import analyze_apk
+    from ..android.ipc_fuzzer import fuzz_exported_components
+
+    console.print(f"[bold]Analyzing {Path(apk_path).name}…[/]")
+    analysis = analyze_apk(apk_path)
+
+    if not analysis.exported_components:
+        console.print("[yellow]No exported components found[/]")
+        return
+
+    import shutil
+    adb_bin = shutil.which("adb") or ""
+    if not adb_bin:
+        for c in [Path.cwd() / "adb", Path(__file__).parent.parent.parent.parent / "adb"]:
+            if c.exists():
+                adb_bin = str(c)
+                break
+    if not adb_bin:
+        adb_bin = "adb"
+
+    console.print(f"Fuzzing {len(analysis.exported_components)} exported components on {device}…\n")
+    report = fuzz_exported_components(
+        analysis.package_name,
+        [c.to_dict() for c in analysis.exported_components],
+        adb_serial=device, adb_binary=adb_bin,
+        max_tests_per_component=max_per_component,
+    )
+
+    console.print(f"\n[bold]═══ Fuzz Results ═══[/]")
+    console.print(f"  Total tests: {report.total_tests}")
+    console.print(f"  Crashes: [red]{report.crashes}[/]")
+    console.print(f"  Interesting: [yellow]{report.interesting}[/]")
+
+    # Show interesting results
+    for r in report.results:
+        if r.crashed or r.success:
+            color = "red" if r.crashed else "yellow"
+            console.print(f"  [{color}]{'CRASH' if r.crashed else 'INTERESTING'}[/{color}] "
+                         f"[{r.component_type}] {r.component}: {r.payload[:60]}")
+
+    if output_dir:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "fuzz_report.json").write_text(json.dumps(report.to_dict(), indent=2))
+        console.print(f"\n  📄 Report saved: {out / 'fuzz_report.json'}")
+
+
+@app.command(name="exploit-app")
+def exploit_app_cmd(
+    apk_path: str = typer.Argument(help="Path to APK file"),
+    device: str = typer.Option("localhost:6537", "--device", "-d", help="ADB device serial"),
+    verify: bool = typer.Option(True, "--verify/--no-verify", help="Verify exploits after generation"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
+) -> None:
+    """Generate and optionally verify exploits for an Android app."""
+    from ..android.app_analyzer import analyze_apk
+    from ..android.vuln_scanner import scan_static
+    from ..android.exploit_generator import generate_all_exploits, save_exploits
+
+    console.print(f"[bold]═══ Exploit Generation Pipeline ═══[/]\n")
+
+    # Step 1: Analyze
+    console.print(f"[bold]Step 1:[/] Analyzing {Path(apk_path).name}…")
+    analysis = analyze_apk(apk_path)
+    console.print(f"  Package: {analysis.package_name}")
+    console.print(f"  Vulnerabilities from manifest: {len(analysis.vulnerabilities)}")
+
+    # Step 2: Generate exploits
+    console.print(f"\n[bold]Step 2:[/] Generating exploit scripts…")
+
+    import shutil
+    adb_bin = shutil.which("adb") or ""
+    if not adb_bin:
+        for c in [Path.cwd() / "adb", Path(__file__).parent.parent.parent.parent / "adb"]:
+            if c.exists():
+                adb_bin = str(c)
+                break
+    if not adb_bin:
+        adb_bin = "adb"
+
+    exploits = generate_all_exploits(
+        analysis.vulnerabilities,
+        package_name=analysis.package_name,
+        adb_serial=device,
+        adb_binary=adb_bin,
+    )
+    console.print(f"  Generated {len(exploits)} exploit scripts")
+
+    for e in exploits:
+        console.print(f"    [{e.script_type}] {e.name}: {e.target_vuln}")
+
+    # Step 3: Save
+    if output_dir:
+        out = Path(output_dir) / "exploits"
+        saved = save_exploits(exploits, str(out))
+        console.print(f"\n  Saved {len(saved)} files to {out}/")
+
+    # Step 4: Verify
+    if verify and exploits:
+        console.print(f"\n[bold]Step 3:[/] Verifying exploits on {device}…")
+        from ..android.app_verify import verify_all_exploits
+        results = verify_all_exploits(
+            exploits, analysis.package_name,
+            adb_serial=device, adb_binary=adb_bin,
+        )
+        for r in results:
+            status = "[green]SUCCESS[/]" if r.success else "[dim]no impact[/]"
+            console.print(f"    {status} {r.exploit_name} ({r.duration_ms}ms)")
+            for ind in r.indicators[:3]:
+                console.print(f"      → {ind[:100]}")
+
+        if output_dir:
+            out = Path(output_dir)
+            (out / "verify_results.json").write_text(
+                json.dumps([r.to_dict() for r in results], indent=2)
+            )
+
+    console.print(f"\n[bold]Done.[/]")
+
+
+@app.command(name="capture-traffic")
+def capture_traffic_cmd(
+    package_name: str = typer.Argument(help="Target app package name"),
+    device: str = typer.Option("localhost:6537", "--device", "-d", help="ADB device serial"),
+    duration: int = typer.Option(15, "--duration", "-t", help="Capture duration (seconds)"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Output directory"),
+) -> None:
+    """Capture and analyze network traffic from an Android app."""
+    from ..android.traffic_capture import capture_app_traffic, get_connections
+
+    import shutil
+    adb_bin = shutil.which("adb") or ""
+    if not adb_bin:
+        for c in [Path.cwd() / "adb", Path(__file__).parent.parent.parent.parent / "adb"]:
+            if c.exists():
+                adb_bin = str(c)
+                break
+    if not adb_bin:
+        adb_bin = "adb"
+
+    console.print(f"[bold]Capturing traffic for {package_name} ({duration}s)…[/]")
+    result = capture_app_traffic(package_name, duration, device, adb_bin)
+
+    console.print(f"\n[bold]═══ Traffic Analysis ═══[/]")
+    console.print(f"  Connections: {len(result.connections)}")
+    console.print(f"  URLs found: {len(result.urls_found)}")
+    console.print(f"  API endpoints: {len(result.api_endpoints)}")
+    console.print(f"  Cleartext URLs: {len(result.cleartext_urls)}")
+
+    for conn in result.connections[:10]:
+        console.print(f"  {conn.state:12s} {conn.local_addr}:{conn.local_port} → "
+                      f"{conn.remote_addr}:{conn.remote_port} (uid={conn.uid})")
+
+    if result.cleartext_urls:
+        console.print(f"\n  [red]Cleartext HTTP URLs:[/]")
+        for url in result.cleartext_urls[:5]:
+            console.print(f"    {url}")
+
+    if output_dir:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "traffic_report.json").write_text(json.dumps(result.to_dict(), indent=2))
+        console.print(f"\n  📄 Report saved: {out / 'traffic_report.json'}")
+
+
 def main() -> None:
     """Entry-point registered in pyproject.toml."""
     app()
