@@ -16,7 +16,7 @@ from .util import config_lines
 from .codeql import CodeqlQuery, CodeqlContext
 
 T = TypeVar('T')
-adb = AdbClient()
+adb = AdbClient("0.0.0.0:6520")
 
 # possible locations of selinux policy
 # obtained from `strace restorecon /data/local/tmp &>&1 | grep open`

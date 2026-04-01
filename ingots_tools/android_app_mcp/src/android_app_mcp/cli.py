@@ -3,6 +3,7 @@ from typing_extensions import Annotated
 import typer
 from libadb import AdbClient
 
+from .frida_support import bootstrap_frida
 from .server import create_server
 
 app = typer.Typer()
@@ -15,7 +16,8 @@ def serve(
 ):
     adb = AdbClient(f"{adb_host}:{adb_port}")
     adb.upload_tools()
-    server = create_server(adb)
+    frida = bootstrap_frida(adb)
+    server = create_server(adb, frida)
     server.run(transport="stdio")
 
 

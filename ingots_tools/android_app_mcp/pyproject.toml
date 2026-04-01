@@ -5,6 +5,7 @@ description = "Mcp server for developing app exploits"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "frida>=16.0.0",
     "libadb",
     "mcp[cli]>=1.26.0",
     "typer>=0.21.1",
