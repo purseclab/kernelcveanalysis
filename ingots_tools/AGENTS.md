@@ -47,6 +47,28 @@ The project is organized as a `uv` workspace with the following members:
 *   **Purpose:** Miscellaneous utility scripts.
 *   **Key Script:** `expand_binary.py` (expands dynamically linked binaries for exploit chaining).
 
+### 7. `android_app_mcp` (Tool: `android_app_mcp`)
+*   **Purpose:** MCP server for debugging and instrumenting Android apps inside an emulator over ADB.
+*   **Key Features:**
+    *   Uploads and launches the bundled `frida-server` on startup.
+    *   Exposes emulator shell and file operations over MCP.
+    *   Supports Frida app enumeration, attach/spawn, script management, and RPC calls.
+*   **Usage:** `uv run android_app_mcp serve --adb-host <host> --adb-port <port>`
+
+### 8. `primitives`
+*   **Purpose:** Exploit primitive library for Linux kernel research.
+*   **Key Features:**
+    *   Stores primitives as structured entries under `src/primitive_data/`.
+    *   Each primitive includes `metadata.json`, `PRIMITIVE.md`, and `primitive.c`.
+    *   Provides reusable primitive data consumed by other tooling in the workspace.
+
+### 9. `object_db`
+*   **Purpose:** Shared kernel object database models and extraction utilities.
+*   **Key Features:**
+    *   Maintains shared object and BTF type models.
+    *   Includes CodeQL query integration used by `kexploit`.
+    *   Provides database-layer utilities for kernel object analysis workflows.
+
 ## Setup & Dependencies
 
 The project uses `uv` for dependency management.
@@ -60,14 +82,17 @@ The project uses `uv` for dependency management.
 
 *   **Language:** Python 3.12+ (some modules require 3.13+).
 *   **Dependency Management:** `uv sync` to install dependencies for all workspace members.
-*   **Type Checking:** `uv run mypy src` (within specific package directories).
+*   **Type Checking:** Use `uv run mypy <package_name>` from the workspace root while developing to check package-local type errors (for example, `uv run mypy kexploit`).
 
 ## Directory Structure
 
 *   `android_env/`: Android analysis tools.
+*   `android_app_mcp/`: MCP server for Android app debugging and Frida-based instrumentation.
 *   `kexploit/`: Kernel exploit adaptation and synthesis tool.
 *   `kexploit_agent/`: Sandbox environment for agents.
 *   `kexploit_utils/`: Shared utilities and data management.
 *   `libadb/`: Shared ADB library.
+*   `object_db/`: Shared kernel object database models and extraction utilities.
+*   `primitives/`: Structured exploit primitive library and metadata.
 *   `scripts/`: Standalone utility scripts.
 *   `SYNTHESIS_TODO.md`: Roadmap for exploit synthesis features.
