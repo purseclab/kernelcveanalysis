@@ -34,9 +34,9 @@ def analyze(
         help="Directory for output reports, pocs, and exploits.",
     ),
     model: Model = typer.Option(
+        Model.GPT_5_1,
         "--model",
         help="LangChain model identifier to use for the agent.",
-        default_factory=lambda: Model.GPT_5_1,
     ),
 ) -> None:
     load_dotenv()
