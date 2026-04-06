@@ -95,6 +95,8 @@ class BugHunter:
         - inspect each .so one at a time
         - identify likely library names and version clues
         - research likely known CVEs
+          - Even if there are no .so or 3rd party dependencies you can find,
+            still search for info about the app itself to determine if any CVEs are present.
         - write findings into {output_path / f"{container_app_path.name}.md"}
         - write pocs into {output_path / "pocs.md"}
 
