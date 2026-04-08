@@ -1,0 +1,2 @@
+home assitant: /home/jack/kx/llm_workdir/agent_history/b310d756-d46e-44a0-9a6a-81011737dc09.jsons
+chrome: /home/jack/kx/llm_workdir/agent_history/3a177038-7f2d-4601-aec1-cab54a2d00d0.jsons

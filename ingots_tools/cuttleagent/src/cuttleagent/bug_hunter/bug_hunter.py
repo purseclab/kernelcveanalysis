@@ -85,7 +85,12 @@ class BugHunter:
 
     def analyze_app(self, app_name: str):
         container_app_path = Path(self.input_mount.dst_path()) / app_name
-        output_path = Path(self.output_mount.dst_path()) / app_name
+        results_folder_name = ".".join(app_name.split(".")[:-1])
+        output_path = Path(self.output_mount.dst_path()) / results_folder_name
+
+        if (self.output_dir / results_folder_name).exists():
+            logger.info(f"Skipping app {app_name}, results folder already exists")
+            return
 
         user_prompt = f"""Analyze only this APK: {container_app_path}
 
@@ -97,8 +102,8 @@ class BugHunter:
         - research likely known CVEs
           - Even if there are no .so or 3rd party dependencies you can find,
             still search for info about the app itself to determine if any CVEs are present.
-        - write findings into {output_path / f"{container_app_path.name}.md"}
-        - write pocs into {output_path / "pocs.md"}
+        - write findings into {output_path / "REPORT.md"}
+        - write pocs into {output_path / "POCS.md"}
 
         Do not analyze other apps in this run.
         Do not write REPORT.md in this run.
@@ -111,7 +116,7 @@ class BugHunter:
     def write_final_report(self):
         output_path = self.output_mount.dst_path()
         user_prompt = f"""
-        Read all per-app reports in {output_path} and write REPORT.md in {output_path}.
+        Read all per-app reports in {output_path} (NOTE: they will be inside the subfolders in this folder) and write REPORT.md in {output_path}.
 
         Tasks:
         - summarize highest-confidence findings

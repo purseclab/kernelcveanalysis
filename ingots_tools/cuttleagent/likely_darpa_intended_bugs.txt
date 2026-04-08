@@ -1,0 +1,7 @@
+mpv: format strinng issue
+
+adobe: same bug, but with splitcompat?
+
+call blocker: CVE-2023-29728 
+
+home assistant webview
