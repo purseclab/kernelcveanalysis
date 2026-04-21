@@ -22,9 +22,45 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <ctype.h>
+#include "util.h"
 
 void *zalloc(size_t sz) {
     return calloc(1, sz);
+}
+
+void close_all_fds_except_stdio(void) {
+    long max_fds = sysconf(_SC_OPEN_MAX);
+    if (max_fds < 0) {
+        max_fds = 1024;
+    }
+
+    for (int fd = 3; fd < max_fds; fd++) {
+        close(fd);
+    }
+}
+
+int get_fdtable_size(void) {
+    char buf[4096];
+    int fd = open("/proc/self/status", O_RDONLY | O_CLOEXEC);
+    if (fd == -1) {
+        return -1;
+    }
+
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) {
+        return -1;
+    }
+    buf[n] = '\0';
+
+    char *line = strstr(buf, "FDSize:");
+    if (line == NULL) {
+        return -1;
+    }
+
+    int fdsize = -1;
+    sscanf(line, "FDSize:%d", &fdsize);
+    return fdsize;
 }
 
 int pin_to_cpu(int cpu) {

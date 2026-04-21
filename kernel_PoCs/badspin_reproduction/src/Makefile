@@ -25,7 +25,7 @@ CCFLAGS += -Wno-unused-function
 CCFLAGS += -DTEST_VULN=$(TEST_VULN)
 CCFLAGS += -DVERBOSE=$(VERBOSE)
 CCFLAGS += -I$(LIBSEPOL_DIR)/include
-CCFLAGS += $(shell ../../common/payload-flags --shared --listening-shell --port 1340)
+CCFLAGS += $(shell ../../common/payload-flags --binary --listening-shell --port 1340)
 
 OBJ += exploit.o
 OBJ += vuln.o
@@ -42,7 +42,7 @@ OBJ += root.o
 
 
 .PHONY: all
-all: clean $(LIBSEPOL_DIR)/src/libsepol.a lib$(LIBNAME).so
+all: clean $(LIBSEPOL_DIR)/src/libsepol.a $(LIBNAME)
 	@echo "\n[x] lib$(LIBNAME).so successfully generated."
 
 list: list_devices
@@ -51,8 +51,8 @@ list: list_devices
 list_devices:
 	gcc -Wall -Wno-unused-variable -DLIST_DEVICES -o list_devices -x c dev_config.h
 
-lib$(LIBNAME).so: $(OBJ)
-	$(CC) $(CCFLAGS) -shared -o $@ $^ $(LIBSEPOL_DIR)/src/libsepol.a -llog
+$(LIBNAME): $(OBJ)
+	$(CC) $(CCFLAGS) -o $@ $^ $(LIBSEPOL_DIR)/src/libsepol.a -llog
 
 %.o: %.c
 	$(CC) $(CCFLAGS) -c -fpic -o $@ -c $<

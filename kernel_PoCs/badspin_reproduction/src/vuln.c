@@ -668,7 +668,7 @@ int vuln(exploit_ctx_t *ctx, enum vuln_mode vuln_mode) {
     for (int i = 0; i < NUM_CLIENTS; i++) {
         pid_t pid;
         switch(pid = SYSCHK(fork())) {
-            case 0: exit(do_client(ctx, i));
+            case 0: _exit(do_client(ctx, i));
             default: break;
         }
         pids[i] = pid;

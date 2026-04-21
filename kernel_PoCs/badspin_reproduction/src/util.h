@@ -4,9 +4,12 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <errno.h>
+#include <string.h>
 
 // allocate memory initialized with zeroes
 void *zalloc(size_t sz);
+void close_all_fds_except_stdio(void);
+int get_fdtable_size(void);
 
 // if cpu is -1 then the process can be scheduled on every online cpu
 int pin_to_cpu(int cpu);
@@ -83,9 +86,9 @@ typedef uint64_t u64;
 #define SYSCHK(x) ({                  \
   __typeof__(x) __res = (x);          \
   if (__res == (__typeof__(x))-1) {   \
-    LOG("SYSCHK(" #x ") = %d\n", __res);\
+    LOG("SYSCHK(" #x ") = %lld\n", (long long)__res);\
     int error_val = errno;            \
-    LOG("errno: %d\n", error_val);    \
+    LOG("errno: %d (%s)\n", error_val, strerror(error_val));    \
     exit(1);                          \
   }                                   \
   __res;                              \

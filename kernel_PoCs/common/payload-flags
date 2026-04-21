@@ -14,6 +14,7 @@ def main():
     payload_group = parser.add_mutually_exclusive_group(required=True)
 
     entrypoint_group.add_argument('--static', action='store_true', help='Build binary as static executable')
+    entrypoint_group.add_argument('--binary', action='store_true', help='Build binary as regular executable')
     entrypoint_group.add_argument('--shared', action='store_true', help='Build binary as shared library which calls the main on load')
     entrypoint_group.add_argument('--jni', action='store_true', help='Build binary as a JNI shared library which calls main on JNI load')
 
@@ -41,6 +42,8 @@ def main():
 
     if args.static:
         flags += '-static -fno-pie -DEXPLOIT_STATIC'
+    elif args.binary:
+        flags += '-DEXPLOIT_STATIC'
     elif args.shared:
         flags += '-shared -llog -DEXPLOIT_SHARED'
     elif args.jni:

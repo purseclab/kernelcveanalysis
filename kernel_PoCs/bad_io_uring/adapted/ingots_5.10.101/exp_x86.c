@@ -550,7 +550,7 @@ usize is_kernel_address(usize addr) {
 
 // for x86 build of 5.10.66 kernel using lts kernel config from kernelctf
 
-#define LIBC_PATH "/lib/x86_64-linux-gnu/libc.so.6"
+#define LIBC_PATH "/lib/libc.so.0"
 #define SHELL "/bin/bash"
 
 #define SPRAY_SIZE 192

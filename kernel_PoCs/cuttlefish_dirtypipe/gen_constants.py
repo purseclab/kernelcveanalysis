@@ -3,6 +3,7 @@ import sys
 
 context.arch = 'aarch64'
 
+# from /system/lib64/libc++.so
 libcpp = ELF('android_libc++.so')
 # streambuff_ctor = libcpp.symbols[b'_ZNSt3__115basic_streambufIcNS_11char_traitsIcEEEC2Ev']
 streambuff_ctor = libcpp.symbols[b'_ZNSt3__15mutex4lockEv']

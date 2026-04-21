@@ -16,7 +16,11 @@ __kexploit_src_metadata("{\"original_kernel_name\":\"ingots_5.10.66\",\"current_
 #include <sys/uio.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
+
+void do_exploit();
+#define EXPLOIT_MAIN do_exploit();
 #include <root_payload.h>
+#include <exploit_entry.h>
 
 typedef uint64_t u64;
 typedef int64_t i64;
@@ -1113,12 +1117,10 @@ void exploit() {
   }
 }
 
-int main() {
+void do_exploit() {
   puts("Starting exploit...");
 
   pin_to_cpu(0);
 
   exploit();
-
-  return 0;
 }

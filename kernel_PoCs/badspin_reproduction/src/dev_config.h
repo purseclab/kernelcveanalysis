@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -17,7 +19,7 @@ typedef struct ____offset {
 
 #define OFFCHK(o) ({ \
     if (!(o).valid) { \
-        LOG("OFFCHK(" #o ")"); \
+        fprintf(stderr, "OFFCHK(" #o ")\n"); \
         exit(0); \
     } \
     ((o).offset);\
