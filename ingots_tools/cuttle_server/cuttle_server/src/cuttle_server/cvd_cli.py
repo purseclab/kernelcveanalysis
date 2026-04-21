@@ -27,7 +27,7 @@ class CuttlefishCli:
         subprocess.run(
             command,
             cwd=runtime_dir,
-            env=self._build_env(runtime_dir),
+            env=self._build_env(record),
             check=True,
             capture_output=True,
             text=True,
@@ -48,7 +48,7 @@ class CuttlefishCli:
         subprocess.run(
             command,
             cwd=record.runtime_dir,
-            env=self._build_env(record.runtime_dir),
+            env=self._build_env(record),
             check=True,
             capture_output=True,
             text=True,
@@ -75,7 +75,7 @@ class CuttlefishCli:
         return 6520 + record.instance_num - 1
 
     @staticmethod
-    def _build_env(runtime_dir: Path) -> dict[str, str]:
+    def _build_env(record: InstanceRecord) -> dict[str, str]:
         env = os.environ.copy()
-        env["HOME"] = str(runtime_dir)
+        env["HOME"] = str(record.runtime_dir.parent)
         return env
