@@ -79,7 +79,7 @@ class CuttlefishCli:
         try:
             subprocess.run(
                 command,
-                cwd=record.runtime_dir,
+                cwd=record.config.runtime_root,
                 env=self._build_env(record),
                 check=True,
                 capture_output=True,

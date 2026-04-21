@@ -235,7 +235,7 @@ class ApiBackgroundTaskTests(unittest.TestCase):
 
 
 class CvdCliTests(unittest.TestCase):
-    def test_start_and_stop_use_template_runtime_root_as_home(self):
+    def test_start_and_stop_use_template_runtime_root_for_home_and_cwd(self):
         cli = CuttlefishCli()
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -262,9 +262,9 @@ class CvdCliTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         start_call = run.call_args_list[0]
         stop_call = run.call_args_list[1]
-        self.assertEqual(start_call.kwargs["cwd"], runtime_dir)
+        self.assertEqual(start_call.kwargs["cwd"], config.runtime_root)
         self.assertEqual(start_call.kwargs["env"]["HOME"], str(config.runtime_root))
-        self.assertEqual(stop_call.kwargs["cwd"], runtime_dir)
+        self.assertEqual(stop_call.kwargs["cwd"], config.runtime_root)
         self.assertEqual(stop_call.kwargs["env"]["HOME"], str(config.runtime_root))
         self.assertEqual(launch_result.adb_port, 6522)
 
