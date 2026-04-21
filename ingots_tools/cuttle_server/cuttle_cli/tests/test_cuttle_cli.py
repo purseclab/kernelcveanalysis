@@ -115,6 +115,7 @@ class CliCommandTests(unittest.TestCase):
             )
 
         self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("adb=127.0.0.1:6520", result.output)
         request_body = mock_client.start_instance.call_args.args[0]
         self.assertEqual(request_body.template_name, "phone")
         self.assertEqual(request_body.instance_name, "demo")
@@ -152,9 +153,15 @@ class CliCommandTests(unittest.TestCase):
             result = self.runner.invoke(app, ["list"])
 
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("inst-1", result.output)
-        self.assertIn("phone", result.output)
-        self.assertIn("127.0.0.1:6520", result.output)
+        lines = result.output.strip().splitlines()
+        self.assertEqual(
+            lines[0],
+            "instance_name  instance_id  state   template  owner  adb_target",
+        )
+        self.assertEqual(
+            lines[1],
+            "inst-1         inst-1       active  phone     alice  127.0.0.1:6520",
+        )
 
     def test_stop_command_uses_name_endpoint(self):
         mock_client = Mock()

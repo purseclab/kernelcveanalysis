@@ -111,9 +111,11 @@ def start(
         raise typer.Exit(code=1) from exc
 
     instance = response.instance
+    adb_target = client.adb_target(instance) or "-"
     typer.echo(
         f"started {instance.instance_name} ({instance.instance_id}) "
-        f"template={instance.template_name} state={instance.state.value}"
+        f"template={instance.template_name} state={instance.state.value} "
+        f"adb={adb_target}"
     )
 
 
@@ -132,12 +134,32 @@ def list_instances(ctx: typer.Context) -> None:
         typer.echo("No instances.")
         return
 
-    for instance in response.instances:
-        adb_target = client.adb_target(instance) or "-"
-        typer.echo(
-            f"{instance.instance_name}\t{instance.state.value}\t"
-            f"{instance.template_name}\t{instance.owner_id}\t{adb_target}"
+    headers = (
+        "instance_name",
+        "instance_id",
+        "state",
+        "template",
+        "owner",
+        "adb_target",
+    )
+    rows = [
+        (
+            instance.instance_name,
+            instance.instance_id,
+            instance.state.value,
+            instance.template_name,
+            instance.owner_id,
+            client.adb_target(instance) or "-",
         )
+        for instance in response.instances
+    ]
+    widths = [
+        max(len(header), *(len(row[index]) for row in rows))
+        for index, header in enumerate(headers)
+    ]
+    typer.echo(_format_columns(headers, widths))
+    for row in rows:
+        typer.echo(_format_columns(row, widths))
 
 
 @app.command()
@@ -163,6 +185,12 @@ def stop(
         f"stopped {instance.instance_name} ({instance.instance_id}) "
         f"state={instance.state.value}"
     )
+
+
+def _format_columns(values: tuple[str, ...], widths: list[int]) -> str:
+    padded = [value.ljust(width) for value, width in zip(values[:-1], widths[:-1])]
+    padded.append(values[-1])
+    return "  ".join(padded)
 
 
 @daemon_app.command("start")
