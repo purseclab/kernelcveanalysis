@@ -66,7 +66,7 @@ class CuttlefishCli:
     @staticmethod
     def _build_env(record: InstanceRecord) -> dict[str, str]:
         env = os.environ.copy()
-        env["HOME"] = str(record.runtime_dir.parent)
+        env["HOME"] = str(record.config.runtime_root)
         return env
 
     def _run_command(

@@ -19,6 +19,7 @@ class ResolvedLaunchConfig(BaseModel):
     template_name: str
     cpus: int = Field(ge=1, le=64)
     selinux: bool
+    runtime_root: Path
     kernel_path: Path
     initrd_path: Path
     apps: list[Path] = Field(default_factory=list)

@@ -364,6 +364,7 @@ class CuttlefishServerManager:
                 if request.overrides.selinux is not None
                 else template.selinux
             ),
+            runtime_root=template.runtime_root,
             kernel_path=template.kernel_path,
             initrd_path=template.initrd_path,
             apps=list(template.apps),
