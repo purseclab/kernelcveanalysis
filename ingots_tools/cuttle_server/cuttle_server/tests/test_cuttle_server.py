@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import tempfile
 import unittest
 from datetime import timedelta
@@ -265,6 +266,43 @@ class CvdCliTests(unittest.TestCase):
         self.assertEqual(stop_call.kwargs["cwd"], runtime_dir)
         self.assertEqual(stop_call.kwargs["env"]["HOME"], str(runtime_dir.parent))
         self.assertEqual(launch_result.adb_port, 6522)
+
+    def test_failed_start_logs_stdout_and_stderr(self):
+        cli = CuttlefishCli()
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            config = ResolvedLaunchConfig(
+                template_name="phone",
+                cpus=4,
+                selinux=False,
+                kernel_path=Path("/kernel"),
+                initrd_path=Path("/initrd"),
+                apps=[],
+                launch_binary=Path("/cf/bin/launch_cvd"),
+                stop_binary=Path("/cf/bin/stop_cvd"),
+            )
+            record = type("Record", (), {})()
+            record.instance_num = 3
+            record.runtime_dir = runtime_dir
+            record.config = config
+            error = subprocess.CalledProcessError(
+                1,
+                ["/cf/bin/launch_cvd"],
+                output="launch stdout",
+                stderr="launch stderr",
+            )
+
+            with self.assertLogs("cuttle_server.cvd_cli", level="ERROR") as logs:
+                with patch(
+                    "cuttle_server.cvd_cli.subprocess.run",
+                    side_effect=error,
+                ):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        cli.start_instance(record)
+
+        joined_logs = "\n".join(logs.output)
+        self.assertIn("launch stdout", joined_logs)
+        self.assertIn("launch stderr", joined_logs)
 
 
 class FakeCli:

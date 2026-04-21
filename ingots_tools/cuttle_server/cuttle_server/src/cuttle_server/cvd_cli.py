@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from .models import InstanceRecord
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,14 +27,7 @@ class CuttlefishCli:
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
         command = self._build_launch_command(record)
-        subprocess.run(
-            command,
-            cwd=runtime_dir,
-            env=self._build_env(record),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        self._run_command(command, record=record, action="start")
         adb_port = self._resolve_adb_port(record)
         return LaunchResult(
             launch_command=command,
@@ -45,14 +41,7 @@ class CuttlefishCli:
             str(record.config.stop_binary),
             f"--instance_num={record.instance_num}",
         ]
-        subprocess.run(
-            command,
-            cwd=record.runtime_dir,
-            env=self._build_env(record),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        self._run_command(command, record=record, action="stop")
 
     def _build_launch_command(self, record: InstanceRecord) -> list[str]:
         config = record.config
@@ -79,3 +68,29 @@ class CuttlefishCli:
         env = os.environ.copy()
         env["HOME"] = str(record.runtime_dir.parent)
         return env
+
+    def _run_command(
+        self,
+        command: list[str],
+        *,
+        record: InstanceRecord,
+        action: str,
+    ) -> None:
+        try:
+            subprocess.run(
+                command,
+                cwd=record.runtime_dir,
+                env=self._build_env(record),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            LOGGER.exception(
+                "cuttlefish %s command failed: command=%s stdout=%r stderr=%r",
+                action,
+                command,
+                getattr(exc, "stdout", None),
+                getattr(exc, "stderr", None),
+            )
+            raise
