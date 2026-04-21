@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -121,9 +119,9 @@ def create_app(settings: CuttlefishSettings) -> FastAPI:
 
     def require_identity(
         authorization: Annotated[
-            str | None, Header(alias="Authorization", default=None)
+            str | None, Header(alias="Authorization")
         ] = None,
-        user_id: Annotated[str | None, Header(alias="X-User-Id", default=None)] = None,
+        user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
     ) -> RequestIdentity:
         return build_request_identity(
             authorization,
