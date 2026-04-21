@@ -61,6 +61,12 @@ class AdbClient:
     def adb_args(self, *args: str) -> list[str]:
         return ["adb", "-s", self.remote_addr, *args]
 
+    def connect_args(self) -> list[str]:
+        return ["adb", "connect", self.remote_addr]
+
+    def disconnect_args(self) -> list[str]:
+        return ["adb", "disconnect", self.remote_addr]
+
     def run_adb(self, *args: str, check: bool = True, text: bool = False) -> subprocess.CompletedProcess:
         return subprocess.run(
             self.adb_args(*args),
@@ -68,6 +74,52 @@ class AdbClient:
             capture_output=True,
             text=text,
         )
+
+    def connect(self) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            self.connect_args(),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def disconnect(self) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            self.disconnect_args(),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def wait_for_device(self, timeout_sec: float | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            self.adb_args("wait-for-device"),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+
+    def wait_for_boot_completed(
+        self,
+        timeout_sec: float = 180.0,
+        poll_interval_sec: float = 1.0,
+    ) -> None:
+        deadline = None if timeout_sec is None else timeout_sec
+        elapsed = 0.0
+        while True:
+            try:
+                if self.shell_text("getprop sys.boot_completed").strip() == "1":
+                    return
+            except AdbCommandError:
+                pass
+
+            if deadline is not None and elapsed >= deadline:
+                raise TimeoutError(
+                    f"timed out waiting for {self.remote_addr} boot completion"
+                )
+            sleep(poll_interval_sec)
+            elapsed += poll_interval_sec
 
     def run_shell(
         self,

@@ -85,6 +85,57 @@ class AdbClientTests(unittest.TestCase):
             check=True,
         )
 
+    def test_connect_uses_remote_addr(self):
+        adb = AdbClient("198.51.100.8:7777")
+
+        with patch("libadb.adb.subprocess.run") as run:
+            adb.connect()
+
+        run.assert_called_once_with(
+            ["adb", "connect", "198.51.100.8:7777"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_disconnect_uses_remote_addr(self):
+        adb = AdbClient("198.51.100.8:7777")
+
+        with patch("libadb.adb.subprocess.run") as run:
+            adb.disconnect()
+
+        run.assert_called_once_with(
+            ["adb", "disconnect", "198.51.100.8:7777"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_wait_for_device_uses_remote_addr(self):
+        adb = AdbClient("198.51.100.8:7777")
+
+        with patch("libadb.adb.subprocess.run") as run:
+            adb.wait_for_device(timeout_sec=12.5)
+
+        run.assert_called_once_with(
+            ["adb", "-s", "198.51.100.8:7777", "wait-for-device"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=12.5,
+        )
+
+    def test_wait_for_boot_completed_polls_until_ready(self):
+        adb = AdbClient("198.51.100.8:7777")
+
+        with patch.object(adb, "shell_text", side_effect=["0", "1"]) as shell_text, patch(
+            "libadb.adb.sleep"
+        ) as sleep_mock:
+            adb.wait_for_boot_completed(timeout_sec=5, poll_interval_sec=0.5)
+
+        self.assertEqual(shell_text.call_count, 2)
+        sleep_mock.assert_called_once_with(0.5)
+
     def test_get_all_process_binds_processes_to_same_client(self):
         adb = AdbClient("203.0.113.5:9999")
         ps_output = "USER PID PPID VSZ RSS WCHAN ADDR S NAME\nu0_a1 42 1 0 0 0 0 S toybox\n"

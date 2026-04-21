@@ -1,0 +1,25 @@
+[project]
+name = "cuttle_server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cuttle_types",
+    "fastapi>=0.136.0",
+    "libadb",
+    "pydantic>=2.12.5",
+    "typer>=0.24.1",
+    "uvicorn>=0.42.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+kexploit_agent = { workspace = true }
+cuttle_types = { workspace = true }
+libadb = { workspace = true }
+
+[project.scripts]
+cuttle_server = "cuttle_server.main:main"

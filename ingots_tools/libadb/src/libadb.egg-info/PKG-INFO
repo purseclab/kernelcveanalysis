@@ -2,9 +2,22 @@ Metadata-Version: 2.4
 Name: libadb
 Version: 0.1.0
 Summary: ADB utilities and tools for kernel exploitation research
-Requires-Python: >=3.13
+Requires-Python: >=3.12
 Description-Content-Type: text/markdown
 
 # libadb
 
 ADB utilities and tools for kernel exploitation research.
+
+```python
+from pathlib import Path
+
+from libadb import AdbClient
+
+adb = AdbClient()
+other_device = AdbClient("127.0.0.1:5555")
+
+adb.upload_tools()
+output = adb.run_adb_command("id", root=True)
+other_device.install_app(Path("app.apk"))
+```

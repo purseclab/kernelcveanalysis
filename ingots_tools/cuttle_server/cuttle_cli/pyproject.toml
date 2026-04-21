@@ -1,0 +1,21 @@
+[project]
+name = "cuttle_cli"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cuttle_types",
+    "pydantic>=2.12.5",
+    "typer>=0.24.1",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+kexploit_agent = { workspace = true }
+cuttle_types = { workspace = true }
+
+[project.scripts]
+cuttle_cli = "cuttle_cli.main:main"

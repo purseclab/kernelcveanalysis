@@ -6,3 +6,4 @@ src/libadb.egg-info/PKG-INFO
 src/libadb.egg-info/SOURCES.txt
 src/libadb.egg-info/dependency_links.txt
 src/libadb.egg-info/top_level.txt
+tests/test_adb.py

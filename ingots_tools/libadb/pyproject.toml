@@ -3,7 +3,7 @@ name = "libadb"
 version = "0.1.0"
 description = "ADB utilities and tools for kernel exploitation research"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv]

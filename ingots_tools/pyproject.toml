@@ -13,6 +13,9 @@ dependencies = [
     "kexploit_utils",
     "primitives",
     "object_db",
+    "cuttle_server",
+    "cuttle_cli",
+    "cuttle_types",
 ]
 
 [tool.uv.workspace]
@@ -27,6 +30,9 @@ members = [
     "kexploit_utils",
     "primitives",
     "object_db",
+    "cuttle_server/cuttle_server",
+    "cuttle_server/cuttle_cli",
+    "cuttle_server/cuttle_types",
 ]
 
 [tool.uv.sources]
@@ -40,3 +46,7 @@ kexploit_agent = { workspace = true }
 kexploit_utils = { workspace = true }
 primitives = { workspace = true }
 object_db = { workspace = true }
+
+cuttle_server = { workspace = true }
+cuttle_cli = { workspace = true }
+cuttle_types = { workspace = true }

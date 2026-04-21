@@ -1,0 +1,12 @@
+[project]
+name = "cuttle_types"
+version = "0.1.0"
+description = "Shared API types for cuttle_server and cuttle_cli"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.12.5",
+]
+
+[tool.uv]
+package = true

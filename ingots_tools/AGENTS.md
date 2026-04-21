@@ -69,6 +69,36 @@ The project is organized as a `uv` workspace with the following members:
     *   Includes CodeQL query integration used by `kexploit`.
     *   Provides database-layer utilities for kernel object analysis workflows.
 
+### 10. `cuttle_server`
+*   **Purpose:** FastAPI control plane for launching, tracking, leasing, and stopping Cuttlefish instances.
+*   **Key Features:**
+    *   SQLite-backed instance state tracking with per-instance runtime directories.
+    *   Config-directory driven startup via `uv run cuttle_server <config-dir>`.
+    *   TOML-based template definitions for Cuttlefish installations, kernels, initrds, SELinux mode, and APK lists.
+    *   Shared bearer-token auth plus `X-User-Id` ownership checks, with configurable admin user support.
+    *   Lease expiration, explicit stop handling, stop-by-name support, and runtime directory cleanup after shutdown.
+    *   Per-instance `adb_port` reporting so clients can connect over the same host as the HTTP control plane.
+    *   Server-side template APK auto-loading during startup via `libadb`, with a per-request opt-out.
+*   **Documentation:** See `cuttle_server/cuttle_server/README.md` for API and config details.
+
+### 11. `cuttle_cli`
+*   **Purpose:** Typer-based CLI client for `cuttle_server`.
+*   **Key Features:**
+    *   Reads default connection config from `~/.config/cuttle_cli/config.toml`.
+    *   Supports `start`, `list`, `stop`, `templates list`, and `templates show`.
+    *   Manages a local pidfile-backed daemon for syncing `adb connect` / `adb disconnect` with the current user's visible instances.
+    *   `start` can disable server-side app auto-loading with `--no-load-apps`.
+    *   Sends shared auth and user headers for all server requests.
+
+### 12. `cuttle_types`
+*   **Purpose:** Shared request/response models used by `cuttle_server` and `cuttle_cli`.
+*   **Key Features:**
+    *   Pydantic models for instance lifecycle requests and responses.
+    *   Shared instance connection fields such as `adb_port`.
+    *   Shared startup overrides such as `load_apps`.
+    *   Shared template summary/detail views.
+    *   Common `InstanceState` enum used across server and client packages.
+
 ## Setup & Dependencies
 
 The project uses `uv` for dependency management.
@@ -77,12 +107,22 @@ The project uses `uv` for dependency management.
 2.  **Environment Variables:**
     *   Check `kexploit/README.md` for `kexploit` specific variables (e.g., `OPENAI_API_KEY`, `GHIDRA_INSTALL_DIR`, `KEXPLOIT_DATA_DIR`).
     *   Check `android_env/README.md` for Android-specific setup (SSH tunnels for Cuttlefish/ADB).
+    *   Check `cuttle_server/cuttle_server/README.md` for the Cuttlefish control-plane config directory layout and template format.
 
 ## Development
 
 *   **Language:** Python 3.12+ (some modules require 3.13+).
 *   **Dependency Management:** `uv sync` to install dependencies for all workspace members.
 *   **Type Checking:** Use `uv run mypy <package_name>` from the workspace root while developing to check package-local type errors (for example, `uv run mypy kexploit`).
+
+## Style Guide
+
+*   Prefer typed data models over ad hoc structures.
+    *   Use `@dataclass` types for internal structured data and Pydantic models for validated config, persistence, and API request/response objects.
+    *   Avoid passing around untyped `dict`s, raw JSON-shaped objects, or positional `tuple`s when the data has a stable schema.
+*   Favor explicit field names and type annotations at module boundaries.
+    *   New interfaces should make expected shapes obvious from the type signature rather than relying on implicit key conventions.
+*   When replacing legacy loose structures, prefer incremental migration toward typed wrappers instead of adding more untyped call paths.
 
 ## Directory Structure
 
@@ -92,6 +132,7 @@ The project uses `uv` for dependency management.
 *   `kexploit_agent/`: Sandbox environment for agents.
 *   `kexploit_utils/`: Shared utilities and data management.
 *   `libadb/`: Shared ADB library.
+*   `cuttle_server/`: Cuttlefish control-plane packages (`cuttle_server` and `cuttle_cli`).
 *   `object_db/`: Shared kernel object database models and extraction utilities.
 *   `primitives/`: Structured exploit primitive library and metadata.
 *   `scripts/`: Standalone utility scripts.
