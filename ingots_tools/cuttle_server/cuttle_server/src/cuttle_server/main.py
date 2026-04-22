@@ -24,11 +24,13 @@ def serve(
         ),
     ],
     host: Annotated[
-        str, typer.Option("--host", help="Host interface to bind the FastAPI server.")
-    ] = "127.0.0.1",
+        str | None,
+        typer.Option("--host", help="Override the configured FastAPI bind host."),
+    ] = None,
     port: Annotated[
-        int, typer.Option("--port", help="TCP port to bind the FastAPI server.")
-    ] = 8000,
+        int | None,
+        typer.Option("--port", help="Override the configured FastAPI bind port."),
+    ] = None,
 ) -> None:
     try:
         settings = load_settings(config_dir)
@@ -36,7 +38,11 @@ def serve(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    uvicorn.run(create_app(settings), host=host, port=port)
+    uvicorn.run(
+        create_app(settings),
+        host=host or settings.server_host,
+        port=port or settings.server_port,
+    )
 
 
 def main() -> None:

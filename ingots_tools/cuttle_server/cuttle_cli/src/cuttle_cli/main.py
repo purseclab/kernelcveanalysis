@@ -196,25 +196,84 @@ def list_instances(
 def stop(
     ctx: typer.Context,
     instance_name: Annotated[
-        str,
+        str | None,
         typer.Argument(
             help="Effective instance name to stop. Unnamed instances use their instance id."
         ),
-    ],
+    ] = None,
+    stop_all: Annotated[
+        bool,
+        typer.Option(
+            "--stop-all",
+            help="Stop all visible non-terminal instances you have permission to stop.",
+        ),
+    ] = False,
+    stop_all_user: Annotated[
+        str | None,
+        typer.Option(
+            "--stop-all-user",
+            help="Stop all visible non-terminal instances owned by the given user.",
+        ),
+    ] = None,
 ) -> None:
     state = _state_from_ctx(ctx)
     _ensure_daemon_running_or_exit(state.settings)
     client = state.client
+    if sum(bool(value) for value in (instance_name, stop_all, stop_all_user)) != 1:
+        typer.echo(
+            "specify exactly one of INSTANCE_NAME, --stop-all, or --stop-all-user",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if instance_name is not None:
+        try:
+            instance = client.stop_instance_by_name(instance_name)
+        except CliError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
+        typer.echo(
+            f"stopped {instance.instance_name} ({instance.instance_id}) "
+            f"state={instance.state.value}"
+        )
+        return
+
     try:
-        instance = client.stop_instance_by_name(instance_name)
+        visible_instances = client.list_instances().instances
     except CliError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(
-        f"stopped {instance.instance_name} ({instance.instance_id}) "
-        f"state={instance.state.value}"
-    )
+    instances_to_stop = [
+        instance
+        for instance in visible_instances
+        if _is_default_list_state(instance)
+        and (stop_all or instance.owner_id == stop_all_user)
+    ]
+    if not instances_to_stop:
+        typer.echo("No matching running instances.")
+        return
+
+    failure = False
+    for instance in instances_to_stop:
+        try:
+            stopped = client.stop_instance(instance.instance_id)
+        except CliError as exc:
+            typer.echo(
+                f"failed to stop {instance.instance_name} ({instance.instance_id}): {exc}",
+                err=True,
+            )
+            failure = True
+            continue
+
+        typer.echo(
+            f"stopped {stopped.instance_name} ({stopped.instance_id}) "
+            f"owner={stopped.owner_id} state={stopped.state.value}"
+        )
+
+    if failure:
+        raise typer.Exit(code=1)
 
 
 def _format_columns(values: tuple[str, ...], widths: list[int]) -> str:

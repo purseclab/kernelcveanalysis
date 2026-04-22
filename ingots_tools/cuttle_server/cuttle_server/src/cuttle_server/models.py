@@ -47,11 +47,12 @@ class InstanceRecord(BaseModel):
     adb_port: int | None = None
     adb_serial: str | None = None
     webrtc_port: int | None = None
-    expires_at: datetime
+    expires_at: datetime | None
     failure_reason: str | None = None
 
-    def is_expired(self, *, now: datetime | None = None, timeout_sec: int) -> bool:
-        del timeout_sec
+    def is_expired(self, *, now: datetime | None = None) -> bool:
+        if self.expires_at is None:
+            return False
         current_time = now or utc_now()
         return self.expires_at <= current_time
 

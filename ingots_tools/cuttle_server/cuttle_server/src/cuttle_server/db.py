@@ -38,7 +38,7 @@ class InstanceDb:
                     adb_port INTEGER,
                     adb_serial TEXT,
                     webrtc_port INTEGER,
-                    expires_at TEXT NOT NULL,
+                    expires_at TEXT,
                     failure_reason TEXT
                 );
 
@@ -55,6 +55,7 @@ class InstanceDb:
             self._migrate_legacy_unique_instance_num()
             self._migrate_add_instance_name_column()
             self._migrate_add_adb_port_column()
+            self._migrate_nullable_expires_at_column()
             self._connection.commit()
 
     def close(self) -> None:
@@ -110,7 +111,7 @@ class InstanceDb:
                     record.adb_port,
                     record.adb_serial,
                     record.webrtc_port,
-                    record.expires_at.isoformat(),
+                    record.expires_at.isoformat() if record.expires_at else None,
                     record.failure_reason,
                 ),
             )
@@ -237,7 +238,7 @@ class InstanceDb:
                 adb_port INTEGER,
                 adb_serial TEXT,
                 webrtc_port INTEGER,
-                expires_at TEXT NOT NULL,
+                expires_at TEXT,
                 failure_reason TEXT
             );
 
@@ -302,6 +303,86 @@ class InstanceDb:
         }
         if "adb_port" not in columns:
             connection.execute("ALTER TABLE instances ADD COLUMN adb_port INTEGER")
+
+    def _migrate_nullable_expires_at_column(self) -> None:
+        connection = self._require_connection()
+        create_sql_row = connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'instances'
+            """
+        ).fetchone()
+        if create_sql_row is None:
+            return
+
+        create_sql = create_sql_row["sql"] or ""
+        if "expires_at TEXT NOT NULL" not in create_sql:
+            return
+
+        connection.executescript(
+            """
+            ALTER TABLE instances RENAME TO instances_old_expires_at;
+
+            CREATE TABLE instances (
+                instance_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                instance_name TEXT,
+                state TEXT NOT NULL,
+                instance_num INTEGER NOT NULL,
+                config_json TEXT NOT NULL,
+                runtime_dir TEXT NOT NULL,
+                launch_command_json TEXT NOT NULL,
+                adb_port INTEGER,
+                adb_serial TEXT,
+                webrtc_port INTEGER,
+                expires_at TEXT,
+                failure_reason TEXT
+            );
+
+            INSERT INTO instances (
+                instance_id,
+                owner_id,
+                instance_name,
+                state,
+                instance_num,
+                config_json,
+                runtime_dir,
+                launch_command_json,
+                adb_port,
+                adb_serial,
+                webrtc_port,
+                expires_at,
+                failure_reason
+            )
+            SELECT
+                instance_id,
+                owner_id,
+                instance_name,
+                state,
+                instance_num,
+                config_json,
+                runtime_dir,
+                launch_command_json,
+                adb_port,
+                adb_serial,
+                webrtc_port,
+                expires_at,
+                failure_reason
+            FROM instances_old_expires_at;
+
+            DROP TABLE instances_old_expires_at;
+
+            CREATE INDEX IF NOT EXISTS idx_instances_state
+                ON instances(state);
+
+            CREATE INDEX IF NOT EXISTS idx_instances_expires_at
+                ON instances(expires_at);
+
+            CREATE INDEX IF NOT EXISTS idx_instances_instance_num
+                ON instances(instance_num);
+            """
+        )
 
     def _row_to_record(self, row: sqlite3.Row) -> InstanceRecord:
         return InstanceRecord.model_validate(

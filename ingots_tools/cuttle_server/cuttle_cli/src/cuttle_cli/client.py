@@ -58,6 +58,14 @@ class CuttleApiClient:
         )
         return InstanceView.model_validate(data)
 
+    def stop_instance(self, instance_id: str) -> InstanceView:
+        quoted_id = parse.quote(instance_id, safe="")
+        data = self._request_json(
+            "POST",
+            f"/v1/instances/{quoted_id}/stop",
+        )
+        return InstanceView.model_validate(data)
+
     def list_templates(self) -> TemplateListResponse:
         data = self._request_json("GET", "/v1/templates")
         return TemplateListResponse.model_validate(data)

@@ -76,12 +76,19 @@ class CliCommandTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("daemon", result.output)
 
-    def _mock_instance(self, *, instance_name: str, owner_id: str = "alice") -> InstanceView:
+    def _mock_instance(
+        self,
+        *,
+        instance_name: str,
+        owner_id: str = "alice",
+        state: InstanceState = InstanceState.ACTIVE,
+        instance_id: str = "inst-1",
+    ) -> InstanceView:
         return InstanceView(
-            instance_id="inst-1",
+            instance_id=instance_id,
             owner_id=owner_id,
             instance_name=instance_name,
-            state=InstanceState.ACTIVE,
+            state=state,
             instance_num=1,
             template_name="phone",
             cpus=4,
@@ -212,6 +219,85 @@ class CliCommandTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, result.output)
         mock_client.stop_instance_by_name.assert_called_once_with("inst-1")
+
+    def test_stop_all_stops_all_visible_running_instances(self):
+        mock_client = Mock()
+        running = self._mock_instance(instance_name="demo", instance_id="inst-1")
+        stopped = self._mock_instance(
+            instance_name="done",
+            instance_id="inst-2",
+            state=InstanceState.STOPPED,
+        )
+        other = self._mock_instance(
+            instance_name="other",
+            instance_id="inst-3",
+            owner_id="bob",
+        )
+        mock_client.list_instances.return_value = InstanceListResponse(
+            instances=[running, stopped, other]
+        )
+        mock_client.stop_instance.side_effect = [running, other]
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"):
+            result = self.runner.invoke(app, ["stop", "--stop-all"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(
+            [call.args[0] for call in mock_client.stop_instance.call_args_list],
+            ["inst-1", "inst-3"],
+        )
+        self.assertIn("stopped demo (inst-1)", result.output)
+        self.assertIn("stopped other (inst-3)", result.output)
+
+    def test_stop_all_user_stops_only_matching_owner_instances(self):
+        mock_client = Mock()
+        alice = self._mock_instance(instance_name="alice-1", instance_id="inst-1")
+        bob = self._mock_instance(
+            instance_name="bob-1",
+            instance_id="inst-2",
+            owner_id="bob",
+        )
+        mock_client.list_instances.return_value = InstanceListResponse(
+            instances=[alice, bob]
+        )
+        mock_client.stop_instance.return_value = bob
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"):
+            result = self.runner.invoke(app, ["stop", "--stop-all-user", "bob"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        mock_client.stop_instance.assert_called_once_with("inst-2")
+        self.assertIn("owner=bob", result.output)
+
+    def test_stop_all_user_reports_no_matches(self):
+        mock_client = Mock()
+        mock_client.list_instances.return_value = InstanceListResponse(
+            instances=[self._mock_instance(instance_name="alice-1", instance_id="inst-1")]
+        )
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"):
+            result = self.runner.invoke(app, ["stop", "--stop-all-user", "bob"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.output.strip(), "No matching running instances.")
+        mock_client.stop_instance.assert_not_called()
+
+    def test_stop_command_rejects_multiple_modes(self):
+        mock_client = Mock()
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"):
+            result = self.runner.invoke(app, ["stop", "inst-1", "--stop-all"])
+
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn("specify exactly one", result.output)
 
     def test_templates_commands_work(self):
         mock_client = Mock()

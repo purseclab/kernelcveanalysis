@@ -15,10 +15,12 @@ DEFAULT_INSTANCE_RUNTIME_ROOT = Path("/tmp/cvd")
 
 
 class ServerConfigFile(BaseModel):
+    server_host: str = Field(default="127.0.0.1", min_length=1)
+    server_port: int = Field(default=8000, ge=1, le=65535)
     auth_token: str = Field(min_length=1)
     admin_user_id: str = Field(min_length=1)
     database_path: Path
-    instance_timeout_sec: int = Field(default=600, ge=1)
+    instance_timeout_sec: int = Field(default=600, ge=0)
     reconcile_interval_sec: int = Field(default=30, ge=1)
     max_instances: int = Field(default=10, ge=1)
 
@@ -55,11 +57,13 @@ class InstanceTemplate:
 
 @dataclass(frozen=True, slots=True)
 class CuttlefishSettings:
+    server_host: str
+    server_port: int
     auth_token: str
     admin_user_id: str
     database_path: Path
     instance_runtime_root: Path
-    instance_timeout_sec: int
+    instance_timeout_sec: int | None
     reconcile_interval_sec: int
     max_instances: int
     templates: dict[str, InstanceTemplate]
@@ -89,11 +93,17 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
         raise ConfigError(f"no template TOML files found in {templates_dir}")
 
     return CuttlefishSettings(
+        server_host=main_config.server_host,
+        server_port=main_config.server_port,
         auth_token=main_config.auth_token,
         admin_user_id=main_config.admin_user_id,
         database_path=main_config.database_path,
         instance_runtime_root=DEFAULT_INSTANCE_RUNTIME_ROOT,
-        instance_timeout_sec=main_config.instance_timeout_sec,
+        instance_timeout_sec=(
+            None
+            if main_config.instance_timeout_sec == 0
+            else main_config.instance_timeout_sec
+        ),
         reconcile_interval_sec=main_config.reconcile_interval_sec,
         max_instances=main_config.max_instances,
         templates=templates,

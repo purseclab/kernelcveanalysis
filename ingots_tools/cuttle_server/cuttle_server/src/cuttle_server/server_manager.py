@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import threading
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from cuttle_types import (
@@ -77,8 +77,8 @@ class CuttlefishServerManager:
         with self.lock:
             self.reconcile_expired_instances()
             config = self._resolve_config(request)
-            expires_at = utc_now() + timedelta(
-                seconds=self.settings.instance_timeout_sec
+            expires_at = self._resolve_expiration_deadline(
+                self.settings.instance_timeout_sec
             )
             if request.instance_name is not None and self.db.has_active_instance_name(
                 user_id, request.instance_name
@@ -143,9 +143,7 @@ class CuttlefishServerManager:
     ) -> InstanceView:
         with self.lock:
             record = self._get_visible_instance_record(user_id, is_admin, instance_id)
-            if record.is_expired(
-                now=utc_now(), timeout_sec=self.settings.instance_timeout_sec
-            ):
+            if record.is_expired(now=utc_now()):
                 self._expire_instance(record)
                 record = self._get_visible_instance_record(
                     user_id, is_admin, instance_id
@@ -161,8 +159,12 @@ class CuttlefishServerManager:
     ) -> InstanceView:
         with self.lock:
             record = self._get_visible_instance_record(user_id, is_admin, instance_id)
-            timeout_sec = request.timeout_sec or self.settings.instance_timeout_sec
-            record.expires_at = utc_now() + timedelta(seconds=timeout_sec)
+            timeout_sec = (
+                request.timeout_sec
+                if request.timeout_sec is not None
+                else self.settings.instance_timeout_sec
+            )
+            record.expires_at = self._resolve_expiration_deadline(timeout_sec)
             self.db.upsert(record)
             return instance_view_from_record(record)
 
@@ -233,9 +235,7 @@ class CuttlefishServerManager:
             for record in self.db.list_instances():
                 if record.state in TERMINAL_STATES:
                     continue
-                if record.is_expired(
-                    now=utc_now(), timeout_sec=self.settings.instance_timeout_sec
-                ):
+                if record.is_expired(now=utc_now()):
                     self._expire_instance(record)
 
     def _expire_instance(self, record: InstanceRecord) -> None:
@@ -361,6 +361,12 @@ class CuttlefishServerManager:
             return UUID(instance_id).hex
         except ValueError:
             return instance_id.replace("-", "")
+
+    @staticmethod
+    def _resolve_expiration_deadline(timeout_sec: int | None = None) -> datetime | None:
+        if timeout_sec is None:
+            return None
+        return utc_now() + timedelta(seconds=timeout_sec)
 
     def _resolve_config(self, request: CreateInstanceRequest) -> ResolvedLaunchConfig:
         template = self.settings.templates.get(request.template_name)

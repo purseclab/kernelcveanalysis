@@ -6,7 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from cuttle_types import CreateInstanceRequest, InstanceState
+from cuttle_types import CreateInstanceRequest, InstanceState, RenewLeaseRequest
 from fastapi import HTTPException
 from typer.testing import CliRunner
 
@@ -50,6 +50,8 @@ class ConfigLoadingTests(unittest.TestCase):
             app_two.write_text("")
             (root / "templates").mkdir()
             (root / "cuttle_server.toml").write_text(
+                'server_host = "0.0.0.0"\n'
+                "server_port = 9000\n"
                 'auth_token = "secret-token"\n'
                 'admin_user_id = "admin"\n'
                 'database_path = "data/cuttlefish.db"\n'
@@ -68,6 +70,8 @@ class ConfigLoadingTests(unittest.TestCase):
 
             settings = load_settings(root)
 
+        self.assertEqual(settings.server_host, "0.0.0.0")
+        self.assertEqual(settings.server_port, 9000)
         self.assertEqual(settings.auth_token, "secret-token")
         self.assertEqual(settings.admin_user_id, "admin")
         self.assertEqual(settings.instance_timeout_sec, 123)
@@ -97,6 +101,46 @@ class ServerCliTests(unittest.TestCase):
             initrd.write_text("")
             (root / "templates").mkdir()
             (root / "cuttle_server.toml").write_text(
+                'server_host = "0.0.0.0"\n'
+                "server_port = 9000\n"
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "db.sqlite"\n'
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "phone"\n'
+                f'runtime_root = "{install_dir}"\n'
+                "cpus = 2\n"
+                f'kernel_path = "{kernel}"\n'
+                f'initrd_path = "{initrd}"\n'
+                "selinux = true\n"
+                "apps = []\n"
+            )
+
+            with patch("cuttle_server.main.uvicorn.run") as run:
+                result = runner.invoke(app, [str(root)])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs["host"], "0.0.0.0")
+        self.assertEqual(run.call_args.kwargs["port"], 9000)
+
+    def test_cli_flags_override_configured_bind_address(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            bin_dir = install_dir / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "cvd").write_text("")
+            kernel = root / "kernel"
+            kernel.write_text("")
+            initrd = root / "initrd.img"
+            initrd.write_text("")
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'server_host = "127.0.0.1"\n'
+                "server_port = 8000\n"
                 'auth_token = "secret-token"\n'
                 'admin_user_id = "admin"\n'
                 'database_path = "db.sqlite"\n'
@@ -367,6 +411,8 @@ class ServerManagerTests(unittest.TestCase):
             "Settings",
             (),
             {
+                "server_host": "127.0.0.1",
+                "server_port": 8000,
                 "database_path": self.root / "db.sqlite",
                 "instance_runtime_root": self.root / "instances",
                 "instance_timeout_sec": 60,
@@ -539,3 +585,67 @@ class ServerManagerTests(unittest.TestCase):
         assert expired is not None
         self.assertEqual(expired.state, InstanceState.EXPIRED)
         self.assertFalse(created_two.runtime_dir.exists())
+
+    def test_zero_timeout_in_config_disables_expiration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            bin_dir = install_dir / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "cvd").write_text("")
+            kernel = root / "kernel"
+            kernel.write_text("")
+            initrd = root / "initrd.img"
+            initrd.write_text("")
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "data/cuttlefish.db"\n'
+                "instance_timeout_sec = 0\n"
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "phone"\n'
+                f'runtime_root = "{install_dir}"\n'
+                "cpus = 2\n"
+                f'kernel_path = "{kernel}"\n'
+                f'initrd_path = "{initrd}"\n'
+                "selinux = true\n"
+                "apps = []\n"
+            )
+
+            settings = load_settings(root)
+
+        self.assertIsNone(settings.instance_timeout_sec)
+
+    def test_disabled_global_timeout_leaves_instance_unexpired(self):
+        self.settings.instance_timeout_sec = None
+
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="demo"),
+        ).instance
+        self.assertIsNone(created.expires_at)
+
+        self.manager.reconcile_expired_instances()
+
+        record = self.db.get(created.instance_id)
+        assert record is not None
+        self.assertEqual(record.state, InstanceState.ACTIVE)
+        self.assertIsNone(record.expires_at)
+
+    def test_renew_without_timeout_keeps_disabled_global_expiration(self):
+        self.settings.instance_timeout_sec = None
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="demo"),
+        ).instance
+
+        renewed = self.manager.renew_lease(
+            "alice",
+            is_admin=False,
+            instance_id=created.instance_id,
+            request=RenewLeaseRequest(),
+        )
+
+        self.assertIsNone(renewed.expires_at)

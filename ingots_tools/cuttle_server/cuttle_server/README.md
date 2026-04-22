@@ -7,13 +7,13 @@
 From the workspace root:
 
 ```sh
-uv run cuttle_server /path/to/config-dir
+uv run cuttle-server /path/to/config-dir
 ```
 
-Optional bind flags:
+Optional bind overrides:
 
 ```sh
-uv run cuttle_server /path/to/config-dir --host 0.0.0.0 --port 9000
+uv run cuttle-server /path/to/config-dir --host 0.0.0.0 --port 9000
 ```
 
 ## Config Layout
@@ -33,6 +33,8 @@ config-dir/
 `cuttle_server.toml` contains server-level paths, auth, and limits:
 
 ```toml
+server_host = "127.0.0.1"
+server_port = 8000
 auth_token = "replace-me"
 admin_user_id = "admin"
 database_path = "data/cuttlefish.db"
@@ -42,9 +44,11 @@ max_instances = 10
 ```
 
 - Relative paths are resolved relative to the config directory.
+- `server_host` and `server_port` control the default FastAPI bind address. CLI `--host` and `--port` still override them for one-off runs.
 - `auth_token` is the shared bearer token required on every request.
 - `admin_user_id` is the only user allowed to reconcile and bypass normal per-user instance visibility.
 - Per-instance runtime state is stored under `/tmp/cvd` using short generated directory names to avoid Unix socket path-length failures.
+- Set `instance_timeout_sec = 0` to disable automatic expiration globally.
 - `reconcile_interval_sec` controls how often the server's background cleanup task checks for expired instances.
 
 ### Template Config
@@ -122,6 +126,7 @@ Notes:
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
 - When `load_apps` is enabled and the template has APKs, the server connects to the instance over server-local ADB, waits for boot completion, installs the APKs in template order, then disconnects before marking the instance `ACTIVE`.
 - The server runs a background task on startup that periodically reconciles and stops expired instances, and it also performs one reconciliation pass immediately during startup.
+- If automatic expiration is disabled globally, new instances are created without an `expires_at` deadline until a client explicitly renews them with a timeout.
 - After a successful explicit stop or expiration cleanup, the runtime directory is removed.
 - If stop or cleanup fails, the instance record is updated with `failure_reason` and the runtime directory is left in place for inspection.
 - If app loading fails, instance creation fails, the instance is stopped, and the record is left in `crashed` state with a failure reason.

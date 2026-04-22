@@ -22,4 +22,4 @@ cuttle_types = { workspace = true }
 libadb = { workspace = true }
 
 [project.scripts]
-cuttle_server = "cuttle_server.main:main"
+cuttle-server = "cuttle_server.main:main"

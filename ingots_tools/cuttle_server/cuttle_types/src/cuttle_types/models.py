@@ -50,7 +50,7 @@ class InstanceView(BaseModel):
     adb_port: int | None
     adb_serial: str | None
     webrtc_port: int | None
-    expires_at: datetime
+    expires_at: datetime | None
     failure_reason: str | None
 
 
