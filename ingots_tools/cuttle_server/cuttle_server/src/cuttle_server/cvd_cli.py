@@ -26,8 +26,8 @@ class CuttlefishCli:
         runtime_dir = record.runtime_dir
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        command = self._build_create_command(record)
-        self._run_command(command, record=record, action="create")
+        command = self._build_start_command(record)
+        self._run_command(command, record=record, action="start")
         adb_port = self._resolve_adb_port(record)
         return LaunchResult(
             launch_command=command,
@@ -39,16 +39,12 @@ class CuttlefishCli:
     def stop_instance(self, record: InstanceRecord) -> None:
         stop_command = [str(record.config.cvd_binary), "stop"]
         self._run_command(stop_command, record=record, action="stop")
-        remove_command = [str(record.config.cvd_binary), "remove"]
-        self._run_command(remove_command, record=record, action="remove")
 
-    def _build_create_command(self, record: InstanceRecord) -> list[str]:
+    def _build_start_command(self, record: InstanceRecord) -> list[str]:
         config = record.config
         command = [
             str(config.cvd_binary),
-            "create",
-            f"--host_path={config.runtime_root}",
-            f"--product_path={config.runtime_root}",
+            "start",
             f"--base_instance_num={record.instance_num}",
             f"--cpus={config.cpus}",
             "--start_webrtc=true",
@@ -69,6 +65,8 @@ class CuttlefishCli:
     def _build_env(record: InstanceRecord) -> dict[str, str]:
         env = os.environ.copy()
         env["HOME"] = str(record.runtime_dir)
+        env["ANDROID_HOST_OUT"] = str(record.config.runtime_root)
+        env["ANDROID_PRODUCT_OUT"] = str(record.config.runtime_root)
         return env
 
     def _run_command(

@@ -231,7 +231,7 @@ class ApiBackgroundTaskTests(unittest.TestCase):
 
 
 class CvdCliTests(unittest.TestCase):
-    def test_create_stop_and_remove_use_instance_runtime_dir_for_home_and_cwd(self):
+    def test_start_and_stop_use_instance_runtime_dir_and_android_host_env(self):
         cli = CuttlefishCli()
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -254,24 +254,23 @@ class CvdCliTests(unittest.TestCase):
                 launch_result = cli.start_instance(record)
                 cli.stop_instance(record)
 
-        self.assertEqual(run.call_count, 3)
-        create_call = run.call_args_list[0]
+        self.assertEqual(run.call_count, 2)
+        start_call = run.call_args_list[0]
         stop_call = run.call_args_list[1]
-        remove_call = run.call_args_list[2]
-        self.assertEqual(create_call.kwargs["cwd"], runtime_dir)
-        self.assertEqual(create_call.kwargs["env"]["HOME"], str(runtime_dir))
+        self.assertEqual(start_call.kwargs["cwd"], runtime_dir)
+        self.assertEqual(start_call.kwargs["env"]["HOME"], str(runtime_dir))
+        self.assertEqual(start_call.kwargs["env"]["ANDROID_HOST_OUT"], "/cf")
+        self.assertEqual(start_call.kwargs["env"]["ANDROID_PRODUCT_OUT"], "/cf")
         self.assertEqual(stop_call.kwargs["cwd"], runtime_dir)
         self.assertEqual(stop_call.kwargs["env"]["HOME"], str(runtime_dir))
-        self.assertEqual(remove_call.kwargs["cwd"], runtime_dir)
-        self.assertEqual(remove_call.kwargs["env"]["HOME"], str(runtime_dir))
+        self.assertEqual(stop_call.kwargs["env"]["ANDROID_HOST_OUT"], "/cf")
+        self.assertEqual(stop_call.kwargs["env"]["ANDROID_PRODUCT_OUT"], "/cf")
         self.assertEqual(launch_result.adb_port, 6522)
         self.assertEqual(
             launch_result.launch_command,
             [
                 "/cf/bin/cvd",
-                "create",
-                "--host_path=/cf",
-                "--product_path=/cf",
+                "start",
                 "--base_instance_num=3",
                 "--cpus=4",
                 "--start_webrtc=true",
@@ -283,7 +282,6 @@ class CvdCliTests(unittest.TestCase):
             ],
         )
         self.assertEqual(stop_call.args[0], ["/cf/bin/cvd", "stop"])
-        self.assertEqual(remove_call.args[0], ["/cf/bin/cvd", "remove"])
 
     def test_failed_start_logs_stdout_and_stderr(self):
         cli = CuttlefishCli()
@@ -305,7 +303,7 @@ class CvdCliTests(unittest.TestCase):
             record.config = config
             error = subprocess.CalledProcessError(
                 1,
-                ["/cf/bin/cvd", "create"],
+                ["/cf/bin/cvd", "start"],
                 output="launch stdout",
                 stderr="launch stderr",
             )

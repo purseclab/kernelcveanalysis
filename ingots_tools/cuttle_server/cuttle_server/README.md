@@ -118,8 +118,8 @@ Notes:
 ## Runtime Behavior
 
 - Each instance gets a unique runtime directory under `instance_runtime_root/<instance-id>`.
-- `cvd create`, `cvd stop`, and `cvd remove` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
-- `cvd create` also receives explicit `--host_path=<runtime_root>` and `--product_path=<runtime_root>` so the template installation remains the source of host tools and guest artifacts.
+- `cvd start` and `cvd stop` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
+- The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
 - When `load_apps` is enabled and the template has APKs, the server connects to the instance over server-local ADB, waits for boot completion, installs the APKs in template order, then disconnects before marking the instance `ACTIVE`.
 - The server runs a background task on startup that periodically reconciles and stops expired instances, and it also performs one reconciliation pass immediately during startup.
@@ -127,12 +127,10 @@ Notes:
 - If stop or cleanup fails, the instance record is updated with `failure_reason` and the runtime directory is left in place for inspection.
 - If app loading fails, instance creation fails, the instance is stopped, and the record is left in `crashed` state with a failure reason.
 
-Current create command shape:
+Current start command shape:
 
 ```text
-cvd create \
-  --host_path=<runtime_root> \
-  --product_path=<runtime_root> \
+cvd start \
   --base_instance_num=<N> \
   --cpus=<cpus> \
   --start_webrtc=true \
@@ -148,11 +146,10 @@ If SELinux is disabled, the server also adds:
 --extra_kernel_cmdline=androidboot.selinux=permissive
 ```
 
-Stop and cleanup use:
+Stop uses:
 
 ```text
 cvd stop
-cvd remove
 ```
 
 ## Current Limitations
