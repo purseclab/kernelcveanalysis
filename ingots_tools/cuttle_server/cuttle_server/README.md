@@ -36,7 +36,6 @@ config-dir/
 auth_token = "replace-me"
 admin_user_id = "admin"
 database_path = "data/cuttlefish.db"
-instance_runtime_root = "data/instances"
 instance_timeout_sec = 600
 reconcile_interval_sec = 30
 max_instances = 10
@@ -45,7 +44,7 @@ max_instances = 10
 - Relative paths are resolved relative to the config directory.
 - `auth_token` is the shared bearer token required on every request.
 - `admin_user_id` is the only user allowed to reconcile and bypass normal per-user instance visibility.
-- `instance_runtime_root` is the parent directory for per-instance runtime state.
+- Per-instance runtime state is stored under `/tmp/cvd` using short generated directory names to avoid Unix socket path-length failures.
 - `reconcile_interval_sec` controls how often the server's background cleanup task checks for expired instances.
 
 ### Template Config
@@ -117,7 +116,7 @@ Notes:
 
 ## Runtime Behavior
 
-- Each instance gets a unique runtime directory under `instance_runtime_root/<instance-id>`.
+- Each instance gets a unique runtime directory under `/tmp/cvd/<short-instance-id>`.
 - `cvd start` and `cvd stop` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.

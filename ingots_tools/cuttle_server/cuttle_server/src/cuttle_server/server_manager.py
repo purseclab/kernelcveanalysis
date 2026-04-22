@@ -4,6 +4,7 @@ import shutil
 import threading
 import uuid
 from datetime import timedelta
+from uuid import UUID
 
 from cuttle_types import (
     CreateInstanceRequest,
@@ -94,7 +95,10 @@ class CuttlefishServerManager:
                 state=InstanceState.STARTING,
                 instance_num=instance_num,
                 config=config,
-                runtime_dir=self.settings.instance_runtime_root / instance_id,
+                runtime_dir=(
+                    self.settings.instance_runtime_root
+                    / self._runtime_dir_name(instance_id)
+                ),
                 launch_command=[],
                 adb_port=None,
                 adb_serial=None,
@@ -350,6 +354,13 @@ class CuttlefishServerManager:
         raise CapacityError(
             f"no instance slots available; max is {self.settings.max_instances}"
         )
+
+    @staticmethod
+    def _runtime_dir_name(instance_id: str) -> str:
+        try:
+            return UUID(instance_id).hex
+        except ValueError:
+            return instance_id.replace("-", "")
 
     def _resolve_config(self, request: CreateInstanceRequest) -> ResolvedLaunchConfig:
         template = self.settings.templates.get(request.template_name)

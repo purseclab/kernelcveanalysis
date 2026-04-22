@@ -11,11 +11,13 @@ class ConfigError(ValueError):
     pass
 
 
+DEFAULT_INSTANCE_RUNTIME_ROOT = Path("/tmp/cvd")
+
+
 class ServerConfigFile(BaseModel):
     auth_token: str = Field(min_length=1)
     admin_user_id: str = Field(min_length=1)
     database_path: Path
-    instance_runtime_root: Path
     instance_timeout_sec: int = Field(default=600, ge=1)
     reconcile_interval_sec: int = Field(default=30, ge=1)
     max_instances: int = Field(default=10, ge=1)
@@ -90,7 +92,7 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
         auth_token=main_config.auth_token,
         admin_user_id=main_config.admin_user_id,
         database_path=main_config.database_path,
-        instance_runtime_root=main_config.instance_runtime_root,
+        instance_runtime_root=DEFAULT_INSTANCE_RUNTIME_ROOT,
         instance_timeout_sec=main_config.instance_timeout_sec,
         reconcile_interval_sec=main_config.reconcile_interval_sec,
         max_instances=main_config.max_instances,
@@ -110,9 +112,6 @@ def _load_main_config(main_config_path: Path, config_dir: Path) -> ServerConfigF
     return parsed.model_copy(
         update={
             "database_path": _resolve_path(parsed.database_path, config_dir),
-            "instance_runtime_root": _resolve_path(
-                parsed.instance_runtime_root, config_dir
-            ),
         }
     )
 

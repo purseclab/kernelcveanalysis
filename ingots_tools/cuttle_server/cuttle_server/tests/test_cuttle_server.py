@@ -16,7 +16,11 @@ from cuttle_server.api import (
     validate_authorization_header,
     validate_user_id_header,
 )
-from cuttle_server.config import InstanceTemplate, load_settings
+from cuttle_server.config import (
+    DEFAULT_INSTANCE_RUNTIME_ROOT,
+    InstanceTemplate,
+    load_settings,
+)
 from cuttle_server.cvd_cli import CuttlefishCli
 from cuttle_server.db import InstanceDb
 from cuttle_server.main import app
@@ -49,7 +53,6 @@ class ConfigLoadingTests(unittest.TestCase):
                 'auth_token = "secret-token"\n'
                 'admin_user_id = "admin"\n'
                 'database_path = "data/cuttlefish.db"\n'
-                'instance_runtime_root = "data/runtime"\n'
                 "instance_timeout_sec = 123\n"
                 "max_instances = 7\n"
             )
@@ -71,9 +74,7 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(settings.reconcile_interval_sec, 30)
         self.assertEqual(settings.max_instances, 7)
         self.assertEqual(settings.database_path, (root / "data/cuttlefish.db").resolve())
-        self.assertEqual(
-            settings.instance_runtime_root, (root / "data/runtime").resolve()
-        )
+        self.assertEqual(settings.instance_runtime_root, DEFAULT_INSTANCE_RUNTIME_ROOT)
         template = settings.templates["phone"]
         self.assertEqual(template.cpus, 4)
         self.assertEqual(template.runtime_root, install_dir.resolve())
@@ -99,7 +100,6 @@ class ServerCliTests(unittest.TestCase):
                 'auth_token = "secret-token"\n'
                 'admin_user_id = "admin"\n'
                 'database_path = "db.sqlite"\n'
-                'instance_runtime_root = "runtime"\n'
             )
             (root / "templates" / "default.toml").write_text(
                 'name = "phone"\n'
@@ -413,6 +413,8 @@ class ServerManagerTests(unittest.TestCase):
         self.assertIsNone(record.instance_name)
         self.assertEqual(record.adb_port, 6520)
         self.assertTrue(record.config.load_apps)
+        self.assertEqual(record.runtime_dir.parent, self.root / "instances")
+        self.assertEqual(len(record.runtime_dir.name), 32)
 
     def test_app_loading_runs_by_default(self):
         created = self.manager.create_instance(
