@@ -163,6 +163,41 @@ class CliCommandTests(unittest.TestCase):
             "inst-1         inst-1       active  phone     alice  127.0.0.1:6520",
         )
 
+    def test_list_command_hides_terminal_instances_by_default(self):
+        mock_client = Mock()
+        mock_client.adb_target.return_value = "127.0.0.1:6520"
+        stopped = self._mock_instance(instance_name="stopped")
+        stopped.state = InstanceState.STOPPED
+        mock_client.list_instances.return_value = InstanceListResponse(
+            instances=[stopped]
+        )
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"):
+            result = self.runner.invoke(app, ["list"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.output.strip(), "No instances.")
+
+    def test_list_command_all_shows_terminal_instances(self):
+        mock_client = Mock()
+        mock_client.adb_target.return_value = "-"
+        stopped = self._mock_instance(instance_name="stopped")
+        stopped.state = InstanceState.STOPPED
+        stopped.adb_port = None
+        mock_client.list_instances.return_value = InstanceListResponse(
+            instances=[stopped]
+        )
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"):
+            result = self.runner.invoke(app, ["list", "--all"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("stopped", result.output)
+
     def test_stop_command_uses_name_endpoint(self):
         mock_client = Mock()
         mock_client.adb_target.return_value = "127.0.0.1:6520"

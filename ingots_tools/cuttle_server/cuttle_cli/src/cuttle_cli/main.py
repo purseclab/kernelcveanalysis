@@ -4,7 +4,13 @@ from dataclasses import dataclass
 import sys
 
 import typer
-from cuttle_types import CreateInstanceRequest, LaunchOverrides, TemplateSummary
+from cuttle_types import (
+    CreateInstanceRequest,
+    InstanceState,
+    InstanceView,
+    LaunchOverrides,
+    TemplateSummary,
+)
 from typing_extensions import Annotated
 
 from .client import CliError, CuttleApiClient
@@ -24,6 +30,10 @@ templates_app = typer.Typer(add_completion=False, no_args_is_help=True)
 daemon_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(templates_app, name="templates")
 app.add_typer(daemon_app, name="daemon")
+
+VISIBLE_INSTANCE_STATES = frozenset(
+    {InstanceState.STARTING, InstanceState.ACTIVE, InstanceState.STOPPING}
+)
 
 
 @dataclass
@@ -120,7 +130,17 @@ def start(
 
 
 @app.command(name="list")
-def list_instances(ctx: typer.Context) -> None:
+def list_instances(
+    ctx: typer.Context,
+    all_instances: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            "-a",
+            help="Show all instances, including stopped, crashed, and expired ones.",
+        ),
+    ] = False,
+) -> None:
     state = _state_from_ctx(ctx)
     _ensure_daemon_running_or_exit(state.settings)
     client = state.client
@@ -130,7 +150,17 @@ def list_instances(ctx: typer.Context) -> None:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    if not response.instances:
+    instances = (
+        response.instances
+        if all_instances
+        else [
+            instance
+            for instance in response.instances
+            if _is_default_list_state(instance)
+        ]
+    )
+
+    if not instances:
         typer.echo("No instances.")
         return
 
@@ -151,7 +181,7 @@ def list_instances(ctx: typer.Context) -> None:
             instance.owner_id,
             client.adb_target(instance) or "-",
         )
-        for instance in response.instances
+        for instance in instances
     ]
     widths = [
         max(len(header), *(len(row[index]) for row in rows))
@@ -191,6 +221,10 @@ def _format_columns(values: tuple[str, ...], widths: list[int]) -> str:
     padded = [value.ljust(width) for value, width in zip(values[:-1], widths[:-1])]
     padded.append(values[-1])
     return "  ".join(padded)
+
+
+def _is_default_list_state(instance: InstanceView) -> bool:
+    return instance.state in VISIBLE_INSTANCE_STATES
 
 
 @daemon_app.command("start")

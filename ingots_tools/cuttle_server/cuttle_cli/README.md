@@ -18,6 +18,7 @@ Supported commands:
 
 - `uv run cuttle_cli start <template-name>`
 - `uv run cuttle_cli list`
+- `uv run cuttle_cli list --all`
 - `uv run cuttle_cli stop <instance-name>`
 - `uv run cuttle_cli templates list`
 - `uv run cuttle_cli templates show <template-name>`
@@ -29,6 +30,7 @@ Supported commands:
 The CLI auto-starts the managed daemon for `start`, `list`, and `stop`. The daemon keeps the local shared ADB server in sync with the current user's visible instances by issuing `adb connect` and `adb disconnect` against `<server_host>:<adb_port>`.
 
 `start` also supports `--load-apps/--no-load-apps` to control whether the server should auto-install the template APK list during instance startup.
+`list` shows only non-terminal instances by default; pass `--all` or `-a` to include stopped, crashed, and expired instances.
 
 Minimal config shape:
 
