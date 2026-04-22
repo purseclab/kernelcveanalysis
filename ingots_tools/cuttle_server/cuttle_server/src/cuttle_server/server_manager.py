@@ -373,6 +373,5 @@ class CuttlefishServerManager:
                 if request.overrides.load_apps is not None
                 else True
             ),
-            launch_binary=template.launch_binary,
-            stop_binary=template.stop_binary,
+            cvd_binary=template.cvd_binary,
         )

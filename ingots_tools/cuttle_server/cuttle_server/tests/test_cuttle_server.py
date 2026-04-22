@@ -35,8 +35,7 @@ class ConfigLoadingTests(unittest.TestCase):
             install_dir = root / "cf"
             bin_dir = install_dir / "bin"
             bin_dir.mkdir(parents=True)
-            (bin_dir / "launch_cvd").write_text("")
-            (bin_dir / "stop_cvd").write_text("")
+            (bin_dir / "cvd").write_text("")
             kernel = root / "kernel"
             kernel.write_text("")
             initrd = root / "initrd.img"
@@ -79,9 +78,7 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(template.cpus, 4)
         self.assertEqual(template.runtime_root, install_dir.resolve())
         self.assertEqual(template.apps, (app_one.resolve(), app_two.resolve()))
-        self.assertEqual(
-            template.launch_binary, install_dir.resolve() / "bin" / "launch_cvd"
-        )
+        self.assertEqual(template.cvd_binary, install_dir.resolve() / "bin" / "cvd")
 
 
 class ServerCliTests(unittest.TestCase):
@@ -92,8 +89,7 @@ class ServerCliTests(unittest.TestCase):
             install_dir = root / "cf"
             bin_dir = install_dir / "bin"
             bin_dir.mkdir(parents=True)
-            (bin_dir / "launch_cvd").write_text("")
-            (bin_dir / "stop_cvd").write_text("")
+            (bin_dir / "cvd").write_text("")
             kernel = root / "kernel"
             kernel.write_text("")
             initrd = root / "initrd.img"
@@ -235,7 +231,7 @@ class ApiBackgroundTaskTests(unittest.TestCase):
 
 
 class CvdCliTests(unittest.TestCase):
-    def test_start_and_stop_use_template_runtime_root_for_home_and_cwd(self):
+    def test_create_stop_and_remove_use_instance_runtime_dir_for_home_and_cwd(self):
         cli = CuttlefishCli()
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
@@ -247,8 +243,7 @@ class CvdCliTests(unittest.TestCase):
                 kernel_path=Path("/kernel"),
                 initrd_path=Path("/initrd"),
                 apps=[],
-                launch_binary=Path("/cf/bin/launch_cvd"),
-                stop_binary=Path("/cf/bin/stop_cvd"),
+                cvd_binary=Path("/cf/bin/cvd"),
             )
             record = type("Record", (), {})()
             record.instance_num = 3
@@ -259,14 +254,36 @@ class CvdCliTests(unittest.TestCase):
                 launch_result = cli.start_instance(record)
                 cli.stop_instance(record)
 
-        self.assertEqual(run.call_count, 2)
-        start_call = run.call_args_list[0]
+        self.assertEqual(run.call_count, 3)
+        create_call = run.call_args_list[0]
         stop_call = run.call_args_list[1]
-        self.assertEqual(start_call.kwargs["cwd"], config.runtime_root)
-        self.assertEqual(start_call.kwargs["env"]["HOME"], str(config.runtime_root))
-        self.assertEqual(stop_call.kwargs["cwd"], config.runtime_root)
-        self.assertEqual(stop_call.kwargs["env"]["HOME"], str(config.runtime_root))
+        remove_call = run.call_args_list[2]
+        self.assertEqual(create_call.kwargs["cwd"], runtime_dir)
+        self.assertEqual(create_call.kwargs["env"]["HOME"], str(runtime_dir))
+        self.assertEqual(stop_call.kwargs["cwd"], runtime_dir)
+        self.assertEqual(stop_call.kwargs["env"]["HOME"], str(runtime_dir))
+        self.assertEqual(remove_call.kwargs["cwd"], runtime_dir)
+        self.assertEqual(remove_call.kwargs["env"]["HOME"], str(runtime_dir))
         self.assertEqual(launch_result.adb_port, 6522)
+        self.assertEqual(
+            launch_result.launch_command,
+            [
+                "/cf/bin/cvd",
+                "create",
+                "--host_path=/cf",
+                "--product_path=/cf",
+                "--base_instance_num=3",
+                "--cpus=4",
+                "--start_webrtc=true",
+                "--kernel_path=/kernel",
+                "--initramfs_path=/initrd",
+                "--daemon",
+                "--report_anonymous_usage_stats=n",
+                "--extra_kernel_cmdline=androidboot.selinux=permissive",
+            ],
+        )
+        self.assertEqual(stop_call.args[0], ["/cf/bin/cvd", "stop"])
+        self.assertEqual(remove_call.args[0], ["/cf/bin/cvd", "remove"])
 
     def test_failed_start_logs_stdout_and_stderr(self):
         cli = CuttlefishCli()
@@ -280,8 +297,7 @@ class CvdCliTests(unittest.TestCase):
                 kernel_path=Path("/kernel"),
                 initrd_path=Path("/initrd"),
                 apps=[],
-                launch_binary=Path("/cf/bin/launch_cvd"),
-                stop_binary=Path("/cf/bin/stop_cvd"),
+                cvd_binary=Path("/cf/bin/cvd"),
             )
             record = type("Record", (), {})()
             record.instance_num = 3
@@ -289,7 +305,7 @@ class CvdCliTests(unittest.TestCase):
             record.config = config
             error = subprocess.CalledProcessError(
                 1,
-                ["/cf/bin/launch_cvd"],
+                ["/cf/bin/cvd", "create"],
                 output="launch stdout",
                 stderr="launch stderr",
             )
@@ -363,8 +379,7 @@ class ServerManagerTests(unittest.TestCase):
                     "phone": InstanceTemplate(
                         name="phone",
                         runtime_root=Path("/cf"),
-                        launch_binary=Path("/cf/bin/launch_cvd"),
-                        stop_binary=Path("/cf/bin/stop_cvd"),
+                        cvd_binary=Path("/cf/bin/cvd"),
                         cpus=2,
                         kernel_path=Path("/kernel"),
                         initrd_path=Path("/initrd"),

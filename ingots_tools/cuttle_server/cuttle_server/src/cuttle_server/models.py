@@ -24,8 +24,7 @@ class ResolvedLaunchConfig(BaseModel):
     initrd_path: Path
     apps: list[Path] = Field(default_factory=list)
     load_apps: bool = True
-    launch_binary: Path
-    stop_binary: Path
+    cvd_binary: Path
 
 
 TERMINAL_STATES = frozenset(

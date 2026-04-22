@@ -26,8 +26,8 @@ class CuttlefishCli:
         runtime_dir = record.runtime_dir
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        command = self._build_launch_command(record)
-        self._run_command(command, record=record, action="start")
+        command = self._build_create_command(record)
+        self._run_command(command, record=record, action="create")
         adb_port = self._resolve_adb_port(record)
         return LaunchResult(
             launch_command=command,
@@ -37,16 +37,18 @@ class CuttlefishCli:
         )
 
     def stop_instance(self, record: InstanceRecord) -> None:
-        command = [
-            str(record.config.stop_binary),
-            f"--instance_num={record.instance_num}",
-        ]
-        self._run_command(command, record=record, action="stop")
+        stop_command = [str(record.config.cvd_binary), "stop"]
+        self._run_command(stop_command, record=record, action="stop")
+        remove_command = [str(record.config.cvd_binary), "remove"]
+        self._run_command(remove_command, record=record, action="remove")
 
-    def _build_launch_command(self, record: InstanceRecord) -> list[str]:
+    def _build_create_command(self, record: InstanceRecord) -> list[str]:
         config = record.config
         command = [
-            str(config.launch_binary),
+            str(config.cvd_binary),
+            "create",
+            f"--host_path={config.runtime_root}",
+            f"--product_path={config.runtime_root}",
             f"--base_instance_num={record.instance_num}",
             f"--cpus={config.cpus}",
             "--start_webrtc=true",
@@ -66,7 +68,7 @@ class CuttlefishCli:
     @staticmethod
     def _build_env(record: InstanceRecord) -> dict[str, str]:
         env = os.environ.copy()
-        env["HOME"] = str(record.config.runtime_root)
+        env["HOME"] = str(record.runtime_dir)
         return env
 
     def _run_command(
@@ -79,7 +81,7 @@ class CuttlefishCli:
         try:
             subprocess.run(
                 command,
-                cwd=record.config.runtime_root,
+                cwd=record.runtime_dir,
                 env=self._build_env(record),
                 check=True,
                 capture_output=True,

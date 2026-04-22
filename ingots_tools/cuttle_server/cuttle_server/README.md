@@ -67,7 +67,7 @@ apps = [
 
 - `name` is the template identifier used as `template_name`.
 - `runtime_root` is the Cuttlefish installation directory. Relative values are resolved relative to the template file.
-- The server derives `bin/launch_cvd` and `bin/stop_cvd` from `runtime_root`.
+- The server derives `bin/cvd` from `runtime_root`.
 - Relative `kernel_path`, `initrd_path`, and `apps` entries are resolved relative to the template file.
 - `apps` are parsed, validated, persisted, returned by the API, and auto-installed in order during startup unless disabled per request.
 
@@ -118,8 +118,8 @@ Notes:
 ## Runtime Behavior
 
 - Each instance gets a unique runtime directory under `instance_runtime_root/<instance-id>`.
-- `launch_cvd` runs with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
-- `stop_cvd` runs with the same `cwd` and `HOME`.
+- `cvd create`, `cvd stop`, and `cvd remove` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
+- `cvd create` also receives explicit `--host_path=<runtime_root>` and `--product_path=<runtime_root>` so the template installation remains the source of host tools and guest artifacts.
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
 - When `load_apps` is enabled and the template has APKs, the server connects to the instance over server-local ADB, waits for boot completion, installs the APKs in template order, then disconnects before marking the instance `ACTIVE`.
 - The server runs a background task on startup that periodically reconciles and stops expired instances, and it also performs one reconciliation pass immediately during startup.
@@ -127,10 +127,12 @@ Notes:
 - If stop or cleanup fails, the instance record is updated with `failure_reason` and the runtime directory is left in place for inspection.
 - If app loading fails, instance creation fails, the instance is stopped, and the record is left in `crashed` state with a failure reason.
 
-Current launch command shape:
+Current create command shape:
 
 ```text
-launch_cvd \
+cvd create \
+  --host_path=<runtime_root> \
+  --product_path=<runtime_root> \
   --base_instance_num=<N> \
   --cpus=<cpus> \
   --start_webrtc=true \
@@ -146,10 +148,11 @@ If SELinux is disabled, the server also adds:
 --extra_kernel_cmdline=androidboot.selinux=permissive
 ```
 
-Stop uses:
+Stop and cleanup use:
 
 ```text
-stop_cvd --instance_num=<N>
+cvd stop
+cvd remove
 ```
 
 ## Current Limitations

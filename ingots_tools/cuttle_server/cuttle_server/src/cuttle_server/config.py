@@ -43,8 +43,7 @@ class TemplateConfigFile(BaseModel):
 class InstanceTemplate:
     name: str
     runtime_root: Path
-    launch_binary: Path
-    stop_binary: Path
+    cvd_binary: Path
     cpus: int
     kernel_path: Path
     initrd_path: Path
@@ -130,12 +129,10 @@ def _load_template(template_path: Path) -> InstanceTemplate:
     kernel_path = _resolve_path(parsed.kernel_path, base_dir)
     initrd_path = _resolve_path(parsed.initrd_path, base_dir)
     apps = tuple(_resolve_path(path, base_dir) for path in parsed.apps)
-    launch_binary = runtime_root / "bin" / "launch_cvd"
-    stop_binary = runtime_root / "bin" / "stop_cvd"
+    cvd_binary = runtime_root / "bin" / "cvd"
 
     for path, label in (
-        (launch_binary, "launch binary"),
-        (stop_binary, "stop binary"),
+        (cvd_binary, "cvd binary"),
         (kernel_path, "kernel path"),
         (initrd_path, "initrd path"),
     ):
@@ -151,8 +148,7 @@ def _load_template(template_path: Path) -> InstanceTemplate:
     return InstanceTemplate(
         name=parsed.name,
         runtime_root=runtime_root,
-        launch_binary=launch_binary,
-        stop_binary=stop_binary,
+        cvd_binary=cvd_binary,
         cpus=parsed.cpus,
         kernel_path=kernel_path,
         initrd_path=initrd_path,
