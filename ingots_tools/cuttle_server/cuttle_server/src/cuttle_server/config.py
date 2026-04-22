@@ -38,8 +38,10 @@ class TemplateConfigFile(BaseModel):
     @classmethod
     def validate_apps(cls, value: list[Path]) -> list[Path]:
         for path in value:
-            if path.suffix.lower() != ".apk":
-                raise ValueError(f"app path must end with .apk: {path}")
+            if path.suffix.lower() not in [".apk", ".xapk", ".apkm"]:
+                raise ValueError(
+                    f"app path must end with .apk, .xapk, or .apkm: {path}"
+                )
         return value
 
 
@@ -115,9 +117,7 @@ def _load_main_config(main_config_path: Path, config_dir: Path) -> ServerConfigF
     try:
         parsed = ServerConfigFile.model_validate(data)
     except ValidationError as exc:
-        raise ConfigError(
-            f"invalid main config {main_config_path}: {exc}"
-        ) from exc
+        raise ConfigError(f"invalid main config {main_config_path}: {exc}") from exc
 
     return parsed.model_copy(
         update={
