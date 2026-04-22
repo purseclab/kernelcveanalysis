@@ -1,7 +1,9 @@
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from zipfile import ZipFile
 
 from libadb import AdbClient, AdbCommandError, AdbProcess, Process
 
@@ -84,6 +86,86 @@ class AdbClientTests(unittest.TestCase):
             ["adb", "-s", "198.51.100.8:7777", "install", "/tmp/app.apk"],
             check=True,
         )
+
+    def test_install_app_installs_xapk_splits_and_pushes_obb(self):
+        adb = AdbClient("198.51.100.8:7777")
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "app.xapk"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("split_config.arm64_v8a.apk", b"split")
+                archive.writestr("base.apk", b"base")
+                archive.writestr(
+                    "Android/obb/com.example.app/main.1.com.example.app.obb",
+                    b"obb",
+                )
+
+            with patch("libadb.adb.subprocess.run") as run, patch.object(
+                adb,
+                "run_adb_command",
+                return_value="",
+            ) as run_adb_command:
+                adb.install_app(archive_path)
+
+        self.assertEqual(len(run.call_args_list), 2)
+        install_cmd = run.call_args_list[0].args[0]
+        push_cmd = run.call_args_list[1].args[0]
+        self.assertEqual(
+            install_cmd[:4],
+            ["adb", "-s", "198.51.100.8:7777", "install-multiple"],
+        )
+        self.assertEqual(Path(install_cmd[4]).name, "base.apk")
+        self.assertEqual(Path(install_cmd[5]).name, "split_config.arm64_v8a.apk")
+        self.assertEqual(
+            push_cmd[:4],
+            ["adb", "-s", "198.51.100.8:7777", "push"],
+        )
+        self.assertEqual(
+            push_cmd[5],
+            "/sdcard/Android/obb/com.example.app/main.1.com.example.app.obb",
+        )
+        run_adb_command.assert_called_once_with(
+            "mkdir -p /sdcard/Android/obb/com.example.app"
+        )
+
+    def test_install_app_installs_single_apk_from_apkm(self):
+        adb = AdbClient("198.51.100.8:7777")
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "app.apkm"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("base.apk", b"base")
+
+            with patch("libadb.adb.subprocess.run") as run:
+                adb.install_app(archive_path)
+
+        run.assert_called_once()
+        self.assertEqual(
+            run.call_args.args[0][:4],
+            ["adb", "-s", "198.51.100.8:7777", "install"],
+        )
+        self.assertEqual(Path(run.call_args.args[0][4]).name, "base.apk")
+
+    def test_install_app_rejects_bundle_without_apks(self):
+        adb = AdbClient("198.51.100.8:7777")
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "app.xapk"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("Android/obb/com.example.app/main.1.com.example.app.obb", b"obb")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "app bundle does not contain any APK files",
+            ):
+                adb.install_app(archive_path)
+
+    def test_install_app_rejects_unsafe_bundle_paths(self):
+        adb = AdbClient("198.51.100.8:7777")
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / "app.apkm"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr("../base.apk", b"base")
+
+            with self.assertRaisesRegex(ValueError, "unsafe archive member path"):
+                adb.install_app(archive_path)
 
     def test_connect_uses_remote_addr(self):
         adb = AdbClient("198.51.100.8:7777")

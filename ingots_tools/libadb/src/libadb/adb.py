@@ -1,10 +1,15 @@
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
+from posixpath import normpath
+from shutil import copyfileobj
 from shlex import quote
 from time import sleep
 from typing import Optional, Self
+from zipfile import ZipFile
 
 
 DEFAULT_REMOTE_ADDR = "0.0.0.0:6532"
@@ -37,6 +42,18 @@ class Permissions:
 class ExpandBinaryResult:
     load_addr: int
     expanded_binary: bytes
+
+
+@dataclass(frozen=True)
+class BundleObbFile:
+    source_path: Path
+    device_path: Path
+
+
+@dataclass(frozen=True)
+class ExtractedAppBundle:
+    apk_paths: tuple[Path, ...]
+    obb_files: tuple[BundleObbFile, ...]
 
 
 class AdbCommandError(RuntimeError):
@@ -162,10 +179,101 @@ class AdbClient:
             self.run_adb_command(f"chmod +x {dst_path}", root=True)
 
     def install_app(self, app: Path):
+        suffix = app.suffix.lower()
+        if suffix == ".apk":
+            self._install_apk(app)
+            return
+        if suffix in {".xapk", ".apkm"}:
+            self._install_bundle_archive(app)
+            return
+        raise ValueError(f"unsupported app format: {app}")
+
+    def install_multiple_apps(self, apps: list[Path]):
+        if not apps:
+            raise ValueError("install_multiple_apps requires at least one apk")
+        subprocess.run(
+            ["adb", "-s", self.remote_addr, "install-multiple", *map(str, apps)],
+            check=True,
+        )
+
+    def _install_apk(self, app: Path) -> None:
         subprocess.run(
             ["adb", "-s", self.remote_addr, "install", str(app)],
             check=True,
         )
+
+    def _install_bundle_archive(self, app: Path) -> None:
+        with self._extract_app_bundle(app) as extracted:
+            if len(extracted.apk_paths) == 1:
+                self._install_apk(extracted.apk_paths[0])
+            else:
+                self.install_multiple_apps(list(extracted.apk_paths))
+
+            for obb_file in extracted.obb_files:
+                parent_dir = str(obb_file.device_path.parent)
+                self.run_adb_command(f"mkdir -p {quote(parent_dir)}")
+                self.upload_file(obb_file.source_path, obb_file.device_path)
+
+    @contextmanager
+    def _extract_app_bundle(self, app: Path):
+        with tempfile.TemporaryDirectory(prefix=f"{app.stem}-") as tempdir:
+            yield self._extract_app_bundle_contents(app, Path(tempdir))
+
+    def _extract_app_bundle_contents(
+        self,
+        app: Path,
+        destination_dir: Path,
+    ) -> ExtractedAppBundle:
+        apk_paths: list[Path] = []
+        obb_files: list[BundleObbFile] = []
+        with ZipFile(app) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                member_path = self._normalized_archive_path(member.filename)
+                target_path = destination_dir / member_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as src, target_path.open("wb") as dst:
+                    copyfileobj(src, dst)
+
+                if target_path.suffix.lower() == ".apk":
+                    apk_paths.append(target_path)
+                elif self._is_obb_archive_path(member_path):
+                    obb_files.append(
+                        BundleObbFile(
+                            source_path=target_path,
+                            device_path=Path("/sdcard") / member_path,
+                        )
+                    )
+
+        ordered_apks = tuple(sorted(apk_paths, key=self._apk_install_sort_key))
+        if not ordered_apks:
+            raise ValueError(f"app bundle does not contain any APK files: {app}")
+        return ExtractedAppBundle(
+            apk_paths=ordered_apks,
+            obb_files=tuple(sorted(obb_files, key=lambda file: str(file.device_path))),
+        )
+
+    def _normalized_archive_path(self, member_name: str) -> Path:
+        normalized = normpath(member_name.replace("\\", "/"))
+        if normalized in {"", "."}:
+            raise ValueError(f"invalid archive member path: {member_name!r}")
+        normalized_path = Path(normalized)
+        if normalized_path.is_absolute() or ".." in normalized_path.parts:
+            raise ValueError(f"unsafe archive member path: {member_name!r}")
+        return normalized_path
+
+    def _is_obb_archive_path(self, path: Path) -> bool:
+        return (
+            len(path.parts) >= 4
+            and path.parts[:2] == ("Android", "obb")
+            and path.suffix.lower() == ".obb"
+        )
+
+    def _apk_install_sort_key(self, path: Path) -> tuple[int, str]:
+        lower_name = path.name.lower()
+        is_base = 0 if lower_name == "base.apk" else 1
+        return (is_base, lower_name)
 
     def upload_tools(self):
         self.run_adb_command("mkdir -p /data/local/tmp/tools")

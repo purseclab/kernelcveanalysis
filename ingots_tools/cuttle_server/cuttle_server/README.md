@@ -64,7 +64,8 @@ initrd_path = "/srv/kernels/initramfs.img"
 selinux = false
 apps = [
   "/srv/apps/one.apk",
-  "/srv/apps/two.apk",
+  "/srv/apps/two.xapk",
+  "/srv/apps/three.apkm",
 ]
 ```
 
@@ -73,6 +74,7 @@ apps = [
 - The server derives `bin/cvd` from `runtime_root`.
 - Relative `kernel_path`, `initrd_path`, and `apps` entries are resolved relative to the template file.
 - `apps` are parsed, validated, persisted, returned by the API, and auto-installed in order during startup unless disabled per request.
+- Supported app payloads are `.apk`, `.xapk`, and `.apkm`. Bundle formats are unpacked server-side; embedded APK splits are installed together and bundled OBB files are copied into `/sdcard/Android/obb/...`.
 
 ## API
 
@@ -124,7 +126,7 @@ Notes:
 - `cvd start` and `cvd stop` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
-- When `load_apps` is enabled and the template has APKs, the server connects to the instance over server-local ADB, waits for boot completion, installs the APKs in template order, then disconnects before marking the instance `ACTIVE`.
+- When `load_apps` is enabled and the template has apps, the server connects to the instance over server-local ADB, waits for boot completion, installs each `.apk` directly or unpacks and installs `.xapk`/`.apkm` bundles in template order, then disconnects before marking the instance `ACTIVE`.
 - The server runs a background task on startup that periodically reconciles and stops expired instances, and it also performs one reconciliation pass immediately during startup.
 - If automatic expiration is disabled globally, new instances are created without an `expires_at` deadline until a client explicitly renews them with a timeout.
 - After a successful explicit stop or expiration cleanup, the runtime directory is removed.
