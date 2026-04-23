@@ -4,13 +4,13 @@ requires-python = ">=3.13"
 
 [manifest]
 members = [
-    "android-app-mcp",
     "android-env",
     "cuttle-cli",
     "cuttle-server",
     "cuttle-types",
     "cuttleagent",
     "ingots-tools",
+    "kdebug",
     "kexploit",
     "kexploit-agent",
     "kexploit-utils",
@@ -107,25 +107,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz", hash = "sha256:f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7", size = 25007, upload-time = "2025-07-03T22:54:43.528Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fb/76/641ae371508676492379f16e2fa48f4e2c11741bd63c48be4b12a6b09cba/aiosignal-1.4.0-py3-none-any.whl", hash = "sha256:053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e", size = 7490, upload-time = "2025-07-03T22:54:42.156Z" },
-]
-
-[[package]]
-name = "android-app-mcp"
-version = "0.1.0"
-source = { editable = "android_app_mcp" }
-dependencies = [
-    { name = "frida" },
-    { name = "libadb" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "typer" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "frida", specifier = ">=16.0.0" },
-    { name = "libadb", editable = "libadb" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.26.0" },
-    { name = "typer", specifier = ">=0.21.1" },
 ]
 
 [[package]]
@@ -910,12 +891,12 @@ name = "ingots-tools"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "android-app-mcp" },
     { name = "android-env" },
     { name = "cuttle-cli" },
     { name = "cuttle-server" },
     { name = "cuttle-types" },
     { name = "cuttleagent" },
+    { name = "kdebug" },
     { name = "kexploit" },
     { name = "kexploit-agent" },
     { name = "kexploit-utils" },
@@ -927,12 +908,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "android-app-mcp", editable = "android_app_mcp" },
     { name = "android-env", editable = "android_env" },
     { name = "cuttle-cli", editable = "cuttle_server/cuttle_cli" },
     { name = "cuttle-server", editable = "cuttle_server/cuttle_server" },
     { name = "cuttle-types", editable = "cuttle_server/cuttle_types" },
     { name = "cuttleagent", editable = "cuttleagent" },
+    { name = "kdebug", editable = "kdebug" },
     { name = "kexploit", editable = "kexploit" },
     { name = "kexploit-agent", editable = "kexploit_agent" },
     { name = "kexploit-utils", editable = "kexploit_utils" },
@@ -1119,6 +1100,25 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe", size = 18437, upload-time = "2025-09-08T01:34:57.871Z" },
+]
+
+[[package]]
+name = "kdebug"
+version = "0.1.0"
+source = { editable = "kdebug" }
+dependencies = [
+    { name = "frida" },
+    { name = "libadb" },
+    { name = "pydantic" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "frida", specifier = ">=16.0.0" },
+    { name = "libadb", editable = "libadb" },
+    { name = "pydantic", specifier = ">=2.11.0" },
+    { name = "typer", specifier = ">=0.21.1" },
 ]
 
 [[package]]

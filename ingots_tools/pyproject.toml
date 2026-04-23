@@ -4,9 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "android_env",
-    "android_app_mcp",
     "cuttleagent",
     "kexploit",
+    "kdebug",
     "libadb",
     "scripts",
     "kexploit_agent",
@@ -21,9 +21,9 @@ dependencies = [
 [tool.uv.workspace]
 members = [
     "android_env",
-    "android_app_mcp",
     "cuttleagent",
     "kexploit",
+    "kdebug",
     "libadb",
     "scripts",
     "kexploit_agent",
@@ -37,9 +37,9 @@ members = [
 
 [tool.uv.sources]
 android_env = { workspace = true }
-android_app_mcp = { workspace = true }
 cuttleagent = { workspace = true }
 kexploit = { workspace = true }
+kdebug = { workspace = true }
 libadb = { workspace = true }
 scripts = { workspace = true }
 kexploit_agent = { workspace = true }

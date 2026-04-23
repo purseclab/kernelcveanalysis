@@ -50,7 +50,7 @@ def bootstrap_frida(
     if not frida_server_path.is_file():
         raise FileNotFoundError(
             f"frida-server binary not found at {frida_server_path}. "
-            "Place the host binary there before starting android_app_mcp."
+            "Place the host binary there before starting kdebug."
         )
 
     adb.upload_file(frida_server_path, Path(FRIDA_SERVER_REMOTE_PATH), executable=True)
@@ -83,16 +83,36 @@ class FridaManager:
         self.scripts: dict[str, FridaScriptRecord] = {}
 
     def list_apps(self) -> list[dict[str, object | None]]:
-        apps = []
-        for app in self.device.enumerate_applications():
-            apps.append(
-                {
-                    "identifier": app.identifier,
-                    "name": app.name,
-                    "pid": app.pid,
-                }
-            )
-        return apps
+        return [
+            {
+                "identifier": app.identifier,
+                "name": app.name,
+                "pid": app.pid,
+            }
+            for app in self.device.enumerate_applications()
+        ]
+
+    def list_sessions(self) -> list[dict[str, object]]:
+        return [
+            {
+                "session_id": record.session_id,
+                "package_name": record.package_name,
+                "pid": record.pid,
+                "paused": record.paused,
+            }
+            for record in self.sessions.values()
+        ]
+
+    def list_scripts(self) -> list[dict[str, object]]:
+        return [
+            {
+                "script_id": record.script_id,
+                "session_id": record.session_id,
+                "name": record.name,
+                "buffered_messages": len(record.messages),
+            }
+            for record in self.scripts.values()
+        ]
 
     def attach(self, package_name: str) -> dict[str, object]:
         app = self._get_running_app(package_name)
@@ -171,6 +191,20 @@ class FridaManager:
             "script_id": script_id,
             "messages": self._drain_messages(record, clear=clear),
         }
+
+    def shutdown(self) -> None:
+        for script_id in list(self.scripts):
+            try:
+                self._remove_script(script_id, unload=True)
+            except Exception:
+                pass
+        for session_id in list(self.sessions):
+            try:
+                session = self.sessions[session_id].session
+                session.detach()
+            except Exception:
+                pass
+            self.sessions.pop(session_id, None)
 
     def _get_running_app(self, package_name: str):
         for app in self.device.enumerate_applications():

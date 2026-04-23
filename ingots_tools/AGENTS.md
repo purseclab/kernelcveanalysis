@@ -47,13 +47,13 @@ The project is organized as a `uv` workspace with the following members:
 *   **Purpose:** Miscellaneous utility scripts.
 *   **Key Script:** `expand_binary.py` (expands dynamically linked binaries for exploit chaining).
 
-### 7. `android_app_mcp` (Tool: `android_app_mcp`)
-*   **Purpose:** MCP server for debugging and instrumenting Android apps inside an emulator over ADB.
+### 7. `kdebug` (Tool: `kdebug`)
+*   **Purpose:** Daemon-backed CLI for debugging and instrumenting Android apps over ADB with Frida.
 *   **Key Features:**
-    *   Uploads and launches the bundled `frida-server` on startup.
-    *   Exposes emulator shell and file operations over MCP.
-    *   Supports Frida app enumeration, attach/spawn, script management, and RPC calls.
-*   **Usage:** `uv run android_app_mcp serve --adb-host <host> --adb-port <port>`
+    *   Uploads and launches the bundled `frida-server` on demand.
+    *   Keeps Frida sessions and scripts alive across CLI invocations with a per-device daemon.
+    *   Supports Frida app enumeration, attach/spawn, script management, RPC calls, and buffered message retrieval.
+*   **Usage:** `uv run kdebug --device <serial-or-host:port> frida apps`
 
 ### 8. `primitives`
 *   **Purpose:** Exploit primitive library for Linux kernel research.
@@ -127,7 +127,7 @@ The project uses `uv` for dependency management.
 ## Directory Structure
 
 *   `android_env/`: Android analysis tools.
-*   `android_app_mcp/`: MCP server for Android app debugging and Frida-based instrumentation.
+*   `kdebug/`: Daemon-backed Frida CLI for Android app debugging and instrumentation.
 *   `kexploit/`: Kernel exploit adaptation and synthesis tool.
 *   `kexploit_agent/`: Sandbox environment for agents.
 *   `kexploit_utils/`: Shared utilities and data management.

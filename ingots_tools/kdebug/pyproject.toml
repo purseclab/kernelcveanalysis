@@ -1,13 +1,13 @@
 [project]
-name = "android_app_mcp"
+name = "kdebug"
 version = "0.1.0"
-description = "Mcp server for developing app exploits"
+description = "Daemon-backed Frida CLI for Android app debugging over ADB"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "frida>=16.0.0",
     "libadb",
-    "mcp[cli]>=1.26.0",
+    "pydantic>=2.11.0",
     "typer>=0.21.1",
 ]
 
@@ -18,4 +18,4 @@ package = true
 libadb = { workspace = true }
 
 [project.scripts]
-android_app_mcp = "android_app_mcp.cli:main"
+kdebug = "kdebug.main:main"
