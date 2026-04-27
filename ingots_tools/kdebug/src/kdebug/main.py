@@ -96,32 +96,32 @@ def main_callback(
 
 @daemon_app.command("start")
 def daemon_start(ctx: typer.Context) -> None:
-    state = _state_from_ctx(ctx, require_target=True)
+    state = _state_from_ctx(ctx, require_target=False)
     try:
-        start_daemon(state.target, state.frida_server_path, state.lldb_server_root)
+        start_daemon()
     except CliError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    _emit(ctx, {"status": "running", "target": state.target}, f"daemon running for {state.target}")
+    _emit(ctx, {"status": "running"}, "daemon running")
 
 
 @daemon_app.command("stop")
 def daemon_stop(ctx: typer.Context) -> None:
-    state = _state_from_ctx(ctx, require_target=True)
+    state = _state_from_ctx(ctx, require_target=False)
     try:
-        stopped = stop_daemon(state.target, state.frida_server_path, state.lldb_server_root)
+        stopped = stop_daemon()
     except CliError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    message = f"daemon stopped for {state.target}" if stopped else f"daemon already stopped for {state.target}"
-    _emit(ctx, {"status": "stopped" if stopped else "already_stopped", "target": state.target}, message)
+    message = "daemon stopped" if stopped else "daemon already stopped"
+    _emit(ctx, {"status": "stopped" if stopped else "already_stopped"}, message)
 
 
 @daemon_app.command("status")
 def daemon_status(ctx: typer.Context) -> None:
-    state = _state_from_ctx(ctx, require_target=True)
+    state = _state_from_ctx(ctx, require_target=False)
     try:
-        view = status_view(state.target, state.frida_server_path, state.lldb_server_root).model_dump(mode="json")
+        view = status_view().model_dump(mode="json")
     except CliError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -130,18 +130,18 @@ def daemon_status(ctx: typer.Context) -> None:
         return
     status = view["status"]
     if status == "running":
-        typer.echo(f"running pid={view['pid']} target={view['target']} socket={view['socket_path']}")
+        typer.echo(f"running pid={view['pid']} socket={view['socket_path']}")
         return
     if status == "stale":
-        typer.echo(f"stale pid={view['pid']} target={view['target']} socket={view['socket_path']}")
+        typer.echo(f"stale pid={view['pid']} socket={view['socket_path']}")
         return
     typer.echo("stopped")
 
 
 @daemon_app.command("run-internal", hidden=True)
 def daemon_run_internal(ctx: typer.Context) -> None:
-    state = _state_from_ctx(ctx, require_target=True)
-    run_daemon_forever(state.target, state.frida_server_path, state.lldb_server_root)
+    _state_from_ctx(ctx, require_target=False)
+    run_daemon_forever()
 
 
 @frida_app.command("apps")
@@ -337,7 +337,7 @@ def _state_from_ctx(ctx: typer.Context, *, require_target: bool) -> AppState:
 def _client_from_ctx(ctx: typer.Context) -> KdebugDaemonClient:
     state = _state_from_ctx(ctx, require_target=True)
     try:
-        ensure_daemon_running(state.target, state.frida_server_path, state.lldb_server_root)
+        ensure_daemon_running()
     except CliError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc

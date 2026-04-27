@@ -13,10 +13,16 @@ class KdebugDaemonClient:
         self.target = target
         self.frida_server_path = frida_server_path
         self.lldb_server_root = lldb_server_root
-        self.paths = daemon_paths(target, frida_server_path, lldb_server_root)
+        self.paths = daemon_paths()
 
     def call(self, action: str, **params) -> dict[str, object]:
-        request = json.dumps({"action": action, "params": params}).encode("utf-8") + b"\n"
+        request_params = {
+            "target": self.target,
+            "frida_server_path": str(self.frida_server_path),
+            "lldb_server_root": str(self.lldb_server_root),
+            **params,
+        }
+        request = json.dumps({"action": action, "params": request_params}).encode("utf-8") + b"\n"
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.connect(str(self.paths.socket))

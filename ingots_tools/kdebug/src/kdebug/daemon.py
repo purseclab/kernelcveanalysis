@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import signal
-import socket
 import socketserver
 import subprocess
 import sys
@@ -56,6 +54,32 @@ class DaemonStatus:
     metadata: DaemonMetadata | None
 
 
+@dataclass(slots=True)
+class TargetRuntime:
+    target: str
+    frida_server_path: Path
+    lldb_server_root: Path
+    adb: AdbClient
+    frida: FridaManager | None = None
+    lldb: LLDBManager | None = None
+
+    def get_frida(self) -> FridaManager:
+        if self.frida is None:
+            self.frida = bootstrap_frida(self.adb, frida_server_path=self.frida_server_path)
+        return self.frida
+
+    def get_lldb(self) -> LLDBManager:
+        if self.lldb is None:
+            self.lldb = LLDBManager(self.adb, lldb_server_root=self.lldb_server_root)
+        return self.lldb
+
+    def shutdown(self) -> None:
+        if self.lldb is not None:
+            self.lldb.shutdown()
+        if self.frida is not None:
+            self.frida.shutdown()
+
+
 def default_state_dir() -> Path:
     return Path.home() / ".local" / "state" / "kdebug"
 
@@ -77,11 +101,8 @@ def normalize_target(
     return f"{adb_host}:{adb_port}"
 
 
-def daemon_paths(target: str, frida_server_path: Path, lldb_server_root: Path) -> DaemonPaths:
-    identity = hashlib.sha256(
-        f"{target}\0{frida_server_path.resolve()}\0{lldb_server_root.resolve()}".encode("utf-8")
-    ).hexdigest()[:16]
-    state_dir = default_state_dir() / identity
+def daemon_paths() -> DaemonPaths:
+    state_dir = default_state_dir()
     return DaemonPaths(
         state_dir=state_dir,
         pidfile=state_dir / "daemon.pid",
@@ -91,32 +112,30 @@ def daemon_paths(target: str, frida_server_path: Path, lldb_server_root: Path) -
     )
 
 
-def get_daemon_status(target: str, frida_server_path: Path, lldb_server_root: Path) -> DaemonStatus:
-    paths = daemon_paths(target, frida_server_path, lldb_server_root)
+def get_daemon_status() -> DaemonStatus:
+    paths = daemon_paths()
     metadata = _load_metadata(paths.metadata)
     if metadata is None:
         return DaemonStatus(running=False, stale=False, metadata=None)
-
-    _validate_metadata_identity(metadata, target, frida_server_path, lldb_server_root)
     if _pid_is_running(metadata.pid):
         return DaemonStatus(running=True, stale=False, metadata=metadata)
     return DaemonStatus(running=False, stale=True, metadata=metadata)
 
 
-def ensure_daemon_running(target: str, frida_server_path: Path, lldb_server_root: Path) -> None:
-    status = get_daemon_status(target, frida_server_path, lldb_server_root)
+def ensure_daemon_running() -> None:
+    status = get_daemon_status()
     if status.running:
         return
     if status.stale:
-        _cleanup_stale_files(daemon_paths(target, frida_server_path, lldb_server_root))
-    start_daemon(target, frida_server_path, lldb_server_root)
+        _cleanup_stale_files(daemon_paths())
+    start_daemon()
 
 
-def start_daemon(target: str, frida_server_path: Path, lldb_server_root: Path) -> None:
-    status = get_daemon_status(target, frida_server_path, lldb_server_root)
+def start_daemon() -> None:
+    status = get_daemon_status()
     if status.running:
         return
-    paths = daemon_paths(target, frida_server_path, lldb_server_root)
+    paths = daemon_paths()
     if status.stale:
         _cleanup_stale_files(paths)
 
@@ -127,12 +146,6 @@ def start_daemon(target: str, frida_server_path: Path, lldb_server_root: Path) -
                 sys.executable,
                 "-m",
                 "kdebug.main",
-                "--device",
-                target,
-                "--frida-server-path",
-                str(frida_server_path),
-                "--lldb-server-root",
-                str(lldb_server_root),
                 "daemon",
                 "run-internal",
             ],
@@ -141,12 +154,12 @@ def start_daemon(target: str, frida_server_path: Path, lldb_server_root: Path) -
             stderr=log_handle,
             start_new_session=True,
         )
-    _wait_for_daemon_start(process, target, frida_server_path, lldb_server_root)
+    _wait_for_daemon_start(process)
 
 
-def stop_daemon(target: str, frida_server_path: Path, lldb_server_root: Path) -> bool:
-    status = get_daemon_status(target, frida_server_path, lldb_server_root)
-    paths = daemon_paths(target, frida_server_path, lldb_server_root)
+def stop_daemon() -> bool:
+    status = get_daemon_status()
+    paths = daemon_paths()
     if not status.running:
         _cleanup_stale_files(paths)
         return False
@@ -165,15 +178,14 @@ def stop_daemon(target: str, frida_server_path: Path, lldb_server_root: Path) ->
     return True
 
 
-def status_view(target: str, frida_server_path: Path, lldb_server_root: Path) -> DaemonStatusView:
-    status = get_daemon_status(target, frida_server_path, lldb_server_root)
+def status_view() -> DaemonStatusView:
+    status = get_daemon_status()
     if status.running:
         metadata = status.metadata
         assert metadata is not None
         return DaemonStatusView(
             status="running",
             pid=metadata.pid,
-            target=metadata.target,
             socket_path=metadata.socket_path,
         )
     if status.stale:
@@ -182,66 +194,103 @@ def status_view(target: str, frida_server_path: Path, lldb_server_root: Path) ->
         return DaemonStatusView(
             status="stale",
             pid=metadata.pid,
-            target=metadata.target,
             socket_path=metadata.socket_path,
         )
     return DaemonStatusView(status="stopped")
 
 
 class KdebugDaemon:
-    def __init__(self, frida: FridaManager, lldb: LLDBManager):
-        self.frida = frida
-        self.lldb = lldb
+    def __init__(self):
+        self.runtimes: dict[str, TargetRuntime] = {}
 
     def dispatch(self, action: str, params: dict[str, object]) -> dict[str, object]:
+        if action == "daemon_list_targets":
+            return {"targets": sorted(self.runtimes)}
+
+        runtime = self._runtime_for_params(action, params)
+
         if action == "frida_list_apps":
-            return {"apps": self.frida.list_apps()}
+            return {"apps": runtime.get_frida().list_apps()}
         if action == "frida_list_sessions":
-            return {"sessions": self.frida.list_sessions()}
+            return {"sessions": runtime.get_frida().list_sessions()}
         if action == "frida_list_scripts":
-            return {"scripts": self.frida.list_scripts()}
+            return {"scripts": runtime.get_frida().list_scripts()}
         if action == "frida_attach":
             validated = AttachParams.model_validate(params)
-            return self.frida.attach(validated.package_name)
+            return runtime.get_frida().attach(validated.package_name)
         if action == "frida_spawn":
             validated = AttachParams.model_validate(params)
-            return self.frida.spawn(validated.package_name)
+            return runtime.get_frida().spawn(validated.package_name)
         if action == "frida_resume":
             validated = ResumeParams.model_validate(params)
-            return self.frida.resume(validated.session_id)
+            return runtime.get_frida().resume(validated.session_id)
         if action == "frida_detach":
             validated = DetachParams.model_validate(params)
-            return self.frida.detach(validated.session_id)
+            return runtime.get_frida().detach(validated.session_id)
         if action == "frida_load_script":
             validated = LoadScriptParams.model_validate(params)
-            return self.frida.load_script(validated.session_id, validated.name, validated.source)
+            return runtime.get_frida().load_script(validated.session_id, validated.name, validated.source)
         if action == "frida_unload_script":
             validated = UnloadScriptParams.model_validate(params)
-            return self.frida.unload_script(validated.script_id)
+            return runtime.get_frida().unload_script(validated.script_id)
         if action == "frida_eval":
             validated = EvalParams.model_validate(params)
-            return self.frida.eval(validated.session_id, validated.source)
+            return runtime.get_frida().eval(validated.session_id, validated.source)
         if action == "frida_rpc_call":
             validated = RpcCallParams.model_validate(params)
-            return self.frida.rpc_call(validated.script_id, validated.method, args=validated.args)
+            return runtime.get_frida().rpc_call(validated.script_id, validated.method, args=validated.args)
         if action == "frida_get_messages":
             validated = GetMessagesParams.model_validate(params)
-            return self.frida.get_messages(validated.script_id, clear=validated.clear)
+            return runtime.get_frida().get_messages(validated.script_id, clear=validated.clear)
         if action == "lldb_attach_package":
             validated = LldbAttachPackageParams.model_validate(params)
-            return self.lldb.attach_package(validated.package_name)
+            return runtime.get_lldb().attach_package(validated.package_name)
         if action == "lldb_attach_pid":
             validated = LldbAttachPidParams.model_validate(params)
-            return self.lldb.attach_pid(validated.pid)
+            return runtime.get_lldb().attach_pid(validated.pid)
         if action == "lldb_list_sessions":
-            return {"sessions": self.lldb.list_sessions()}
+            return {"sessions": runtime.get_lldb().list_sessions()}
         if action == "lldb_stop_session":
             validated = LldbStopSessionParams.model_validate(params)
-            return self.lldb.stop_session(validated.session_id)
+            return runtime.get_lldb().stop_session(validated.session_id)
         if action == "lldb_get_connect_info":
             validated = LldbGetConnectInfoParams.model_validate(params)
-            return self.lldb.get_connect_info(validated.session_id)
+            return runtime.get_lldb().get_connect_info(validated.session_id)
         raise KeyError(f"Unknown daemon action `{action}`")
+
+    def shutdown(self) -> None:
+        for runtime in self.runtimes.values():
+            runtime.shutdown()
+
+    def _runtime_for_params(self, action: str, params: dict[str, object]) -> TargetRuntime:
+        del action
+        target = _required_param(params, "target")
+        frida_server_path = Path(_required_param(params, "frida_server_path"))
+        lldb_server_root = Path(_required_param(params, "lldb_server_root"))
+
+        runtime = self.runtimes.get(target)
+        if runtime is None:
+            _maybe_connect_network_target(target)
+            runtime = TargetRuntime(
+                target=target,
+                frida_server_path=frida_server_path,
+                lldb_server_root=lldb_server_root,
+                adb=AdbClient(target),
+            )
+            self.runtimes[target] = runtime
+            return runtime
+
+        if runtime.frida_server_path.resolve() != frida_server_path.resolve():
+            raise CliError(
+                f"target `{target}` is already active with a different frida-server path: "
+                f"{runtime.frida_server_path}"
+            )
+        if runtime.lldb_server_root.resolve() != lldb_server_root.resolve():
+            raise CliError(
+                f"target `{target}` is already active with a different lldb-server root: "
+                f"{runtime.lldb_server_root}"
+            )
+        return runtime
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):
@@ -267,20 +316,13 @@ class _UnixServer(socketserver.UnixStreamServer):
         self.daemon = daemon_instance
 
 
-def run_daemon_forever(target: str, frida_server_path: Path, lldb_server_root: Path) -> None:
-    paths = daemon_paths(target, frida_server_path, lldb_server_root)
+def run_daemon_forever() -> None:
+    paths = daemon_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
     _cleanup_socket(paths.socket)
-    _maybe_connect_network_target(target)
-    adb = AdbClient(target)
-    frida = bootstrap_frida(adb, frida_server_path=frida_server_path)
-    lldb = LLDBManager(adb, lldb_server_root=lldb_server_root)
-    daemon_instance = KdebugDaemon(frida, lldb)
+    daemon_instance = KdebugDaemon()
     metadata = DaemonMetadata(
         pid=os.getpid(),
-        target=target,
-        frida_server_path=str(frida_server_path.resolve()),
-        lldb_server_root=str(lldb_server_root.resolve()),
         socket_path=str(paths.socket),
     )
     _write_metadata(paths.metadata, metadata)
@@ -302,23 +344,17 @@ def run_daemon_forever(target: str, frida_server_path: Path, lldb_server_root: P
             server.handle_request()
     finally:
         server.server_close()
-        lldb.shutdown()
-        frida.shutdown()
+        daemon_instance.shutdown()
         _cleanup_stale_files(paths)
 
 
-def _wait_for_daemon_start(
-    process: subprocess.Popen[bytes],
-    target: str,
-    frida_server_path: Path,
-    lldb_server_root: Path,
-) -> None:
+def _wait_for_daemon_start(process: subprocess.Popen[bytes]) -> None:
     deadline = time.time() + 5.0
-    paths = daemon_paths(target, frida_server_path, lldb_server_root)
+    paths = daemon_paths()
     while time.time() < deadline:
         if process.poll() is not None:
             raise CliError(f"daemon exited early with status {process.returncode}")
-        status = get_daemon_status(target, frida_server_path, lldb_server_root)
+        status = get_daemon_status()
         if status.running and paths.socket.exists():
             return
         time.sleep(0.1)
@@ -336,20 +372,6 @@ def _load_metadata(path: Path) -> DaemonMetadata | None:
 
 def _write_metadata(path: Path, metadata: DaemonMetadata) -> None:
     path.write_text(metadata.model_dump_json(indent=2) + "\n", encoding="utf-8")
-
-
-def _validate_metadata_identity(
-    metadata: DaemonMetadata,
-    target: str,
-    frida_server_path: Path,
-    lldb_server_root: Path,
-) -> None:
-    if (
-        metadata.target != target
-        or metadata.frida_server_path != str(frida_server_path.resolve())
-        or metadata.lldb_server_root != str(lldb_server_root.resolve())
-    ):
-        raise CliError("daemon metadata does not match the requested target identity")
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -388,3 +410,10 @@ def _maybe_connect_network_target(target: str) -> None:
         subprocess.run(["adb", "connect", target], check=False, capture_output=True, text=True)
     except FileNotFoundError:
         raise CliError("adb command not found in PATH")
+
+
+def _required_param(params: dict[str, object], key: str) -> str:
+    value = params.get(key)
+    if not isinstance(value, str) or not value:
+        raise CliError(f"missing required daemon parameter `{key}`")
+    return value

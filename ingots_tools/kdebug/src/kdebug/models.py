@@ -8,9 +8,6 @@ from pydantic import BaseModel, Field
 
 class DaemonMetadata(BaseModel):
     pid: int
-    target: str
-    frida_server_path: str
-    lldb_server_root: str
     socket_path: str
 
 
@@ -94,5 +91,5 @@ class LldbGetConnectInfoParams(BaseModel):
 class DaemonStatusView(BaseModel):
     status: Literal["running", "stale", "stopped"]
     pid: int | None = None
-    target: str | None = None
     socket_path: str | None = None
+    active_targets: int | None = None

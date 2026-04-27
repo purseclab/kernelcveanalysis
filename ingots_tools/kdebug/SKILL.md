@@ -107,15 +107,15 @@ Notes:
 
 ## Daemon behavior
 
-Frida commands auto-start a local daemon for the selected device. Explicit daemon commands are only for inspection or cleanup:
+Frida and LLDB commands auto-start one local `kdebug` daemon for all targets. Explicit daemon commands are only for inspection or cleanup:
 
 ```bash
-kdebug --device <target> daemon status
-kdebug --device <target> daemon start
-kdebug --device <target> daemon stop
+kdebug daemon status
+kdebug daemon start
+kdebug daemon stop
 ```
 
-The daemon holds live Frida sessions and loaded scripts in memory. If it stops, those sessions are gone and must be recreated.
+The daemon holds target-scoped Frida sessions, scripts, and LLDB sessions in memory. If it stops, those sessions are gone and must be recreated.
 
 ## Use adb for non-Frida tasks
 

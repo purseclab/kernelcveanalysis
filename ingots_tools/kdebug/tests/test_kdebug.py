@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -126,6 +127,20 @@ class FakeFridaModule:
         return self.manager
 
 
+@dataclass
+class FakeRuntime:
+    frida: FridaManager | None = None
+    lldb: LLDBManager | None = None
+
+    def get_frida(self) -> FridaManager:
+        assert self.frida is not None
+        return self.frida
+
+    def get_lldb(self) -> LLDBManager:
+        assert self.lldb is not None
+        return self.lldb
+
+
 class FakeAdbProcess:
     def __init__(self, adb, name: str, pid: int):
         self.adb = adb
@@ -194,31 +209,58 @@ class TargetTests(unittest.TestCase):
         with self.assertRaises(CliError):
             normalize_target(device="serial", adb_host="127.0.0.1", adb_port=5555)
 
-    def test_daemon_paths_are_hashed_per_identity(self):
-        first = daemon_paths("127.0.0.1:5555", Path("/tmp/a"), Path("/tmp/root-a"))
-        second = daemon_paths("127.0.0.1:5555", Path("/tmp/a"), Path("/tmp/root-b"))
-        self.assertNotEqual(first.state_dir, second.state_dir)
-        self.assertTrue(str(first.state_dir).startswith(str(default_state_dir())))
+    def test_daemon_paths_use_global_state_dir(self):
+        paths = daemon_paths()
+        self.assertEqual(paths.state_dir, default_state_dir())
+        self.assertEqual(paths.socket.name, "daemon.sock")
 
 
 class DaemonDispatchTests(unittest.TestCase):
     def test_dispatch_attach_and_list(self):
         manager = FridaManager(FakeDevice())
-        daemon = KdebugDaemon(manager, Mock())
+        daemon = KdebugDaemon()
+        daemon._runtime_for_params = Mock(return_value=FakeRuntime(frida=manager))  # type: ignore[attr-defined]
 
-        attached = daemon.dispatch("frida_attach", {"package_name": "com.example.app"})
-        sessions = daemon.dispatch("frida_list_sessions", {})
+        attached = daemon.dispatch(
+            "frida_attach",
+            {
+                "target": "serial",
+                "frida_server_path": "/tmp/frida",
+                "lldb_server_root": "/tmp/lldb",
+                "package_name": "com.example.app",
+            },
+        )
+        sessions = daemon.dispatch(
+            "frida_list_sessions",
+            {
+                "target": "serial",
+                "frida_server_path": "/tmp/frida",
+                "lldb_server_root": "/tmp/lldb",
+            },
+        )
 
         self.assertEqual(attached["package_name"], "com.example.app")
         self.assertEqual(len(sessions["sessions"]), 1)
 
     def test_dispatch_rpc_round_trip(self):
         manager = FridaManager(FakeDevice())
-        daemon = KdebugDaemon(manager, Mock())
-        attached = daemon.dispatch("frida_attach", {"package_name": "com.example.app"})
+        daemon = KdebugDaemon()
+        daemon._runtime_for_params = Mock(return_value=FakeRuntime(frida=manager))  # type: ignore[attr-defined]
+        attached = daemon.dispatch(
+            "frida_attach",
+            {
+                "target": "serial",
+                "frida_server_path": "/tmp/frida",
+                "lldb_server_root": "/tmp/lldb",
+                "package_name": "com.example.app",
+            },
+        )
         loaded = daemon.dispatch(
             "frida_load_script",
             {
+                "target": "serial",
+                "frida_server_path": "/tmp/frida",
+                "lldb_server_root": "/tmp/lldb",
                 "session_id": attached["session_id"],
                 "name": "demo",
                 "source": "console.log('hi')",
@@ -229,7 +271,14 @@ class DaemonDispatchTests(unittest.TestCase):
 
         result = daemon.dispatch(
             "frida_rpc_call",
-            {"script_id": loaded["script_id"], "method": "ping", "args": ["a", "b"]},
+            {
+                "target": "serial",
+                "frida_server_path": "/tmp/frida",
+                "lldb_server_root": "/tmp/lldb",
+                "script_id": loaded["script_id"],
+                "method": "ping",
+                "args": ["a", "b"],
+            },
         )
 
         self.assertEqual(result["result"], ["a", "b"])
@@ -241,19 +290,55 @@ class DaemonDispatchTests(unittest.TestCase):
             asset.parent.mkdir(parents=True, exist_ok=True)
             asset.write_text("stub\n", encoding="utf-8")
             lldb = LLDBManager(FakeAdbClient(), lldb_server_root=Path(tmpdir))
-            daemon = KdebugDaemon(FridaManager(FakeDevice()), lldb)
+            daemon = KdebugDaemon()
+            daemon._runtime_for_params = Mock(return_value=FakeRuntime(frida=FridaManager(FakeDevice()), lldb=lldb))  # type: ignore[attr-defined]
 
-            attached = daemon.dispatch("lldb_attach_package", {"package_name": "com.example.app"})
-            info = daemon.dispatch("lldb_get_connect_info", {"session_id": attached["session_id"]})
+            attached = daemon.dispatch(
+                "lldb_attach_package",
+                {
+                    "target": "serial",
+                    "frida_server_path": "/tmp/frida",
+                    "lldb_server_root": str(Path(tmpdir)),
+                    "package_name": "com.example.app",
+                },
+            )
+            info = daemon.dispatch(
+                "lldb_get_connect_info",
+                {
+                    "target": "serial",
+                    "frida_server_path": "/tmp/frida",
+                    "lldb_server_root": str(Path(tmpdir)),
+                    "session_id": attached["session_id"],
+                },
+            )
 
         self.assertEqual(attached["package_name"], "com.example.app")
         self.assertEqual(info["connect_host"], "127.0.0.1")
+
+    def test_runtime_rejects_target_path_mismatch(self):
+        daemon = KdebugDaemon()
+        runtime = FakeRuntime(frida=FridaManager(FakeDevice()))
+        daemon.runtimes["serial"] = runtime  # type: ignore[assignment]
+        daemon.runtimes["serial"].target = "serial"  # type: ignore[attr-defined]
+        daemon.runtimes["serial"].frida_server_path = Path("/tmp/frida-a")  # type: ignore[attr-defined]
+        daemon.runtimes["serial"].lldb_server_root = Path("/tmp/lldb-a")  # type: ignore[attr-defined]
+
+        with self.assertRaisesRegex(CliError, "different frida-server path"):
+            daemon._runtime_for_params(
+                "frida_list_apps",
+                {
+                    "target": "serial",
+                    "frida_server_path": "/tmp/frida-b",
+                    "lldb_server_root": "/tmp/lldb-a",
+                },
+            )
 
 
 class ClientSocketTests(unittest.TestCase):
     def test_client_talks_to_unix_socket_server(self):
         manager = FridaManager(FakeDevice())
-        daemon = KdebugDaemon(manager, Mock())
+        daemon = KdebugDaemon()
+        daemon._runtime_for_params = Mock(return_value=FakeRuntime(frida=manager))  # type: ignore[attr-defined]
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = Path(tmpdir) / "daemon.sock"
             server = _UnixServer(str(socket_path), daemon)
@@ -407,7 +492,7 @@ class CliTests(unittest.TestCase):
 
         with patch("kdebug.main.status_view") as status_view_mock:
             status_view_mock.return_value = Mock(model_dump=lambda mode="json": {"status": "stopped"})
-            result = runner.invoke(app, ["--device", "serial", "daemon", "status"])
+            result = runner.invoke(app, ["daemon", "status"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(result.output.strip(), "stopped")

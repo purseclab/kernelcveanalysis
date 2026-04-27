@@ -3,7 +3,7 @@
 `kdebug` is a daemon-backed CLI for Android app debugging over ADB.
 
 It keeps Frida sessions, loaded scripts, and LLDB attach sessions alive in a
-local per-device daemon so you can:
+single local daemon with per-target runtimes so you can:
 
 - list visible apps
 - attach to a running package
@@ -28,9 +28,9 @@ uv run kdebug --device 127.0.0.1:6532 lldb attach-package com.example.app
 uv run kdebug --device 127.0.0.1:6532 lldb connect <session-id> --binary ./libtarget.so
 ```
 
-`kdebug` auto-starts its daemon for Frida and LLDB commands. Use
+`kdebug` auto-starts its global daemon for Frida and LLDB commands. Use
 `kdebug daemon status`, `start`, and `stop` only when you need to inspect or
-manage that state directly.
+manage that process directly.
 
 Place a host `frida-server` binary at `kdebug/assets/frida-server` or pass an
 override with `--frida-server-path`.
