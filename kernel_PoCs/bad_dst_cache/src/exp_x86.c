@@ -923,9 +923,6 @@ int set_hard_file_limit(rlim_t new_limit) {
 int main() {
     puts("Starting exploit...");
 
-    test();
-    return 0;
-
     set_hard_file_limit(16384);
     set_soft_file_limit(16384);
 
