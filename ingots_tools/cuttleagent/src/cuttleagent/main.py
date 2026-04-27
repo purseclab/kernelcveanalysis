@@ -36,7 +36,7 @@ def analyze(
     model: Model = typer.Option(
         Model.GPT_5_1,
         "--model",
-        help="LangChain model identifier to use for the agent.",
+        help="OpenCode model identifier to use for the agent.",
     ),
 ) -> None:
     load_dotenv()

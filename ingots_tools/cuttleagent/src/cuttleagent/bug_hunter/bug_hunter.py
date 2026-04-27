@@ -4,8 +4,8 @@ from pathlib import Path
 from secrets import token_hex
 
 from kexploit_agent import Agent, DockerSandboxProvider, Model, MountInfo
-from kexploit_agent.agent import BaseTool
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import BaseTool
 from langchain_tavily import TavilySearch
 
 from .prompts import BUG_HUNTER_PROMPT
@@ -54,7 +54,7 @@ class BugHunter:
             "sandbox not started, can't create bug hunter agent"
         )
         return Agent(
-            model=self.model.create_model(),
+            model=self.model,
             tools=self.tools,
             system_prompt=BUG_HUNTER_PROMPT,
             name=name,
