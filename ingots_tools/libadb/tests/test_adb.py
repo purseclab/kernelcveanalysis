@@ -83,7 +83,7 @@ class AdbClientTests(unittest.TestCase):
             adb.install_app(Path("/tmp/app.apk"))
 
         run.assert_called_once_with(
-            ["adb", "-s", "198.51.100.8:7777", "install", "/tmp/app.apk"],
+            ["adb", "-s", "198.51.100.8:7777", "install", "-t", "/tmp/app.apk"],
             check=True,
         )
 
@@ -110,11 +110,11 @@ class AdbClientTests(unittest.TestCase):
         install_cmd = run.call_args_list[0].args[0]
         push_cmd = run.call_args_list[1].args[0]
         self.assertEqual(
-            install_cmd[:4],
-            ["adb", "-s", "198.51.100.8:7777", "install-multiple"],
+            install_cmd[:5],
+            ["adb", "-s", "198.51.100.8:7777", "install-multiple", "-t"],
         )
-        self.assertEqual(Path(install_cmd[4]).name, "base.apk")
-        self.assertEqual(Path(install_cmd[5]).name, "split_config.arm64_v8a.apk")
+        self.assertEqual(Path(install_cmd[5]).name, "base.apk")
+        self.assertEqual(Path(install_cmd[6]).name, "split_config.arm64_v8a.apk")
         self.assertEqual(
             push_cmd[:4],
             ["adb", "-s", "198.51.100.8:7777", "push"],
@@ -139,10 +139,10 @@ class AdbClientTests(unittest.TestCase):
 
         run.assert_called_once()
         self.assertEqual(
-            run.call_args.args[0][:4],
-            ["adb", "-s", "198.51.100.8:7777", "install"],
+            run.call_args.args[0][:5],
+            ["adb", "-s", "198.51.100.8:7777", "install", "-t"],
         )
-        self.assertEqual(Path(run.call_args.args[0][4]).name, "base.apk")
+        self.assertEqual(Path(run.call_args.args[0][5]).name, "base.apk")
 
     def test_install_app_rejects_bundle_without_apks(self):
         adb = AdbClient("198.51.100.8:7777")

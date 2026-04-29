@@ -22,6 +22,7 @@ class ServerConfigFile(BaseModel):
     database_path: Path
     instance_timeout_sec: int = Field(default=600, ge=0)
     reconcile_interval_sec: int = Field(default=30, ge=1)
+    base_instance_num: int = Field(default=0, ge=0)
     max_instances: int = Field(default=10, ge=1)
 
 
@@ -67,6 +68,7 @@ class CuttlefishSettings:
     instance_runtime_root: Path
     instance_timeout_sec: int | None
     reconcile_interval_sec: int
+    base_instance_num: int
     max_instances: int
     templates: dict[str, InstanceTemplate]
 
@@ -107,6 +109,7 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
             else main_config.instance_timeout_sec
         ),
         reconcile_interval_sec=main_config.reconcile_interval_sec,
+        base_instance_num=main_config.base_instance_num,
         max_instances=main_config.max_instances,
         templates=templates,
     )

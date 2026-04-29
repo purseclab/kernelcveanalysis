@@ -192,13 +192,13 @@ class AdbClient:
         if not apps:
             raise ValueError("install_multiple_apps requires at least one apk")
         subprocess.run(
-            ["adb", "-s", self.remote_addr, "install-multiple", *map(str, apps)],
+            ["adb", "-s", self.remote_addr, "install-multiple", "-t", *map(str, apps)],
             check=True,
         )
 
     def _install_apk(self, app: Path) -> None:
         subprocess.run(
-            ["adb", "-s", self.remote_addr, "install", str(app)],
+            ["adb", "-s", self.remote_addr, "install", "-t", str(app)],
             check=True,
         )
 

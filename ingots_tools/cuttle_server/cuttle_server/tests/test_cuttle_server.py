@@ -56,6 +56,7 @@ class ConfigLoadingTests(unittest.TestCase):
                 'admin_user_id = "admin"\n'
                 'database_path = "data/cuttlefish.db"\n'
                 "instance_timeout_sec = 123\n"
+                "base_instance_num = 4\n"
                 "max_instances = 7\n"
             )
             (root / "templates" / "default.toml").write_text(
@@ -76,6 +77,7 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(settings.admin_user_id, "admin")
         self.assertEqual(settings.instance_timeout_sec, 123)
         self.assertEqual(settings.reconcile_interval_sec, 30)
+        self.assertEqual(settings.base_instance_num, 4)
         self.assertEqual(settings.max_instances, 7)
         self.assertEqual(settings.database_path, (root / "data/cuttlefish.db").resolve())
         self.assertEqual(settings.instance_runtime_root, DEFAULT_INSTANCE_RUNTIME_ROOT)
@@ -417,6 +419,7 @@ class ServerManagerTests(unittest.TestCase):
                 "instance_runtime_root": self.root / "instances",
                 "instance_timeout_sec": 60,
                 "reconcile_interval_sec": 30,
+                "base_instance_num": 0,
                 "max_instances": 10,
                 "admin_user_id": "admin",
                 "templates": {
@@ -461,6 +464,40 @@ class ServerManagerTests(unittest.TestCase):
         self.assertTrue(record.config.load_apps)
         self.assertEqual(record.runtime_dir.parent, self.root / "instances")
         self.assertEqual(len(record.runtime_dir.name), 32)
+
+    def test_base_instance_num_offsets_allocated_slots(self):
+        self.settings.base_instance_num = 5
+
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone"),
+        ).instance
+
+        self.assertEqual(created.instance_num, 6)
+        self.assertEqual(created.adb_port, 6525)
+        record = self.db.get(created.instance_id)
+        assert record is not None
+        self.assertEqual(record.instance_num, 6)
+
+    def test_capacity_uses_offset_managed_range(self):
+        self.settings.base_instance_num = 5
+        self.settings.max_instances = 2
+        self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="one"),
+        )
+        self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="two"),
+        )
+
+        with self.assertRaises(InstanceError) as exc_info:
+            self.manager.create_instance(
+                "alice",
+                CreateInstanceRequest(template_name="phone", instance_name="three"),
+            )
+
+        self.assertIn("managed range is 6-7", str(exc_info.exception))
 
     def test_app_loading_runs_by_default(self):
         created = self.manager.create_instance(

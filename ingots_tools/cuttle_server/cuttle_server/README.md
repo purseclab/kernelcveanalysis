@@ -40,6 +40,7 @@ admin_user_id = "admin"
 database_path = "data/cuttlefish.db"
 instance_timeout_sec = 600
 reconcile_interval_sec = 30
+base_instance_num = 0
 max_instances = 10
 ```
 
@@ -50,6 +51,7 @@ max_instances = 10
 - Per-instance runtime state is stored under `/tmp/cvd` using short generated directory names to avoid Unix socket path-length failures.
 - Set `instance_timeout_sec = 0` to disable automatic expiration globally.
 - `reconcile_interval_sec` controls how often the server's background cleanup task checks for expired instances.
+- `base_instance_num` reserves the first `N` Cuttlefish instance numbers for manually launched devices. When set to `N`, the server allocates from `N + 1` through `N + max_instances`.
 
 ### Template Config
 
@@ -126,6 +128,7 @@ Notes:
 - `cvd start` and `cvd stop` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
+- `max_instances` still means the number of instances managed by the server, not the highest raw Cuttlefish instance number.
 - When `load_apps` is enabled and the template has apps, the server connects to the instance over server-local ADB, waits for boot completion, installs each `.apk` directly or unpacks and installs `.xapk`/`.apkm` bundles in template order, then disconnects before marking the instance `ACTIVE`.
 - The server runs a background task on startup that periodically reconciles and stops expired instances, and it also performs one reconciliation pass immediately during startup.
 - If automatic expiration is disabled globally, new instances are created without an `expires_at` deadline until a client explicitly renews them with a timeout.

@@ -348,11 +348,14 @@ class CuttlefishServerManager:
 
     def _allocate_instance_number(self) -> int:
         active_numbers = self.db.list_active_instance_numbers()
-        for instance_num in range(1, self.settings.max_instances + 1):
+        first_instance_num = self.settings.base_instance_num + 1
+        last_instance_num = self.settings.base_instance_num + self.settings.max_instances
+        for instance_num in range(first_instance_num, last_instance_num + 1):
             if instance_num not in active_numbers:
                 return instance_num
         raise CapacityError(
-            f"no instance slots available; max is {self.settings.max_instances}"
+            "no instance slots available; "
+            f"managed range is {first_instance_num}-{last_instance_num}"
         )
 
     @staticmethod
