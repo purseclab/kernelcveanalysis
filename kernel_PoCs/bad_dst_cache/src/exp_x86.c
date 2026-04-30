@@ -516,8 +516,8 @@ void scan_kernel_phys_base() {
 
 #define NUM_PAGE_PIPES 0x600
 #define NUM_VULN_PIPES 0x20
-#define NUM_PRE_SOCKETS 1024
-#define NUM_POST_SOCKETS 1024
+#define NUM_PRE_SOCKETS 1792
+#define NUM_POST_SOCKETS 256
 
 typedef struct {
     atomic_int ready_counter;
