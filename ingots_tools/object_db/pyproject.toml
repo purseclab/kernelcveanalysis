@@ -5,9 +5,19 @@ description = "Kernel object database models and extraction utilities"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "kexploit_utils",
     "pydantic>=2.11.5",
+    "python-dotenv>=1.1.0",
+    "rich>=14.0.0",
     "sqlalchemy>=2.0.45",
+    "typer>=0.21.1",
 ]
 
 [tool.uv]
 package = true
+
+[tool.uv.sources]
+kexploit_utils = { workspace = true }
+
+[project.scripts]
+objectdb = "object_db.cli:main"

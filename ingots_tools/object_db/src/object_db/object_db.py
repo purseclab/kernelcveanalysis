@@ -39,7 +39,7 @@ class DBBtfType(Base):
     component_idx: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
-class HeapObject(Base):
+class DBHeapObject(Base):
     __tablename__ = "objects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -51,7 +51,7 @@ class HeapObject(Base):
     btf_type: Mapped[DBBtfType] = relationship(foreign_keys=[type_id])
 
 
-class KmallocCall(Base):
+class DBKmallocCall(Base):
     __tablename__ = "kmalloc_calls"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -66,7 +66,7 @@ class KmallocCall(Base):
     kmalloc_cache_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     heap_object_id: Mapped[Optional[int]] = mapped_column(ForeignKey("objects.id"), nullable=True)
-    heap_object: Mapped[Optional[HeapObject]] = relationship(foreign_keys=[heap_object_id])
+    heap_object: Mapped[Optional[DBHeapObject]] = relationship(foreign_keys=[heap_object_id])
 
     @classmethod
     def from_codeql_result(cls, result: CodeQlKmallocCallResult):
@@ -88,19 +88,27 @@ class ObjectDb:
         self.engine = create_engine(f"sqlite:///{db_path}")
         Base.metadata.create_all(self.engine)
 
-    def save_kmalloc_call(self, call: KmallocCall):
+    def close(self):
+        self.engine.dispose()
+
+    def save_kmalloc_call(self, call: DBKmallocCall):
         with Session(self.engine) as session:
             session.add(call)
             session.commit()
 
-    def get_all_kmalloc_calls(self) -> list[KmallocCall]:
+    def get_all_kmalloc_calls(self) -> list[DBKmallocCall]:
         with Session(self.engine) as session:
-            stmt = select(KmallocCall)
+            stmt = select(DBKmallocCall)
             return list(session.scalars(stmt).all())
 
-    def get_heap_object(self, obj_id: int) -> Optional[HeapObject]:
+    def get_all_heap_objects(self) -> list[DBHeapObject]:
         with Session(self.engine) as session:
-            return session.get(HeapObject, obj_id)
+            stmt = select(DBHeapObject)
+            return list(session.scalars(stmt).all())
+
+    def get_heap_object(self, obj_id: int) -> Optional[DBHeapObject]:
+        with Session(self.engine) as session:
+            return session.get(DBHeapObject, obj_id)
 
     def save_btf_type(self, btf_type: DomainBtfType):
         db_obj = self._domain_to_db_btf(btf_type)
@@ -121,12 +129,12 @@ class ObjectDb:
             db_objs = session.scalars(stmt).all()
             return [self._db_to_domain_btf(obj, btf_types_ctx) for obj in db_objs]
 
-    def save_heap_object(self, object: HeapObject):
+    def save_heap_object(self, object: DBHeapObject):
         with Session(self.engine) as session:
             session.merge(object)
             session.commit()
 
-    def save_btf_types_and_heap_objects(self, btf_types: list[DomainBtfType], heap_objects: list[HeapObject]):
+    def save_btf_types_and_heap_objects(self, btf_types: list[DomainBtfType], heap_objects: list[DBHeapObject]):
         db_btf_objs = [self._domain_to_db_btf(t) for t in btf_types]
         with Session(self.engine) as session:
             for btf_obj in db_btf_objs:
@@ -134,6 +142,19 @@ class ObjectDb:
             for heap_obj in heap_objects:
                 session.merge(heap_obj)
             session.commit()
+
+    def load_btf_types(self) -> BtfTypes:
+        ctx = BtfTypes({"types": []})
+        with Session(self.engine) as session:
+            stmt = select(DBBtfType).order_by(DBBtfType.id)
+            db_objs = session.scalars(stmt).all()
+
+        for obj in db_objs:
+            domain_obj = self._db_to_domain_btf(obj, ctx)
+            ctx.types[domain_obj.id] = domain_obj
+            ctx.type_name_map[domain_obj.name] = domain_obj
+
+        return ctx
 
     def _domain_to_db_btf(self, t: DomainBtfType) -> DBBtfType:
         from dataclasses import asdict

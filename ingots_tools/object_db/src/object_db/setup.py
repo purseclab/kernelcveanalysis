@@ -4,7 +4,7 @@ from typing import Optional
 
 from .btf_types import BtfStruct, BtfTypes
 from .codeql import CodeqlContext
-from .object_db import HeapObject, KmallocCall, OBJECT_DB_FILE_NAME, ObjectDb
+from .object_db import DBHeapObject, DBKmallocCall, OBJECT_DB_FILE_NAME, ObjectDb
 from .synthesis_metadata import SynthesisMetadata
 
 
@@ -54,7 +54,7 @@ def extract_type_info(
 
         object_db.save_btf_type(btf_type)
         object_db.save_heap_object(
-            HeapObject(
+            DBHeapObject(
                 id=struct.location.to_db_id(),
                 type_id=btf_type.id,
                 location=str(struct.location),
@@ -67,7 +67,7 @@ def extract_type_info(
 def extract_kmalloc_calls(object_db: ObjectDb, codeql: CodeqlContext):
     results = codeql.get_kmalloc_calls()
     for result in results:
-        call = KmallocCall.from_codeql_result(result)
+        call = DBKmallocCall.from_codeql_result(result)
 
         heap_obj_id = result.struct_def.to_db_id()
         if object_db.get_heap_object(heap_obj_id):
