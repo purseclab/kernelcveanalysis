@@ -41,8 +41,8 @@ class InstanceView(BaseModel):
     template_name: str
     cpus: int
     selinux: bool
-    kernel_path: Path
-    initrd_path: Path
+    kernel_path: Path | None
+    initrd_path: Path | None
     apps: list[Path]
     load_apps: bool
     runtime_dir: Path
@@ -72,8 +72,8 @@ class TemplateView(BaseModel):
     template_name: str
     runtime_root: Path
     cpus: int
-    kernel_path: Path
-    initrd_path: Path
+    kernel_path: Path | None
+    initrd_path: Path | None
     selinux: bool
     apps: list[Path]
 

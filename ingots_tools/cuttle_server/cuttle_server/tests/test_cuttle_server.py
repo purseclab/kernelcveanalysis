@@ -84,8 +84,37 @@ class ConfigLoadingTests(unittest.TestCase):
         template = settings.templates["phone"]
         self.assertEqual(template.cpus, 4)
         self.assertEqual(template.runtime_root, install_dir.resolve())
+        self.assertEqual(template.kernel_path, kernel.resolve())
+        self.assertEqual(template.initrd_path, initrd.resolve())
         self.assertEqual(template.apps, (app_one.resolve(), app_two.resolve()))
         self.assertEqual(template.cvd_binary, install_dir.resolve() / "bin" / "cvd")
+
+    def test_load_settings_allows_omitted_kernel_and_initrd_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            bin_dir = install_dir / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "cvd").write_text("")
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "data/cuttlefish.db"\n'
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "phone"\n'
+                f'runtime_root = "{install_dir}"\n'
+                "cpus = 4\n"
+                "selinux = false\n"
+                "apps = []\n"
+            )
+
+            settings = load_settings(root)
+
+        template = settings.templates["phone"]
+        self.assertIsNone(template.kernel_path)
+        self.assertIsNone(template.initrd_path)
 
 
 class ServerCliTests(unittest.TestCase):
@@ -328,6 +357,66 @@ class CvdCliTests(unittest.TestCase):
             ],
         )
         self.assertEqual(stop_call.args[0], ["/cf/bin/cvd", "stop"])
+
+    def test_start_omits_kernel_and_initrd_args_when_paths_are_unset(self):
+        cli = CuttlefishCli()
+        config = ResolvedLaunchConfig(
+            template_name="phone",
+            cpus=4,
+            selinux=True,
+            runtime_root=Path("/cf"),
+            kernel_path=None,
+            initrd_path=None,
+            apps=[],
+            cvd_binary=Path("/cf/bin/cvd"),
+        )
+        record = type("Record", (), {})()
+        record.instance_num = 3
+        record.runtime_dir = Path("/runtime")
+        record.config = config
+
+        command = cli._build_start_command(record)
+
+        self.assertEqual(
+            command,
+            [
+                "/cf/bin/cvd",
+                "start",
+                "--base_instance_num=3",
+                "--cpus=4",
+                "--start_webrtc=true",
+                "--daemon",
+                "--report_anonymous_usage_stats=n",
+            ],
+        )
+
+    def test_start_includes_only_configured_kernel_or_initrd_args(self):
+        cli = CuttlefishCli()
+        record = type("Record", (), {})()
+        record.instance_num = 3
+        record.runtime_dir = Path("/runtime")
+        record.config = ResolvedLaunchConfig(
+            template_name="phone",
+            cpus=4,
+            selinux=True,
+            runtime_root=Path("/cf"),
+            kernel_path=Path("/kernel"),
+            initrd_path=None,
+            apps=[],
+            cvd_binary=Path("/cf/bin/cvd"),
+        )
+
+        kernel_only_command = cli._build_start_command(record)
+
+        record.config = record.config.model_copy(
+            update={"kernel_path": None, "initrd_path": Path("/initrd")}
+        )
+        initrd_only_command = cli._build_start_command(record)
+
+        self.assertIn("--kernel_path=/kernel", kernel_only_command)
+        self.assertNotIn("--initramfs_path=/initrd", kernel_only_command)
+        self.assertNotIn("--kernel_path=/kernel", initrd_only_command)
+        self.assertIn("--initramfs_path=/initrd", initrd_only_command)
 
     def test_failed_start_logs_stdout_and_stderr(self):
         cli = CuttlefishCli()

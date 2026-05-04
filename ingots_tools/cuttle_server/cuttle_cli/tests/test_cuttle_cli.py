@@ -326,6 +326,27 @@ class CliCommandTests(unittest.TestCase):
         self.assertIn("phone", list_result.output)
         self.assertIn("runtime_root: /cf", show_result.output)
 
+    def test_templates_show_displays_default_for_omitted_kernel_and_initrd(self):
+        mock_client = Mock()
+        mock_client.get_template.return_value = TemplateView(
+            template_name="phone",
+            runtime_root=Path("/cf"),
+            cpus=4,
+            kernel_path=None,
+            initrd_path=None,
+            selinux=False,
+            apps=[],
+        )
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ):
+            result = self.runner.invoke(app, ["templates", "show", "phone"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("kernel_path: <default>", result.output)
+        self.assertIn("initrd_path: <default>", result.output)
+
     def test_auto_start_calls_daemon_helper(self):
         mock_client = Mock()
         mock_client.adb_target.return_value = "127.0.0.1:6520"

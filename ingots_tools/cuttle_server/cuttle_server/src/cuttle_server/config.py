@@ -30,8 +30,8 @@ class TemplateConfigFile(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     runtime_root: Path
     cpus: int = Field(ge=1, le=64)
-    kernel_path: Path
-    initrd_path: Path
+    kernel_path: Path | None = None
+    initrd_path: Path | None = None
     selinux: bool
     apps: list[Path] = Field(default_factory=list)
 
@@ -52,8 +52,8 @@ class InstanceTemplate:
     runtime_root: Path
     cvd_binary: Path
     cpus: int
-    kernel_path: Path
-    initrd_path: Path
+    kernel_path: Path | None
+    initrd_path: Path | None
     selinux: bool
     apps: tuple[Path, ...]
 
@@ -138,17 +138,18 @@ def _load_template(template_path: Path) -> InstanceTemplate:
 
     base_dir = template_path.parent
     runtime_root = _resolve_path(parsed.runtime_root, base_dir)
-    kernel_path = _resolve_path(parsed.kernel_path, base_dir)
-    initrd_path = _resolve_path(parsed.initrd_path, base_dir)
+    kernel_path = _resolve_optional_path(parsed.kernel_path, base_dir)
+    initrd_path = _resolve_optional_path(parsed.initrd_path, base_dir)
     apps = tuple(_resolve_path(path, base_dir) for path in parsed.apps)
     cvd_binary = runtime_root / "bin" / "cvd"
 
-    for path, label in (
+    required_paths: tuple[tuple[Path | None, str], ...] = (
         (cvd_binary, "cvd binary"),
         (kernel_path, "kernel path"),
         (initrd_path, "initrd path"),
-    ):
-        if not path.exists():
+    )
+    for path, label in required_paths:
+        if path is not None and not path.exists():
             raise ConfigError(
                 f"template {parsed.name!r} {label} does not exist: {path}"
             )
@@ -184,3 +185,9 @@ def _resolve_path(path: Path, base_dir: Path) -> Path:
     if path.is_absolute():
         return path
     return (base_dir / path).resolve()
+
+
+def _resolve_optional_path(path: Path | None, base_dir: Path) -> Path | None:
+    if path is None:
+        return None
+    return _resolve_path(path, base_dir)

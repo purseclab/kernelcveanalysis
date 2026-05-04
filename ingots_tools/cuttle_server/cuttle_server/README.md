@@ -74,6 +74,7 @@ apps = [
 - `name` is the template identifier used as `template_name`.
 - `runtime_root` is the Cuttlefish installation directory. Relative values are resolved relative to the template file.
 - The server derives `bin/cvd` from `runtime_root`.
+- `kernel_path` and `initrd_path` are optional. When omitted, the server does not pass the corresponding Cuttlefish launch argument, allowing the image defaults such as `boot.img` to be used.
 - Relative `kernel_path`, `initrd_path`, and `apps` entries are resolved relative to the template file.
 - `apps` are parsed, validated, persisted, returned by the API, and auto-installed in order during startup unless disabled per request.
 - Supported app payloads are `.apk`, `.xapk`, and `.apkm`. Bundle formats are unpacked server-side; embedded APK splits are installed together and bundled OBB files are copied into `/sdcard/Android/obb/...`.
@@ -143,8 +144,8 @@ cvd start \
   --base_instance_num=<N> \
   --cpus=<cpus> \
   --start_webrtc=true \
-  --kernel_path=<kernel> \
-  --initramfs_path=<initrd> \
+  [--kernel_path=<kernel>] \
+  [--initramfs_path=<initrd>] \
   --daemon \
   --report_anonymous_usage_stats=n
 ```

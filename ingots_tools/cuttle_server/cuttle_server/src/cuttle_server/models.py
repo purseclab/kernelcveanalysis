@@ -20,8 +20,8 @@ class ResolvedLaunchConfig(BaseModel):
     cpus: int = Field(ge=1, le=64)
     selinux: bool
     runtime_root: Path
-    kernel_path: Path
-    initrd_path: Path
+    kernel_path: Path | None
+    initrd_path: Path | None
     apps: list[Path] = Field(default_factory=list)
     load_apps: bool = True
     cvd_binary: Path

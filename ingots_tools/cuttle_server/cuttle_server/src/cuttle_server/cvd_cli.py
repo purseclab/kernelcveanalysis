@@ -48,11 +48,17 @@ class CuttlefishCli:
             f"--base_instance_num={record.instance_num}",
             f"--cpus={config.cpus}",
             "--start_webrtc=true",
-            f"--kernel_path={config.kernel_path}",
-            f"--initramfs_path={config.initrd_path}",
-            "--daemon",
-            "--report_anonymous_usage_stats=n",
         ]
+        if config.kernel_path is not None:
+            command.append(f"--kernel_path={config.kernel_path}")
+        if config.initrd_path is not None:
+            command.append(f"--initramfs_path={config.initrd_path}")
+        command.extend(
+            [
+                "--daemon",
+                "--report_anonymous_usage_stats=n",
+            ]
+        )
         if not config.selinux:
             command.append("--extra_kernel_cmdline=androidboot.selinux=permissive")
         return command

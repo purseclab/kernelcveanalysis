@@ -376,8 +376,8 @@ def show_template(
     typer.echo(f"name: {template.template_name}")
     typer.echo(f"runtime_root: {template.runtime_root}")
     typer.echo(f"cpus: {template.cpus}")
-    typer.echo(f"kernel_path: {template.kernel_path}")
-    typer.echo(f"initrd_path: {template.initrd_path}")
+    typer.echo(f"kernel_path: {template.kernel_path or '<default>'}")
+    typer.echo(f"initrd_path: {template.initrd_path or '<default>'}")
     typer.echo(f"selinux: {template.selinux}")
     if template.apps:
         typer.echo("apps:")
