@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -109,8 +110,12 @@ class CuttlefishCli:
     ) -> None:
         log_path = self._log_path_for_action(record, action)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        mode = "w" if action == "start" else "a"
         try:
-            with log_path.open("a", encoding="utf-8") as log_handle:
+            with log_path.open(mode, encoding="utf-8") as log_handle:
+                if action == "start":
+                    log_handle.write(f"$ {shlex.join(command)}\n\n")
+                    log_handle.flush()
                 subprocess.run(
                     command,
                     cwd=record.runtime_dir,

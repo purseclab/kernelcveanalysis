@@ -445,24 +445,28 @@ class CvdCliTests(unittest.TestCase):
             record.instance_id = "inst-1"
             record.runtime_dir = runtime_dir
             record.config = config
-            runtime_dir.mkdir(parents=True)
-            (runtime_dir / "cvd-start.log").write_text("launch stdout\nlaunch stderr\n")
             error = subprocess.CalledProcessError(
                 1,
                 ["/cf/bin/cvd", "start"],
             )
 
+            def fail_start(*args, **kwargs):
+                kwargs["stdout"].write("launch stdout\nlaunch stderr\n")
+                raise error
+
             with self.assertLogs("cuttle_server.cvd_cli", level="ERROR") as logs:
                 with patch(
                     "cuttle_server.cvd_cli.subprocess.run",
-                    side_effect=error,
+                    side_effect=fail_start,
                 ):
                     with self.assertRaises(RuntimeError) as exc_info:
                         cli.start_instance(record)
 
         joined_logs = "\n".join(logs.output)
+        self.assertIn("$ /cf/bin/cvd start", joined_logs)
         self.assertIn("launch stdout", joined_logs)
         self.assertIn("launch stderr", joined_logs)
+        self.assertIn("$ /cf/bin/cvd start", str(exc_info.exception))
         self.assertIn("launch stdout", str(exc_info.exception))
 
     def test_start_timeout_reports_log_tail(self):
