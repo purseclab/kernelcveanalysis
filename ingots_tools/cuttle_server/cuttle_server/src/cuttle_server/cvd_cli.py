@@ -19,15 +19,29 @@ class LaunchResult:
     webrtc_port: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class CuttlefishLogPaths:
+    start_log: Path
+    stop_log: Path
+
+
 class CuttlefishCli:
     """Handles spawning Cuttlefish instances."""
+
+    def __init__(self, *, start_timeout_sec: int = 120) -> None:
+        self.start_timeout_sec = start_timeout_sec
 
     def start_instance(self, record: InstanceRecord) -> LaunchResult:
         runtime_dir = record.runtime_dir
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        command = self._build_start_command(record)
-        self._run_command(command, record=record, action="start")
+        command = self.build_start_command(record)
+        self._run_command(
+            command,
+            record=record,
+            action="start",
+            timeout_sec=self.start_timeout_sec,
+        )
         adb_port = self._resolve_adb_port(record)
         return LaunchResult(
             launch_command=command,
@@ -38,9 +52,9 @@ class CuttlefishCli:
 
     def stop_instance(self, record: InstanceRecord) -> None:
         stop_command = [str(record.config.cvd_binary), "stop"]
-        self._run_command(stop_command, record=record, action="stop")
+        self._run_command(stop_command, record=record, action="stop", timeout_sec=None)
 
-    def _build_start_command(self, record: InstanceRecord) -> list[str]:
+    def build_start_command(self, record: InstanceRecord) -> list[str]:
         config = record.config
         command = [
             str(config.cvd_binary),
@@ -63,6 +77,16 @@ class CuttlefishCli:
             command.append("--extra_kernel_cmdline=androidboot.selinux=permissive")
         return command
 
+    def _build_start_command(self, record: InstanceRecord) -> list[str]:
+        return self.build_start_command(record)
+
+    @staticmethod
+    def log_paths(record: InstanceRecord) -> CuttlefishLogPaths:
+        return CuttlefishLogPaths(
+            start_log=record.runtime_dir / "cvd-start.log",
+            stop_log=record.runtime_dir / "cvd-stop.log",
+        )
+
     @staticmethod
     def _resolve_adb_port(record: InstanceRecord) -> int:
         return 6520 + record.instance_num - 1
@@ -81,22 +105,65 @@ class CuttlefishCli:
         *,
         record: InstanceRecord,
         action: str,
+        timeout_sec: int | None,
     ) -> None:
+        log_path = self._log_path_for_action(record, action)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            subprocess.run(
-                command,
-                cwd=record.runtime_dir,
-                env=self._build_env(record),
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            with log_path.open("a", encoding="utf-8") as log_handle:
+                subprocess.run(
+                    command,
+                    cwd=record.runtime_dir,
+                    env=self._build_env(record),
+                    check=True,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=timeout_sec,
+                )
         except subprocess.CalledProcessError as exc:
+            log_tail = self.read_log_tail(log_path)
             LOGGER.exception(
-                "cuttlefish %s command failed: command=%s stdout=%r stderr=%r",
+                "cuttlefish %s command failed: command=%s log_path=%s log_tail=%r",
                 action,
                 command,
-                getattr(exc, "stdout", None),
-                getattr(exc, "stderr", None),
+                log_path,
+                log_tail,
             )
-            raise
+            raise RuntimeError(
+                f"cuttlefish {action} command failed with exit code "
+                f"{exc.returncode}; log: {log_path}; tail:\n{log_tail}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            log_tail = self.read_log_tail(log_path)
+            LOGGER.exception(
+                "cuttlefish %s command timed out: command=%s timeout=%s "
+                "log_path=%s log_tail=%r",
+                action,
+                command,
+                timeout_sec,
+                log_path,
+                log_tail,
+            )
+            raise RuntimeError(
+                f"cuttlefish {action} command timed out after {timeout_sec}s; "
+                f"log: {log_path}; tail:\n{log_tail}"
+            ) from exc
+
+    def _log_path_for_action(self, record: InstanceRecord, action: str) -> Path:
+        paths = self.log_paths(record)
+        if action == "start":
+            return paths.start_log
+        if action == "stop":
+            return paths.stop_log
+        return record.runtime_dir / f"cvd-{action}.log"
+
+    @staticmethod
+    def read_log_tail(path: Path, *, max_chars: int = 4096) -> str:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[-max_chars:]

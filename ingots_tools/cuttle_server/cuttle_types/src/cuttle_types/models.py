@@ -62,6 +62,16 @@ class InstanceListResponse(BaseModel):
     instances: list[InstanceView]
 
 
+class InstanceLogsView(BaseModel):
+    instance_id: str
+    instance_name: str
+    state: InstanceState
+    launch_command: list[str]
+    failure_reason: str | None
+    start_log: str
+    stop_log: str
+
+
 class TemplateSummary(BaseModel):
     template_name: str
     cpus: int

@@ -19,6 +19,7 @@ Supported commands:
 - `uv run cuttle-cli start <template-name>`
 - `uv run cuttle-cli list`
 - `uv run cuttle-cli list --all`
+- `uv run cuttle-cli logs <instance-id-or-name>`
 - `uv run cuttle-cli stop <instance-name>`
 - `uv run cuttle-cli stop --stop-all`
 - `uv run cuttle-cli stop --stop-all-user <user-id>`
@@ -32,7 +33,9 @@ Supported commands:
 The CLI auto-starts the managed daemon for `start`, `list`, and `stop`. The daemon keeps the local shared ADB server in sync with the current user's visible instances by issuing `adb connect` and `adb disconnect` against `<server_host>:<adb_port>`.
 
 `start` also supports `--load-apps/--no-load-apps` to control whether the server should auto-install the template APK list during instance startup.
+`start` prints new CVD launch log output while the instance is starting.
 `list` shows only non-terminal instances by default; pass `--all` or `-a` to include stopped, crashed, and expired instances.
+`logs` prints the latest CVD start/stop logs for a visible instance by id or name.
 `stop` can target one instance by effective name, `--stop-all` visible non-terminal instances, or `--stop-all-user <user-id>` for a specific visible owner.
 
 Minimal config shape:

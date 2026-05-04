@@ -4,12 +4,14 @@ import shutil
 import threading
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from uuid import UUID
 
 from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
     InstanceListResponse,
+    InstanceLogsView,
     InstanceState,
     InstanceView,
     RenewLeaseRequest,
@@ -73,6 +75,8 @@ class CuttlefishServerManager:
         self,
         user_id: str,
         request: CreateInstanceRequest,
+        *,
+        start_async: bool = False,
     ) -> CreateInstanceResponse:
         with self.lock:
             self.reconcile_expired_instances()
@@ -106,8 +110,22 @@ class CuttlefishServerManager:
                 expires_at=expires_at,
                 failure_reason=None,
             )
+            record.launch_command = self._build_launch_command(record)
             self.db.upsert(record)
 
+        if start_async:
+            thread = threading.Thread(
+                target=self._complete_instance_start_in_background,
+                args=(record,),
+                daemon=True,
+            )
+            thread.start()
+            return CreateInstanceResponse(instance=instance_view_from_record(record))
+
+        self._complete_instance_start(record)
+        return CreateInstanceResponse(instance=instance_view_from_record(record))
+
+    def _complete_instance_start(self, record: InstanceRecord) -> None:
         try:
             launch_result = self.cli.start_instance(record)
         except Exception as exc:
@@ -133,7 +151,11 @@ class CuttlefishServerManager:
         record.failure_reason = None
         self.db.upsert(record)
 
-        return CreateInstanceResponse(instance=instance_view_from_record(record))
+    def _complete_instance_start_in_background(self, record: InstanceRecord) -> None:
+        try:
+            self._complete_instance_start(record)
+        except InstanceError:
+            return
 
     def get_instance(
         self,
@@ -149,6 +171,25 @@ class CuttlefishServerManager:
                     user_id, is_admin, instance_id
                 )
             return instance_view_from_record(record)
+
+    def get_instance_logs(
+        self,
+        user_id: str,
+        is_admin: bool,
+        instance_id: str,
+    ) -> InstanceLogsView:
+        with self.lock:
+            record = self._get_visible_instance_record(user_id, is_admin, instance_id)
+            paths = CuttlefishCli.log_paths(record)
+            return InstanceLogsView(
+                instance_id=record.instance_id,
+                instance_name=record.effective_instance_name,
+                state=record.state,
+                launch_command=record.launch_command,
+                failure_reason=record.failure_reason,
+                start_log=self._read_log(paths.start_log),
+                stop_log=self._read_log(paths.stop_log),
+            )
 
     def renew_lease(
         self,
@@ -274,6 +315,19 @@ class CuttlefishServerManager:
 
         self._cleanup_runtime_dir(record, state=InstanceState.CRASHED)
         self.db.upsert(record)
+
+    def _build_launch_command(self, record: InstanceRecord) -> list[str]:
+        build_start_command = getattr(self.cli, "build_start_command", None)
+        if build_start_command is None:
+            return []
+        return list(build_start_command(record))
+
+    @staticmethod
+    def _read_log(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            return ""
 
     def _get_instance_record(self, instance_id: str) -> InstanceRecord:
         record = self.db.get(instance_id)

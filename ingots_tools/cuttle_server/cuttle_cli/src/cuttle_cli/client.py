@@ -8,6 +8,7 @@ from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
     InstanceListResponse,
+    InstanceLogsView,
     InstanceView,
     TemplateListResponse,
     TemplateView,
@@ -37,14 +38,27 @@ class CuttleApiClient:
         )
 
     def start_instance(
-        self, request_body: CreateInstanceRequest
+        self, request_body: CreateInstanceRequest, *, async_start: bool = False
     ) -> CreateInstanceResponse:
+        path = "/v1/instances"
+        if async_start:
+            path = f"{path}?async_start=true"
         data = self._request_json(
             "POST",
-            "/v1/instances",
+            path,
             request_body.model_dump(mode="json"),
         )
         return CreateInstanceResponse.model_validate(data)
+
+    def get_instance(self, instance_id: str) -> InstanceView:
+        quoted_id = parse.quote(instance_id, safe="")
+        data = self._request_json("GET", f"/v1/instances/{quoted_id}")
+        return InstanceView.model_validate(data)
+
+    def get_instance_logs(self, instance_id: str) -> InstanceLogsView:
+        quoted_id = parse.quote(instance_id, safe="")
+        data = self._request_json("GET", f"/v1/instances/{quoted_id}/logs")
+        return InstanceLogsView.model_validate(data)
 
     def list_instances(self) -> InstanceListResponse:
         data = self._request_json("GET", "/v1/instances")

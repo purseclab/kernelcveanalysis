@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import sys
+import time
 
 import typer
 from cuttle_types import (
     CreateInstanceRequest,
+    InstanceLogsView,
     InstanceState,
     InstanceView,
     LaunchOverrides,
@@ -114,19 +116,52 @@ def start(
                     selinux=selinux,
                     load_apps=load_apps,
                 ),
-            )
+            ),
+            async_start=True,
         )
+        instance = response.instance
+        printed_log_chars = 0
+        while instance.state == InstanceState.STARTING:
+            logs = client.get_instance_logs(instance.instance_id)
+            printed_log_chars = _echo_new_log_text(
+                logs.start_log,
+                printed_log_chars,
+            )
+            instance = client.get_instance(instance.instance_id)
+            if instance.state == InstanceState.STARTING:
+                time.sleep(1)
+        logs = client.get_instance_logs(instance.instance_id)
+        _echo_new_log_text(logs.start_log, printed_log_chars)
     except CliError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    instance = response.instance
+    if instance.state == InstanceState.CRASHED:
+        detail = instance.failure_reason or "startup failed"
+        typer.echo(f"failed to start {instance.instance_name}: {detail}", err=True)
+        raise typer.Exit(code=1)
+
     adb_target = client.adb_target(instance) or "-"
     typer.echo(
         f"started {instance.instance_name} ({instance.instance_id}) "
         f"template={instance.template_name} state={instance.state.value} "
         f"adb={adb_target}"
     )
+
+
+@app.command(name="logs")
+def show_logs(
+    ctx: typer.Context,
+    instance: Annotated[str, typer.Argument(help="Instance id or name.")],
+) -> None:
+    client = _client_from_ctx(ctx)
+    try:
+        logs = _get_logs_by_id_or_name(client, instance)
+    except CliError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    _echo_logs_view(logs)
 
 
 @app.command(name="list")
@@ -391,6 +426,52 @@ def _echo_template_summary(template: TemplateSummary) -> None:
     typer.echo(
         f"{template.template_name}\tcpus={template.cpus}\tselinux={template.selinux}"
     )
+
+
+def _echo_new_log_text(log_text: str, offset: int) -> int:
+    if len(log_text) <= offset:
+        return offset
+    typer.echo(log_text[offset:], nl=False)
+    return len(log_text)
+
+
+def _get_logs_by_id_or_name(client: CuttleApiClient, identifier: str) -> InstanceLogsView:
+    first_error: CliError | None = None
+    try:
+        return client.get_instance_logs(identifier)
+    except CliError as exc:
+        first_error = exc
+
+    response = client.list_instances()
+    matches = [
+        instance
+        for instance in response.instances
+        if instance.instance_id == identifier or instance.instance_name == identifier
+    ]
+    if len(matches) == 1:
+        return client.get_instance_logs(matches[0].instance_id)
+    if len(matches) > 1:
+        raise CliError(f"multiple visible instances match {identifier!r}")
+    assert first_error is not None
+    raise first_error
+
+
+def _echo_logs_view(logs: InstanceLogsView) -> None:
+    typer.echo(
+        f"instance={logs.instance_name} ({logs.instance_id}) state={logs.state.value}"
+    )
+    if logs.failure_reason:
+        typer.echo(f"failure_reason: {logs.failure_reason}")
+    if logs.launch_command:
+        typer.echo(f"launch_command: {' '.join(logs.launch_command)}")
+    if logs.start_log:
+        typer.echo("== cvd start ==")
+        typer.echo(logs.start_log, nl=not logs.start_log.endswith("\n"))
+    if logs.stop_log:
+        typer.echo("== cvd stop ==")
+        typer.echo(logs.stop_log, nl=not logs.stop_log.endswith("\n"))
+    if not logs.start_log and not logs.stop_log:
+        typer.echo("No logs.")
 
 
 def _client_from_ctx(ctx: typer.Context) -> CuttleApiClient:

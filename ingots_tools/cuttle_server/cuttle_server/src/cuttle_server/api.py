@@ -8,12 +8,13 @@ from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
     InstanceListResponse,
+    InstanceLogsView,
     InstanceView,
     RenewLeaseRequest,
     TemplateListResponse,
     TemplateView,
 )
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 
 from .config import CuttlefishSettings
 from .cvd_cli import CuttlefishCli
@@ -89,7 +90,7 @@ async def reconcile_expired_instances_periodically(
 
 def create_app(settings: CuttlefishSettings) -> FastAPI:
     db = InstanceDb(settings.database_path)
-    cli = CuttlefishCli()
+    cli = CuttlefishCli(start_timeout_sec=settings.cvd_start_timeout_sec)
     server_manager = CuttlefishServerManager(settings, db, cli)
 
     @asynccontextmanager
@@ -138,9 +139,22 @@ def create_app(settings: CuttlefishSettings) -> FastAPI:
     def create_instance(
         request: CreateInstanceRequest,
         identity: Annotated[RequestIdentity, Depends(require_identity)],
+        async_start: Annotated[
+            bool,
+            Query(
+                description=(
+                    "Return after recording the instance and start it in the "
+                    "background."
+                )
+            ),
+        ] = False,
     ) -> CreateInstanceResponse:
         try:
-            return server_manager.create_instance(identity.user_id, request)
+            return server_manager.create_instance(
+                identity.user_id,
+                request,
+                start_async=async_start,
+            )
         except CapacityError as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail=str(exc)
@@ -181,6 +195,26 @@ def create_app(settings: CuttlefishSettings) -> FastAPI:
     ) -> InstanceView:
         try:
             return server_manager.get_instance(
+                identity.user_id,
+                identity.is_admin,
+                instance_id,
+            )
+        except NotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            ) from exc
+        except AuthorizationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+            ) from exc
+
+    @app.get("/v1/instances/{instance_id}/logs", response_model=InstanceLogsView)
+    def get_instance_logs(
+        instance_id: str,
+        identity: Annotated[RequestIdentity, Depends(require_identity)],
+    ) -> InstanceLogsView:
+        try:
+            return server_manager.get_instance_logs(
                 identity.user_id,
                 identity.is_admin,
                 instance_id,

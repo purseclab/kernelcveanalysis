@@ -39,6 +39,7 @@ auth_token = "replace-me"
 admin_user_id = "admin"
 database_path = "data/cuttlefish.db"
 instance_timeout_sec = 600
+cvd_start_timeout_sec = 120
 reconcile_interval_sec = 30
 base_instance_num = 0
 max_instances = 10
@@ -50,6 +51,7 @@ max_instances = 10
 - `admin_user_id` is the only user allowed to reconcile and bypass normal per-user instance visibility.
 - Per-instance runtime state is stored under `/tmp/cvd` using short generated directory names to avoid Unix socket path-length failures.
 - Set `instance_timeout_sec = 0` to disable automatic expiration globally.
+- `cvd_start_timeout_sec` bounds the `cvd start --daemon` subprocess so failed launches do not hang forever.
 - `reconcile_interval_sec` controls how often the server's background cleanup task checks for expired instances.
 - `base_instance_num` reserves the first `N` Cuttlefish instance numbers for manually launched devices. When set to `N`, the server allocates from `N + 1` through `N + max_instances`.
 
@@ -86,6 +88,7 @@ Implemented endpoints:
 - `POST /v1/instances`
 - `GET /v1/instances`
 - `GET /v1/instances/{instance_id}`
+- `GET /v1/instances/{instance_id}/logs`
 - `POST /v1/instances/{instance_id}/renew`
 - `POST /v1/instances/{instance_id}/stop`
 - `POST /v1/instances/by-name/{instance_name}/stop`
@@ -122,11 +125,13 @@ Notes:
 - Explicit names are unique per user among non-terminal instances.
 - Instance views include `adb_port` once the launch succeeds. Clients should connect to `<same-host-as-http-server>:<adb_port>`.
 - `overrides.load_apps` defaults to `true`. Set it to `false` to skip template APK installation for that instance.
+- `POST /v1/instances?async_start=true` returns after recording the instance in `starting` state and completes launch in the background.
 
 ## Runtime Behavior
 
 - Each instance gets a unique runtime directory under `/tmp/cvd/<short-instance-id>`.
 - `cvd start` and `cvd stop` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
+- CVD stdout/stderr are written to `cvd-start.log` and `cvd-stop.log` in the instance runtime directory and are available through the logs endpoint while that directory exists.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
 - `max_instances` still means the number of instances managed by the server, not the highest raw Cuttlefish instance number.

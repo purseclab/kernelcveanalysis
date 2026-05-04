@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from cuttle_types import (
     CreateInstanceResponse,
     InstanceListResponse,
+    InstanceLogsView,
     InstanceState,
     InstanceView,
     TemplateListResponse,
@@ -15,6 +16,7 @@ from cuttle_types import (
 from typer.testing import CliRunner
 
 from cuttle_cli.config import CliSettings, load_cli_settings
+from cuttle_cli.client import CliError
 from cuttle_cli.daemon import (
     DaemonMetadata,
     get_daemon_status,
@@ -106,12 +108,33 @@ class CliCommandTests(unittest.TestCase):
             failure_reason=None,
         )
 
+    def _mock_logs(
+        self,
+        *,
+        instance_id: str = "inst-1",
+        instance_name: str = "demo",
+        state: InstanceState = InstanceState.ACTIVE,
+        start_log: str = "",
+        stop_log: str = "",
+        failure_reason: str | None = None,
+    ) -> InstanceLogsView:
+        return InstanceLogsView(
+            instance_id=instance_id,
+            instance_name=instance_name,
+            state=state,
+            launch_command=["launch"],
+            failure_reason=failure_reason,
+            start_log=start_log,
+            stop_log=stop_log,
+        )
+
     def test_start_command_uses_optional_name(self):
         mock_client = Mock()
         mock_client.adb_target.return_value = "127.0.0.1:6520"
         mock_client.start_instance.return_value = CreateInstanceResponse(
             instance=self._mock_instance(instance_name="demo")
         )
+        mock_client.get_instance_logs.return_value = self._mock_logs()
         with patch("cuttle_cli.main.load_cli_settings"), patch(
             "cuttle_cli.main.CuttleApiClient.from_settings",
             return_value=mock_client,
@@ -127,6 +150,7 @@ class CliCommandTests(unittest.TestCase):
         self.assertEqual(request_body.template_name, "phone")
         self.assertEqual(request_body.instance_name, "demo")
         self.assertEqual(request_body.overrides.cpus, 6)
+        self.assertTrue(mock_client.start_instance.call_args.kwargs["async_start"])
 
     def test_start_command_can_disable_app_loading(self):
         mock_client = Mock()
@@ -134,6 +158,7 @@ class CliCommandTests(unittest.TestCase):
         mock_client.start_instance.return_value = CreateInstanceResponse(
             instance=self._mock_instance(instance_name="demo")
         )
+        mock_client.get_instance_logs.return_value = self._mock_logs()
         with patch("cuttle_cli.main.load_cli_settings"), patch(
             "cuttle_cli.main.CuttleApiClient.from_settings",
             return_value=mock_client,
@@ -146,6 +171,53 @@ class CliCommandTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         request_body = mock_client.start_instance.call_args.args[0]
         self.assertFalse(request_body.overrides.load_apps)
+
+    def test_start_command_polls_and_prints_logs_until_active(self):
+        mock_client = Mock()
+        mock_client.adb_target.return_value = "127.0.0.1:6520"
+        mock_client.start_instance.return_value = CreateInstanceResponse(
+            instance=self._mock_instance(
+                instance_name="demo",
+                state=InstanceState.STARTING,
+            )
+        )
+        mock_client.get_instance_logs.side_effect = [
+            self._mock_logs(state=InstanceState.STARTING, start_log="booting\n"),
+            self._mock_logs(state=InstanceState.ACTIVE, start_log="booting\ndone\n"),
+        ]
+        mock_client.get_instance.return_value = self._mock_instance(instance_name="demo")
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"), patch(
+            "cuttle_cli.main.time.sleep"
+        ):
+            result = self.runner.invoke(app, ["start", "phone", "--name", "demo"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("booting", result.output)
+        self.assertIn("done", result.output)
+        mock_client.get_instance.assert_called_once_with("inst-1")
+
+    def test_logs_command_prints_logs_by_name(self):
+        mock_client = Mock()
+        mock_client.get_instance_logs.side_effect = [
+            CliError("server returned 404: missing"),
+            self._mock_logs(start_log="booting\n", stop_log="stopped\n"),
+        ]
+        mock_client.list_instances.return_value = InstanceListResponse(
+            instances=[self._mock_instance(instance_name="demo")]
+        )
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ):
+            result = self.runner.invoke(app, ["logs", "demo"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("== cvd start ==", result.output)
+        self.assertIn("booting", result.output)
+        self.assertIn("== cvd stop ==", result.output)
 
     def test_list_command_prints_instances(self):
         mock_client = Mock()

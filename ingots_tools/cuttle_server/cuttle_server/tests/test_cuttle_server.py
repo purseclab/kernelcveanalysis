@@ -56,6 +56,7 @@ class ConfigLoadingTests(unittest.TestCase):
                 'admin_user_id = "admin"\n'
                 'database_path = "data/cuttlefish.db"\n'
                 "instance_timeout_sec = 123\n"
+                "cvd_start_timeout_sec = 45\n"
                 "base_instance_num = 4\n"
                 "max_instances = 7\n"
             )
@@ -76,6 +77,7 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(settings.auth_token, "secret-token")
         self.assertEqual(settings.admin_user_id, "admin")
         self.assertEqual(settings.instance_timeout_sec, 123)
+        self.assertEqual(settings.cvd_start_timeout_sec, 45)
         self.assertEqual(settings.reconcile_interval_sec, 30)
         self.assertEqual(settings.base_instance_num, 4)
         self.assertEqual(settings.max_instances, 7)
@@ -322,6 +324,7 @@ class CvdCliTests(unittest.TestCase):
             )
             record = type("Record", (), {})()
             record.instance_num = 3
+            record.instance_id = "inst-1"
             record.runtime_dir = runtime_dir
             record.config = config
 
@@ -336,10 +339,15 @@ class CvdCliTests(unittest.TestCase):
         self.assertEqual(start_call.kwargs["env"]["HOME"], str(runtime_dir))
         self.assertEqual(start_call.kwargs["env"]["ANDROID_HOST_OUT"], "/cf")
         self.assertEqual(start_call.kwargs["env"]["ANDROID_PRODUCT_OUT"], "/cf")
+        self.assertNotIn("capture_output", start_call.kwargs)
+        self.assertEqual(start_call.kwargs["stderr"], subprocess.STDOUT)
+        self.assertEqual(start_call.kwargs["timeout"], 120)
+        self.assertEqual(Path(start_call.kwargs["stdout"].name), runtime_dir / "cvd-start.log")
         self.assertEqual(stop_call.kwargs["cwd"], runtime_dir)
         self.assertEqual(stop_call.kwargs["env"]["HOME"], str(runtime_dir))
         self.assertEqual(stop_call.kwargs["env"]["ANDROID_HOST_OUT"], "/cf")
         self.assertEqual(stop_call.kwargs["env"]["ANDROID_PRODUCT_OUT"], "/cf")
+        self.assertEqual(Path(stop_call.kwargs["stdout"].name), runtime_dir / "cvd-stop.log")
         self.assertEqual(launch_result.adb_port, 6522)
         self.assertEqual(
             launch_result.launch_command,
@@ -434,13 +442,14 @@ class CvdCliTests(unittest.TestCase):
             )
             record = type("Record", (), {})()
             record.instance_num = 3
+            record.instance_id = "inst-1"
             record.runtime_dir = runtime_dir
             record.config = config
+            runtime_dir.mkdir(parents=True)
+            (runtime_dir / "cvd-start.log").write_text("launch stdout\nlaunch stderr\n")
             error = subprocess.CalledProcessError(
                 1,
                 ["/cf/bin/cvd", "start"],
-                output="launch stdout",
-                stderr="launch stderr",
             )
 
             with self.assertLogs("cuttle_server.cvd_cli", level="ERROR") as logs:
@@ -448,27 +457,64 @@ class CvdCliTests(unittest.TestCase):
                     "cuttle_server.cvd_cli.subprocess.run",
                     side_effect=error,
                 ):
-                    with self.assertRaises(subprocess.CalledProcessError):
+                    with self.assertRaises(RuntimeError) as exc_info:
                         cli.start_instance(record)
 
         joined_logs = "\n".join(logs.output)
         self.assertIn("launch stdout", joined_logs)
         self.assertIn("launch stderr", joined_logs)
+        self.assertIn("launch stdout", str(exc_info.exception))
+
+    def test_start_timeout_reports_log_tail(self):
+        cli = CuttlefishCli(start_timeout_sec=5)
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            config = ResolvedLaunchConfig(
+                template_name="phone",
+                cpus=4,
+                selinux=False,
+                runtime_root=Path("/cf"),
+                kernel_path=Path("/kernel"),
+                initrd_path=Path("/initrd"),
+                apps=[],
+                cvd_binary=Path("/cf/bin/cvd"),
+            )
+            record = type("Record", (), {})()
+            record.instance_num = 3
+            record.instance_id = "inst-1"
+            record.runtime_dir = runtime_dir
+            record.config = config
+
+            def timeout(*args, **kwargs):
+                kwargs["stdout"].write("still booting\n")
+                raise subprocess.TimeoutExpired(args[0], 5)
+
+            with self.assertLogs("cuttle_server.cvd_cli", level="ERROR"):
+                with patch("cuttle_server.cvd_cli.subprocess.run", side_effect=timeout):
+                    with self.assertRaises(RuntimeError) as exc_info:
+                        cli.start_instance(record)
+
+        self.assertIn("timed out after 5s", str(exc_info.exception))
+        self.assertIn("still booting", str(exc_info.exception))
 
 
 class FakeCli:
     def __init__(self) -> None:
         self.stop_calls: list[str] = []
 
+    def build_start_command(self, record):
+        return ["launch", record.instance_id]
+
     def start_instance(self, record):
         record.runtime_dir.mkdir(parents=True, exist_ok=True)
+        (record.runtime_dir / "cvd-start.log").write_text("started\n")
         return type(
-            "LaunchResult",
-            (),
-            {
-                "launch_command": ["launch"],
-                "adb_port": 6520 + record.instance_num - 1,
-                "adb_serial": None,
+                "LaunchResult",
+                (),
+                {
+                    "launch_command": self.build_start_command(record),
+                    "adb_port": 6520 + record.instance_num - 1,
+                    "adb_serial": None,
                 "webrtc_port": None,
             },
         )()
@@ -476,6 +522,7 @@ class FakeCli:
     def stop_instance(self, record):
         self.stop_calls.append(record.instance_id)
         record.runtime_dir.mkdir(parents=True, exist_ok=True)
+        (record.runtime_dir / "cvd-stop.log").write_text("stopped\n")
 
 
 class FakeAppLoader:
@@ -507,6 +554,7 @@ class ServerManagerTests(unittest.TestCase):
                 "database_path": self.root / "db.sqlite",
                 "instance_runtime_root": self.root / "instances",
                 "instance_timeout_sec": 60,
+                "cvd_start_timeout_sec": 120,
                 "reconcile_interval_sec": 30,
                 "base_instance_num": 0,
                 "max_instances": 10,
@@ -553,6 +601,7 @@ class ServerManagerTests(unittest.TestCase):
         self.assertTrue(record.config.load_apps)
         self.assertEqual(record.runtime_dir.parent, self.root / "instances")
         self.assertEqual(len(record.runtime_dir.name), 32)
+        self.assertEqual(record.launch_command, ["launch", created.instance_id])
 
     def test_base_instance_num_offsets_allocated_slots(self):
         self.settings.base_instance_num = 5
@@ -668,6 +717,36 @@ class ServerManagerTests(unittest.TestCase):
             "admin", is_admin=True, instance_id=alice_instance.instance_id
         )
         self.assertEqual(admin_view.owner_id, "alice")
+
+    def test_get_instance_logs_returns_runtime_logs(self):
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="demo"),
+        ).instance
+
+        logs = self.manager.get_instance_logs(
+            "alice",
+            is_admin=False,
+            instance_id=created.instance_id,
+        )
+
+        self.assertEqual(logs.instance_name, "demo")
+        self.assertEqual(logs.state, InstanceState.ACTIVE)
+        self.assertIn("started", logs.start_log)
+        self.assertEqual(logs.launch_command, ["launch", created.instance_id])
+
+    def test_get_instance_logs_enforces_visibility(self):
+        bob_instance = self.manager.create_instance(
+            "bob",
+            CreateInstanceRequest(template_name="phone", instance_name="bob-vm"),
+        ).instance
+
+        with self.assertRaises(AuthorizationError):
+            self.manager.get_instance_logs(
+                "alice",
+                is_admin=False,
+                instance_id=bob_instance.instance_id,
+            )
 
     def test_stop_by_name_uses_instance_id_for_unnamed_instances(self):
         created = self.manager.create_instance(

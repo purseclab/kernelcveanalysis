@@ -21,6 +21,7 @@ class ServerConfigFile(BaseModel):
     admin_user_id: str = Field(min_length=1)
     database_path: Path
     instance_timeout_sec: int = Field(default=600, ge=0)
+    cvd_start_timeout_sec: int = Field(default=120, ge=1)
     reconcile_interval_sec: int = Field(default=30, ge=1)
     base_instance_num: int = Field(default=0, ge=0)
     max_instances: int = Field(default=10, ge=1)
@@ -67,6 +68,7 @@ class CuttlefishSettings:
     database_path: Path
     instance_runtime_root: Path
     instance_timeout_sec: int | None
+    cvd_start_timeout_sec: int
     reconcile_interval_sec: int
     base_instance_num: int
     max_instances: int
@@ -108,6 +110,7 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
             if main_config.instance_timeout_sec == 0
             else main_config.instance_timeout_sec
         ),
+        cvd_start_timeout_sec=main_config.cvd_start_timeout_sec,
         reconcile_interval_sec=main_config.reconcile_interval_sec,
         base_instance_num=main_config.base_instance_num,
         max_instances=main_config.max_instances,
