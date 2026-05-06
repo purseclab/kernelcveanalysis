@@ -410,6 +410,7 @@ def show_template(
 
     typer.echo(f"name: {template.template_name}")
     typer.echo(f"runtime_root: {template.runtime_root}")
+    typer.echo(f"command_mode: {template.command_mode.value}")
     typer.echo(f"cpus: {template.cpus}")
     typer.echo(f"kernel_path: {template.kernel_path or '<default>'}")
     typer.echo(f"initrd_path: {template.initrd_path or '<default>'}")
@@ -425,6 +426,7 @@ def show_template(
 def _echo_template_summary(template: TemplateSummary) -> None:
     typer.echo(
         f"{template.template_name}\tcpus={template.cpus}\tselinux={template.selinux}"
+        f"\tcommand_mode={template.command_mode.value}"
     )
 
 

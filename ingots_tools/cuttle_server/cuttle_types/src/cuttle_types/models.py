@@ -32,6 +32,11 @@ class InstanceState(str, Enum):
     EXPIRED = "expired"
 
 
+class CvdCommandMode(str, Enum):
+    CVD = "cvd"
+    LEGACY = "legacy"
+
+
 class InstanceView(BaseModel):
     instance_id: str
     owner_id: str
@@ -45,6 +50,7 @@ class InstanceView(BaseModel):
     initrd_path: Path | None
     apps: list[Path]
     load_apps: bool
+    command_mode: CvdCommandMode = CvdCommandMode.CVD
     runtime_dir: Path
     launch_command: list[str]
     adb_port: int | None
@@ -76,6 +82,7 @@ class TemplateSummary(BaseModel):
     template_name: str
     cpus: int
     selinux: bool
+    command_mode: CvdCommandMode = CvdCommandMode.CVD
 
 
 class TemplateView(BaseModel):
@@ -86,6 +93,7 @@ class TemplateView(BaseModel):
     initrd_path: Path | None
     selinux: bool
     apps: list[Path]
+    command_mode: CvdCommandMode = CvdCommandMode.CVD
 
 
 class TemplateListResponse(BaseModel):

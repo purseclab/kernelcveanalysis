@@ -4,6 +4,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from cuttle_types import CvdCommandMode
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 
@@ -30,6 +31,7 @@ class ServerConfigFile(BaseModel):
 class TemplateConfigFile(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     runtime_root: Path
+    command_mode: CvdCommandMode = CvdCommandMode.CVD
     cpus: int = Field(ge=1, le=64)
     kernel_path: Path | None = None
     initrd_path: Path | None = None
@@ -51,6 +53,7 @@ class TemplateConfigFile(BaseModel):
 class InstanceTemplate:
     name: str
     runtime_root: Path
+    command_mode: CvdCommandMode
     cvd_binary: Path
     cpus: int
     kernel_path: Path | None
@@ -145,9 +148,20 @@ def _load_template(template_path: Path) -> InstanceTemplate:
     initrd_path = _resolve_optional_path(parsed.initrd_path, base_dir)
     apps = tuple(_resolve_path(path, base_dir) for path in parsed.apps)
     cvd_binary = runtime_root / "bin" / "cvd"
+    launch_cvd_binary = runtime_root / "bin" / "launch_cvd"
+    stop_cvd_binary = runtime_root / "bin" / "stop_cvd"
+
+    required_binaries: tuple[tuple[Path, str], ...]
+    if parsed.command_mode == CvdCommandMode.LEGACY:
+        required_binaries = (
+            (launch_cvd_binary, "launch_cvd binary"),
+            (stop_cvd_binary, "stop_cvd binary"),
+        )
+    else:
+        required_binaries = ((cvd_binary, "cvd binary"),)
 
     required_paths: tuple[tuple[Path | None, str], ...] = (
-        (cvd_binary, "cvd binary"),
+        *required_binaries,
         (kernel_path, "kernel path"),
         (initrd_path, "initrd path"),
     )
@@ -164,6 +178,7 @@ def _load_template(template_path: Path) -> InstanceTemplate:
     return InstanceTemplate(
         name=parsed.name,
         runtime_root=runtime_root,
+        command_mode=parsed.command_mode,
         cvd_binary=cvd_binary,
         cpus=parsed.cpus,
         kernel_path=kernel_path,

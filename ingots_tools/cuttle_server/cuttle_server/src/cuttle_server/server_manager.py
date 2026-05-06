@@ -447,5 +447,6 @@ class CuttlefishServerManager:
                 if request.overrides.load_apps is not None
                 else True
             ),
+            command_mode=template.command_mode,
             cvd_binary=template.cvd_binary,
         )

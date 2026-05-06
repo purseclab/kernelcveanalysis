@@ -1,6 +1,7 @@
 from .models import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CvdCommandMode,
     InstanceListResponse,
     InstanceLogsView,
     InstanceState,
@@ -15,6 +16,7 @@ from .models import (
 __all__ = [
     "CreateInstanceRequest",
     "CreateInstanceResponse",
+    "CvdCommandMode",
     "InstanceListResponse",
     "InstanceLogsView",
     "InstanceState",

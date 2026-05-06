@@ -7,6 +7,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from cuttle_types import CvdCommandMode
+
 from .models import InstanceRecord
 
 LOGGER = logging.getLogger(__name__)
@@ -52,18 +54,27 @@ class CuttlefishCli:
         )
 
     def stop_instance(self, record: InstanceRecord) -> None:
-        stop_command = [str(record.config.cvd_binary), "stop"]
+        config = record.config
+        if config.command_mode == CvdCommandMode.LEGACY:
+            stop_command = [str(config.runtime_root / "bin" / "stop_cvd")]
+        else:
+            stop_command = [str(config.cvd_binary), "stop"]
         self._run_command(stop_command, record=record, action="stop", timeout_sec=None)
 
     def build_start_command(self, record: InstanceRecord) -> list[str]:
         config = record.config
-        command = [
-            str(config.cvd_binary),
-            "start",
-            f"--base_instance_num={record.instance_num}",
-            f"--cpus={config.cpus}",
-            "--start_webrtc=true",
-        ]
+        if config.command_mode == CvdCommandMode.LEGACY:
+            command = [str(config.runtime_root / "bin" / "launch_cvd")]
+        else:
+            command = [str(config.cvd_binary), "start"]
+
+        command.extend(
+            [
+                f"--base_instance_num={record.instance_num}",
+                f"--cpus={config.cpus}",
+                "--start_webrtc=true",
+            ]
+        )
         if config.kernel_path is not None:
             command.append(f"--kernel_path={config.kernel_path}")
         if config.initrd_path is not None:

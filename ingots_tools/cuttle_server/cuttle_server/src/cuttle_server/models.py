@@ -4,7 +4,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cuttle_types import InstanceState, InstanceView, TemplateSummary, TemplateView
+from cuttle_types import (
+    CvdCommandMode,
+    InstanceState,
+    InstanceView,
+    TemplateSummary,
+    TemplateView,
+)
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
@@ -24,6 +30,7 @@ class ResolvedLaunchConfig(BaseModel):
     initrd_path: Path | None
     apps: list[Path] = Field(default_factory=list)
     load_apps: bool = True
+    command_mode: CvdCommandMode = CvdCommandMode.CVD
     cvd_binary: Path
 
 
@@ -79,6 +86,7 @@ def instance_view_from_record(record: InstanceRecord) -> InstanceView:
         initrd_path=record.config.initrd_path,
         apps=record.config.apps,
         load_apps=record.config.load_apps,
+        command_mode=record.config.command_mode,
         runtime_dir=record.runtime_dir,
         launch_command=record.launch_command,
         adb_port=record.adb_port,
@@ -94,6 +102,7 @@ def template_summary_from_template(template: "InstanceTemplate") -> TemplateSumm
         template_name=template.name,
         cpus=template.cpus,
         selinux=template.selinux,
+        command_mode=template.command_mode,
     )
 
 
@@ -106,4 +115,5 @@ def template_view_from_template(template: "InstanceTemplate") -> TemplateView:
         initrd_path=template.initrd_path,
         selinux=template.selinux,
         apps=list(template.apps),
+        command_mode=template.command_mode,
     )

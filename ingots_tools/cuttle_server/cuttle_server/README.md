@@ -62,6 +62,7 @@ Each `templates/*.toml` file defines one launch template:
 ```toml
 name = "phone"
 runtime_root = "/opt/cuttlefish"
+command_mode = "cvd"
 cpus = 4
 kernel_path = "/srv/kernels/bzImage"
 initrd_path = "/srv/kernels/initramfs.img"
@@ -75,7 +76,7 @@ apps = [
 
 - `name` is the template identifier used as `template_name`.
 - `runtime_root` is the Cuttlefish installation directory. Relative values are resolved relative to the template file.
-- The server derives `bin/cvd` from `runtime_root`.
+- `command_mode` chooses which Cuttlefish command wrapper to use. It defaults to `cvd`, which runs `bin/cvd start` and `bin/cvd stop`. Set it to `legacy` to run `bin/launch_cvd` and `bin/stop_cvd`.
 - `kernel_path` and `initrd_path` are optional. When omitted, the server does not pass the corresponding Cuttlefish launch argument, allowing the image defaults such as `boot.img` to be used.
 - Relative `kernel_path`, `initrd_path`, and `apps` entries are resolved relative to the template file.
 - `apps` are parsed, validated, persisted, returned by the API, and auto-installed in order during startup unless disabled per request.
@@ -130,7 +131,7 @@ Notes:
 ## Runtime Behavior
 
 - Each instance gets a unique runtime directory under `/tmp/cvd/<short-instance-id>`.
-- `cvd start` and `cvd stop` run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
+- The configured start and stop commands run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
 - CVD stdout/stderr are written to `cvd-start.log` and `cvd-stop.log` in the instance runtime directory and are available through the logs endpoint while that directory exists.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
@@ -142,7 +143,7 @@ Notes:
 - If stop or cleanup fails, the instance record is updated with `failure_reason` and the runtime directory is left in place for inspection.
 - If app loading fails, instance creation fails, the instance is stopped, and the record is left in `crashed` state with a failure reason.
 
-Current start command shape:
+Current `command_mode = "cvd"` start command shape:
 
 ```text
 cvd start \
@@ -161,10 +162,16 @@ If SELinux is disabled, the server also adds:
 --extra_kernel_cmdline=androidboot.selinux=permissive
 ```
 
-Stop uses:
+Its stop command uses:
 
 ```text
 cvd stop
+```
+
+With `command_mode = "legacy"`, the server runs `launch_cvd` with the same launch flags and stops with:
+
+```text
+stop_cvd
 ```
 
 ## Current Limitations

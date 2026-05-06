@@ -37,6 +37,7 @@ The CLI auto-starts the managed daemon for `start`, `list`, and `stop`. The daem
 `list` shows only non-terminal instances by default; pass `--all` or `-a` to include stopped, crashed, and expired instances.
 `logs` prints the latest CVD start/stop logs for a visible instance by id or name.
 `stop` can target one instance by effective name, `--stop-all` visible non-terminal instances, or `--stop-all-user <user-id>` for a specific visible owner.
+`templates list` and `templates show` include each template's CVD command mode.
 
 Minimal config shape:
 

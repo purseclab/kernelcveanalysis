@@ -6,7 +6,12 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from cuttle_types import CreateInstanceRequest, InstanceState, RenewLeaseRequest
+from cuttle_types import (
+    CreateInstanceRequest,
+    CvdCommandMode,
+    InstanceState,
+    RenewLeaseRequest,
+)
 from fastapi import HTTPException
 from typer.testing import CliRunner
 
@@ -17,6 +22,7 @@ from cuttle_server.api import (
     validate_user_id_header,
 )
 from cuttle_server.config import (
+    ConfigError,
     DEFAULT_INSTANCE_RUNTIME_ROOT,
     InstanceTemplate,
     load_settings,
@@ -89,7 +95,93 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(template.kernel_path, kernel.resolve())
         self.assertEqual(template.initrd_path, initrd.resolve())
         self.assertEqual(template.apps, (app_one.resolve(), app_two.resolve()))
+        self.assertEqual(template.command_mode, CvdCommandMode.CVD)
         self.assertEqual(template.cvd_binary, install_dir.resolve() / "bin" / "cvd")
+
+    def test_load_settings_accepts_legacy_command_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            bin_dir = install_dir / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "launch_cvd").write_text("")
+            (bin_dir / "stop_cvd").write_text("")
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "data/cuttlefish.db"\n'
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "phone"\n'
+                f'runtime_root = "{install_dir}"\n'
+                'command_mode = "legacy"\n'
+                "cpus = 4\n"
+                "selinux = false\n"
+                "apps = []\n"
+            )
+
+            settings = load_settings(root)
+
+        template = settings.templates["phone"]
+        self.assertEqual(template.command_mode, CvdCommandMode.LEGACY)
+        self.assertEqual(template.cvd_binary, install_dir.resolve() / "bin" / "cvd")
+
+    def test_load_settings_validates_default_cvd_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            (install_dir / "bin").mkdir(parents=True)
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "data/cuttlefish.db"\n'
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "phone"\n'
+                f'runtime_root = "{install_dir}"\n'
+                "cpus = 4\n"
+                "selinux = false\n"
+                "apps = []\n"
+            )
+
+            with self.assertRaises(ConfigError) as exc_info:
+                load_settings(root)
+
+        self.assertIn("cvd binary does not exist", str(exc_info.exception))
+
+    def test_load_settings_validates_legacy_command_mode_binaries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            bin_dir = install_dir / "bin"
+            bin_dir.mkdir(parents=True)
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "data/cuttlefish.db"\n'
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "phone"\n'
+                f'runtime_root = "{install_dir}"\n'
+                'command_mode = "legacy"\n'
+                "cpus = 4\n"
+                "selinux = false\n"
+                "apps = []\n"
+            )
+
+            with self.assertRaises(ConfigError) as exc_info:
+                load_settings(root)
+
+            self.assertIn("launch_cvd binary does not exist", str(exc_info.exception))
+
+            (bin_dir / "launch_cvd").write_text("")
+            with self.assertRaises(ConfigError) as exc_info:
+                load_settings(root)
+
+        self.assertIn("stop_cvd binary does not exist", str(exc_info.exception))
 
     def test_load_settings_allows_omitted_kernel_and_initrd_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -366,6 +458,46 @@ class CvdCliTests(unittest.TestCase):
         )
         self.assertEqual(stop_call.args[0], ["/cf/bin/cvd", "stop"])
 
+    def test_legacy_mode_uses_launch_and_stop_cvd_binaries(self):
+        cli = CuttlefishCli()
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            config = ResolvedLaunchConfig(
+                template_name="phone",
+                cpus=4,
+                selinux=True,
+                runtime_root=Path("/cf"),
+                kernel_path=Path("/kernel"),
+                initrd_path=Path("/initrd"),
+                apps=[],
+                command_mode=CvdCommandMode.LEGACY,
+                cvd_binary=Path("/cf/bin/cvd"),
+            )
+            record = type("Record", (), {})()
+            record.instance_num = 3
+            record.instance_id = "inst-1"
+            record.runtime_dir = runtime_dir
+            record.config = config
+
+            with patch("cuttle_server.cvd_cli.subprocess.run") as run:
+                launch_result = cli.start_instance(record)
+                cli.stop_instance(record)
+
+        self.assertEqual(
+            launch_result.launch_command,
+            [
+                "/cf/bin/launch_cvd",
+                "--base_instance_num=3",
+                "--cpus=4",
+                "--start_webrtc=true",
+                "--kernel_path=/kernel",
+                "--initramfs_path=/initrd",
+                "--daemon",
+                "--report_anonymous_usage_stats=n",
+            ],
+        )
+        self.assertEqual(run.call_args_list[1].args[0], ["/cf/bin/stop_cvd"])
+
     def test_start_omits_kernel_and_initrd_args_when_paths_are_unset(self):
         cli = CuttlefishCli()
         config = ResolvedLaunchConfig(
@@ -567,6 +699,7 @@ class ServerManagerTests(unittest.TestCase):
                     "phone": InstanceTemplate(
                         name="phone",
                         runtime_root=Path("/cf"),
+                        command_mode=CvdCommandMode.CVD,
                         cvd_binary=Path("/cf/bin/cvd"),
                         cpus=2,
                         kernel_path=Path("/kernel"),
@@ -598,11 +731,13 @@ class ServerManagerTests(unittest.TestCase):
         self.assertEqual(created.instance_name, created.instance_id)
         self.assertEqual(created.adb_port, 6520)
         self.assertTrue(created.load_apps)
+        self.assertEqual(created.command_mode, CvdCommandMode.CVD)
         record = self.db.get(created.instance_id)
         assert record is not None
         self.assertIsNone(record.instance_name)
         self.assertEqual(record.adb_port, 6520)
         self.assertTrue(record.config.load_apps)
+        self.assertEqual(record.config.command_mode, CvdCommandMode.CVD)
         self.assertEqual(record.runtime_dir.parent, self.root / "instances")
         self.assertEqual(len(record.runtime_dir.name), 32)
         self.assertEqual(record.launch_command, ["launch", created.instance_id])

@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from cuttle_types import (
     CreateInstanceResponse,
+    CvdCommandMode,
     InstanceListResponse,
     InstanceLogsView,
     InstanceState,
@@ -375,7 +376,14 @@ class CliCommandTests(unittest.TestCase):
         mock_client = Mock()
         mock_client.adb_target.return_value = "127.0.0.1:6520"
         mock_client.list_templates.return_value = TemplateListResponse(
-            templates=[TemplateSummary(template_name="phone", cpus=4, selinux=False)]
+            templates=[
+                TemplateSummary(
+                    template_name="phone",
+                    cpus=4,
+                    selinux=False,
+                    command_mode=CvdCommandMode.LEGACY,
+                )
+            ]
         )
         mock_client.get_template.return_value = TemplateView(
             template_name="phone",
@@ -385,6 +393,7 @@ class CliCommandTests(unittest.TestCase):
             initrd_path=Path("/initrd"),
             selinux=False,
             apps=[Path("/app.apk")],
+            command_mode=CvdCommandMode.LEGACY,
         )
         with patch("cuttle_cli.main.load_cli_settings"), patch(
             "cuttle_cli.main.CuttleApiClient.from_settings",
@@ -396,7 +405,9 @@ class CliCommandTests(unittest.TestCase):
         self.assertEqual(list_result.exit_code, 0, list_result.output)
         self.assertEqual(show_result.exit_code, 0, show_result.output)
         self.assertIn("phone", list_result.output)
+        self.assertIn("command_mode=legacy", list_result.output)
         self.assertIn("runtime_root: /cf", show_result.output)
+        self.assertIn("command_mode: legacy", show_result.output)
 
     def test_templates_show_displays_default_for_omitted_kernel_and_initrd(self):
         mock_client = Mock()
