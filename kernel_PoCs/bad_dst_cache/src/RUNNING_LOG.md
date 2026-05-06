@@ -1386,3 +1386,353 @@
 - The privileged `mtu_expires=1` stub plus dropped-UID execution is verified.
 - The root payload path is verified once the pipe-buffer primitive is reached, even when the exploit was started unprivileged through `drop_exec`.
 - The real unprivileged race path still does not reliably reach the pipe-buffer primitive. The next work should focus on stabilizing the unaligned-free-to-pipe-buffer reclaim, and on preserving/leaking corrupted pipe state after success to avoid the debug-control cleanup panic.
+
+## 2026-05-04 Status update: non-root race path with `mtu_expires=1`
+
+### Checkpoint
+- Backed up the log before this status update:
+  - `old/2026-05-04_before_status_and_history_update_RUNNING_LOG.md`
+
+### Process status
+- Checked for stale VM/exploit processes after the interrupted run.
+- No `testvm`, `qemu-system-x86_64`, or `bad_dst_cache` process was still running.
+
+### Trace-assisted dropped-UID success
+- Folder:
+  - `old/2026-05-04_unpriv_mtu1_cfsblock_mix_skcheck_trace_smp2/`
+- Setup:
+  - Root wrapper set `/proc/sys/net/ipv4/route/mtu_expires=1`.
+  - Exploit body ran through `drop_exec` as UID 1000.
+  - Root-only ftrace/kprobe instrumentation was enabled for diagnosis.
+  - CFS CPU1 blocker, mixed fake dst offsets `64,128`, `BAD_DST_VULN_PIPES=256`, pre-opened exploit pipes.
+- Result:
+  - Reached `Arb R/W setup` on real race attempt 4.
+  - First 3 candidates reached the race but missed pipe corruption.
+  - Attempt 4 produced:
+    - `found corrupted pipe FIONREAD source=current index=15 size=0xc3c3c3c3`
+    - `pipe probe leak accepted: page_index=134 probe=0x7f8 pipe_base=0x780 active_before=3 ... ops=0xffffffff827bf740`
+    - `kaslr base: ffffffff81000000`
+    - `Arb R/W setup`
+  - Trace confirmed the intended fake-dst path:
+    - `cnxret` for socket `0xffff88801bb70d80` saw old route `0xffff88801b7d8780`.
+    - Later `sk_dst_check` on the same socket saw `dst=0xffff88801b7d8780 ref=1 obs=1 ops=0xffffffff836a9c40 flags=0xffff`.
+    - `skgot` incremented that fake dst refcount to `2`.
+    - `sknull` returned NULL through the fake blackhole ops.
+- Interpretation:
+  - This proves the real dropped-UID race can reach the fake dst and the pipe-buffer primitive when `mtu_expires=1` is set by the wrapper.
+  - It is not yet a final no-root exploit result because the proof used root-only kprobes. The exploit process itself was unprivileged, but tracing may have perturbed timing/allocator behavior.
+
+### No-trace exact rerun
+- Folder:
+  - `old/2026-05-04_unpriv_mtu1_cfsblock_mix_notrace_exact_smp2/`
+- Setup:
+  - Same exploit-side timing/config as the trace-assisted success.
+  - No kprobes and no trace markers.
+  - Root wrapper only set `mtu_expires=1`, then dropped to UID 1000.
+- Result:
+  - Ran 80 real-race attempts.
+  - Counts:
+    - `14` lock-held race candidates.
+    - `66` timer/done-oracle late misses.
+    - `14` `FAIL: could not corrupt pipe`.
+    - `0` corrupted pipe detections.
+    - `0` accepted pipe probes.
+    - `0` arbitrary R/W setups.
+  - Console showed one `dst_release underflow` in `ipv4_negative_advice`, then the run ended at:
+    - `FAIL: reached BAD_DST_MAX_ATTEMPTS without winning real race`
+    - `wrapper deadline_remaining=316`
+- Interpretation:
+  - The no-trace path still hits plausible candidates, but did not reproduce the trace-assisted fake-dst/pipe-buffer overlap in this bounded run.
+  - The kprobes are likely changing timing enough to improve the fake-dst hit or downstream reclaim probability, or the success probability is still low enough that the trace run was lucky.
+
+### No-trace CPU0-resize/leak variant
+- Folder:
+  - `old/2026-05-04_unpriv_mtu1_notrace_cpu0resize_leak_smp2/`
+- Setup:
+  - No kprobes.
+  - Root wrapper set `mtu_expires=1`, then dropped to UID 1000.
+  - Added allocator-pressure variants:
+    - `BAD_DST_VULN_PIPE_RESIZE_PERCPU=0`
+    - `BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL=1`
+    - `BAD_DST_MAX_LEAKED_VULN_PIPES=8192`
+- Result:
+  - Reached attempt 28 before stopping at `F_SETPIPE_SZ`.
+  - Counts:
+    - `13` lock-held race candidates.
+    - `15` timer/done-oracle late misses.
+    - `12` pipe corruption failures.
+    - `0` corrupted pipe detections.
+    - `0` accepted pipe probes.
+    - `0` arbitrary R/W setups.
+  - Leaked failed vuln pipe sets up to `3072` tracked pipes, then hit:
+    - `SYSCHK(fcntl(pipe->write_fd, F_SETPIPE_SZ, size)) = -1`
+    - `errno: 1`
+  - Console also showed `dst_release underflow`/`refcnt:-1` warnings.
+- Interpretation:
+  - Leaking failed vuln pipes can preserve allocator pressure, but it quickly trips unprivileged pipe page accounting when the exploit keeps resizing pipes upward.
+  - This variant is not a clean route to reliability unless the pipe accounting issue is avoided or the number/size of retained pipes is reduced.
+
+### Root-payload history check
+- Searched the `old/2026-05-04_unpriv_mtu1*` and root-payload archives for:
+  - `Arb R/W setup`
+  - `now uid/gid/euid/egid: 0/0/0/0`
+  - `ROOT_PAYLOAD_MARKER`
+  - `root_payload_shell_output`
+- Confirmed positive root-payload run:
+  - Folder: `old/2026-05-04_debug67_drop_mtu1_root_payload_smp1/`
+  - This was the debug-67 control path, not the real race path.
+  - Root wrapper set `mtu_expires=1`, then the debug exploit ran through `drop_exec`.
+  - It reached:
+    - `pipe probe leak accepted: page_index=157 probe=0x8b8 pipe_base=0x840 ...`
+    - `Arb R/W setup`
+    - `now uid/gid/euid/egid: 0/0/0/0`
+  - Root shell verifier wrote:
+    - `root_payload_marker` containing `ROOT_PAYLOAD_MARKER`
+    - `root_payload_shell_output` beginning with `uid=0 gid=0`
+    - `/proc/self/status` with `Uid: 0 0 0 0`, `Gid: 0 0 0 0`, and full capability sets.
+- Confirmed negative real-race root-payload run:
+  - Folder: `old/2026-05-04_unpriv_mtu1_root_payload_smp2/`
+  - `mtu_expires_value=1`.
+  - Payload flags were enabled:
+    - `BAD_DST_GET_ROOT=1`
+    - `BAD_DST_RUN_ROOT_PAYLOAD=1`
+  - Synced result files:
+    - `found_probe=0`
+    - `found_setup=0`
+    - `found_root=0`
+    - `found_listen=0`
+    - `checker_started=0`
+  - The run hit many race candidates but never reached the pipe-buffer primitive.
+
+### Current status
+- Real dropped-UID race with `mtu_expires=1` is proven reachable through trace-assisted diagnostics.
+- No-trace real-race execution is not yet reliable enough; the bounded no-trace runs did not reach arbitrary R/W.
+- Root payload is verified once the pipe-buffer primitive is reached, but only on the debug-67 control so far.
+- No archived run currently shows a real-race, no-kprobe, dropped-UID root shell.
+- Immediate technical blocker remains reliability of fake-dst reclaim and/or unaligned-free-to-pipe-buffer reclaim without root-only tracing perturbing the timing.
+
+## 2026-05-04 non-root timing perturbation work
+
+### Checkpoints
+- Saved pre-edit checkpoints:
+  - `old/2026-05-04_before_cpu0_noise_exp_x86.c`
+  - `old/2026-05-04_before_cpu0_noise_RUNNING_LOG.md`
+
+### Code changes
+- Added an optional userspace-only CPU0 noise mechanism to `exp_x86.c`.
+- New environment controls:
+  - `BAD_DST_CPU0_NOISE_THREADS`
+  - `BAD_DST_CPU0_NOISE_AFTER_TIMER_ARM`
+  - `BAD_DST_CPU0_NOISE_DURATION_NS`
+  - `BAD_DST_CPU0_NOISE_SPIN_NS`
+  - `BAD_DST_CPU0_NOISE_SLEEP_NS`
+  - `BAD_DST_CPU0_NOISE_NICE`
+- The noise threads pin to CPU0, wait on a futex epoch, and can be woken immediately after `timerfd_settime()` in the trigger thread. This is meant to reproduce the timing perturbation from the kprobe path without root-only tracing.
+- Rebuilt with `nix-shell -p glibc.static --run ./compile_x86.sh`; build completed with existing warnings only.
+
+### Lock oracle correction
+- Important correction: with `BAD_DST_LOCK_ORACLE=0`, the current `race candidate: lock held with stack=unknown` line is misleading.
+- The lock oracle state defaults to `LOCK_ORACLE_BLOCKED`, so disabled-oracle runs can label any still-running trigger as a candidate.
+- Runs with `BAD_DST_LOCK_ORACLE=1` are the meaningful non-root confirmation that another process blocks in `getsockopt(IP_MTU)` while the vulnerable socket lock is held.
+
+### CPU0-noise no-oracle run
+- Folder:
+  - `old/2026-05-04_unpriv_mtu1_cpu0_noise_smp2/`
+- Setup:
+  - No kprobes.
+  - Wrapper set `/proc/sys/net/ipv4/route/mtu_expires=1`, then dropped to UID 1000.
+  - `BAD_DST_CPU0_NOISE_THREADS=1`
+  - `BAD_DST_CPU0_NOISE_AFTER_TIMER_ARM=1`
+  - `BAD_DST_CPU0_NOISE_DURATION_NS=250000`
+  - `BAD_DST_CPU0_NOISE_SPIN_NS=2000`
+  - `BAD_DST_CPU0_NOISE_SLEEP_NS=5000`
+  - `BAD_DST_LOCK_ORACLE=0`
+- Result before manual stop:
+  - `23` attempts.
+  - `23` candidate lines, but these are not trustworthy because the lock oracle was disabled.
+  - `22` pipe corruption failures.
+  - `0` corrupted pipe detections, accepted pipe probes, or arbitrary R/W setups.
+
+### CPU0-noise pulse no-oracle run
+- Folder:
+  - `old/2026-05-04_unpriv_mtu1_cpu0_noise_pulse_smp2/`
+- Setup:
+  - No kprobes.
+  - Dropped to UID 1000 after setting `mtu_expires=1`.
+  - Lighter CPU0 noise plus CPU1 futex pulse sweep.
+  - `BAD_DST_LOCK_ORACLE=0`
+- Result before manual stop:
+  - `35` attempts.
+  - `23` candidate lines, not trustworthy because the lock oracle was disabled.
+  - `12` timer/done-oracle late misses.
+  - `22` pipe corruption failures.
+  - `0` corrupted pipe detections, accepted pipe probes, or arbitrary R/W setups.
+- Interpretation:
+  - The pulse can move attempts between still-running and already-returned states, but this run did not prove socket-lock holds.
+
+### CPU0-noise lock-oracle run
+- Folder:
+  - `old/2026-05-04_unpriv_mtu1_cpu0_noise_lockoracle_smp2/`
+- Setup:
+  - No kprobes.
+  - Dropped to UID 1000 after setting `mtu_expires=1`.
+  - `BAD_DST_CPU0_NOISE_THREADS=1`
+  - `BAD_DST_CPU0_NOISE_AFTER_TIMER_ARM=1`
+  - `BAD_DST_CPU0_NOISE_DURATION_NS=220000`
+  - `BAD_DST_CPU0_NOISE_SPIN_NS=1500`
+  - `BAD_DST_CPU0_NOISE_SLEEP_NS=6000`
+  - `BAD_DST_LOCK_ORACLE=1`
+  - `BAD_DST_LOCK_ORACLE_US=20000`
+- Result before manual stop:
+  - `13` attempts.
+  - `13` confirmed `lock oracle: blocked` results.
+  - `12` pipe corruption failures.
+  - `0` corrupted pipe detections, accepted pipe probes, or arbitrary R/W setups.
+- Interpretation:
+  - CPU0 noise can reproduce a real non-root socket-lock-held state without kprobes.
+  - This is still too broad; a held lock does not prove the trigger is in the exact post-refcount-drop/pre-null subwindow.
+
+### CPU0-noise pulse lock-oracle run
+- Folder:
+  - `old/2026-05-04_unpriv_mtu1_cpu0_noise_pulse_lockoracle_smp2/`
+- Setup:
+  - No kprobes.
+  - Dropped to UID 1000 after setting `mtu_expires=1`.
+  - `BAD_DST_CPU0_NOISE_THREADS=1`
+  - `BAD_DST_CPU0_NOISE_AFTER_TIMER_ARM=1`
+  - `BAD_DST_CPU0_NOISE_DURATION_NS=180000`
+  - `BAD_DST_CPU0_NOISE_SPIN_NS=1500`
+  - `BAD_DST_CPU0_NOISE_SLEEP_NS=6000`
+  - `BAD_DST_CPU1_BLOCK_FUTEX=1`
+  - `BAD_DST_LOCK_ORACLE=1`
+  - `BAD_DST_LOCK_ORACLE_US=20000`
+  - `BAD_DST_RACE_PULSE_SWEEP_COUNT=48`
+  - `BAD_DST_RACE_PULSE_START_NS=5000`
+  - `BAD_DST_RACE_PULSE_STEP_NS=1000`
+  - `BAD_DST_RACE_PULSE_SETTLE_NS=10000`
+- Result:
+  - Ran the full `72` attempts.
+  - `40` confirmed `lock oracle: blocked` results.
+  - `32` timer/done-oracle late misses.
+  - `40` pipe corruption failures.
+  - `0` corrupted pipe detections, accepted pipe probes, or arbitrary R/W setups.
+  - Ended with:
+    - `FAIL: reached BAD_DST_MAX_ATTEMPTS without winning real race`
+- Interpretation:
+  - The userspace-only CPU0 noise plus pulse sweep does reproduce non-root socket-lock holds without kprobes.
+  - It does not reproduce the trace-assisted arbitrary R/W path in this bounded run.
+  - The lock oracle is too coarse for the exact race window: it identifies `sk_lock` held, but the target subwindow is narrower and likely after the refcount decrement. The current non-root timing mechanism may be stopping the trigger before or after that narrower point, or the downstream fake-dst/pipe reclaim still requires additional tuning.
+
+### Updated status
+- Non-root timing now has a proven broad oracle: CPU0 userspace noise can hold the trigger in a socket-locked state without kprobes.
+- No-kprobe dropped-UID arbitrary R/W is still not reproduced.
+- The next useful step is a stronger non-root oracle or calibration method for the post-refcount-drop subwindow, because `IP_MTU` lock blocking alone is not selective enough.
+
+## 2026-05-04 close-read race ideas
+
+### Kernel-side window
+- The vulnerable sequence in `include/net/sock.h` is:
+  - `dst = __sk_dst_get(sk);`
+  - `ndst = dst->ops->negative_advice(dst);`
+  - if `ndst != dst`, then `rcu_assign_pointer(sk->sk_dst_cache, ndst);`
+- For the current IPv4 route, `ipv4_negative_advice()` drops the reference through `ip_rt_put(rt)` and returns `NULL` when `rt->dst.expires` is set.
+- Therefore the useful stop point is after `ipv4_negative_advice()` returns with `ndst == NULL`, but before `rcu_assign_pointer(sk->sk_dst_cache, NULL)`.
+- The successful trace-assisted run shows exactly this:
+  - `cnxret` fires for the vulnerable socket.
+  - There is no matching `cnxassign` before `MSG_PROBE`.
+  - Later `sk_dst_check()` sees the sprayed fake dst (`obs=1`, fake ops, fake flags) and reaches the pipe-buffer primitive.
+- Failed trace-assisted candidates generally show `cnxassign` shortly after `cnxret`, before `MSG_PROBE`, which clears the socket cache and removes the UAF.
+
+### Current non-root timing issue
+- `IP_MTU` lock blocking proves only that `sk_lock` is held.
+- It does not distinguish these states:
+  - stopped after `lock_sock()` but before `dst_negative_advice()`;
+  - stopped inside or before `ipv4_negative_advice()`;
+  - stopped at the useful post-`negative_advice`/pre-assign point;
+  - stopped after the useful point but before release.
+- The CPU0-noise runs mostly create the first broad condition, not the precise useful one.
+- The current pulse path can also be harmful: `pulse_frozen_trigger()` briefly releases the CPU1 blockers, which can let a good candidate run past `rcu_assign_pointer()` before the main thread uses the stale pointer.
+
+### Stronger ideas to try next
+- Do a narrow timer sweep around the trace-assisted successful neighborhood (`timer_offset=91144`, `align_pad=3`) without pulse first, using the lock oracle only as a filter. The last CPU0-noise pulse run used a 4096 ns timer step and did not include `91144`; the trace/no-trace exact runs used 2048 ns steps.
+- Add a mode that fixes `BAD_DST_ALIGN_PAD=3` and sweeps `BAD_DST_TIMER_SWEEP_START_NS` around roughly `90000..92500` with sub-microsecond steps, then repeats that small window many times. This accepts that the final window is instruction-scale and tries to sample it directly.
+- Try removing or greatly shrinking `pulse_frozen_trigger()` for final attempts. Pulse is useful for mapping early/late behavior, but once a timer hit is in the right neighborhood it may advance the trigger past the assignment.
+- Consider a per-trigger-thread timing source instead of wall-clock `timerfd`: `perf_event_open()` with a task/cpu-clock or cycle event attached to the trigger thread could generate an interrupt after a calibrated amount of kernel execution. This may be non-root depending on `perf_event_paranoid`/CAP_PERFMON policy, and it is more aligned to "instruction progress inside the syscall" than wall-clock time.
+- A POSIX CPU-time timer targeting the trigger thread is another lower-probability variant to test. It may only deliver the signal on syscall exit, but it is worth checking whether it can set a reschedule point while the syscall is still executing on this kernel.
+- Use kprobes only as a calibration tool to map `cnxret` timing for a given build/config, then remove them and run a tight non-root sweep around the measured offset. Do not treat kprobe-success rates as representative because the `cnxret` kprobe likely widens the exact window it is measuring.
+- If no non-root timing source can reliably hit the tiny post-return/pre-assign interval, the practical fallback is to search for another vulnerable protocol/path where `negative_advice()` has a longer or more controllable gap before the socket cache is cleared. The patch covers IPv4, IPv6, and xfrm users, so the same bug class may have a slower path elsewhere.
+
+## 2026-05-04 IPv6 path investigation
+
+### Kernel behavior
+- The vulnerable IPv6 ordering is the same core bug in `include/net/sock.h:__dst_negative_advice()`:
+  - read `sk->sk_dst_cache`;
+  - call `dst->ops->negative_advice(dst)`;
+  - only afterward assign the returned pointer back to `sk->sk_dst_cache`.
+- `net/ipv6/route.c:ip6_negative_advice()` has two cases:
+  - non-`RTF_CACHE`: calls `dst_release(dst)` and returns `NULL`;
+  - `RTF_CACHE`: only removes the exception and returns `NULL` if `rt6_check_expired(rt)` is true.
+- `BUG.md` confirms the upstream fix special-cased IPv6:
+  - non-`RTF_CACHE` now uses `sk_dst_reset(sk)`;
+  - expired `RTF_CACHE` now does `dst_hold(dst)`, `sk_dst_reset(sk)`, then `rt6_remove_exception_rt(rt)`.
+- `struct rt6_info` is not in generic kmalloc on this test kernel. `ip6_route_init()` creates a dedicated `ip6_dst_cache` with `sizeof(struct rt6_info)`.
+- Current x86 `vmlinux` layout:
+  - `struct rt6_info`: size `232`;
+  - embedded `struct dst_entry`: offset `0`, size `112`;
+  - `from`: offset `112`;
+  - `sernum`: offset `120`;
+  - `rt6i_idev`: offset `184`;
+  - `rt6i_flags`: offset `192`;
+  - `rt6i_uncached`: offset `200`;
+  - `rt6i_uncached_list`: offset `216`.
+- Important symbols in current `vmlinux`:
+  - `ip6_dst_check`: `0xffffffff81e3af70`;
+  - `ip6_negative_advice`: `0xffffffff81e3bc10`;
+  - `dst_blackhole_check`: `0xffffffff81c078f0`;
+  - `metadata_dst_free`: `0xffffffff81c07af0`;
+  - `dst_blackhole_ops`: `0xffffffff836a8e40`;
+  - `ip6_dst_blackhole_ops`: `0xffffffff836bea80`;
+  - `ip6_dst_ops_template`: `0xffffffff836beb40`;
+  - `anon_pipe_buf_ops`: `0xffffffff827bf3c0`.
+
+### Route/refcount implications
+- `connect(AF_INET6, SOCK_DGRAM)` reaches `ip6_datagram_dst_update()`, then `ip6_dst_lookup_flow()`, then `ip6_sk_dst_store_flow()`.
+- For connected UDP sends, `udpv6_sendmsg()` reaches `ip6_sk_dst_lookup_flow()`, which calls `sk_dst_check()` before `ip6_sk_dst_check()`.
+- `MSG_PROBE` is still useful for the fake-dst trigger because `ip6_append_data()` returns immediately for `MSG_PROBE`.
+- Normal IPv6 output lookup uses `ip6_pol_route_output()`, not the input-side per-cpu route path. It searches the exception table first and otherwise creates an `rt6_info` with `ip6_create_rt_rcu()`.
+- IPv6 PMTU can create `RTF_CACHE` exception routes through `ip6_rt_cache_alloc()` and `rt6_insert_exception()`, but this path needs runtime confirmation because exception ownership/refcounting differs from the simple non-`RTF_CACHE` `dst_release()` case.
+
+### Fake dst considerations
+- A fake IPv6 `rt6_info` can make `ip6_dst_check()` return `NULL` by setting:
+  - `dst.obsolete != 0`;
+  - `dst.ops` to an ops table whose `.check` passes KCFI;
+  - `from = NULL`;
+  - `sernum = 0`.
+- Using `ip6_dst_blackhole_ops` is not automatically safe: its `.destroy = ip6_dst_destroy`, which calls `rt6_uncached_list_del()`, `in6_dev_put(rt6i_idev)` if non-null, and `fib6_info_release(from)`.
+- Therefore a fake `rt6_info` using IPv6 ops must zero `rt6i_idev/from` and initialize `rt6i_uncached` as an empty list head, or destruction may dereference invalid list/device pointers.
+- The generic `dst_blackhole_ops` / metadata-dst pattern is likely safer because `.check = dst_blackhole_check` returns `NULL` and `dst_destroy()` can route `DST_METADATA` objects into `metadata_dst_free()` instead of `ip6_dst_destroy()`. However `ip6_sk_dst_check()` rejects non-`AF_INET6` families only after `sk_dst_check()` returns a non-NULL dst, so for the invalidation trigger this may be acceptable.
+- Existing `exp_x86.c` already uses the metadata-dst style for IPv4. Existing `exp_x86_ipv6.c` does not build a fake payload at all.
+
+### IPv6 oracle and scaffold issues
+- `getsockopt(IPV6_MTU)` is not a socket-lock oracle. It does an RCU read of `__sk_dst_get()` and does not call `lock_sock()`.
+- Better IPv6 lock-oracle candidates are sticky-option getters such as `IPV6_DSTOPTS`, `IPV6_HOPOPTS`, `IPV6_RTHDRDSTOPTS`, and `IPV6_RTHDR`, which call `lock_sock()` in `ipv6_getsockopt()`.
+- `exp_x86_ipv6.c` is an old scaffold:
+  - it connects to `::1`;
+  - it uses the lockless `IPV6_MTU` check as a heuristic;
+  - it lacks the current IPv4 harness features: CPU0 noise, real lock oracle, pipe active-ring setup, robust pipe probe, root payload, and fake dst builder.
+- Current test VM wrappers configure only IPv4 tap addresses. Any non-loopback IPv6 PMTU path will first need IPv6 addressing/router setup or an explicit local IPv6-only test plan.
+
+### Plan
+- First validate route/refcount behavior with tracing/debug only:
+  - trace `ip6_negative_advice`, `dst_release`, `dst_destroy_rcu`/`ip6_dst_destroy`, `sk_dst_check`, and `rt6_remove_exception_rt`;
+  - capture `rt6i_flags`, `dst->__refcnt`, `dst->ops`, and whether the cached socket dst is `RTF_CACHE` for `::1` and for a non-loopback peer.
+- Prefer testing both IPv6 route modes:
+  - non-`RTF_CACHE`, to see if `ip6_negative_advice()` directly drops the socket-owned final ref;
+  - expired `RTF_CACHE`, to see if `rt6_remove_exception_rt()` provides a slightly wider or easier-to-control post-release path.
+- Do not build on `exp_x86_ipv6.c` directly. If IPv6 looks promising, port the current `exp_x86.c` harness and swap only:
+  - IPv6 socket creation and PMTU setup;
+  - IPv6-safe lock oracle;
+  - IPv6/metadata fake-dst payload builder;
+  - IPv6 symbol constants.
+- For fake dst, first test the safer metadata/generic blackhole choice in a debug harness. If it fails KCFI or family assumptions on Android, use `ip6_dst_blackhole_ops` with a correctly initialized fake `rt6_info`.
+- Treat IPv6 as a candidate for a better trigger path, not yet a proven race solution. The key unknown is whether the IPv6 `negative_advice()` branch gives a longer exact window than IPv4 or merely reproduces the same tiny post-refdrop/pre-assign interval.

