@@ -1,6 +1,6 @@
 ---
 name: android-kdebug
-description: Use this skill when debugging Android apps over ADB with the kdebug Frida CLI, or when you need the equivalent plain adb commands for shell, file transfer, install, and log inspection tasks that kdebug does not implement.
+description: Use the android-kdebug skill when debugging Android apps over ADB. The android-kdebug skill documents using kdebug Frida CLI, the kdebug LLDB CLI, or common adb commands.
 ---
 
 # Android Kdebug

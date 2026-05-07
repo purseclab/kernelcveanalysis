@@ -1736,3 +1736,947 @@
   - IPv6 symbol constants.
 - For fake dst, first test the safer metadata/generic blackhole choice in a debug harness. If it fails KCFI or family assumptions on Android, use `ip6_dst_blackhole_ops` with a correctly initialized fake `rt6_info`.
 - Treat IPv6 as a candidate for a better trigger path, not yet a proven race solution. The key unknown is whether the IPv6 `negative_advice()` branch gives a longer exact window than IPv4 or merely reproduces the same tiny post-refdrop/pre-assign interval.
+
+## 2026-05-06 Clean IPv4 race profile and networking retest
+
+### Actions
+- Added a compile-time/runtime clean IPv4 profile in `exp_x86.c`, enabled by `BAD_DST_CLEAN_RACE=1` or by building `exp_x86_clean.c`.
+- Added `exp_x86_clean.c`, which includes `exp_x86.c` with `BAD_DST_CLEAN_PROFILE_DEFAULT=1`.
+- Added `compile_x86_clean.sh` and rebuilt `bad_dst_cache_clean` with the same static payload flags as the normal x86 build.
+- Created checkpoints:
+  - `old/2026-05-06_before_clean_ipv4_profile_exp_x86.c`
+  - `old/2026-05-06_before_clean_ipv4_profile_RUNNING_LOG.md`
+  - `old/2026-05-06_clean_ipv4_profile_smp2_lockoracle_exp_x86.c`
+  - `old/2026-05-06_clean_ipv4_profile_smp2_lockoracle_exp_x86_clean.c`
+  - `old/2026-05-06_clean_ipv4_profile_smp2_lockoracle_compile_x86_clean.sh`
+- Verified the host side after networking setup:
+  - `icmp4_mtu_server.py -i br0testvm -p 6767` was running.
+  - `tap0testvm` and `br0testvm` existed; `br0testvm` had `192.168.10.1/24`.
+  - Both test VMs configured `eth0` as `192.168.10.2/24` and reported `testvm-host (192.168.10.1)` reachable.
+- Ran `new_kernel/bzImage` with `--nokaslr --smp 2 --memory 1G --network tap --network-tap tap0testvm`.
+
+### Clean profile run without lock oracle
+- Artifact directory: `old/2026-05-06_clean_ipv4_profile_smp2/share`.
+- Guest confirmed `/proc/sys/net/ipv4/route/mtu_expires = 1`.
+- The autorun deadline expired after 240 seconds, with no kernel oops and no pipe corruption.
+- Exploit log showed 33 exact `race candidate: lock held` entries, but this profile had `BAD_DST_LOCK_ORACLE=0`, so those were not trustworthy as real socket-lock evidence.
+- All 33 candidate paths reached `FAIL: could not corrupt pipe`.
+- Final state paused because the leaked-vuln-pipe registry reached 8192.
+
+### Clean profile run with unprivileged lock oracle
+- Artifact directory: `old/2026-05-06_clean_ipv4_profile_smp2_lockoracle/share`.
+- Same networking and `mtu_expires=1` setup.
+- Added environment override `BAD_DST_LOCK_ORACLE=1`, using the existing unprivileged `getsockopt(IP_MTU)` blocked-child oracle.
+- Observed 37 attempts in 240 seconds:
+  - 33 `lock oracle: blocked` results;
+  - 33 `race candidate: lock held` results;
+  - 4 `race miss after timer: trigger already returned` results;
+  - 33 `FAIL: could not corrupt pipe` results.
+- The clean profile is now reliably reaching a state where the socket lock remains held from userspace timing alone on SMP=2. This is stronger than the earlier "near hit" suspicion, but it still does not prove the timer lands after the dst refcount drop; it only proves the trigger thread has not released the socket lock.
+
+### Insights
+- The networking setup appears fixed for the IPv4 path. No connect/read syscheck failure appeared, the VM reached the host, and the exploit got through the initial UDP exchange and repeated PMTU/expiry sequence.
+- Current blocker is distinguishing an exact post-refdrop hit from a lock-held-but-too-early hit, then validating the reclaim/free sequence. The fake-dst invalid-free stage is reached in the harness, but pipe-page overlap is not observed by the FIONREAD corruption probe.
+- `critical elapsed before MSG_PROBE` was consistently about `1.66s` to `1.70s`, which is dominated by the intentional FNHE expiry/RCU timing. That elapsed time does not by itself mean the lock race was missed because the lock oracle child stayed blocked across the candidate.
+- Both runs hit the same end condition: repeated `FAIL: could not corrupt pipe`, then leaked vuln-pipe registry exhaustion. Further work should focus on validating whether the fake dst is actually reclaimed by the cmsg spray and whether the subsequent unaligned free lands in the intended kmalloc-256 slab/page path.
+
+### Issues / next checks
+- Add a diagnostic pass that stops just after `MSG_PROBE` and inspects whether the fake dst free callback runs and whether a kmalloc-256 object from the cmsg spray is freed.
+- Revisit the prepared pipe strategy after proving the fake dst object is actually in the socket dst cache. If the fake dst is not installed, tune the exact race window; if it is installed, focus on allocator placement, fake-dst offset/layout, and the pipe-buffer active-ring/FIONREAD probe.
+- Consider re-enabling only lightweight trace markers for one run to correlate `before_msg_probe`, `after_fake_dst_rcu`, and pipe resize timing without perturbing the race window much.
+
+## 2026-05-06 Race-window assembly/source inspection
+
+### Tooling note
+- Avoided further radare use on `vmlinux`; bounded `objdump --start-address/--stop-address` plus `nm` is sufficient for this inspection and avoids whole-kernel analysis overhead.
+
+### Current `new_kernel/vmlinux` symbols
+- `sock_setsockopt`: `0xffffffff81c054a0`
+- `dst_release`: `0xffffffff81c2cd80`
+- `ipv4_negative_advice`: `0xffffffff81d8c310`
+- `xfrm_negative_advice`: `0xffffffff81e2c510`
+- `rt6_remove_exception_rt`: `0xffffffff81e655b0`
+- `ip6_negative_advice`: `0xffffffff81e656d0`
+
+### IPv4 source path
+- Vulnerable ordering is still the old `include/net/sock.h:__dst_negative_advice()`:
+  - read `sk->sk_dst_cache`;
+  - call `dst->ops->negative_advice(dst)`;
+  - if returned dst differs, assign `sk->sk_dst_cache = ndst`.
+- IPv4 `net/ipv4/route.c:ipv4_negative_advice()` drops the route reference via `ip_rt_put(rt)` / `dst_release()` and returns `NULL` when `rt->dst.expires` is set.
+- Therefore the useful stop point is after `dst_release()` has decremented `dst->__refcnt`, but before `sock_setsockopt()` stores `NULL` to `sk->sk_dst_cache`.
+
+### IPv4 x86 instruction window
+- Relevant `sock_setsockopt()` sequence:
+  - `0xffffffff81c06376`: load `sk->sk_dst_cache` from `sk+0x138`;
+  - `0xffffffff81c06386`: load `dst->ops`;
+  - `0xffffffff81c0638b`: load `ops->negative_advice`;
+  - `0xffffffff81c0639b`: indirect call to `negative_advice`;
+  - `0xffffffff81c063a0`: `cnxret`, compare returned dst with old dst;
+  - `0xffffffff81c063a3`: not-taken branch for `ndst != dst`;
+  - `0xffffffff81c063a9`: `cnxassign`, store returned pointer to `sk->sk_dst_cache`.
+- `ipv4_negative_advice()` calls `dst_release()` at `0xffffffff81d8c335`, then returns `NULL` with `xor %eax,%eax; ret`.
+- `dst_release()` decrements `dst->__refcnt` at `0xffffffff81c2cd98` with `lock xadd %ecx,0x40(%rdi)`.
+- On the intended non-final-ref IPv4 path, after the `lock xadd` retires there are only about ten instructions before the `sk_dst_cache = NULL` store:
+  - `sub`, two conditional branches, stack restore, `ret` from `dst_release`, `xor`, `ret` from `ipv4_negative_advice`, `cmp`, not-taken `je`, then the store.
+- If only measuring from the old trace marker `cnxret` (`sock_setsockopt+0xf00`) to `cnxassign` (`+0xf09`), the post-return window is just two instructions before the store.
+- This explains why the `getsockopt(IP_MTU)` lock oracle is too coarse: it accepts anything after `lock_sock()` but before `release_sock()`, while the exact post-refdrop/pre-assign interval is tiny.
+
+### IPv4 cache-miss / stall opportunities
+- The obvious dereferences all happen before the useful refcount drop:
+  - `sk->sk_dst_cache` load;
+  - `dst->ops` load;
+  - `ops->negative_advice` load;
+  - `rt->dst.expires` / flags checks inside `ipv4_negative_advice`;
+  - the `dst->__refcnt` locked atomic operation.
+- Slowing those can move the timing target, but it mostly widens the lock-held-too-early interval rather than the useful interval.
+- The `sk_dst_cache` assignment at `sock_setsockopt+0xf09` is unlikely to be a good cache-miss lever because the same socket cacheline was loaded at `+0xed6` just before the call.
+- There is no post-refdrop memory dereference on the non-final-ref IPv4 path before the assignment, only returns, branches, and stack cleanup.
+
+### Potential race-widening paths
+- IPv4 final-ref variant:
+  - If the socket drop can make `dst->__refcnt` reach zero inside `dst_release()`, the function tail-jumps into `call_rcu()` before returning to `ipv4_negative_advice()`.
+  - This could widen the after-refdrop/before-assign window and may remove the FNHE-expiry dependency, but it changes ownership assumptions and needs tracing to confirm when the RCU callback is actually queued relative to preemption.
+- IPv6 expired `RTF_CACHE` exception path:
+  - `ip6_negative_advice()` calls `rt6_remove_exception_rt(rt)` before returning `NULL`.
+  - `fib6_nh_remove_exception()` holds `rt6_exception_lock` with `spin_lock_bh()`, finds the exception, calls `rt6_remove_exception()`, then unlocks.
+  - `rt6_remove_exception()` performs `dst_release(&rt6_ex->rt6i->dst)` while still in that removal path, then does `kvfree_call_rcu()` and bucket accounting before returning.
+  - Because `spin_lock_bh()` suppresses preemption until unlock, a timer interrupt that arrives while the lock is held can be deferred until after the exception removal has dropped the route reference but before `ip6_negative_advice()` returns to the vulnerable assignment site. This may substantially widen the practical timing window.
+  - The downside remains the IPv6 reclaim problem: `rt6_info` is from the dedicated `ip6_dst_cache`, not generic kmalloc, so the fake-dst and pipe-reclaim strategy needs separate work.
+- XFRM `xfrm_negative_advice()` is not promising for window width. It is essentially shorter than IPv4: check `dst->obsolete`, call `dst_release()`, return `NULL`.
+- KCFI/indirect-call checks on Android likely add work before entering `negative_advice()`, not in the post-refdrop/pre-assign part that matters for IPv4. They may move calibration but probably do not widen the useful IPv4 window.
+
+## 2026-05-06 IPv6 refcount audit
+
+### Generic dst refs
+- `dst_init()` sets `dst->__refcnt` to the allocator-supplied `initial_ref`.
+- `ip6_dst_alloc()` calls `dst_alloc(..., initial_ref=1, initial_obsolete=DST_OBSOLETE_FORCE_CHK, ...)`, so every allocated `rt6_info` starts with one dst ref.
+- `dst_hold()`, `dst_hold_safe()`, and `dst_clone()` increment `dst->__refcnt`.
+- `dst_release()` decrements `dst->__refcnt`; reaching zero queues `dst_destroy_rcu()`.
+- `ip6_dst_destroy()` releases IPv6 side resources: metrics, uncached-list membership, `rt6i_idev`, and the stored `from` `fib6_info` reference.
+
+### Socket-cache refs
+- `sk_dst_get()` takes a temporary ref with `atomic_inc_not_zero()`.
+- `__sk_dst_get()` does not take a ref; `dst_negative_advice()` uses this lock-protected/no-ref accessor.
+- `sk_dst_set()` stores the new pointer and releases the old socket-cache dst ref.
+- `sk_setup_caps()` calls `sk_dst_set()`, so `ip6_dst_store()` consumes exactly one dst ref for the socket cache. It does not create a new ref by itself.
+- `ip6_datagram_dst_update()` looks up a dst and passes it directly to `ip6_sk_dst_store_flow()`, so the lookup's returned ref becomes the socket-cache ref.
+- `ip6_sk_dst_lookup_flow()` uses a different pattern for sends: if connected and it performs a fresh lookup, it stores `dst_clone(dst)` in the socket cache and returns the original lookup ref to the send path; the send path later `dst_release(dst)`.
+
+### Normal non-RTF_CACHE connected UDP route
+- The usual output lookup uses a per-cpu `RTF_PCPU` route when there is no PMTU exception.
+- `ip6_rt_pcpu_alloc()` allocates the route with refcount 1 and stores it in `rt6i_pcpu`; that ref is the per-cpu route owner.
+- `ip6_route_output_flags()` takes an additional ref before returning a normal refcounted dst to callers.
+- After `connect()` / `ip6_datagram_dst_update()`, the socket consumes that returned ref. Normal steady state is therefore refcount 2:
+  - one per-cpu route owner ref;
+  - one socket-cache ref.
+- `ip6_negative_advice()` on non-`RTF_CACHE` routes calls `dst_release(dst)` and returns `NULL`. For the normal per-cpu route this drops the socket ref from 2 to 1, not to zero, so the object is not freed by the race.
+
+### PMTU-created RTF_CACHE exception
+- `__ip6_rt_update_pmtu()` creates an exception only when `rt6_cache_allowed_for_pmtu(rt6)` is true: the current route is not already `RTF_CACHE` and is either `RTF_PCPU` or has a `from` route.
+- `ip6_rt_cache_alloc()` allocates an `RTF_CACHE` `rt6_info` with initial dst refcount 1 and takes a `fib6_info` ref for `rt->from`.
+- `rt6_insert_exception()` stores that `rt6_info` in an `rt6_exception`. It does not call `dst_hold()`; the initial dst ref is effectively the exception-table owner ref.
+- A later lookup that finds this exception uses `rt6_find_cached_rt()` to find the pointer without taking a ref, then `ip6_hold_safe()` / `dst_hold_safe()` to give the caller a ref.
+- If the connected socket caches the exception during a send:
+  - exception table starts at refcount 1;
+  - lookup returns a caller ref: refcount 2;
+  - `ip6_sk_dst_lookup_flow()` stores `dst_clone(dst)` in the socket: refcount 3;
+  - UDP send releases the caller ref at `out`: refcount 2.
+- If the connected socket caches the exception through `ip6_datagram_dst_update()`, the lookup ref is consumed directly by the socket, also leaving steady-state refcount 2:
+  - one exception-table ref;
+  - one socket-cache ref.
+
+### Removing PMTU exceptions
+- `rt6_remove_exception()` removes the exception from the hash table and does:
+  - `from = xchg(&rt6_ex->rt6i->from, NULL)`;
+  - `fib6_info_release(from)`;
+  - `dst_dev_put(&rt6_ex->rt6i->dst)`;
+  - `hlist_del_rcu(&rt6_ex->hlist)`;
+  - `dst_release(&rt6_ex->rt6i->dst)`;
+  - `kfree_rcu(rt6_ex, rcu)`.
+- That `dst_release()` drops the exception-table dst ref. It does not specifically drop the socket-cache ref.
+- PMTU exception aging/GC (`rt6_age_examine_exception()`) also removes expired `RTF_EXPIRES` exceptions through `rt6_remove_exception()`, so it likewise drops the table ref and leaves any socket ref alive.
+
+### Old vulnerable `ip6_negative_advice()` behavior
+- For `RTF_CACHE` routes, old `ip6_negative_advice()` does:
+  - if `rt6_check_expired(rt)` is true, call `rt6_remove_exception_rt(rt)`;
+  - set local `dst = NULL`;
+  - return `NULL` to `__dst_negative_advice()`.
+- The old core `__dst_negative_advice()` then assigns `sk->sk_dst_cache = NULL` directly with `rcu_assign_pointer()`. It does not call `sk_dst_reset()` / `sk_dst_set()`, so it does not run the normal `dst_release(old_dst)` for the socket-cache reference.
+- This means the expired `RTF_CACHE` IPv6 branch appears to clear the socket dst pointer without consuming the socket-owned dst reference. The only dst release in that branch is the one inside `rt6_remove_exception()`, which corresponds to removing the exception/table ownership.
+- The upstream fix confirms this reading: the fixed IPv6 `RTF_CACHE` path does `dst_hold(dst); sk_dst_reset(sk); rt6_remove_exception_rt(rt);` with the comment "counteract the dst_release() in sk_dst_reset()". In other words, the fix makes the socket-cache clear obey RCU ordering while preserving the old branch's net refcount effect: the exception removal is the meaningful ref drop, not the socket-cache clear.
+- Follow-up upstream/local-history check found `8b591bd522b7` / upstream `3301ab7d5aeb` ("net/ipv6: release expired exception dst cached in socket"). Its commit message explicitly confirms this was a dst leak: for an expired exception dst cached in a timing-out socket, with no other socket holding it, refcount is 2 (`dst_init()`/exception-table ownership + socket-cache ownership), and the socket-cache ref was not released by the old IPv6 negative-advice behavior.
+- That follow-up removed the compensating `dst_hold()` from the post-CVE fixed `ip6_negative_advice()` path. The corrected fixed ordering is: under `rcu_read_lock()`, `sk_dst_reset(sk)` drops the socket-cache ref first, then `rt6_remove_exception_rt(rt)` drops the exception-table ref. If both refs existed, this becomes 2 -> 1 -> 0 and queues/free-after-RCU.
+- If the socket-cached exception still has both normal refs (table + socket), `rt6_remove_exception_rt()` removes the exception and drops the table ref: refcount 2 -> 1. The object is still alive because the socket ref remains.
+- If the exception table was already removed by aging/GC, the cached `RTF_CACHE` route can be at refcount 1 from the socket only, but `rt6_remove_exception_rt()` finds no exception and performs no dst release. The object still is not freed by `ip6_negative_advice()`.
+- Therefore an ICMPv6 PMTU packet can create the two-ref exception state, and timeout/GC can drop the table ref, but I do not see a path where ICMPv6 alone gets the route to refcount 1 and then `ip6_negative_advice()` drops that last socket ref. The RTF_CACHE branch drops/removes the exception-table ownership, not the socket-cache ownership.
+
+### Consequences for the IPv6 exploit idea
+- The normal IPv6 connected UDP route starts at refcount 2 for exploit purposes: per-cpu owner + socket cache.
+- The PMTU exception route also starts at refcount 2 once cached in the socket: exception table + socket cache.
+- Non-`RTF_CACHE` negative advice can free only if the socket-cached route has no independent owner. I did not find that in the normal connected UDP output path.
+- Expired `RTF_CACHE` negative advice may be useful as a wider timing window, but it does not appear to create the same "drop last ref while socket cache still points at freed object" primitive that IPv4 gives after the FNHE/table ref has expired.
+- A potentially useful IPv6 direction would be to find a socket-cached non-`RTF_CACHE` `rt6_info` with refcount 1, or a separate way to make the RTF_CACHE branch drop the socket ref after the table ref is gone. I do not currently see either from the standard UDP + ICMPv6 PMTU path.
+
+### IPv6 ordering idea: drop table ref after socket cache exists
+- Considered whether we can first create a socket-cached exception, get `sk_dst_cache` down to a single socket-owned ref, and then use ICMPv6 PMTU to drop the exception/table ref later.
+- If `ip6_negative_advice()` runs on an expired `RTF_CACHE` entry, it already calls `rt6_remove_exception_rt()` before returning `NULL`; the exception/table ref is the one dropped inside the negative-advice call. There is no remaining exception-table ref for a later ICMP packet to drop.
+- ICMPv6 PMTU can replace an existing exception for the same `(daddr,saddr)` through `rt6_insert_exception()`: it finds an existing `rt6_ex` and calls `rt6_remove_exception()` before inserting the new exception. If a socket still caches the old exception, this can make the old exception refcount become 1.
+- However the old socket-cached object remains an `RTF_CACHE` dst. Later old vulnerable `ip6_negative_advice()` on that object either finds no exception because `rt->from` was cleared by `rt6_remove_exception()`, or calls removal that does not release the socket ref. It then returns `NULL` and old `__dst_negative_advice()` clears `sk_dst_cache` without `dst_release(old_dst)`. This is still a leak path, not the useful stale-pointer UAF.
+- The safe cache-validation paths (`sk_dst_check()` / `__sk_dst_check()`) can release a stale socket-cached exception after the table ref is gone, but they clear `sk_dst_cache` before the final release, so they do not recreate the vulnerable negative-advice ordering.
+
+### IPv6 non-RTF_CACHE race plus PMTU insertion idea
+- Revised idea from discussion: start with a normal non-`RTF_CACHE` socket-cached route at refcount 2 (`RTF_PCPU` owner + socket cache). Trigger old `ip6_negative_advice()` on that route, which calls `dst_release(dst)` before the core clears `sk_dst_cache`; during the race window this can leave refcount 1 while the socket cache still points at it.
+- `rt6_insert_exception()` does not directly release that original `RTF_PCPU` route. It allocates/stores a separate `RTF_CACHE` exception and only removes an existing exception entry for the same key.
+- But successful `rt6_insert_exception()` calls `fib6_update_sernum()` and comments "invalidate all cached dst". If the old pcpu route has `sernum != 0`, a later same-CPU `rt6_get_pcpu_route()` sees `!rt6_is_valid(pcpu_rt)`, `xchg`s the per-cpu slot to `NULL`, and calls `dst_release(&prev->dst)`. That could drop the remaining pcpu owner ref while the trigger thread has not yet cleared `sk_dst_cache`.
+- A lookup for the same `(daddr,saddr)` after PMTU insertion will likely hit the new exception in `rt6_find_cached_rt()` and skip `rt6_get_pcpu_route()`. To release the invalidated pcpu route, the follow-up lookup likely needs to be for a different destination/source pair that resolves to the same underlying `res->nh` but has no matching exception entry.
+- Important condition: `ip6_rt_pcpu_alloc()` sets `pcpu_rt->sernum = rt_genid_ipv6()` only when `f6i->nh` is set, i.e. the route uses a nexthop object. For ordinary embedded-`fib6_nh` routes, `sernum` appears to remain 0, and `rt6_get_pcpu_route()` will not release the pcpu dst just because `fib6_update_sernum()` changed the generation.
+- Practical implication: this path may be viable only if the target route uses nexthop objects, or if another trigger can release the exact pcpu route ref without clearing `sk_dst_cache`. It also needs the releasing lookup to run on the same CPU as the stale pcpu route, because the owner ref is stored in `res->nh->rt6i_pcpu` per-cpu.
+
+## 2026-05-06 19:10 EDT - static clean IPv4 build and 4-vCPU diagnostics
+
+### Actions
+- Re-ran `./compile_x86_clean.sh` after the static libc nix shell became available.
+- Confirmed `bad_dst_cache_clean` builds as a statically linked x86-64 ELF.
+- Copied `bad_dst_cache_clean` plus the VM wrapper into `/tmp/bad_dst_clean_share` to avoid sharing the whole source directory and its large `vmlinux`.
+- Ran the clean IPv4 race profile under `testvm run bzImage --nokaslr --smp 4 --net tap ...` with the existing host ICMP4 MTU listener.
+- Stopped only the QEMU/testvm processes from these runs after the exploit reached its terminal sleep.
+
+### Results
+- Build succeeds. Remaining compiler output is warnings only:
+  - `%d` format strings used with `ssize_t` in the existing `SYSCHK`/`CHECK` logging macros.
+  - ignored return value warnings on existing `write`/`read`/`system` calls.
+- A 5-attempt clean run with the default clean profile reached the reclaim path every time, but every attempt failed with `FAIL: could not corrupt pipe`.
+- That 5-attempt run had `BAD_DST_LOCK_ORACLE=0` and `BAD_DST_STACK_ORACLE=0`, so the log line `race candidate: lock held with stack=unknown` was not strong evidence that the real race landed.
+
+### Diagnostic findings
+- First 20-attempt 4-vCPU diagnostic enabled both lock and stack oracles. Every attempt classified the trigger stack as `too_late_far`, while the lock oracle reported `blocked`.
+- The lock oracle result is likely contaminated in this setup: `run_ip_mtu_lock_oracle()` forks a child and, by default, closes inherited fds up to the current rlimit before calling `getsockopt(IP_MTU)`. With the exploit's thousands of sockets/pipes, a 20 ms timeout can classify the child as `blocked` before it even reaches `getsockopt`.
+- Re-ran an 8-attempt diagnostic with `BAD_DST_LOCK_ORACLE=0`, `BAD_DST_STACK_ORACLE=1`, `BAD_DST_STACK_ORACLE_VERBOSE=1`, and `BAD_DST_DONE_ORACLE_SETTLE_US=1000`.
+- In every attempt, including after autotune clamped `BAD_DST_TIMER_INITIAL_NS` down to `1`, the trigger stack was already past the vulnerable path:
+
+```text
+[<0>] exit_to_user_mode_prepare+0x9a/0xf0
+[<0>] syscall_exit_to_user_mode+0x28/0x150
+[<0>] entry_SYSCALL_64_after_hwframe+0x44/0xa9
+```
+
+or:
+
+```text
+[<0>] exit_to_user_mode_prepare+0x9a/0xf0
+[<0>] irqentry_exit_to_user_mode+0x5/0x20
+[<0>] asm_sysvec_apic_timer_interrupt+0x12/0x20
+```
+
+### Current interpretation
+- The minified clean IPv4 path is compiling and running, but the current timerfd + post-expiration affinity migration is freezing the trigger thread too late on this 4-vCPU test kernel.
+- The userspace done oracle can miss this too-late state because the thread can be on the syscall exit path before executing the userspace `trigger_done_counter` increment.
+- The pipe corruption failures from the default clean profile are therefore consistent with false candidates, not necessarily reclaim failure after a real UAF.
+- Next useful direction is to make the freeze/preemption mechanism happen inside the syscall window instead of reacting after the timerfd is observed in the main thread. Candidate approaches include signal/timer delivery to the trigger thread, a lower-latency same-process oracle/freeze, or adding a diagnostic kernel-only delay/probe to measure the exact window before designing the unprivileged path.
+
+## 2026-05-06 21:32 EDT - scheduler/timerfd preemption model
+
+### Local kernel source facts
+- `timerfd_setup()` arms the timer with plain `HRTIMER_MODE_ABS` / `HRTIMER_MODE_REL`, not a pinned hrtimer mode (`fs/timerfd.c:180-208`).
+- `timerfd_tmrproc()` calls `timerfd_triggered()`, which sets `ctx->expired`, increments `ctx->ticks`, and does `wake_up_locked_poll(&ctx->wqh, EPOLLIN)` (`fs/timerfd.c:63-79`).
+- `wake_up_locked_poll()` reaches the poll waiter's wake function and ultimately `try_to_wake_up()` (`include/linux/wait.h:228-231`, `fs/select.c:210-217`, `kernel/sched/core.c:4809-4813`).
+- Wakeup-preemption is real here:
+  - `try_to_wake_up()` enqueues the waiter through `ttwu_queue()` (`kernel/sched/core.c:2991`).
+  - `ttwu_do_wakeup()` calls `check_preempt_curr()` (`kernel/sched/core.c:2464-2471`).
+  - if the woken task's sched class outranks the current task, `check_preempt_curr()` calls `resched_curr()` (`kernel/sched/core.c:1691-1696`).
+  - for a same-CPU wakeup, `resched_curr()` sets both `TIF_NEED_RESCHED` and the preempt resched bit (`kernel/sched/core.c:607-622`).
+- IRQ return can schedule immediately with `CONFIG_PREEMPTION=y`: `irqentry_exit_cond_resched()` checks `!preempt_count()` and `need_resched()`, then calls `preempt_schedule_irq()` (`kernel/entry/common.c:349-357`). `irqentry_exit()` invokes it when returning to interrupted kernel code with IRQs enabled (`kernel/entry/common.c:361-388`).
+- The current target window is extremely small:
+  - `sock_setsockopt(... SO_CNX_ADVICE=1)` calls `dst_negative_advice(sk)` (`net/core/sock.c:1194-1197`).
+  - `__dst_negative_advice()` calls `dst->ops->negative_advice(dst)` and only after it returns does `rcu_assign_pointer(sk->sk_dst_cache, ndst)` (`include/net/sock.h:1938-1949`).
+  - IPv4 `ipv4_negative_advice()` drops the ref with `ip_rt_put(rt)` and returns `NULL` when `dst->obsolete > 0` (`net/ipv4/route.c:859-874`).
+  - `dst_release()` performs `atomic_dec_return()` and queues `call_rcu()` when the refcount reaches zero (`net/core/dst.c:169-180`).
+
+### Interpretation
+- The timerfd path should preempt a `SCHED_IDLE` trigger when the hrtimer interrupt lands while the trigger is still in preemptible kernel code.
+- Scheduler/migration latency after the interrupt is not the key cost if the interrupt lands in the target window: the trigger instruction stream is paused by the interrupt, and `preempt_schedule_irq()` can switch to the main thread before resuming it.
+- The current failed diagnostic therefore most likely means the hrtimer interrupt is not landing in the useful instruction window. With `BAD_DST_TIMER_INITIAL_NS=1`, the actual interrupt still appears to arrive after `setsockopt()` has passed the vulnerable path and reached syscall exit.
+- This makes a pre-syscall busy delay plausible: arm the hrtimer first, then delay the trigger before `setsockopt()` so the syscall's vulnerable window is shifted later toward the actual hrtimer interrupt.
+- This is a different parameter from `timer_offset`. Existing autotune can reduce the programmed expiry down to 1 ns, but it cannot make the hardware/interrupt delivery happen earlier than its real minimum latency.
+
+### Plan
+- Add a diagnostic-only trigger-side busy-wait parameter between `timerfd_settime()` and `setsockopt()`, e.g. `BAD_DST_PRE_SYSCALL_DELAY_NS`.
+- Sweep/classify it with the stack oracle:
+  - `too_late_far` means the hrtimer interrupt still lands after the vulnerable path; increase the pre-syscall delay.
+  - pre-syscall / `timerfd_settime` / early stack means the timer fires before `setsockopt()` reaches the target; decrease the delay.
+  - `dst_release` / `ipv4_negative_advice` target means the interrupt landed in the useful window.
+- Keep the timer local during diagnostics:
+  - set `/proc/sys/kernel/timer_migration=0` in the privileged test wrapper, or at least log it;
+  - keep CPU0 non-idle when arming the timer, because `get_nohz_timer_target()` keeps non-pinned hrtimers on the current CPU when the current housekeeping CPU is non-idle (`kernel/sched/core.c:652-660`).
+- Enable ftrace for one diagnostic run to confirm the sequence:
+  - trace markers around `timerfd_settime`, pre-syscall delay start/end, and `setsockopt`;
+  - `timer:hrtimer_start`, `timer:hrtimer_expire_entry`, `sched:sched_wakeup`, and `sched:sched_switch`;
+  - optional function probes on `timerfd_tmrproc`, `ipv4_negative_advice`, `dst_release`, and `preempt_schedule_irq`.
+- Do not rely on same-thread signal delivery as the main freeze primitive: `signal_wake_up_state()` sets `TIF_SIGPENDING`, but same-CPU/current signal delivery does not itself set `TIF_NEED_RESCHED`; it is normally handled on syscall/return-to-user paths, which is too late for this race (`kernel/signal.c:760-771`).
+
+## 2026-05-06 21:51 EDT - pre-syscall timerfd timing diagnostics
+
+### Actions
+- Created checkpoints:
+  - `old/2026-05-06_before_pre_syscall_delay_diag/`
+  - `old/2026-05-06_before_presyscall_state_diag/`
+  - `old/2026-05-06_before_thread_lock_oracle/`
+  - `old/2026-05-06_after_presyscall_timing_thread_oracle/`
+- Added `BAD_DST_PRE_SYSCALL_DELAY_*` controls to delay the trigger thread between `timerfd_settime()` and `setsockopt(SO_CNX_ADVICE)`.
+- Added `BAD_DST_TRIGGER_TIMING_DIAG=1` shared-state instrumentation for trigger milestones:
+  - `woken`
+  - `timer_armed`
+  - `pre_syscall_delay`
+  - `setsockopt_enter`
+  - `setsockopt_exit`
+  - `done`
+- Added `BAD_DST_LOCK_ORACLE_THREAD=1`, a pthread-based `getsockopt(IP_MTU)` oracle. This avoids the fork oracle's inherited-fd close loop and did not false-block on early cases.
+- Built `bad_dst_cache_clean` successfully with the existing warning set only.
+- Ran multiple `testvm run bzImage --nokaslr --smp 4 --net tap ...` diagnostics with `timer_migration=0`.
+
+### Results
+- Sanity run with `BAD_DST_TIMER_INITIAL_NS=1` and a 100 ms pre-syscall delay woke the main thread at `stage=woken` with no `timer_armed` timestamp. This means the 1 ns timer expires before `timerfd_settime()` returns; the old stack oracle's `exit_to_user_mode_prepare` classification was misleading here.
+- Coarse sweep with 50 us pre-syscall delay and timer offsets 10-300 us:
+  - 10-20 us: `woken` before `timerfd_settime()` completion.
+  - 30-80 us: `pre_syscall_delay`, confirmed early.
+  - around 90 us and 170-180 us: `setsockopt_enter` marker but no `setsockopt_exit` marker.
+  - most larger offsets: `done`, already returned from the trigger syscall.
+- Fork lock oracle with 5 ms timeout produced a false candidate on `stage=woken`; the child/fork path is still too noisy for this diagnostic.
+- Thread lock oracle results were cleaner:
+  - early stages (`woken`, `timer_armed`, `pre_syscall_delay`) returned `done_ok`.
+  - `setsockopt_enter` marker cases returned `done_err errno=107` (`ENOTCONN`), not `blocked`.
+  - no attempt produced a confirmed socket-lock-held race hit.
+- Fine sweep over 95.000-104.750 us in 250 ns steps with 50 us pre-syscall delay found the same pattern:
+  - early states returned `done_ok`;
+  - `setsockopt_enter` states returned `ENOTCONN`;
+  - occasional `done` states were already fully too late.
+
+### Interpretation
+- The pre-syscall delay approach is useful diagnostically: it brackets timer delivery and shows the stack oracle alone is not enough.
+- The current userspace timerfd delivery jitter is larger than the useful vulnerable window. We can reliably land before the syscall or after negative advice has already made the socket report `ENOTCONN`, but I did not observe an intermediate lock-held state.
+- The `setsockopt_enter` marker is userspace-side and only proves we passed the marker before the syscall wrapper returned; the thread lock oracle is the stronger signal. Its `ENOTCONN` results mean those samples are already beyond the useful socket-lock window.
+- Current likely blocker: hrtimer delivery/preemption granularity in this QEMU/test kernel setup is too coarse to place the interrupt in the tiny `dst_release()` to `sk_dst_cache = NULL` window using this timerfd-only scheme.
+
+### Next Ideas
+- Use ftrace/kprobe diagnostics, not final exploit logic, to directly timestamp `timerfd_tmrproc`, `sock_setsockopt`, `ipv4_negative_advice`, `dst_release`, and socket unlock. This should quantify the real instruction/time gap.
+- Try to extend the kernel-side window instead of only tuning timer expiry: cause a cache miss or slow path in `dst_release()` / `call_rcu()` vicinity, or force contention on data touched after `dst_release()` but before the socket cache clear.
+- Try a lower-jitter trigger mechanism than timerfd if one exists unprivileged; timerfd can bracket the transition, but the fine sweep still jumps from too early to `ENOTCONN`.
+## 2026-05-07 Trace-assisted rerun attempts for real-race root
+
+### Checkpoint
+- Backed up the log before this update:
+  - `old/2026-05-07_before_rerun_trace_root_report_RUNNING_LOG.md`
+
+### Goal
+- Rerun the last strong trace-assisted real-race `Arb R/W setup` checkpoint and try to reproduce it with credential overwrite enabled.
+- Baseline checkpoint used:
+  - `old/2026-05-04_unpriv_mtu1_cfsblock_mix_skcheck_trace_smp2/`
+- Kernel used for reruns:
+  - `new_kernel/bzImage`
+  - `5.10.107+ #2 SMP PREEMPT Sun May 3 07:40:16 UTC 2026`
+  - `--smp 2`, `--memory 1G`, `--nokaslr`, tap networking.
+
+### Rerun folders
+- `old/2026-05-07_rerun_trace_root_from_skcheck_checkpoint_smp2/`
+  - Copied the old successful checkpoint.
+  - Enabled `BAD_DST_GET_ROOT=1` and `BAD_DST_RUN_ROOT_PAYLOAD=1`.
+  - Added the prior root-shell checker to verify the listening root payload.
+  - Result: stopped after 6 pipe-corruption failures. No `Arb R/W setup`, no root.
+  - This run was a larger delta from the old success because it added the checker artifact and payload-shell verification.
+- `old/2026-05-07_rerun_trace_getroot_min_delta_smp2/`
+  - Copied the old successful checkpoint again.
+  - Minimal delta: `BAD_DST_GET_ROOT=1`, `BAD_DST_RUN_ROOT_PAYLOAD=0`, `BAD_DST_DISABLE_SELINUX=0`.
+  - Removed the early wrapper break on `Arb R/W setup` so the wrapper waits for `now uid/gid/euid/egid: 0/0/0/0` or root failure.
+  - Attempt 3 ran 40 attempts under `--qemu-arg=-no-reboot`.
+  - Result: 39 pipe-corruption failures, 1 timer miss, no accepted pipe probe, no `Arb R/W setup`, no root.
+  - Synced artifacts:
+    - `old/2026-05-07_rerun_trace_getroot_min_delta_smp2/share/exploit.log`
+    - `old/2026-05-07_rerun_trace_getroot_min_delta_smp2/share/trace.txt`
+    - `old/2026-05-07_rerun_trace_getroot_min_delta_smp2_attempt3.log`
+- `old/2026-05-07_rerun_trace_arbrw_exact_smp2/`
+  - Exact old wrapper copied from the successful checkpoint, with `BAD_DST_GET_ROOT=0`.
+  - Result: 6 pipe-corruption failures, no `Arb R/W setup`.
+  - This confirms the failure to reproduce is not caused by enabling the root overwrite.
+- `old/2026-05-07_rerun_trace_getroot_cnxje_stack_smp2/`
+  - Diagnostic root rerun with an extra kprobe at `sock_setsockopt+0xf03`, between the old `cnxret` probe at `+0xf00` and the `sk_dst_cache` store at `+0xf09`.
+  - Also attempted stacktrace triggers on `cnxret` and `cnxje`.
+  - Result: no root. It reached attempt 27, then panicked in `sk_dst_check+0x4c` with `ops == NULL`/NULL deref while consuming a stale dst.
+  - The panic log is in:
+    - `old/2026-05-07_rerun_trace_getroot_cnxje_stack_smp2.log`
+  - The guest did not sync its shared `trace.txt` after the panic under `-no-reboot`, so only console output is available for that run.
+
+### Trace comparison
+- The original successful trace had the key pattern:
+  - `cnxret` for the vulnerable socket.
+  - No matching `cnxassign` before stale reuse.
+  - Later `sk_dst_check` on the same socket saw the same dst address reclaimed as fake dst:
+    - `ref=1 obs=1 ops=0xffffffff836a9c40 flags=0xffff`
+  - `skgot` incremented the fake dst refcount and `sknull` returned NULL through fake ops.
+- The 2026-05-07 minimal rerun mostly showed:
+  - `cnxret`, then `cnxassign`, then later `sk_dst_check` on the same socket with `dst=0`.
+  - This means the trigger thread usually ran through the `sk_dst_cache = NULL` store before the later UDP/send path.
+- One minimal-rerun attempt did preserve the old pointer long enough:
+  - `cnxret` at `188.689338` for `sk=0xffff88801bbe4480 old=0xffff88801b56c900`.
+  - Later `sk_dst_check` on the same socket saw `dst=0xffff88801b56c900`, but its fields were `ref=0 obs=0 ops=0x0 flags=0x0`.
+  - The delayed `cnxassign` came later.
+  - Interpretation: the exact stale-cache window did occur at least once, but the reclaimed contents were not the fake dst payload, so it missed the fake-ops path and pipe primitive.
+
+### Current interpretation
+- The real-race/root rerun did not reproduce today.
+- The failure is not from the later credential overwrite path; the exact old non-root wrapper also failed to reproduce `Arb R/W`.
+- The trace-assisted race is still getting close:
+  - Many attempts are real candidates with socket lock held.
+  - Several attempts trigger fake-dst/free side effects, including `dst_release underflow`.
+  - The stronger `+0xf03` probe run reached stale-cache use badly enough to crash in `sk_dst_check`.
+- The current blocker is now downstream of broad lock-held detection:
+  - Usually the trigger thread resumes far enough to execute `cnxassign` before stale reuse.
+  - When stale reuse does occur, the old dst is not reliably reclaimed by the fake dst spray.
+- Next useful directions:
+  - Tune or simplify the fake-dst reclaim around the exact stale-cache window instead of only timer offsets.
+  - Try a root-only diagnostic that captures the old dst address and fake spray placement/counts per attempt.
+  - Consider using only the in-window `cnxret/cnxje` probes, without `sk_dst_check` probes, to change less of the later send path while still slowing the vulnerable window.
+
+## 2026-05-07 Kernel identity check for PREEMPT and debug-67
+
+### Checkpoint
+- Backed up the log before this update:
+  - `old/2026-05-07_before_kernel_identity_debug67_preempt_check_RUNNING_LOG.md`
+
+### Kernel used in May 7 reruns
+- The May 7 reruns used `new_kernel/bzImage`, not the older top-level `bzImage`.
+- `file new_kernel/bzImage` reports:
+  - `Linux kernel x86 boot executable bzImage, version 5.10.107+ ... #2 SMP PREEMPT Sun May 3 07:40:16 UTC 2026`
+- The May 7 console logs and the original May 4 successful trace-assisted run all show the same boot version string:
+  - `Linux version 5.10.107+ ... #2 SMP PREEMPT Sun May 3 07:40:16 UTC 2026`
+- The older top-level `bzImage` is a different build:
+  - `#1 SMP Mon Apr 27 21:55:53 UTC 2026`
+  - Its embedded config has `CONFIG_PREEMPT_NONE=y`.
+
+### Config verification
+- Extracted embedded config from `new_kernel/bzImage` with `scripts/extract-ikconfig`.
+- Relevant config values:
+  - `CONFIG_PREEMPT=y`
+  - `CONFIG_PREEMPTION=y`
+  - `CONFIG_PREEMPT_COUNT=y`
+  - `CONFIG_PREEMPT_RCU=y`
+  - `CONFIG_HZ=1000`
+  - `CONFIG_KPROBES=y`
+  - `CONFIG_FTRACE=y`
+  - `CONFIG_FUNCTION_TRACER=y`
+  - `CONFIG_DEBUG_INFO=y`
+  - `CONFIG_SLUB=y`
+
+### Debug-67 verification
+- Source at `linux_src/linux_stable/net/core/sock.c` still has the local debug hook:
+  - `SO_CNX_ADVICE`
+  - `val == 67`
+  - `dst_release(sk->sk_dst_cache); return ret;`
+- Binary disassembly of `new_kernel/vmlinux:sock_setsockopt` confirms the built kernel contains the debug hook:
+  - compares `val` with `0x43`
+  - loads `sk->sk_dst_cache` from `0x138(%rbx)`
+  - calls `dst_release`
+  - jumps directly to the return epilogue at `sock_setsockopt+0x13c`, bypassing the normal `release_sock` path.
+- This matches the intended debug-67 behavior: decrement the dst refcount while leaving the socket lock held.
+
+## 2026-05-07 Debug-67 root payload retest on PREEMPT kernel
+
+### Checkpoint
+- Backed up the log before this update:
+  - `old/2026-05-07_before_debug67_root_payload_preempt_retest_RUNNING_LOG.md`
+
+### Test
+- Retested the debug-67 root-payload checkpoint against the PREEMPT kernel:
+  - Kernel: `new_kernel/bzImage`
+  - QEMU: `--smp 1 --memory 1G --nokaslr --qemu-arg=-no-reboot`
+  - Checkpoint folder:
+    - `old/2026-05-07_debug67_root_payload_preempt_retest_smp1/`
+  - Binary/wrapper copied from:
+    - `old/2026-05-04_debug67_drop_mtu1_root_payload_smp1/`
+- This uses the already-built debug binary with the local `SO_CNX_ADVICE == 67` harness. Current `exp_x86.c` still has `DEBUG` commented out, so the current source was not rebuilt for this retest.
+
+### Result
+- Debug-67 path worked on the PREEMPT kernel.
+- Attempts 1-3 reached `debug triggered` and missed pipe corruption.
+- Attempt 4 reached:
+  - `found corrupted pipe FIONREAD source=current index=14 size=0xc3c3c3c3`
+  - `pipe probe leak accepted: page_index=9 probe=0x2b8 pipe_base=0x240 active_before=3 ...`
+  - `kaslr base: ffffffff81000000`
+  - `Arb R/W setup`
+  - discovered task layout and current task
+  - `now uid/gid/euid/egid: 0/0/0/0`
+- Root payload marker and shell verifier output were created:
+  - `root_payload_marker`: `ROOT_PAYLOAD_MARKER`
+  - `root_payload_shell_output` shows `uid=0 gid=0`, `Uid: 0 0 0 0`, and full capability masks.
+
+### Caveat
+- The kernel panicked after success in `kfree -> free_pipe_info -> pipe_release -> __fput` while the shell/wrapper was exiting.
+- This matches the previously observed post-success cleanup issue from corrupted pipe state. It does not invalidate the credential overwrite or payload-shell confirmation, but it means cleanup still needs to preserve/leak/avoid closing corrupted pipe resources.
+
+### Interpretation
+- The PREEMPT kernel, debug-67 hook, pipe primitive, arbitrary R/W setup, credential overwrite, and root payload are all still functional.
+- The current real-race failure is therefore before the root payload stage:
+  - usually the trigger thread reaches `cnxassign` before stale reuse, clearing `sk_dst_cache`;
+  - when stale reuse does happen, the stale route is not reliably reclaimed by the fake dst payload.
+
+## 2026-05-07 Futex wake timing experiment
+
+### Checkpoints
+- Backed up the source/log/binary before adding the futex wake timer:
+  - `old/2026-05-07_before_futex_wake_timer/`
+- Backed up the source/log/binary before adding direct trigger pinning from the futex waker:
+  - `old/2026-05-07_before_futex_waker_direct_pin/`
+
+### Code changes
+- Added an optional futex-driven wake timer for the real race path.
+- New knobs:
+  - `BAD_DST_FUTEX_WAKE_TIMER=1`
+  - `BAD_DST_FUTEX_WAKE_CPU`
+  - `BAD_DST_FUTEX_WAKE_NICE`
+  - `BAD_DST_FUTEX_WAKE_USE_SPIN`
+  - `BAD_DST_FUTEX_WAKE_PIN_TRIGGER`
+  - `BAD_DST_FUTEX_WAKE_PIN_CPU`
+- The default timerfd path is unchanged when `BAD_DST_FUTEX_WAKE_TIMER=0`.
+- Added timing diagnostics for futex request/wake/pin ages so timerfd and futex runs can be compared directly.
+- Built with `nix-shell -p glibc.static --run ./compile_x86.sh`; build passed with only the existing warning noise.
+
+### SMP2 futex wake run
+- Folder:
+  - `old/2026-05-07_futex_wake_timer_smp2/`
+- Kernel:
+  - `new_kernel/bzImage`
+  - `--smp 2`
+  - `--nokaslr`
+- Wrapper set `mtu_expires=1`, then dropped privileges through `drop_exec`.
+- Futex waker ran on CPU1 with 128 CFS CPU1 blockers.
+- Results over 80 attempts:
+  - `race candidate`: 16
+  - `race miss after timer`: 72
+  - `race miss before freeze`: 0
+  - `FAIL: could not corrupt pipe`: 8
+  - `Arb R/W setup`: 0
+- Interpretation:
+  - Futex wake can reach lock-held candidates when it shares CPU1 with blocker contention.
+  - Several candidates stopped with `stage=setsockopt_enter` and a blocked lock oracle.
+  - No pipe corruption was reached, so this did not reproduce a full stale-dst reclaim.
+
+### SMP6 futex wake run
+- Folder:
+  - `old/2026-05-07_futex_wake_timer_smp6/`
+- Kernel:
+  - `new_kernel/bzImage`
+  - `--smp 6`
+  - `--nokaslr`
+- Futex waker ran on CPU2, isolated from CPU0 trigger and CPU1 blockers.
+- Results over 96 attempts:
+  - `race candidate`: 0
+  - `race miss after timer`: 96
+  - `race miss before freeze`: 0
+  - `Arb R/W setup`: 0
+- Interpretation:
+  - Clean isolated futex wake was consistently too late.
+  - The main thread's wake-to-`sched_setaffinity()` latency is hundreds of microseconds, longer than the relevant socket-lock/refcount window.
+  - The SMP2 candidates were likely helped by noisy CPU1 contention rather than by precise futex timing.
+
+### SMP6 futex wake with direct trigger pin
+- Folder:
+  - `old/2026-05-07_futex_wake_directpin_smp6/`
+- Change under test:
+  - Futex timer thread calls `sched_setaffinity(trigger_tid, CPU1)` itself before waking main.
+- Results over 96 attempts:
+  - `race candidate`: 0
+  - `race miss after timer`: 96
+  - `race miss before freeze`: 0
+  - `Arb R/W setup`: 0
+- Interpretation:
+  - Direct pinning from the waker did not help.
+  - Timing diagnostics show the `sched_setaffinity()` call from the waker is itself expensive; `futex_pin` often occurs after `setsockopt_exit`.
+  - This suggests same-process affinity migration is not a sufficiently sharp preemption mechanism for the exact window.
+
+### Current conclusion
+- The futex approach is useful as an oracle/timing experiment but does not currently improve the real race enough for the full exploit.
+- It can create lock-held candidates in the noisy SMP2 topology, but the reliable, cleaner SMP6 topology arrives after the vulnerable syscall has already returned.
+- If continuing this line, the next variants worth trying are:
+  - a same-CPU low-priority futex waker to see whether wakeup preemption can interrupt the SCHED_IDLE trigger without starving it before the syscall;
+  - using the futex timer only to trigger a cheaper operation than `sched_setaffinity()`;
+  - returning to trace-assisted timing to identify whether candidates are actually in the refcount-decrement-before-null window or just somewhere else under the socket lock.
+
+## 2026-05-07 kprobe-assisted retry
+
+### Checkpoint
+- Created `old/2026-05-07_before_kprobe_retry_work/` before switching back from the futex timing experiments.
+- Reused the previously successful kprobe-assisted checkpoint binary from `old/2026-05-04_unpriv_mtu1_cfsblock_mix_skcheck_trace_smp2/` for an apples-to-apples retry before changing source again.
+
+### Kprobe setup
+- Kernel:
+  - `new_kernel/bzImage`
+  - `--smp 2`
+  - `--nokaslr`
+- Wrapper:
+  - root phase sets `/proc/sys/net/ipv4/route/mtu_expires=1`
+  - exploit runs through `drop_exec` as UID 1000
+- Kprobes enabled:
+  - `sk_dst_check`
+  - `sk_dst_check+0x39`
+  - `sk_dst_check+0x72`
+  - `sock_setsockopt+0xf00`
+  - `sock_setsockopt+0xf09`
+- Main tuning change from the old success:
+  - `BAD_DST_CPU1_BLOCK_THREADS=1024` instead of 256
+  - CFS blockers, no sched-rt wrapper
+
+### Arb/RW-only run
+- Folder:
+  - `old/2026-05-07_kprobe_1024block_arbrw_smp2/`
+- Result:
+  - `pipefail=18`
+  - `arb=1`
+  - Arb/RW reached on attempt 19.
+- Relevant exploit output:
+  - `found corrupted pipe FIONREAD source=current index=15 size=0xc3c3c3c3`
+  - `pipe probe leak accepted: page_index=118 probe=0x5b8 pipe_base=0x540 active_before=3 page=0xffffea000085c4c0 ops=0xffffffff827bf740 offset=0x0 len=0x4 flags=0x4141414100000010`
+  - `kaslr base: ffffffff81000000`
+  - `physical base address: 1000000`
+  - `Arb R/W setup`
+- Trace pattern:
+  - `cnxret` for vulnerable socket saw `old_ref=1` before `sk_dst_cache` assignment.
+  - About one second later, `sk_dst_check` saw the same dst address reclaimed as fake dst with `ops=0xffffffff836a9c40`, `ref=1`, `obs=1`, `flags=0xffff`.
+  - `skgot` incremented fake dst refcount to 2, `sknull` returned NULL, and `cnxassign` did not run until several seconds later.
+
+### Get-root run
+- Folder:
+  - `old/2026-05-07_kprobe_1024block_getroot_smp2/`
+- Result:
+  - `pipefail=1`
+  - `arb=1`
+  - `root=1`
+  - Arb/RW and root reached on attempt 2.
+- Relevant exploit output:
+  - `found corrupted pipe FIONREAD source=current index=14 size=0xc3c3c3c3`
+  - `pipe probe leak accepted: page_index=126 probe=0xeb8 pipe_base=0xe40 active_before=3 page=0xffffea0000a1b8c0 ops=0xffffffff827bf740 offset=0x0 len=0x4 flags=0x4141414100000010`
+  - `Arb R/W setup`
+  - `found current task: 0xffff888006c7d580`
+  - `current task creds: real_cred=0xffff888006ad69c0 cred=0xffff888006ad69c0`
+  - `capability sets overwritten`
+  - `SELinux disable requested but no SELinux offset/address is configured`
+  - `now uid/gid/euid/egid: 0/0/0/0`
+- Final trace pattern:
+  - First attempt had `cnxret` and `cnxassign` close together and failed pipe corruption.
+  - Second attempt:
+    - `cnxret` at timestamp `17.089598` for `sk=0xffff888020967600`, `old=0xffff888020b29e40`, `old_ref=1`, normal `ip_dst_ops`.
+    - `sk_dst_check` at timestamp `18.719655` saw `dst=0xffff888020b29e40`, `ref=1`, `obs=1`, `ops=0xffffffff836a9c40`, `flags=0xffff`.
+    - `skgot` then incremented ref to 2.
+    - `sknull` returned NULL.
+    - `cnxassign` ran later at timestamp `23.493286`, after the fake dst path had already produced the invalid free and pipe overlap.
+
+### Current kprobe conclusion
+- The kprobe-assisted path is reproducible again on the preempt test kernel with `--smp 2`, `mtu_expires=1`, and 1024 CFS CPU1 blockers.
+- The useful kprobe effect is not just observation. The `cnxret`/`cnxassign` probes strongly appear to widen the post-`dst_release()` / pre-`sk_dst_cache = NULL` interval enough for the userspace block/migration strategy to keep the trigger thread parked.
+- The 1024-blocker variant is the current best debugging baseline:
+  - Arb/RW-only: 1 success in 19 attempts.
+  - Get-root: 1 success in 2 attempts.
+- This does not prove the non-kprobe race is solved. It shows the reclaim and root payload are functional once the exact stale `sk_dst_cache` window is reached.
+
+### Get-root repeat
+- Folder:
+  - `old/2026-05-07_kprobe_1024block_getroot_repeat2_smp2/`
+- Result:
+  - `pipefail=12`
+  - `arb=1`
+  - `root=1`
+  - Arb/RW and root reached on attempt 13.
+- Relevant exploit output:
+  - `found corrupted pipe FIONREAD source=current index=15 size=0xc3c3c3c3`
+  - `pipe probe leak accepted: page_index=118 probe=0xaf8 pipe_base=0xa80 active_before=3 page=0xffffea0000a2d7c0 ops=0xffffffff827bf740 offset=0x0 len=0x4 flags=0x4141414100000010`
+  - `Arb R/W setup`
+  - `found current task: 0xffff888006c00000`
+  - `current task creds: real_cred=0xffff888006a25a80 cred=0xffff888006a25a80`
+  - `capability sets overwritten`
+  - `SELinux disable requested but no SELinux offset/address is configured`
+  - `now uid/gid/euid/egid: 0/0/0/0`
+- Final trace pattern:
+  - Successful attempt had `cnxret` at timestamp `99.869265` for `sk=0xffff888020813600`, `old=0xffff8880283c4a80`, `old_ref=1`, normal `ip_dst_ops`.
+  - `sk_dst_check` at timestamp `100.909735` saw the same `dst=0xffff8880283c4a80` reclaimed as fake dst with `ref=1`, `obs=1`, `ops=0xffffffff836a9c40`, `flags=0xffff`.
+  - `skgot` incremented ref to 2, `sknull` returned NULL, and `cnxassign` ran at timestamp `106.289635`.
+- Note:
+  - The root payload paused for about two minutes after `capability sets overwritten` before printing the final UID line.
+  - The first get-root run likely had the same pause: it powered off at kernel timestamp ~179s despite reaching Arb/RW near timestamp ~18s.
+  - This makes the kprobe baseline operational, but the post-cred `setresgid`/`setresuid`/`setgid`/`setuid` sequence is worth instrumenting or optionally skipping in future source builds so a successful primitive can exit faster.
+
+### Current-source kprobe runs
+- Checkpointed current source/binary/log before rebuilding:
+  - `old/2026-05-07_before_current_source_kprobe_build/`
+- Rebuilt current `exp_x86.c` with:
+  - `nix-shell -p glibc.static --run ./compile_x86.sh`
+  - Build passed with the existing warning noise.
+
+#### Plain current-source wrapper
+- Folder:
+  - `old/2026-05-07_current_source_kprobe_1024block_getroot_smp2/`
+- Result:
+  - Kernel panic on attempt 15 after repeated pipe-corruption misses.
+- Failure:
+  - Last exploit line before panic: `FAIL: could not corrupt pipe`
+  - Panic: `anon_pipe_buf_release+0xb/0x50`
+  - Faulting pointer was non-canonical.
+- Interpretation:
+  - Current source can reach the dangerous stale-dst state under kprobes, but a clean miss can still leave some pipe state corrupted below the `FIONREAD` acceptance threshold.
+  - Closing all vuln pipes on a clean miss is unsafe in that state.
+
+#### Leak clean misses plus high FIONREAD threshold
+- Folder:
+  - `old/2026-05-07_current_source_kprobe_1024block_getroot_leakclean_highfion_smp2/`
+- Extra wrapper knobs:
+  - `BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL=1`
+  - `BAD_DST_PIPE_CORRUPT_FIONREAD_MIN=0xc0000000`
+- Result:
+  - Avoided the earlier `anon_pipe_buf_release` panic.
+  - Stopped in the exploit's fatal `SYSCHK` path around attempt 14:
+    - `fcntl(F_SETPIPE_SZ)` returned `-1`
+    - `errno=1`
+- Interpretation:
+  - Raising `BAD_DST_PIPE_CORRUPT_FIONREAD_MIN` rejects pointer-shaped false positives like `0xffff8880`; the reliable pipe-page overlaps are still the `0xc3c3c3c3` class.
+  - Leaking 256 vuln pipes per clean miss consumes pipe pages, so unprivileged pipe accounting can block later `F_SETPIPE_SZ` calls before a successful overlap arrives.
+
+#### Current-source get-root with pipe limits raised
+- Folder:
+  - `old/2026-05-07_current_source_kprobe_1024block_getroot_leakclean_highfion_pipelimits_smp2/`
+- Extra wrapper setup before dropping privileges:
+  - `ulimit -n 1048576`
+  - `echo 1048576 > /proc/sys/fs/pipe-user-pages-soft`
+  - `echo 1048576 > /proc/sys/fs/pipe-user-pages-hard`
+- Extra exploit knobs:
+  - `BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL=1`
+  - `BAD_DST_PIPE_CORRUPT_FIONREAD_MIN=0xc0000000`
+- Result:
+  - `pipefail=11`
+  - `arb=1`
+  - `root=1`
+  - Arb/RW and root reached on attempt 12.
+- Relevant exploit output:
+  - `found corrupted pipe FIONREAD source=current index=9 size=0xc3c3c3c3`
+  - `pipe probe leak accepted: page_index=122 probe=0x7f8 pipe_base=0x780 active_before=3 page=0xffffea0000a6c740 ops=0xffffffff827bf740 offset=0x0 len=0x4 flags=0x4141414100000010`
+  - `Arb R/W setup`
+  - `found current task: 0xffff888006c82ac0`
+  - `current task creds: real_cred=0xffff8880069f56c0 cred=0xffff8880069f56c0`
+  - `capability sets overwritten`
+  - `now uid/gid/euid/egid: 0/0/0/0`
+- Final trace pattern:
+  - Successful attempt had `cnxret` at timestamp `86.617030` for `sk=0xffff8880226a8480`, `old=0xffff88802273d780`, `old_ref=1`, normal `ip_dst_ops`.
+  - `sk_dst_check` at timestamp `87.644862` saw the same dst reclaimed as fake dst with `ref=1`, `obs=1`, `ops=0xffffffff836a9c40`, `flags=0xffff`.
+  - `skgot` incremented fake dst ref to 2.
+  - `sknull` returned NULL.
+  - `cnxassign` ran at timestamp `93.026252`.
+- Current-source conclusion:
+  - The present `exp_x86.c` can get root on the kprobe-assisted path.
+  - It needs cleanup-miss handling tightened. For current debug runs, the stable wrapper recipe is:
+    - leak vuln pipes on clean misses;
+    - only accept high `FIONREAD` values in the pipe-page pattern range;
+    - raise pipe fd/page limits if many misses are expected.
+  - Longer-term source fixes should avoid closing suspect pipe state after any invalid-free attempt and should avoid scanning stale leaked pipes as candidates unless the pipe-buffer probe can be validated safely.
+
+## 2026-05-07 kprobe minimization
+
+### Goal
+- Remove kprobes until the current-source debug path stops working.
+- Keep the same stable current-source wrapper settings:
+  - `--smp 2`
+  - `mtu_expires=1`
+  - 1024 CFS CPU1 blockers
+  - `BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL=1`
+  - `BAD_DST_PIPE_CORRUPT_FIONREAD_MIN=0xc0000000`
+  - raised fd and pipe page limits before dropping privileges
+
+### cnxret-only
+- Folder:
+  - `old/2026-05-07_current_source_kprobe_only_cnxret_getroot_smp2/`
+- Kprobe set:
+  - only `sock_setsockopt+0xf00` (`cnxret`)
+- Result:
+  - `pipefail=1`
+  - `arb=1`
+  - `root=1`
+  - Arb/RW and root reached on attempt 2.
+- Relevant output:
+  - Attempt 1 reached invalid free and produced `dst_release underflow`, but missed pipe overlap.
+  - Attempt 2:
+    - `found corrupted pipe FIONREAD source=current index=2 size=0xc3c3c3c3`
+    - `pipe probe leak accepted: page_index=135 probe=0x2b8 pipe_base=0x240 active_before=3 page=0xffffea000088b4c0 ops=0xffffffff827bf740 offset=0x0 len=0x4 flags=0x4141414100000010`
+    - `Arb R/W setup`
+    - `found current task: 0xffff888006de9c80`
+    - `current task creds: real_cred=0xffff888006ceb840 cred=0xffff888006ceb840`
+    - `capability sets overwritten`
+    - `now uid/gid/euid/egid: 0/0/0/0`
+- Trace:
+  - exactly two `cnxret` events, both with `old_ref=1`.
+  - No `sk_dst_check`, `cnxassign`, or metadata kprobes were active.
+
+### No kprobes
+- Folder:
+  - `old/2026-05-07_current_source_no_kprobe_getroot_smp2/`
+- Kprobe set:
+  - none; `kprobe_events.actual` is empty.
+- Result:
+  - `pipefail=6`
+  - `arb=0`
+  - `root=0`
+  - Reached `BAD_DST_MAX_ATTEMPTS=96` without winning.
+- Behavior:
+  - Most attempts were `race miss after timer: trigger already returned`.
+  - A few lock-held candidates occurred late in the sweep, but all missed pipe corruption.
+- Interpretation:
+  - The current minimal kprobe-assisted setup is `cnxret` alone.
+  - Removing `cnxret` makes the race much less reliable in this wrapper: it can sometimes freeze a lock-held socket, but did not reach the stale-dst invalid-free plus pipe-page overlap within 96 attempts.
+  - This strongly suggests the useful debug effect is the probe cost at `sock_setsockopt+0xf00`, immediately after the vulnerable `dst_release()` return and before the `sk_dst_cache = NULL` assignment.
+
+## 2026-05-07 project logging/checkpoint skill
+
+### Checkpoint
+- Created a pre-edit checkpoint:
+  - `old/2026-05-07_before_running_log_checkpoint_skill/`
+- Contents:
+  - `RUNNING_LOG.md`
+  - `exp_x86.c`
+  - `bad_dst_cache`
+
+### Change
+- Added `SKILL.md` in the exploit source directory.
+- Purpose:
+  - Tell future agents how to update `RUNNING_LOG.md`.
+  - Tell future agents how to create descriptive milestone checkpoints.
+  - In the skill text, the checkpoint role is named `checkpoints/`; it notes that this checkout may still use `old/` on disk.
+
+### Notes
+- No exploit code was changed for this task.
+- Existing checkpoint directory naming on disk was preserved.
+
+## 2026-05-07 generic exploit skill update
+
+### Checkpoint
+- Created a pre-edit checkpoint:
+  - `old/2026-05-07_before_generic_exploit_skill_update/`
+- Contents:
+  - `RUNNING_LOG.md`
+  - `SKILL.md`
+
+### Change
+- Updated `SKILL.md` to be generic for exploit development and vulnerability research.
+- Removed project-specific/tool-specific wording from the skill body and metadata.
+- The skill now describes generic experiment logging, artifact capture, checkpoints, staging, and final-response checks.
+
+## 2026-05-07 no-cnxret race/reclaim experiments
+
+### Goal
+- Try to get the exploit working without the `sock_setsockopt+0xf00` (`cnxret`) kprobe.
+- Avoid probes that extend the vulnerable window between `ipv4_negative_advice()` returning and `sk_dst_cache = NULL`.
+- Record a durable note for the best minimal kprobe-assisted root run.
+
+### Disassembly check
+- Confirmed with `gdb -batch -ex 'file new_kernel/vmlinux' -ex 'disassemble /r sock_setsockopt'`:
+  - `sock_setsockopt+0xef8`: immediately before the negative-advice indirect call setup.
+  - `sock_setsockopt+0xefb`: indirect call into `ipv4_negative_advice`.
+  - `sock_setsockopt+0xf00`: return from negative advice, before assignment.
+  - `sock_setsockopt+0xf09`: actual `mov %rax,0x138(%rbx)` assignment to `sk_dst_cache`.
+  - `sock_setsockopt+0xf10`: after assignment.
+- Interpretation:
+  - The old `cnxret` probe at `+0xf00` directly extends the useful race window.
+  - A probe at `+0xf09` would also extend the window because it fires before executing the store.
+  - A post-assignment probe at `+0xf10` should not extend the target window, but can still create misleading lock-held oracles because the socket lock is held after `sk_dst_cache` is already NULL.
+
+### Best kprobe-assisted note
+- Added `NOTE.md`.
+- It records the best minimal kprobe root run:
+  - `old/2026-05-07_current_source_kprobe_only_cnxret_getroot_smp2/`
+  - only `cnxret` active
+  - `pipefail=1`, `arb=1`, `root=1`
+  - root on attempt 2
+
+### No cnxret, debug probes outside/after target window
+- Folder:
+  - `old/2026-05-07_no_cnxret_precall_afterassign_skcheck_smp2/`
+- Probes:
+  - `sock_setsockopt+0xef8` before the negative-advice call
+  - `sock_setsockopt+0xf10` after assignment
+  - post-race `sk_dst_check` metadata probes
+- Result:
+  - Many lock-held candidates and some `dst_release underflow` warnings.
+  - No Arb/RW or root before leaked vuln pipe registry pressure.
+- Interpretation:
+  - This is useful debugging evidence, but `+0xf10` still changes post-window socket-lock timing and can inflate false lock-held candidates.
+
+### No cnxret, precall-only debug probe
+- Folder:
+  - `old/2026-05-07_no_cnxret_precall_only_smp2/`
+- Probe:
+  - only `sock_setsockopt+0xef8`
+- Result:
+  - Some candidates and one `dst_release underflow` around attempt 66.
+  - No Arb/RW or root before leaked vuln pipe registry pressure.
+- Interpretation:
+  - A pre-call probe can perturb timing enough to occasionally land the stale-dst invalid-free path, but did not produce pipe-page overlap in this run.
+
+### No cnxret, no kprobes, early timer sweep
+- Folder:
+  - `old/2026-05-07_no_cnxret_no_kprobe_earlytimer_smp2/`
+- Kprobes:
+  - none; `kprobe_events.actual` is empty and trace has no kprobe events.
+- Timer sweep:
+  - `BAD_DST_TIMER_SWEEP_START_NS=25000`
+  - `BAD_DST_TIMER_SWEEP_STEP_NS=4096`
+  - `BAD_DST_TIMER_SWEEP_COUNT=20`
+  - `BAD_DST_MAX_ATTEMPTS=120`
+- Result:
+  - `pipefail=21`
+  - `arb=1`
+  - `root=1`
+  - Root reached on attempt 45.
+- Relevant output:
+  - `found corrupted pipe FIONREAD source=current index=7 size=0xc3c3c3c3`
+  - `pipe probe leak accepted: page_index=114 probe=0x5b8 pipe_base=0x540 active_before=3 page=0xffffea0000910e40 ops=0xffffffff827bf740 offset=0x0 len=0x4 flags=0x4141414100000010`
+  - `Arb R/W setup`
+  - `now uid/gid/euid/egid: 0/0/0/0`
+- Kernel evidence:
+  - A `dst_release underflow` warning occurred earlier in the same run, from `ipv4_negative_advice -> sock_setsockopt+0xf00`, confirming the exact stale-dst invalid-free path can be reached without probes.
+- Interpretation:
+  - `cnxret` is not strictly required.
+  - The early timer sweep can get root with no kprobes on the preempt test kernel.
+  - Reliability is still poor because the race can land without the final pipe-page overlap lining up.
+
+### No cnxret, no kprobes, early timer repeat
+- Folder:
+  - `old/2026-05-07_no_cnxret_no_kprobe_earlytimer_repeat_smp2/`
+- Wrapper delta:
+  - same no-kprobe early timer sweep
+  - stopped at 30 pipe-corruption misses to avoid leaked vuln pipe registry exhaustion
+- Result:
+  - `pipefail=30`
+  - `arb=0`
+  - `root=0`
+  - `race candidate: lock held` count: 30
+  - `race miss after timer` count: 36
+  - `dst_release underflow` count: 0
+- Interpretation:
+  - This repeat did not reproduce root.
+  - Because `BAD_DST_LOCK_ORACLE=0`, the `lock oracle: skipped` candidates include false positives where the trigger had not returned but was not necessarily stopped inside the useful stale-dst window.
+
+### No cnxret, no kprobes, early timer plus lock oracle
+- Folder:
+  - `old/2026-05-07_no_cnxret_no_kprobe_earlytimer_lockoracle_smp2/`
+- Wrapper delta:
+  - same early timer sweep
+  - `BAD_DST_LOCK_ORACLE=1`
+  - stopped at 30 pipe-corruption misses
+- Result:
+  - `pipefail=30`
+  - `arb=0`
+  - `root=0`
+  - `lock oracle: blocked` count: 30
+  - `race miss after timer` count: 41
+  - `dst_release underflow` count: 1
+- Relevant evidence:
+  - Attempt 66 had `lock oracle: blocked`.
+  - Kernel logged `dst_release underflow` from `ipv4_negative_advice -> sock_setsockopt+0xf00`.
+- Interpretation:
+  - The no-`cnxret` path can hit the exact stale-dst invalid-free even with no kprobes.
+  - The current blocker is reclaim/pipe-buffer overlap reliability after a landed race, not whether the race can ever land.
+  - The lock oracle is a useful unprivileged filter for debugging and does not install probes in the vulnerable instruction window, but it did not improve overlap in this bounded run.

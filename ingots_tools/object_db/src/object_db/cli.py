@@ -73,7 +73,25 @@ def _script_source_path(output_path: Path) -> str:
     return str(OBJECT_DB_PROJECT_DIR)
 
 
-def _render_script_template(output_path: Path) -> str:
+def _py_literal_path(path: Optional[Path]) -> str:
+    if path is None:
+        return "None"
+    return repr(str(path.expanduser().resolve()))
+
+
+def _py_literal_str(value: Optional[str]) -> str:
+    if value is None:
+        return "None"
+    return repr(value)
+
+
+def _render_script_template(
+    output_path: Path,
+    *,
+    default_db: Optional[Path] = None,
+    default_kernel: Optional[str] = None,
+    default_kexploit_data_dir: Optional[str] = None,
+) -> str:
     source_path = _script_source_path(output_path)
     return f"""#!/usr/bin/env -S uv run --script
 # /// script
@@ -84,14 +102,25 @@ def _render_script_template(output_path: Path) -> str:
 # ///
 
 from argparse import ArgumentParser
+import os
 from pathlib import Path
 
 from object_db import load_object_set, load_object_set_from_synthesis_dir
 
+DEFAULT_DB_PATH = {_py_literal_path(default_db)}
+DEFAULT_KERNEL = {_py_literal_str(default_kernel)}
+DEFAULT_KEXPLOIT_DATA_DIR = {_py_literal_str(default_kexploit_data_dir)}
+
+
+def default_synthesis_dir():
+    if DEFAULT_KERNEL is None or DEFAULT_KEXPLOIT_DATA_DIR is None:
+        return None
+    return Path(DEFAULT_KEXPLOIT_DATA_DIR) / "synthesis" / DEFAULT_KERNEL
+
 
 def parse_args():
     parser = ArgumentParser(description="Scan an object_db with the high-level object_db API.")
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group(required=False)
     source.add_argument("--db", type=Path, help="Path to object_db.sqlite")
     source.add_argument(
         "--synthesis-dir",
@@ -105,8 +134,14 @@ def main():
     args = parse_args()
     if args.db is not None:
         objects = load_object_set(args.db)
-    else:
+    elif args.synthesis_dir is not None:
         objects = load_object_set_from_synthesis_dir(args.synthesis_dir)
+    elif DEFAULT_DB_PATH is not None:
+        objects = load_object_set(Path(DEFAULT_DB_PATH))
+    elif default_synthesis_dir() is not None:
+        objects = load_object_set_from_synthesis_dir(default_synthesis_dir())
+    else:
+        raise SystemExit("Provide --db or --synthesis-dir, or scaffold the script with defaults.")
 
     # Replace this predicate with the scan you actually want.
     matches = objects.filter(lambda obj: obj.has_pointer_to_type_name("file"))
@@ -331,6 +366,11 @@ def create(
     linux_src: Annotated[Path, typer.Option(help="Path to linux source code")],
     compile_commands: Annotated[Path, typer.Option(help="Path to linux compile commands")],
 ):
+    codeql_db = codeql_db.expanduser().resolve()
+    vmlinux = vmlinux.expanduser().resolve()
+    linux_src = linux_src.expanduser().resolve()
+    compile_commands = compile_commands.expanduser().resolve()
+
     synthesis_path = synthesis_data_dir() / kernel
     synthesis_path.mkdir(exist_ok=True)
 
@@ -367,21 +407,62 @@ def create(
 def scaffold_script(
     ctx: typer.Context,
     output: Annotated[Path, typer.Argument(help="Where to write the script template.")],
+    default_db: Annotated[
+        Optional[Path],
+        typer.Option(help="Bake a default object_db.sqlite path into the generated script."),
+    ] = None,
+    default_kernel: Annotated[
+        Optional[str],
+        typer.Option(help="Bake a default kernel name into the generated script."),
+    ] = None,
     force: Annotated[bool, typer.Option(help="Overwrite the output file if it already exists.")] = False,
 ):
     output_path = output.expanduser().resolve()
     if output_path.exists() and not force:
         raise typer.BadParameter(f"Refusing to overwrite existing file: {output_path}")
 
+    if default_db is not None:
+        default_db = default_db.expanduser().resolve()
+
+    default_kexploit_data_dir: Optional[str] = None
+    if default_kernel is not None:
+        default_kexploit_data_dir = os.environ.get("KEXPLOIT_DATA_DIR")
+        if default_kexploit_data_dir is None:
+            raise typer.BadParameter(
+                "KEXPLOIT_DATA_DIR must be set to bake a default kernel into the generated script."
+            )
+        default_kexploit_data_dir = str(Path(default_kexploit_data_dir).expanduser().resolve())
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(_render_script_template(output_path), encoding="utf-8")
+    output_path.write_text(
+        _render_script_template(
+            output_path,
+            default_db=default_db,
+            default_kernel=default_kernel,
+            default_kexploit_data_dir=default_kexploit_data_dir,
+        ),
+        encoding="utf-8",
+    )
 
     app_ctx = _get_ctx(ctx)
+    run_with_db = f"uv run {output_path} --db /path/to/object_db.sqlite"
+    if default_db is not None:
+        run_with_db = f"uv run {output_path}"
+
+    run_with_synthesis_dir = (
+        f"uv run {output_path} --synthesis-dir /path/to/synthesis/<kernel-or-metadata>"
+    )
+    if default_kernel is not None:
+        run_with_synthesis_dir = f"uv run {output_path}"
+
     payload = {
         "script_path": str(output_path),
         "object_db_source": _script_source_path(output_path),
-        "run_with_db": f"uv run {output_path} --db /path/to/object_db.sqlite",
-        "run_with_synthesis_dir": f"uv run {output_path} --synthesis-dir /path/to/synthesis/<kernel-or-metadata>",
+        "default_db": None if default_db is None else str(default_db),
+        "default_kernel": default_kernel,
+        "default_kexploit_data_dir": default_kexploit_data_dir,
+        "run_with_db": run_with_db,
+        "run_with_synthesis_dir": run_with_synthesis_dir,
     }
 
     if app_ctx.json_output:
@@ -389,7 +470,14 @@ def scaffold_script(
         return
 
     console.print(f"Wrote object_db analysis template to {output_path}")
-    _print_table("How To Run", ["field", "value"], [[key, value] for key, value in payload.items()])
+    console.print(f"object_db source: {payload['object_db_source']}")
+    if payload["default_db"] is not None:
+        console.print(f"default DB: {payload['default_db']}")
+    if payload["default_kernel"] is not None:
+        console.print(f"default kernel: {payload['default_kernel']}")
+        console.print(f"default KEXPLOIT_DATA_DIR: {payload['default_kexploit_data_dir']}")
+    console.print(f"Run with DB: {payload['run_with_db']}")
+    console.print(f"Run with synthesis dir: {payload['run_with_synthesis_dir']}")
 
 
 def main():

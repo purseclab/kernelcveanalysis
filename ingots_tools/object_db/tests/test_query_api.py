@@ -176,3 +176,9 @@ class ObjectQueryApiTests(unittest.TestCase):
 
         with self.assertRaises(FileNotFoundError):
             load_object_set_from_synthesis_dir(missing_dir)
+
+    def test_load_object_set_requires_existing_db_file(self):
+        missing_db = self.temp_path / "does-not-exist.sqlite"
+
+        with self.assertRaises(FileNotFoundError):
+            load_object_set(missing_db)

@@ -1,5 +1,5 @@
 ---
-name: object-db-query-api
+name: objectdb
 description: Use the high-level object_db wrapper API to scan kernel objects in Python by loading an ObjectSet and filtering HeapObject entries with helper predicates instead of raw SQL.
 ---
 
@@ -38,6 +38,13 @@ When you need a standalone analysis script, generate one first with:
 
 ```bash
 objectdb scaffold-script /tmp/object_scan.py
+```
+
+If the user wants the script to run without extra flags, bake in defaults:
+
+```bash
+objectdb scaffold-script /tmp/object_scan.py --default-db /path/to/object_db.sqlite
+objectdb scaffold-script /tmp/object_scan.py --default-kernel ingots_5.10.107
 ```
 
 That command writes a `uv run --script` template with an inline local-path dependency on this checkout's `object_db` package. After generation, edit the predicate in the script, then run it with either:

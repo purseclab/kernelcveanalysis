@@ -12,11 +12,16 @@ from typer.testing import CliRunner
 from kdebug.client import KdebugDaemonClient
 from kdebug.daemon import (
     CliError,
+    DaemonPaths,
+    DaemonStatus,
     KdebugDaemon,
+    ServerSync,
+    TargetRuntime,
     _UnixServer,
     daemon_paths,
     default_state_dir,
     normalize_target,
+    start_daemon,
 )
 from kdebug.frida_core import FRIDA_SERVER_REMOTE_PATH, FridaManager, bootstrap_frida
 from kdebug.lldb_core import LLDB_SERVER_REMOTE_PATH, LLDBManager
@@ -190,8 +195,9 @@ class FakeAdbClient:
             return f"{pid}\n"
         return ""
 
-    def upload_file(self, src_path: Path, dst_path: Path, executable: bool = False):
+    def upload_file(self, src_path: Path, dst_path: Path, executable: bool = False, force: bool = False):
         self.uploaded.append((src_path, dst_path, executable))
+        return True
 
     def run_adb(self, *args: str, check: bool = True, text: bool = False):
         self.forwarded.append(tuple(args))
@@ -213,6 +219,32 @@ class TargetTests(unittest.TestCase):
         paths = daemon_paths()
         self.assertEqual(paths.state_dir, default_state_dir())
         self.assertEqual(paths.socket.name, "daemon.sock")
+        self.assertEqual(paths.lock.name, "daemon.lock")
+
+
+class DaemonStartupTests(unittest.TestCase):
+    def test_start_daemon_rechecks_status_under_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir)
+            paths = DaemonPaths(
+                state_dir=state_dir,
+                pidfile=state_dir / "daemon.pid",
+                metadata=state_dir / "daemon.json",
+                socket=state_dir / "daemon.sock",
+                log=state_dir / "daemon.log",
+                lock=state_dir / "daemon.lock",
+            )
+
+            with patch("kdebug.daemon.daemon_paths", return_value=paths), patch(
+                "kdebug.daemon.get_daemon_status",
+                return_value=DaemonStatus(running=True, stale=False, metadata=None),
+            ), patch("kdebug.daemon.fcntl.flock") as flock, patch(
+                "kdebug.daemon.subprocess.Popen"
+            ) as popen:
+                start_daemon()
+
+        flock.assert_called_once()
+        popen.assert_not_called()
 
 
 class DaemonDispatchTests(unittest.TestCase):
@@ -334,6 +366,67 @@ class DaemonDispatchTests(unittest.TestCase):
             )
 
 
+class ServerSyncTests(unittest.TestCase):
+    def test_server_sync_uploads_frida_server(self):
+        adb = FakeAdbClient()
+        sync = ServerSync(adb, Path("/tmp/frida-server"))
+
+        sync.sync_frida()
+
+        self.assertEqual(adb.uploaded, [(Path("/tmp/frida-server"), Path(FRIDA_SERVER_REMOTE_PATH), True)])
+
+    def test_server_sync_uploads_lldb_server(self):
+        adb = FakeAdbClient()
+        sync = ServerSync(adb, Path("/tmp/frida-server"))
+
+        sync.sync_lldb("arm64-v8a", Path("/tmp/lldb-server"))
+
+        self.assertEqual(adb.shell_commands, [("mkdir -p /data/local/tmp/kdebug", True)])
+        self.assertEqual(adb.uploaded, [(Path("/tmp/lldb-server"), Path(LLDB_SERVER_REMOTE_PATH), True)])
+
+
+class TargetRuntimeSyncTests(unittest.TestCase):
+    def test_get_frida_syncs_server_before_bootstrap(self):
+        adb = FakeAdbClient()
+        manager = FridaManager(FakeDevice())
+        server_sync = Mock()
+        runtime = TargetRuntime(
+            target="serial",
+            frida_server_path=Path("/tmp/frida-server"),
+            lldb_server_root=Path("/tmp/lldb"),
+            adb=adb,  # type: ignore[arg-type]
+            server_sync=server_sync,
+        )
+
+        with patch("kdebug.daemon.bootstrap_frida", return_value=manager) as bootstrap:
+            result = runtime.get_frida()
+
+        self.assertIs(result, manager)
+        server_sync.sync_frida.assert_called_once()
+        bootstrap.assert_called_once_with(adb, frida_server_path=Path("/tmp/frida-server"), sync_server=False)
+
+    def test_get_lldb_uses_daemon_server_syncer(self):
+        adb = FakeAdbClient()
+        server_sync = Mock()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            asset = Path(tmpdir) / "arm64-v8a" / "lldb-server"
+            asset.parent.mkdir(parents=True, exist_ok=True)
+            asset.write_text("stub\n", encoding="utf-8")
+            runtime = TargetRuntime(
+                target="serial",
+                frida_server_path=Path("/tmp/frida-server"),
+                lldb_server_root=Path(tmpdir),
+                adb=adb,  # type: ignore[arg-type]
+                server_sync=server_sync,
+            )
+
+            attached = runtime.get_lldb().attach_package("com.example.app")
+
+        self.assertEqual(attached["package_name"], "com.example.app")
+        server_sync.sync_lldb.assert_called_once_with("arm64-v8a", asset)
+        self.assertEqual(adb.uploaded, [])
+
+
 class ClientSocketTests(unittest.TestCase):
     def test_client_talks_to_unix_socket_server(self):
         manager = FridaManager(FakeDevice())
@@ -379,6 +472,28 @@ class BootstrapTests(unittest.TestCase):
         run_adb.assert_called_once()
         shell_text.assert_called_once()
         self.assertEqual(fake_frida.manager.addresses, ["127.0.0.1:27042"])
+
+    def test_bootstrap_frida_can_skip_server_sync(self):
+        from libadb import AdbClient
+
+        adb = AdbClient("127.0.0.1:5555")
+        device = FakeDevice()
+        fake_frida = FakeFridaModule(device)
+
+        with tempfile.NamedTemporaryFile() as tmp, patch.object(adb, "upload_file") as upload_file, patch.object(
+            adb,
+            "run_adb",
+        ) as run_adb, patch.object(adb, "shell_text", return_value=""):
+            manager = bootstrap_frida(
+                adb,
+                frida_server_path=Path(tmp.name),
+                frida_loader=lambda: fake_frida,
+                sync_server=False,
+            )
+
+        self.assertIsInstance(manager, FridaManager)
+        upload_file.assert_not_called()
+        run_adb.assert_called_once()
 
 
 class LLDBManagerTests(unittest.TestCase):

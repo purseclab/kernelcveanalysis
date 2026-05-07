@@ -1,0 +1,4 @@
+interface:
+  display_name: "running-log-checkpoints"
+  short_description: "Running Log of Progress + Checkpoints to save result files"
+  description: "Use $running-log-checkpoints when working on exploit development or vulnerability research and maintaining RUNNING_LOG.md plus milestone checkpoints.""

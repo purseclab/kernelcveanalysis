@@ -256,7 +256,11 @@ def _heap_object_from_db(
 
 
 def load_object_set(db_path: Path) -> ObjectSet:
-    object_db = ObjectDb(db_path)
+    resolved_db_path = db_path.expanduser().resolve()
+    if not resolved_db_path.exists():
+        raise FileNotFoundError(f"object_db file not found: {resolved_db_path}")
+
+    object_db = ObjectDb(resolved_db_path)
     try:
         btf_types = object_db.load_btf_types()
         heap_objects = object_db.get_all_heap_objects()

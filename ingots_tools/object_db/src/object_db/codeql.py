@@ -88,8 +88,8 @@ class CodeqlContext:
     query_folder: Path
 
     def __init__(self, database_path: Path, query_folder: Path = CODEQL_QUERY_FOLDER):
-        self.database_path = database_path
-        self.query_folder = query_folder
+        self.database_path = database_path.expanduser().resolve()
+        self.query_folder = query_folder.expanduser().resolve()
 
     def run_query_raw(self, query: CodeqlQuery) -> str:
         with TemporaryDirectory() as dir:

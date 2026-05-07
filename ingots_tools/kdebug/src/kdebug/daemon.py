@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import signal
@@ -9,11 +10,12 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from shlex import quote
 
 from libadb import AdbClient
 
-from .frida_core import FridaManager, bootstrap_frida
-from .lldb_core import LLDBManager
+from .frida_core import FRIDA_SERVER_REMOTE_PATH, FridaManager, bootstrap_frida
+from .lldb_core import LLDB_SERVER_REMOTE_DIR, LLDB_SERVER_REMOTE_PATH, LLDBManager
 from .models import (
     AttachParams,
     DaemonMetadata,
@@ -45,6 +47,7 @@ class DaemonPaths:
     metadata: Path
     socket: Path
     log: Path
+    lock: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,23 +57,42 @@ class DaemonStatus:
     metadata: DaemonMetadata | None
 
 
+@dataclass(frozen=True, slots=True)
+class ServerSync:
+    adb: AdbClient
+    frida_server_path: Path
+
+    def sync_frida(self) -> None:
+        self.adb.upload_file(self.frida_server_path, Path(FRIDA_SERVER_REMOTE_PATH), executable=True)
+
+    def sync_lldb(self, _abi: str, host_path: Path) -> None:
+        self.adb.shell_text(f"mkdir -p {quote(LLDB_SERVER_REMOTE_DIR)}", root=True)
+        self.adb.upload_file(host_path, Path(LLDB_SERVER_REMOTE_PATH), executable=True)
+
+
 @dataclass(slots=True)
 class TargetRuntime:
     target: str
     frida_server_path: Path
     lldb_server_root: Path
     adb: AdbClient
+    server_sync: ServerSync
     frida: FridaManager | None = None
     lldb: LLDBManager | None = None
 
     def get_frida(self) -> FridaManager:
         if self.frida is None:
-            self.frida = bootstrap_frida(self.adb, frida_server_path=self.frida_server_path)
+            self.server_sync.sync_frida()
+            self.frida = bootstrap_frida(self.adb, frida_server_path=self.frida_server_path, sync_server=False)
         return self.frida
 
     def get_lldb(self) -> LLDBManager:
         if self.lldb is None:
-            self.lldb = LLDBManager(self.adb, lldb_server_root=self.lldb_server_root)
+            self.lldb = LLDBManager(
+                self.adb,
+                lldb_server_root=self.lldb_server_root,
+                server_syncer=self.server_sync.sync_lldb,
+            )
         return self.lldb
 
     def shutdown(self) -> None:
@@ -109,6 +131,7 @@ def daemon_paths() -> DaemonPaths:
         metadata=state_dir / "daemon.json",
         socket=state_dir / "daemon.sock",
         log=state_dir / "daemon.log",
+        lock=state_dir / "daemon.lock",
     )
 
 
@@ -126,35 +149,36 @@ def ensure_daemon_running() -> None:
     status = get_daemon_status()
     if status.running:
         return
-    if status.stale:
-        _cleanup_stale_files(daemon_paths())
     start_daemon()
 
 
 def start_daemon() -> None:
-    status = get_daemon_status()
-    if status.running:
-        return
     paths = daemon_paths()
-    if status.stale:
-        _cleanup_stale_files(paths)
-
     paths.state_dir.mkdir(parents=True, exist_ok=True)
-    with paths.log.open("a", encoding="utf-8") as log_handle:
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "kdebug.main",
-                "daemon",
-                "run-internal",
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=log_handle,
-            stderr=log_handle,
-            start_new_session=True,
-        )
-    _wait_for_daemon_start(process)
+
+    with paths.lock.open("a", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX)
+        status = get_daemon_status()
+        if status.running:
+            return
+        if status.stale:
+            _cleanup_stale_files(paths)
+
+        with paths.log.open("a", encoding="utf-8") as log_handle:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "kdebug.main",
+                    "daemon",
+                    "run-internal",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=log_handle,
+                start_new_session=True,
+            )
+        _wait_for_daemon_start(process)
 
 
 def stop_daemon() -> bool:
@@ -271,11 +295,13 @@ class KdebugDaemon:
         runtime = self.runtimes.get(target)
         if runtime is None:
             _maybe_connect_network_target(target)
+            adb = AdbClient(target)
             runtime = TargetRuntime(
                 target=target,
                 frida_server_path=frida_server_path,
                 lldb_server_root=lldb_server_root,
-                adb=AdbClient(target),
+                adb=adb,
+                server_sync=ServerSync(adb, frida_server_path),
             )
             self.runtimes[target] = runtime
             return runtime

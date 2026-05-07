@@ -46,6 +46,7 @@ def bootstrap_frida(
     frida_loader=load_frida_module,
     local_port: int = FRIDA_SERVER_LOCAL_PORT,
     remote_port: int = FRIDA_SERVER_REMOTE_PORT,
+    sync_server: bool = True,
 ) -> "FridaManager":
     if not frida_server_path.is_file():
         raise FileNotFoundError(
@@ -53,7 +54,8 @@ def bootstrap_frida(
             "Place the host binary there before starting kdebug."
         )
 
-    adb.upload_file(frida_server_path, Path(FRIDA_SERVER_REMOTE_PATH), executable=True)
+    if sync_server:
+        adb.upload_file(frida_server_path, Path(FRIDA_SERVER_REMOTE_PATH), executable=True)
     adb.run_adb("forward", f"tcp:{local_port}", f"tcp:{remote_port}", check=True, text=True)
 
     start_command = (

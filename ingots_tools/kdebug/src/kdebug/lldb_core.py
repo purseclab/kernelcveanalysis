@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from shlex import quote
 from time import sleep
+from typing import Callable
 from uuid import uuid4
 
 from libadb import AdbClient
@@ -37,9 +38,15 @@ class LldbSessionRecord:
 
 
 class LLDBManager:
-    def __init__(self, adb: AdbClient, lldb_server_root: Path = LLDB_SERVER_ASSET_ROOT):
+    def __init__(
+        self,
+        adb: AdbClient,
+        lldb_server_root: Path = LLDB_SERVER_ASSET_ROOT,
+        server_syncer: Callable[[str, Path], None] | None = None,
+    ):
         self.adb = adb
         self.lldb_server_root = lldb_server_root
+        self.server_syncer = server_syncer
         self.sessions: dict[str, LldbSessionRecord] = {}
 
     def attach_package(self, package_name: str) -> dict[str, object]:
@@ -98,8 +105,7 @@ class LLDBManager:
         self._prune_dead_sessions()
         abi = self._detect_device_abi()
         host_path = self._resolve_lldb_server_path(abi)
-        self.adb.shell_text(f"mkdir -p {quote(LLDB_SERVER_REMOTE_DIR)}", root=True)
-        self.adb.upload_file(host_path, Path(LLDB_SERVER_REMOTE_PATH), executable=True)
+        self._sync_server(abi, host_path)
 
         local_port = self._allocate_local_port()
         remote_port = local_port
@@ -167,6 +173,13 @@ class LLDBManager:
                 "Place the bundled binary there before using `kdebug lldb`."
             )
         return path
+
+    def _sync_server(self, abi: str, host_path: Path) -> None:
+        if self.server_syncer is not None:
+            self.server_syncer(abi, host_path)
+            return
+        self.adb.shell_text(f"mkdir -p {quote(LLDB_SERVER_REMOTE_DIR)}", root=True)
+        self.adb.upload_file(host_path, Path(LLDB_SERVER_REMOTE_PATH), executable=True)
 
     def _wait_for_remote_process(self, pid: int) -> None:
         for _ in range(10):
