@@ -1,0 +1,77 @@
+#ifndef COMMON_AARCH64_H
+#define COMMON_AARCH64_H
+
+#ifndef EXP_COMMON_H
+#error "include exp_common.h instead of common_aarch64.h"
+#endif
+
+// configure EXP_ARM64_VA_BITS
+#ifndef EXP_ARM64_VA_BITS
+#ifdef CONFIG_ARM64_VA_BITS
+#define EXP_ARM64_VA_BITS CONFIG_ARM64_VA_BITS
+#else
+#define EXP_ARM64_VA_BITS 48
+#endif
+#endif
+
+#if EXP_ARM64_VA_BITS != 36 && EXP_ARM64_VA_BITS != 39 && EXP_ARM64_VA_BITS != 42 && \
+    EXP_ARM64_VA_BITS != 47 && EXP_ARM64_VA_BITS != 48 && EXP_ARM64_VA_BITS != 52
+#error "EXP_ARM64_VA_BITS must be one of 36, 39, 42, 47, 48, or 52"
+#endif
+
+#ifndef EXP_PAGE_SHIFT
+#define EXP_PAGE_SHIFT 12
+#endif
+
+#ifndef EXP_STRUCT_PAGE_SHIFT
+#define EXP_STRUCT_PAGE_SHIFT 6
+#endif
+
+#if EXP_PAGE_SHIFT < EXP_STRUCT_PAGE_SHIFT
+#error "EXP_PAGE_SHIFT must be greater than or equal to EXP_STRUCT_PAGE_SHIFT"
+#endif
+
+#if EXP_ARM64_VA_BITS > 48
+#define EXP_AARCH64_VA_BITS_MIN 48
+#else
+#define EXP_AARCH64_VA_BITS_MIN EXP_ARM64_VA_BITS
+#endif
+
+#define EXP_AARCH64_LINEAR_START (0UL - (1UL << EXP_ARM64_VA_BITS))
+#define EXP_AARCH64_LINEAR_END   (0UL - (1UL << (EXP_ARM64_VA_BITS - 1)))
+#define EXP_AARCH64_KERNEL_START EXP_AARCH64_LINEAR_END
+#define EXP_AARCH64_PAGE_END_MIN (0UL - (1UL << (EXP_AARCH64_VA_BITS_MIN - 1)))
+#define EXP_AARCH64_VMEMMAP_SIZE \
+    ((EXP_AARCH64_PAGE_END_MIN - EXP_AARCH64_LINEAR_START) >> (EXP_PAGE_SHIFT - EXP_STRUCT_PAGE_SHIFT))
+#define EXP_AARCH64_VMEMMAP_ALIGN 0x200000UL
+// This is the fixed vmemmap virtual region base, not the memstart-biased sparsemem pointer.
+#define EXP_AARCH64_DEFAULT_VMEMMAP_BASE (0UL - EXP_AARCH64_VMEMMAP_SIZE - EXP_AARCH64_VMEMMAP_ALIGN)
+#define EXP_AARCH64_DEFAULT_VMEMMAP_END  (EXP_AARCH64_DEFAULT_VMEMMAP_BASE + EXP_AARCH64_VMEMMAP_SIZE)
+
+#ifndef EXP_AARCH64_KASAN_SHADOW_END
+#define EXP_AARCH64_KASAN_SHADOW_END EXP_AARCH64_PAGE_END_MIN
+#endif
+
+// These image/module defaults assume the non-KASAN KASAN_SHADOW_END unless overridden above.
+#define EXP_AARCH64_BPF_JIT_REGION_SIZE 0x8000000UL
+#define EXP_AARCH64_MODULES_SIZE        0x8000000UL
+#define EXP_AARCH64_DEFAULT_BPF_JIT_BASE EXP_AARCH64_KASAN_SHADOW_END
+#define EXP_AARCH64_DEFAULT_MODULES_BASE \
+    (EXP_AARCH64_DEFAULT_BPF_JIT_BASE + EXP_AARCH64_BPF_JIT_REGION_SIZE)
+#define EXP_AARCH64_DEFAULT_KERNEL_BASE \
+    (EXP_AARCH64_DEFAULT_MODULES_BASE + EXP_AARCH64_MODULES_SIZE)
+#define EXP_AARCH64_DEFAULT_LINEAR_BASE EXP_AARCH64_LINEAR_START
+
+static EXP_UNUSED bool is_linear_address(usize addr) {
+    return is_in_range(addr, EXP_AARCH64_LINEAR_START, EXP_AARCH64_LINEAR_END);
+}
+
+static EXP_UNUSED bool is_kernel_address(usize addr) {
+    return addr >= EXP_AARCH64_KERNEL_START;
+}
+
+static EXP_UNUSED usize vmemmap_base_from_leak(usize vmemmap_leak) {
+    return align_down(vmemmap_leak, EXP_AARCH64_VMEMMAP_ALIGN);
+}
+
+#endif

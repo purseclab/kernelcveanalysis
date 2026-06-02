@@ -23,8 +23,8 @@ def main():
     payload_group.add_argument('--listening-shell', action='store_true')
     payload_group.add_argument('--shell', action='store_true')
 
-    target_group.add_argument('--linux', action='store_true', help='Build binary with host c compiler for regular linux', default=True)
-    target_group.add_argument('--android', action='store_true', help='Build with android ndk for running on phone', default=False)
+    target_group.add_argument('--linux', action='store_true', help='Build binary with host c compiler for regular linux')
+    target_group.add_argument('--android', action='store_true', help='Build with android ndk for running on phone')
 
     parser.add_argument('--ip', help='IP address for reverse shell to connect to')
     parser.add_argument('--port', type=int, help='Port for listning shell and reverse shell')
@@ -56,7 +56,7 @@ def main():
     if args.linux:
         cc = 'gcc'
         cxx = 'g++'
-    else:
+    elif args.android:
         ndk_path = os.environ.get('ANDROID_NDK_HOME')
         if ndk_path is None:
             print('Error: ANDROID_NDK_HOME env var must be set to build for android')
@@ -67,7 +67,7 @@ def main():
         cxx = f'{cc}++'
 
     common_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    print(f'-I{common_dir} {flags}')
+    print(f'$(eval CCFLAGS += -I{common_dir} {flags}) $(eval CC := {cc}) $(eval CXX := {cxx})')
 
 if __name__ == '__main__':
     main()

