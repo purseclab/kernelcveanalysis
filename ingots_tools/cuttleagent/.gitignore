@@ -2,6 +2,10 @@ apps
 findings
 .python-version
 
+# Local generated results and downloaded app bundles
+local_results/
+input_apps/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

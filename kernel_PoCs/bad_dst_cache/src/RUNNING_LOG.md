@@ -2680,3 +2680,1851 @@ or:
   - The no-`cnxret` path can hit the exact stale-dst invalid-free even with no kprobes.
   - The current blocker is reclaim/pipe-buffer overlap reliability after a landed race, not whether the race can ever land.
   - The lock oracle is a useful unprivileged filter for debugging and does not install probes in the vulnerable instruction window, but it did not improve overlap in this bounded run.
+
+## 2026-05-07 05:54 EDT - kmalloc-256/pipe reclaim reliability pass
+
+Goal:
+
+- Closely re-read the relevant SLUB reclaim and buddy allocator code, then tune spray/pipe constants if there is a clear allocator reason to do so.
+
+Kernel allocator observations:
+
+- `fs/pipe.c::pipe_resize_ring()` uses `kcalloc(nr_slots, sizeof(struct pipe_buffer), GFP_KERNEL_ACCOUNT | __GFP_NOWARN)`, copies active slots, then `kfree()`s the old ring.
+- On x86_64, `struct pipe_buffer` is 40 bytes, so a 4-slot pipe ring is 160 bytes.
+- The test kernel source has the local x86 patch `ARCH_DMA_MINALIGN=128`. With `KMALLOC_MIN_SIZE=128`, `kmalloc_index()` maps 160-byte requests to index 8 (`kmalloc-256`), and `setup_kmalloc_cache_index_table()` also redirects 136..192 byte allocations to the 256-byte cache. `strings vmlinux` can still show `kmalloc-192`, but this exploit's 160-byte pipe ring should allocate from `kmalloc-256` on the patched x86 build.
+- `mm/slub.c::__slab_free()` freezes a previously full, non-current slab page and puts it on the current CPU partial list when CPU partials are enabled. For 256-byte objects, `slub_cpu_partial()` allows about 13 partial objects per CPU before flushing to the node partial list.
+- `free_spray()` can only release the page to the page allocator if all live objects in that kmalloc-256 slab page are freed. If the original rtable slab page still contains non-spray live objects, page-pipe backing pages cannot overwrite the fake pipe ring even when the fake unaligned free and pipe-ring allocation succeeded.
+- `mm/page_alloc.c::free_unref_page_commit()` and `rmqueue_pcplist()` route order-0 frees/allocations through per-CPU page lists. Pipe backing pages are allocated from `alloc_page(GFP_HIGHUSER | __GFP_ACCOUNT)` in the pipe write path; `GFP_HIGHUSER` here is not movable, so a simple migratetype mismatch is probably not the main explanation for misses.
+- Best successful pipe bases were both offset `0x40` within a 0x100 sendmsg cmsg object:
+  - kprobe-assisted root: `pipe_base=0x240`
+  - no-kprobe root: `pipe_base=0x540`
+  This supports offset 64 as the good fake-dst placement. Offset 128 crosses the 256-byte object boundary for a 160-byte pipe ring and is probably less clean, but mixed 64/128 payloads can still be useful because many candidates are false positives and mixed payloads may avoid a destructive fake-free on misses.
+
+Source/constant changes:
+
+- Checkpoint before edits: `old/2026-05-07_before_reclaim_reliability_tuning/`.
+- Raised runtime headroom in `exp_x86.c`:
+  - `MAX_PAGE_PIPES`: `0xc00 -> 0x1800`
+  - `MAX_VULN_PIPES`: `0x100 -> 0x400`
+  - added SMP default/cap plumbing so large runs can request more pipes without rebuilding.
+- Preserved the known-good SMP default page-pipe count at `0xc00` while raising the max to `0x1800`. The previous best kprobe-assisted root run already used `page=3072 vuln=256`; the important source change is preventing the raised max from also becoming the implicit SMP default.
+- Rebuilt `bad_dst_cache` with `nix-shell -p glibc.static --run ./compile_x86.sh`; build succeeded with the existing `ssize_t`/ignored-return warning noise.
+
+Experiments:
+
+- `old/2026-05-07_reclaim_tune_fixed64_cpu0resize_smp2/`
+  - Old binary, no kprobes, lock oracle wrapper.
+  - Forced `BAD_DST_FAKE_DST_OFFSET=64`, disabled mixed/auto offset, forced `BAD_DST_VULN_PIPE_RESIZE_PERCPU=0`.
+  - Result: first candidate reached `FAIL: could not corrupt pipe`, then `FAIL: trigger did not release after failed candidate`. VM was killed; serial log is authoritative.
+
+- `old/2026-05-07_reclaim_tune_fixed64_only_smp2/`
+  - Old binary, fixed offset 64 only, per-CPU pipe resize left enabled.
+  - Result: same immediate pipe miss and unreleased trigger after first candidate.
+
+- `old/2026-05-07_reclaim_tune_large_fixed64_cpu0resize_smp2/`
+  - New binary with raised caps.
+  - `BAD_DST_PAGE_PIPES=6144`, `BAD_DST_VULN_PIPES=1024`, fixed offset 64, CPU0-only resize.
+  - Result: first candidate used `page=6144 vuln=1024`, reached `FAIL: could not corrupt pipe`, leaked 1024 vuln pipes, then trigger did not release. Larger pipe volume did not fix overlap.
+
+- `old/2026-05-07_reclaim_tune_no_post_churn_mixed_smp2/`
+  - New binary, no kprobes, mixed offsets, lock oracle, `BAD_DST_POST_RTABLE_CHURN_CPUS=0`, `BAD_DST_POST_RTABLE_CHURN_ROUNDS=0`.
+  - Result: first candidate used `page=3072 vuln=256`, reached pipe miss and unreleased trigger. No `dst_release` warning was observed in the serial log, so this may still be a false lock-oracle candidate.
+
+- `old/2026-05-07_reclaim_tune_current_cnxret_mixed_smp2/`
+  - New binary with raised caps, known `cnxret` debug probe, mixed offsets.
+  - Result: first candidate used `page=3072 vuln=256`, reached pipe miss and unreleased trigger. This did not reproduce the previous best kprobe-assisted root run, but comparison showed the page/vuln counts matched the best run; the miss is from current timing/state differences, not the 3072 page-pipe count itself.
+
+- `old/2026-05-07_reclaim_tune_restored_page_default_cnxret_smp2/`
+  - Intermediate correction run while checking the default. It used `page=1536 vuln=256`, reached pipe miss, and left the trigger unreleased.
+  - This run is not a recommended configuration; the actual best-run comparison showed the successful kprobe path used `page=3072 vuln=256`, so the source was corrected again to keep SMP default `0xc00`.
+
+Current interpretation:
+
+- Pipe count by itself is not the main reclaim reliability blocker. 6144 page pipes and 1024 vulnerable pipe rings still missed on the first candidate.
+- The likely allocator failure mode is that the fake pipe ring allocation can land in an unaligned fake-freed cmsg object, but the containing kmalloc-256 slab page does not become fully free when sprayed cmsgs are drained. If any rtable or unrelated kmalloc-256 object remains live on that page, buddy/page-pipe reclaim will not overwrite it.
+- Another practical issue is candidate quality: the lock oracle can still produce candidates that are "socket lock blocked" without a confirmed stale-dst invalid-free. Running reclaim on those false candidates can leave the trigger unreleasable.
+- Keep offset 64 as the clean target for allocator reasoning, but mixed 64/128 remains useful in the current retry loop because it seems less likely to make every false candidate destructive.
+
+Next allocator-focused ideas:
+
+- Add runtime knobs for the pre/post rtable socket counts so the rtable slab page can be groomed more deliberately without recompiling.
+- Test reducing or disabling the post-rtable pipe churn only in a run where the race is confirmed by a non-window-expanding oracle; the no-post-churn run here did not confirm the stale-dst invalid-free.
+- Consider a debug-only allocator trace around `kfree`/`kmem_cache_alloc`/`__free_pages` or SLUB statistics, but avoid carrying those probes into the final exploit because they will perturb allocation order.
+- If continuing with no-kprobe operation, improve the candidate oracle before doing expensive reclaim, otherwise many failed allocator runs are probably polluted by false race candidates.
+
+## 2026-05-07 - rtable slab-page purity knobs
+
+Goal:
+
+- Address the suspected slab-page purity issue: the fake pipe ring may be placed into an unaligned fake-freed cmsg object, but the containing kmalloc-256 page may still have live objects and therefore never be returned to buddy for pipe backing-page reclaim.
+
+Source changes:
+
+- Checkpoint before edits: `old/2026-05-07_before_post_before_pipe_groom/`.
+- Added bounded runtime knobs in `exp_x86.c`:
+  - `BAD_DST_BASE_PRE_SOCKETS` capped by `MAX_BASE_PRE_SOCKETS=4096`.
+  - `BAD_DST_ALIGN_PAD_SPAN` capped by `MAX_ALIGN_PAD_SOCKETS=128`.
+  - `BAD_DST_POST_SOCKETS` capped by `MAX_POST_SOCKETS=1024`.
+- Added `BAD_DST_OPEN_POST_BEFORE_PIPE_PREP`.
+  - When set, post sockets are opened immediately after the vulnerable socket and before optional pre-race pipe preparation.
+  - Hypothesis: on the patched x86 kernel, prepared 4-slot pipe rings are kmalloc-256; if they are allocated after the vulnerable rtable but before post sockets, they can occupy the same slab-page tail that should instead be filled with closeable rtable objects.
+- Added logging/tracing for rtable groom config and post-socket open timing.
+- Rebuilt `bad_dst_cache`; build succeeded with the existing warning set.
+
+Experiments:
+
+- `old/2026-05-07_post_before_pipe_cnxret_smp2/`
+  - Known `cnxret` wrapper plus `BAD_DST_OPEN_POST_BEFORE_PIPE_PREP=1`.
+  - Runtime: `base_pre=1792 align_span=21 post=256 post_before_pipe=1`.
+  - Result: first candidate reached `FAIL: could not corrupt pipe`, then `FAIL: trigger did not release after failed candidate`.
+
+- `old/2026-05-07_post_before_pipe_fixed64_post1024_cnxret_smp2/`
+  - Same post-before-pipe ordering, `BAD_DST_POST_SOCKETS=1024`, fixed fake-dst offset 64.
+  - Runtime: `base_pre=1792 align_span=21 post=1024 post_before_pipe=1`.
+  - Result: first candidate reached pipe miss and unreleased trigger.
+
+- `old/2026-05-07_prepare_pipes_after_candidate_cnxret_smp2/`
+  - Disabled pre-race pipe preparation: `BAD_DST_PREPARE_PIPES_BEFORE_RACE=0`.
+  - Ordering: pre sockets, vulnerable socket, race candidate, post sockets, then pipe preparation inside `try_run_main_exploit()`.
+  - Result: first candidate reached pipe miss and unreleased trigger.
+
+- `old/2026-05-07_cnxret_align1_current_smp2/`
+  - Fixed `BAD_DST_ALIGN_PAD=1` to skip the historically bad first alignment candidate.
+  - Result: first candidate with `align_pad=1 pre=1793 post=256` still reached pipe miss and unreleased trigger.
+
+Current interpretation:
+
+- The new knobs are useful and should stay; they make the rtable page layout testable without rebuilding.
+- These allocator-ordering changes did not, by themselves, fix the overlap. That weakens the "prepared pipes are contaminating the target slab page tail" hypothesis.
+- The repeated first-candidate wedge means many of these runs may still be executing reclaim on candidates that are not confirmed stale-dst invalid-frees. The next useful debugging step is probably a confirmation oracle for the fake invalid-free/page-free path, not more blind pipe-count or post-socket sweeps.
+- A debug-only allocator trace around the fake-free/reclaim phase, or a root-only tracepoint/kprobe counter for the exact stale-dst invalid-free plus slab-page discard, would be the fastest way to distinguish "fake pipe ring not allocated" from "ring allocated but slab page not discarded".
+
+## 2026-05-07 13:41 EDT - kprobe race-window debugging
+
+Goal:
+
+- Use tracefs kprobes to separate false lock-oracle candidates from real SO_CNX_ADVICE race-window hits, and measure whether the userspace timing is reaching the narrow window before `sk_dst_cache` is assigned NULL.
+
+Probe setup and confirmed offsets:
+
+- `sock_setsockopt`: `ffffffff81c054a0`
+- `dst_release`: `ffffffff81c2cd80`
+- `metadata_dst_free`: `ffffffff81c2ce40`
+- `ipv4_negative_advice`: `ffffffff81d8c310`
+- `ipv4_dst_check`: `ffffffff81d8b890`
+- `sock_setsockopt+0xec8`: SO_CNX_ADVICE negative-advice path entry.
+- `sock_setsockopt+0xf00`: return from `ipv4_negative_advice`; this is the useful `cnxret` window where the old dst has had its refcount dropped but `sk_dst_cache` still points at it.
+- `sock_setsockopt+0xf09`: assignment of the returned NULL to `sk_dst_cache`.
+
+Checkpoints and experiments:
+
+- `old/2026-05-07_alloc_kprobe_debug_cnxret_smp2/`
+  - Heavy allocator/free/page probes plus old `cnxret`.
+  - One candidate reached the reclaim path but no root.
+  - `cnxret=0`, `metadata_dst_free=0`; this candidate was not a confirmed vulnerable-window hit.
+
+- `old/2026-05-07_path_kprobe_debug_smp2/`
+  - Path probes on `sock_setsockopt`, SO_CNX offsets, `ipv4_negative_advice`, `dst_release`, `metadata_dst_free`, and `ipv4_dst_check`.
+  - Stopped after first MSG_PROBE diagnostic.
+  - No `cnx*`, no `negadv`, no `metadata_dst_free`.
+  - MSG_PROBE saw a normal IPv4 rtable with `obs=2` and normal IPv4 dst ops, then `dst_release` from ref 2 to ref 1. This was another false candidate.
+
+- `old/2026-05-07_path_kprobe_lockoracle_msgprobe_loop_smp2/`
+  - Same path probes, default fork-based lock oracle.
+  - Found a major oracle issue: the fork child closes thousands of inherited fds before reaching `getsockopt()`, so the 50 ms timeout can report `blocked` even when the child is only slow in fd cleanup.
+  - Use `BAD_DST_LOCK_ORACLE_THREAD=1` for this debugging, or disable inherited-fd cleanup with `BAD_DST_LOCK_ORACLE_CLOSE_FDS=0` if the fork oracle is kept.
+
+- `old/2026-05-07_path_kprobe_thread_lockoracle_smp2/`
+  - Switched to pthread lock oracle.
+  - Attempt 1 reported `done_ok` instead of a false block, which confirms the fork-oracle false-positive diagnosis.
+  - With 1024 CPU1 blocker threads, an early/late miss can wedge release because the SCHED_IDLE trigger does not promptly run after the CFS blockers wake/sleep.
+
+- `old/2026-05-07_path_kprobe_thread_lockoracle_128block_smp2/`
+  - Reduced to 128 blockers and a longer release timeout.
+  - Completed 80 attempts without a root candidate.
+  - `cnxenter`, `cnxret`, `cnxassign`, `negadv`, and `negadvret` all fired 80 times, but after main had already classified/released the attempt.
+  - Confirmed the real refcount transition: `ipv4_negative_advice` enters with ref 2 and normal IPv4 ops; at `cnxret`, the old dst has ref 1 and the returned new dst is NULL; `cnxassign` then clears `sk_dst_cache`.
+
+- `old/2026-05-07_path_kprobe_pulse_sweep_128block_smp2/`
+  - Added a broad scheduler pulse sweep: 24 pulse lengths from 1.0 ms upward in 0.5 ms steps, 128 blockers, pthread oracle.
+  - Completed 80 attempts with no MSG_PROBE candidate and no `metadata_dst_free`.
+  - The pulse can drive the trigger through the SO_CNX path, but most hits finished before the main thread froze/checked the socket. Example timing: `cnxret` roughly 685 us after pulse start and `cnxassign` roughly 50 us later.
+
+- `old/2026-05-07_path_kprobe_pulse_fine_128block_smp2/`
+  - Fine sweep: 40 pulse lengths from 600 us upward in 25 us steps, no settle delay, 100 attempts.
+  - No candidate/root, no `metadata_dst_free`.
+  - `cnx*` and `negadv*` fired on every attempt.
+  - Results split between too early, too late, and trigger-already-returned. No blocked pthread oracle was captured.
+
+Current interpretation:
+
+- The SO_CNX_ADVICE race path and kprobe offsets are correct. The critical state exists: after `ipv4_negative_advice` returns NULL, the old rtable has refcount 1 while `sk_dst_cache` still points to it, until the assignment at `sock_setsockopt+0xf09`.
+- The previous fork-based lock oracle produced false positives because fd cleanup in the forked child can exceed the timeout. The pthread oracle is the cleaner debug oracle.
+- With the current userspace scheduling strategy, timing misses are the immediate blocker. The trigger usually reaches `cnxret` only after the main thread has already judged the attempt too early, or it runs all the way through `cnxassign` before the main thread checks.
+- The measured kprobe-assisted `cnxret -> cnxassign` interval is on the order of tens of microseconds and noisy. Tracefs kprobes can observe and slightly perturb this, but plain tracefs kprobes cannot deliberately park the triggering task inside the window. Doing that would require a custom kprobe handler path such as a debug kernel module or equivalent programmable instrumentation; that is useful for diagnosis but should not become part of the final exploit.
+- No current kprobe-debug run observed `metadata_dst_free`, so these runs did not reach the later fake-dst invalid-free/root payload stage.
+
+Next ideas:
+
+- Keep using the pthread lock oracle for race-window debugging and avoid fork-oracle fd cleanup unless its timeout is made much larger.
+- Try a less noisy hold/release mechanism than the current blocker-thread pulse: fewer blockers, futex-controlled blockers, or priority changes that let the trigger run into `cnxret` but delay return to userspace.
+- For debug-only validation, a programmable probe/module that parks specifically at `sock_setsockopt+0xf00` would answer whether the reclaim/root path is still healthy when the exact race window is forced. Do not rely on that in the final exploit.
+
+## 2026-05-07 15:17 EDT - timerfd/pre-syscall grid and SMP3 oracle CPU
+
+Goal:
+
+- Remove the scheduler pulse from the current race attempt and sweep two timing axes instead: coarse timerfd expiry and a fine pre-syscall busy delay in the trigger thread.
+- Test the same root-enabled run on `--smp 3` with the pthread socket-lock oracle pinned to CPU2, so the oracle does not contend with the main thread, trigger thread, or CPU1 blocker set.
+
+Source changes:
+
+- Checkpoint before the timer/pre-syscall grid change: `old/2026-05-07_before_timer_presyscall_grid/`
+- Added opt-in `BAD_DST_DELAY_GRID_SWEEP=1`. With this enabled, `BAD_DST_PRE_SYSCALL_DELAY_*` advances once per full timer sweep instead of diagonally changing both delay dimensions every attempt.
+- Checkpoint before the oracle CPU pinning change: `old/2026-05-07_before_oracle_cpu_pin/`
+- Added opt-in `BAD_DST_LOCK_ORACLE_CPU`. When set with `BAD_DST_LOCK_ORACLE_THREAD=1`, the pthread oracle pins itself to that CPU before running the `getsockopt()` lock check.
+- Rebuilt with `nix-shell -p glibc.static --run './compile_x86.sh && ./compile_x86_clean.sh'`; build succeeded with the existing warning noise only.
+
+Checkpoint and run:
+
+- Main checkpoint/artifacts: `old/2026-05-07_timer_presyscall_grid_oraclecpu2_root_smp3/`
+- Host console log: `old/2026-05-07_timer_presyscall_grid_oraclecpu2_root_smp3.log`
+- Run used `testvm run new_kernel/bzImage --nokaslr --smp 3 --memory 1G --network tap ... --share-mode ext4 --sync-share-back`.
+- Key runtime knobs:
+  - `BAD_DST_RACE_PULSE_SWEEP_COUNT=0`
+  - `BAD_DST_RACE_PULSE_NS=0`
+  - `BAD_DST_DELAY_GRID_SWEEP=1`
+  - `BAD_DST_TIMER_SWEEP_START_NS=85000`
+  - `BAD_DST_TIMER_SWEEP_STEP_NS=2048`
+  - `BAD_DST_TIMER_SWEEP_COUNT=16`
+  - `BAD_DST_PRE_SYSCALL_DELAY_SWEEP_COUNT=12`
+  - `BAD_DST_PRE_SYSCALL_DELAY_START_NS=35000`
+  - `BAD_DST_PRE_SYSCALL_DELAY_STEP_NS=5000`
+  - `BAD_DST_LOCK_ORACLE_THREAD=1`
+  - `BAD_DST_LOCK_ORACLE_CPU=2`
+  - `BAD_DST_LOCK_ORACLE_US=50000`
+  - `BAD_DST_GET_ROOT=1`
+  - `BAD_DST_RUN_ROOT_PAYLOAD=1`
+
+Result:
+
+- `mtu_expires` was confirmed as `1`.
+- Kprobe setup errors were empty.
+- 192 attempts completed.
+- Pthread lock oracle results from `exploit.log`:
+  - `done_ok`: 70
+  - `done_err`: 122
+  - `blocked`: 0
+- Miss classification:
+  - `too_early`: 70
+  - `too_late`: 122
+  - race candidates: 0
+- Kprobe trace counts:
+  - `cnxenter`: 192
+  - `cnxret`: 192
+  - `cnxassign`: 192
+  - `negadv`: 192
+  - `negadvret`: 192
+  - `metadata_dst_free`: 0
+- No fake-free/reclaim/root stage was reached:
+  - `candidate_count`: 0
+  - `pipe_fail_count`: 0
+  - `arb_rw_count`: 0
+  - `root_count`: 0
+
+Current interpretation:
+
+- SMP3 plus a dedicated oracle CPU made the oracle cleaner, but did not make the race land.
+- This is not a pipe-buffer or allocator reclaim failure in this run. The exploit never reached a confirmed vulnerable-window candidate and never hit `metadata_dst_free`.
+- The trace proves the trigger executes the SO_CNX negative-advice path every attempt. At `cnxret`, old dst refcount is 1 and the returned dst is NULL, but the userspace freeze/oracle still misses the short interval before `sk_dst_cache` is assigned NULL.
+- This grid skewed late overall: 122 late misses vs 70 early misses. If continuing this exact approach, the next sweep should shift timing earlier or improve the CPU1 hold/release mechanism rather than changing pipe spray constants.
+
+## 2026-05-07 15:41 EDT - kprobe-derived timer/pre-syscall delay adjustment
+
+Goal:
+
+- Adjust the timerfd and pre-syscall delay settings based on the previous SMP3 kprobe timing trace.
+- In the prior trace, near misses clustered by the effective value `timer_offset - pre_syscall_delay`, mostly in the tens of microseconds. The successful no-kprobe run also hit at `timer_offset=41384` with `pre_syscall_delay=0`.
+- Hypothesis: the explicit pre-syscall delay is counterproductive because it often lets main wake while the trigger is still in userspace. The next useful sweep should set `pre_syscall_delay=0` and sweep timer offsets directly around the effective 20-100 us window.
+
+Trace-derived timing observations:
+
+- In `old/2026-05-07_timer_presyscall_grid_oraclecpu2_root_smp3/share/trace.txt`, 36 attempts had the lock-oracle completion marker within 1 ms of `cnxret`.
+- For those near attempts, `timer_offset - pre_syscall_delay` ranged from about 7 us to 77 us, with median about 31 us and upper quartile about 52 us.
+- Many previous attempts showed `after_timer_read` while the trigger was still in `pre_syscall_delay`, confirming that the delay can freeze the trigger before `setsockopt()`.
+
+Experiment 1: short oracle timeout, early effective sweep, SMP3
+
+- Folder: `old/2026-05-07_adjusted_effective_timer_oracle_smp3/`
+- Wrapper changes:
+  - `--smp 3`
+  - `BAD_DST_PRE_SYSCALL_DELAY_SWEEP_COUNT=0`
+  - `BAD_DST_PRE_SYSCALL_DELAY_NS=0`
+  - `BAD_DST_TIMER_SWEEP_START_NS=15000`
+  - `BAD_DST_TIMER_SWEEP_STEP_NS=2048`
+  - `BAD_DST_TIMER_SWEEP_COUNT=40`
+  - `BAD_DST_CPU1_BLOCK_THREADS=1024`
+  - `BAD_DST_LOCK_ORACLE_THREAD=1`
+  - `BAD_DST_LOCK_ORACLE_CPU=2`
+  - `BAD_DST_LOCK_ORACLE_US=800`
+- Result:
+  - First attempt at `timer_offset=15000` produced `lock oracle: blocked`.
+  - It reached the reclaim path but failed pipe corruption, then failed to release the trigger.
+  - Synced artifacts show 1 candidate, 1 pipe fail, 0 Arb/RW, 0 root.
+  - Trace showed `sock_setsockopt` entry but no `cnxenter`, `cnxret`, `cnxassign`, `negadv`, or `metadata_dst_free`.
+- Interpretation:
+  - The shorter oracle timeout detects a lock hold, but the first offset parked the trigger too early, before the SO_CNX negative-advice path.
+
+Experiment 2: later timer sweep, short oracle timeout, SMP3
+
+- Folder: `old/2026-05-07_adjusted_later_timer_oracle_smp3/`
+- Host console log: `old/2026-05-07_adjusted_later_timer_oracle_smp3.log`
+- Wrapper changes from experiment 1:
+  - `BAD_DST_CPU1_BLOCK_THREADS=128`
+  - `BAD_DST_TIMER_SWEEP_START_NS=45000`
+  - `BAD_DST_TIMER_SWEEP_STEP_NS=2048`
+  - `BAD_DST_TIMER_SWEEP_COUNT=32`
+  - `BAD_DST_LOCK_ORACLE_US=800`
+- Result:
+  - Killed manually after the leaked vuln pipe registry filled; the guest did not power off cleanly, so only the host console log is reliable.
+  - 33 candidates, 33 pipe corruption misses, 0 Arb/RW, 0 root.
+  - The diagnostic stages were still broad and early: many attempts reported `timer_armed` or `setsockopt_enter`, not a confirmed `cnxret` stage.
+- Interpretation:
+  - An 800 us lock-oracle timeout is too aggressive as a candidate gate. It turns normal socket-lock acquisition before SO_CNX negative advice into false candidates.
+
+Experiment 3: no lock oracle, no pre-syscall delay, refined early timer sweep, SMP2
+
+- Folder: `old/2026-05-07_adjusted_timer_no_oracle_smp2/`
+- Host console log: `old/2026-05-07_adjusted_timer_no_oracle_smp2.log`
+- Wrapper changes:
+  - Based on the prior successful no-kprobe SMP2 wrapper.
+  - `BAD_DST_LOCK_ORACLE=0`
+  - `BAD_DST_PRE_SYSCALL_DELAY_SWEEP_COUNT=0`
+  - `BAD_DST_PRE_SYSCALL_DELAY_NS=0`
+  - `BAD_DST_TIMER_SWEEP_START_NS=25000`
+  - `BAD_DST_TIMER_SWEEP_STEP_NS=2048`
+  - `BAD_DST_TIMER_SWEEP_COUNT=40`
+  - `BAD_DST_CPU1_BLOCK_THREADS=1024`
+- Result:
+  - First attempt at `timer_offset=25000` became a broad candidate and missed pipe corruption.
+  - The trigger did not release after the failed candidate, so the VM was killed manually.
+  - 1 candidate, 1 pipe fail, 0 Arb/RW, 0 root.
+
+Current interpretation:
+
+- The correct adjustment from the kprobe timing is still to remove the pre-syscall delay and sweep the effective timer window directly. That part is sound.
+- The short lock-oracle timeout is useful as a diagnostic for millisecond-scale socket-lock holds, but it is not a good success oracle: it accepts states before `cnxret`.
+- These runs did not disprove the old no-kprobe root timing. They show that the current wrappers can get trapped by early broad candidates and unreleased trigger state before enough offsets are explored.
+- A better next wrapper should avoid spending the full reclaim path on candidates whose trigger stage is only `woken`, `timer_armed`, or `setsockopt_enter`. Either require a stronger debug-only `cnxret` confirmation when tuning, or add a cheap candidate rejection path for pre-SO_CNX stages before running the expensive spray/reclaim.
+
+## 2026-05-07 15:58 EDT - fixed-delay variance measurement at timer_offset=41384
+
+Goal:
+
+- Measure variance when repeating one particular timing point instead of sweeping.
+- Use the old successful no-kprobe timing point, `timer_offset=41384` and `pre_syscall_delay=0`, but run in a measurement-only mode so allocator/reclaim noise does not dominate the timing data.
+
+Checkpoint:
+
+- `old/2026-05-07_before_fixed_delay_measure_mode/`
+- Contains the source, binaries, and log before adding the temporary measurement-only mode.
+
+Source/build change:
+
+- Added opt-in `BAD_DST_MEASURE_TIMING_ONLY=1` handling in the real race loop.
+- In this mode, after timerfd wake and CPU migration, the main thread emits a `measure_release` trace marker, releases the frozen trigger, waits for it to finish, emits `measure_done`, cleans the per-attempt sockets/pipes/sprays, and continues.
+- Rebuilt `bad_dst_cache` and `bad_dst_cache_clean` with `nix-shell -p glibc.static --run './compile_x86.sh && ./compile_x86_clean.sh'`.
+
+Experiment 1: SMP2, 1024 blockers
+
+- Folder: `old/2026-05-07_fixed_delay_variance_41384_smp2/`
+- Host console log: `old/2026-05-07_fixed_delay_variance_41384_smp2.log`
+- Wrapper settings:
+  - `--smp 2`
+  - `BAD_DST_TIMER_SWEEP_START_NS=41384`
+  - `BAD_DST_TIMER_SWEEP_STEP_NS=0`
+  - `BAD_DST_TIMER_SWEEP_COUNT=1`
+  - `BAD_DST_PRE_SYSCALL_DELAY_SWEEP_COUNT=0`
+  - `BAD_DST_PRE_SYSCALL_DELAY_NS=0`
+  - `BAD_DST_CPU1_BLOCK_THREADS=1024`
+  - `BAD_DST_MEASURE_TIMING_ONLY=1`
+  - `BAD_DST_MAX_ATTEMPTS=200`
+- Result:
+  - Failed on attempt 1.
+  - The trigger stage was `woken` with `armed=-1`, meaning the timer fired before the trigger had recorded the timer-armed timestamp.
+  - The trigger did not release within the measurement timeout.
+- Interpretation:
+  - 1024 CPU1 blocker threads are too heavy/noisy for this measurement mode. They can prevent reliable cleanup after an early wake.
+
+Experiment 2: SMP3, 128 blockers
+
+- Folder: `old/2026-05-07_fixed_delay_variance_41384_smp3_128block/`
+- Host console log: `old/2026-05-07_fixed_delay_variance_41384_smp3_128block.log`
+- Synced artifacts:
+  - `share/exploit.log`
+  - `share/trace.txt`
+  - `share/kprobe_events.actual`
+- Wrapper differences from experiment 1:
+  - `--smp 3`
+  - `BAD_DST_CPU1_BLOCK_THREADS=128`
+  - `BAD_DST_TRIGGER_RELEASE_TIMEOUT_US=15000000`
+- Result:
+  - Completed 200 measurement attempts.
+  - Reached the SO_CNX negative-advice path on all 200 attempts with kprobe markers through `cnxassign`.
+  - No root/reclaim path was attempted by design.
+  - `after_timer_read` stage distribution: 154 `timer_armed`, 46 `woken`.
+  - `after_pin_trigger` stage distribution: 154 `timer_armed`, 46 `woken`.
+
+Timing stats from `exploit.log` age diagnostics:
+
+- `after_timer_read` armed age, among attempts where armed timestamp existed: n=154, median 301.5 us, p90 483.5 us, max 773 us, stdev 108 us.
+- `after_pin_trigger` armed age, among attempts where armed timestamp existed: n=154, median 909.5 us, p90 1085.4 us, max 1648 us, stdev 146.1 us.
+- At `after_measure_release`, armed age: n=200, median 2939.5 us, p90 10740.2 us, max 13981 us, stdev 3786.3 us.
+- Approximate timer-armed to `setsockopt_enter`: n=200, median 1619.5 us, p90 9647 us, max 12674 us, stdev 3872.9 us.
+- Approximate timer-armed to `setsockopt_exit`: n=200, median 2000 us, p90 9974.7 us, max 13292 us, stdev 3863.6 us.
+- Approximate `setsockopt` duration: n=200, median 359.5 us, p90 689.1 us, max 12847 us, stdev 995.2 us.
+
+Timing stats from `trace.txt` kprobe/trace markers:
+
+- `measure_release -> cnxret`: n=200, median 880 us, p90 9017.1 us, max 13131 us, stdev 3901.1 us.
+- `measure_release -> sockopt`: n=200, median 692.5 us, p90 8925.6 us, max 10939 us, stdev 3899.2 us.
+- `sockopt -> cnxret`: n=200, median 120 us, p90 368.1 us, max 3326 us, stdev 268 us.
+- `cnxret -> cnxassign`: n=200, median 39 us, p90 117.3 us, max 1612 us, stdev 132.5 us.
+- `after_timer_read -> after_pin_trigger`: n=200, median 396 us, p90 664.1 us, max 1204 us.
+- `after_pin_trigger -> measure_release`: n=200, median 49 us, p90 73 us, max 572 us.
+
+Interpretation:
+
+- Repeating a single fixed delay is measurable and useful. At `timer_offset=41384` with 128 blockers, the dominant variance is scheduler wakeup/CPU1 contention after release, not the fixed nanosecond timer value itself.
+- The distribution is bimodal: many attempts reach `cnxret` after `measure_release` in about 0.3-1 ms, while a large group lands around 8-10 ms.
+- The fixed delay is therefore not stable enough to expect a narrow sub-100 us race hit under these blocker settings. It can still be useful for reproducing the old kprobe-assisted timing, but the blocker/release design needs to reduce the millisecond-scale scheduling tails before this becomes reliable without kprobes.
+
+## 2026-05-07 16:15 EDT - fixed common-window repeat exploit run
+
+Goal:
+
+- Try one timing point repeatedly instead of sweeping offsets, using the old no-kprobe root-success timing point and the recent fixed-delay measurement center.
+- Test whether repeated attempts at the common point produce better exploit results than spending attempts across a broad sweep.
+
+Setup/checkpoint:
+
+- Folder: `old/2026-05-07_fixed_common_41384_repeat_root_smp3_128block/`
+- Host console log: `old/2026-05-07_fixed_common_41384_repeat_root_smp3_128block.log`
+- Shared artifacts: `share/run.sh`, `share/exploit.log`, counters, binary, source snapshot.
+- The wrapper sets `mtu_expires=1` before `drop_exec`; the exploit itself still runs after privilege drop.
+- No kprobes were installed for this run.
+
+Wrapper parameters:
+
+- `--smp 3`, `--memory 1G`, `--nokaslr`
+- `BAD_DST_TIMER_SWEEP_START_NS=41384`
+- `BAD_DST_TIMER_SWEEP_STEP_NS=0`
+- `BAD_DST_TIMER_SWEEP_COUNT=1`
+- `BAD_DST_PRE_SYSCALL_DELAY_SWEEP_COUNT=0`
+- `BAD_DST_PRE_SYSCALL_DELAY_NS=0`
+- `BAD_DST_CPU1_BLOCK_THREADS=128`
+- `BAD_DST_LOCK_ORACLE=0`
+- `BAD_DST_DONE_ORACLE=1`
+- `BAD_DST_PREPARE_PIPES_BEFORE_RACE=1`
+- `BAD_DST_FAST_CRITICAL=1`
+- `BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL=0`
+- `BAD_DST_LEAK_VULN_PIPES_ON_FAIL=0`
+- `BAD_DST_MAX_ATTEMPTS=80`
+- `BAD_DST_GET_ROOT=1`
+- `BAD_DST_RUN_ROOT_PAYLOAD=0`
+
+Result:
+
+- Completed all 80 attempts cleanly.
+- Candidates: 78.
+- Done/late misses: 2.
+- Misses before freeze: 0.
+- Pipe corruption failures: 78.
+- Arb/RW successes: 0.
+- Root successes: 0.
+- Trigger release failures: 0.
+- `mtu_expires_value=1`.
+- `critical elapsed before MSG_PROBE` among the 78 candidates: median about 1,158,839 us, p90 about 1,183,525 us, min 1,140,824 us, max 1,212,698 us.
+
+Interpretation:
+
+- Repeating the common fixed delay substantially improves candidate volume: 78/80 attempts entered the expensive candidate path.
+- It did not improve end-to-end exploit reliability in this configuration. Every candidate failed at pipe corruption, so either most candidates are still false positives, or the race is landing but the reclaim/page-overlap path is not aligned under the current SMP3/128-blocker allocator state.
+- Because lock oracle was disabled, a "candidate" here means "trigger not done yet", not confirmed `cnxret`/pre-assign freeze. The fixed delay appears to be good at keeping the trigger unfinished, but this run does not prove it freezes exactly inside the refcount-decrement-before-NULL window.
+- Trace markers were not captured because the no-kprobe wrapper did not make `trace_marker` writable before dropping privileges. After the run, `share/run.sh` was patched to `chmod` trace markers and to accept `bad_dst_fixed_ns=`, `bad_dst_attempts=`, `bad_dst_blockers=`, and `bad_dst_deadline=` from the kernel command line for future fixed-point trials.
+
+Next step:
+
+- If repeating fixed points is kept, run a small matrix of fixed offsets around 35-55 us with a stronger but non-window-changing oracle or trace-marker-only diagnostics. The current 41384 ns point is useful for candidate throughput, but not enough by itself to distinguish exact-window hits from broad unfinished-trigger states.
+
+## 2026-05-07 16:49 EDT - fixed 41384 ns with pthread lock oracle
+
+Goal:
+
+- Repeat the same fixed timing point as the previous run, but enable the pthread lock oracle.
+- Test whether the previous 78/80 candidates were actual socket-lock-held states or just broad "trigger not done yet" states.
+
+Setup/checkpoint:
+
+- Folder: `old/2026-05-07_fixed_41384_pthread_lockoracle_smp3_128block/`
+- Host console log: `old/2026-05-07_fixed_41384_pthread_lockoracle_smp3_128block.log`
+- Shared artifacts: `share/run.sh`, `share/exploit.log`, counters, binary, source snapshot.
+- Command shape:
+  - `testvm run new_kernel/bzImage --nokaslr --smp 3 --memory 1G ... --share-dir old/2026-05-07_fixed_41384_pthread_lockoracle_smp3_128block/share --share-mode ext4 --sync-share-back --autorun-vm-path /mnt/testvm-share/run.sh`
+
+Wrapper parameters:
+
+- `BAD_DST_TIMER_SWEEP_START_NS=41384`
+- `BAD_DST_TIMER_SWEEP_STEP_NS=0`
+- `BAD_DST_TIMER_SWEEP_COUNT=1`
+- `BAD_DST_PRE_SYSCALL_DELAY_NS=0`
+- `BAD_DST_CPU1_BLOCK_THREADS=128`
+- `BAD_DST_LOCK_ORACLE=1`
+- `BAD_DST_LOCK_ORACLE_THREAD=1`
+- `BAD_DST_LOCK_ORACLE_CPU=2`
+- `BAD_DST_LOCK_ORACLE_US=50000`
+- `BAD_DST_DONE_ORACLE=1`
+- `BAD_DST_TRIGGER_TIMING_DIAG=1`
+- `BAD_DST_MAX_ATTEMPTS=40`
+
+Result:
+
+- Completed all 40 attempts cleanly.
+- Candidates: 0.
+- Misses before freeze: 39.
+- Done/late misses before oracle: 1.
+- Pipe corruption failures: 0.
+- Arb/RW successes: 0.
+- Root successes: 0.
+- Trigger release failures: 0.
+- Pthread oracle outcomes:
+  - `done_ok errno=0`: 15
+  - `done_err errno=107` (`ENOTCONN`): 24
+- Miss classification:
+  - too early: 15
+  - too late: 24
+  - already done: 1
+- Timing-diag stage distribution:
+  - `after_timer_read`: 13 `woken`, 26 `timer_armed`, 1 `done`
+  - `after_pin_trigger`: 13 `woken`, 26 `timer_armed`, 1 `done`
+  - For attempts with an armed timestamp, `after_pin_trigger` armed age median was about 914 us, p90 about 1177 us, max 1383 us.
+
+Interpretation:
+
+- The pthread lock oracle completely filtered the previous high candidate rate at this timing point.
+- This strongly suggests the prior fixed-41384 no-oracle run was mostly broad unfinished-trigger noise, not reliable socket-lock-held freezes.
+- At this fixed offset, the oracle usually sees either the socket still unlocked (`done_ok`, classified too early) or the trigger already far enough through the path that `IP_MTU` reports `ENOTCONN` (`done_err`, classified too late).
+- No expensive reclaim path ran, so there is no pipe-overlap evidence from this run.
+
+Issue:
+
+- `trace.txt` still contained only the ftrace header, even though `BAD_DST_TRACE_MARKERS=1` was enabled. The likely issue is non-root traversal/write permission on debugfs after `drop_exec`.
+- After the run, `share/run.sh` was patched to also `chmod 755 /sys/kernel/debug "$TR"` before dropping privileges, in addition to making `trace_marker` writable.
+
+Next step:
+
+- Use the pthread oracle as the candidate gate for a narrow fixed-offset matrix around the common window. This should identify offsets that produce actual blocked-oracle candidates instead of spending minutes on broad false candidates.
+
+## 2026-05-07 17:30 EDT - repeated pthread-oracle timing runs and futex/atomic timer experiments
+
+Goal:
+
+- Run a batch of fixed-window trials with the pthread lock oracle and keep adjusting the timing window.
+- Try the existing futex/atomic busy-loop timer path as an alternative to timerfd.
+- Look for oracle-confirmed lock-held candidates and any Arb/RW or root success.
+
+Wrapper/script changes:
+
+- Created host matrix runner: `old/2026-05-07_pthread_oracle_fixed_matrix/run_matrix.sh`
+- Patched `old/2026-05-07_fixed_41384_pthread_lockoracle_smp3_128block/share/run.sh` to accept additional kernel cmdline knobs:
+  - `bad_dst_futex_timer=`
+  - `bad_dst_futex_pin_trigger=`
+  - `bad_dst_pre_delay_ns=`
+- Patched the matrix runner to pass those knobs through.
+- No exploit-core source change was made in this batch; the futex path already existed in `exp_x86.c`.
+
+Experiment 1: timerfd fixed-offset pthread-oracle matrix
+
+- Folder: `old/2026-05-07_pthread_oracle_fixed_matrix/`
+- Settings:
+  - SMP3, 128 blockers
+  - pthread lock oracle on CPU2
+  - `BAD_DST_LOCK_ORACLE_US=5000`
+  - 40 attempts per offset
+  - timerfd path, no futex timer
+- Results:
+  - 25000 ns: 3/40 blocked candidates, 3 pipe fails, 0 Arb/RW/root
+  - 33000 ns: 4/40 blocked candidates, 4 pipe fails, 0 Arb/RW/root
+  - 38000 ns: 5/40 blocked candidates, 5 pipe fails, 0 Arb/RW/root
+  - 43000 ns: 6/40 blocked candidates, 6 pipe fails, 0 Arb/RW/root
+  - 48000 ns: 4/40 blocked candidates, 4 pipe fails, 0 Arb/RW/root
+  - 55000 ns: 3/40 blocked candidates, 3 pipe fails, 0 Arb/RW/root
+  - 65000 ns: 3/40 blocked candidates, 3 pipe fails, 0 Arb/RW/root
+  - 85000 ns: 6/40 blocked candidates, 6 pipe fails, 0 Arb/RW/root
+- Interpretation:
+  - This is the first clean no-cnxret-kprobe set with repeated pthread-oracle blocked candidates.
+  - Best short-run rates were around 43000 ns and 85000 ns at 6/40 each.
+
+Experiment 2: focused timerfd repeats at best offsets
+
+- Folder: `old/2026-05-07_pthread_oracle_focused_best_offsets/`
+- Settings:
+  - Same as experiment 1, but 100 attempts at each selected offset.
+- Results:
+  - 43000 ns: 8/100 blocked candidates, 8 pipe fails, 0 Arb/RW/root
+  - 85000 ns: 12/100 blocked candidates, 12 pipe fails, 0 Arb/RW/root
+- Interpretation:
+  - 85000 ns held up slightly better in the longer repeat, but neither offset produced pipe corruption.
+
+Experiment 3: futex/atomic busy-loop timer, no pre-syscall delay
+
+- Folder: `old/2026-05-07_pthread_oracle_futex_spin_matrix/`
+- Settings:
+  - `BAD_DST_FUTEX_WAKE_TIMER=1`
+  - futex timer thread on CPU2
+  - futex timer thread pins the trigger to CPU1 at wake time
+  - `BAD_DST_PRE_SYSCALL_DELAY_NS=0`
+  - Offsets: 0, 1000, 5000, 10000, 25000, 50000 ns
+  - 40 attempts per offset
+- Results:
+  - Every tested offset: 0 blocked candidates, 40/40 already-done misses.
+- Timing evidence:
+  - Even at `timer_offset=0`, diagnostics showed the trigger had already completed before main could act.
+  - Example pattern: at `after_futex_timer`, stage was already `done`; `setsockopt_enter` had occurred roughly 1 ms before the futex pin.
+- Interpretation:
+  - The futex/atomic timer by itself is too late because the timer thread does not get scheduled/pin fast enough relative to the trigger's immediate `setsockopt()`.
+
+Experiment 4: futex/atomic busy-loop timer with pre-syscall delay
+
+- Folder: `old/2026-05-07_pthread_oracle_futex_predelay_matrix/`
+- Settings:
+  - Same futex timer as experiment 3
+  - `BAD_DST_PRE_SYSCALL_DELAY_NS=1100000`
+  - Offsets: 0, 25000, 50000, 100000, 200000, 400000 ns
+  - 40 attempts per offset
+- Results:
+  - 0 ns: 5/40 blocked candidates, 5 pipe fails, 0 Arb/RW/root
+  - 25000 ns: 5/40 blocked candidates, 5 pipe fails, 0 Arb/RW/root
+  - 50000 ns: 1/40 blocked candidates, 1 pipe fail, 0 Arb/RW/root
+  - 100000 ns: 4/40 blocked candidates, 4 pipe fails, 0 Arb/RW/root
+  - 200000 ns: 4/40 blocked candidates, 4 pipe fails, 0 Arb/RW/root
+  - 400000 ns: 0/40 blocked candidates, mostly already-done misses
+- Interpretation:
+  - Adding a pre-syscall busy delay makes the futex/atomic path viable for producing lock-held candidates.
+  - It did not improve end-to-end results over timerfd; candidates still all failed at pipe corruption.
+
+Overall result:
+
+- Total from these batches:
+  - Timerfd matrix: 34 blocked candidates / 320 attempts.
+  - Focused timerfd repeats: 20 blocked candidates / 200 attempts.
+  - Futex without pre-delay: 0 blocked candidates / 240 attempts.
+  - Futex with 1.1 ms pre-delay: 19 blocked candidates / 240 attempts.
+  - Arb/RW/root successes: 0.
+- The race can be brought to a pthread-oracle-confirmed socket-lock-held state without cnxret kprobes.
+- The current blocker is now after the oracle gate: every oracle-confirmed candidate still fails at pipe corruption. That can mean either:
+  - the lock-held oracle is still accepting the wrong part of `sock_setsockopt()`, or
+  - the race is landing often enough but the reclaim/page-overlap path is currently unreliable under these SMP3 allocator conditions.
+
+Next ideas:
+
+- Use a temporary kprobe timing run only around the best no-kprobe windows to classify where the blocked pthread-oracle candidates sit relative to `cnxret` and `cnxassign`.
+- If many blocked candidates are pre-`cnxret`, tighten the oracle or shift later; if they are post-`cnxassign`, shift earlier.
+- If blocked candidates are actually around `cnxret`, focus on reclaim reliability rather than timing.
+
+## 2026-05-07 20:20 EDT - stage gate, 1024-blocker release, and pipe-miss diagnostics
+
+Goal:
+
+- Reduce expensive/destructive reclaim on obvious false candidates.
+- Make the 1024-blocker mode releasable after early/late misses.
+- Determine whether pipe corruption failures are threshold/partial-overwrite issues or complete misses.
+
+Source changes:
+
+- Added `BAD_DST_REQUIRE_SETSOCKOPT_ENTER_STAGE=1` to reject candidates unless the trigger thread is at `TRIGGER_STAGE_SETSOCKOPT_ENTER`.
+- Added `BAD_DST_TRIGGER_REPIN_CPU0=0` so the trigger does not pin itself back to CPU0 after main temporarily moves it to CPU1 during release.
+- Restored the ready-counter accounting around `release_frozen_trigger()`.
+- Added `BAD_DST_CPU1_BLOCK_FUTEX=1` blocker mode to avoid the 1024-blocker sleep/wake storm starving a SCHED_IDLE trigger during release.
+- Added pipe miss diagnostics that log max `FIONREAD` values across current and leaked vuln pipes when pipe corruption is not found.
+
+Checkpoints/runs:
+
+- `old/2026-05-07_stage_gate_earlytimer_current_smp2_128block_run1/`
+- `old/2026-05-07_stage_gate_earlytimer_current_smp2_1024block_longrelease_run1/`
+- `old/2026-05-07_stage_gate_earlytimer_current_smp2_1024block_repinfix_run1/`
+- `old/2026-05-07_stage_gate_earlytimer_current_smp2_1024block_futexrelease_run1/`
+- `old/2026-05-07_reclaim_cpu0_512pipes_stagegate_1024futex_run1/`
+
+Results:
+
+- 128 blockers + stage gate:
+  - 120 attempts, 31 `setsockopt_enter` candidates, 31 pipe fails, 0 Arb/RW, 0 root, 0 release failures.
+- 1024 blockers with the old sleep blocker mode:
+  - The first `woken`-stage miss could not release the trigger, even with a long release timeout.
+- 1024 blockers with trigger self-repin disabled but sleep blockers:
+  - Still failed to release on the first `woken`-stage miss.
+- 1024 blockers with futex blockers:
+  - Release progressed instead of wedging. A console-observed long run produced many `setsockopt_enter` candidates and `dst_release underflow` warnings, then hit the leaked-vuln-pipe cap. The VM was interrupted before synced logs were copied back, so this is console evidence only.
+- 1024 futex blockers + CPU0-only reclaim test:
+  - 36 attempts, 12 `setsockopt_enter` candidates, 12 pipe fails, 0 Arb/RW, 0 root, 0 release failures.
+  - Every pipe miss had normal pipe occupancy: `current_max=0x3000` and `leaked_max=0x3000`.
+
+Interpretation:
+
+- The stage gate and futex blocker release path are mechanically useful: they avoid many obvious early/late destructive attempts and make 1024-blocker recovery practical.
+- `setsockopt_enter` is still too broad. The all-`0x3000` pipe miss pattern means the pipe rings are not being overwritten at all, not merely failing a high corruption threshold.
+- The likely remaining split is:
+  - false candidates are holding the socket lock outside the exact refcount-decrement-before-NULL window, or
+  - the fake dst free happens but the kmalloc-256 slab page is not being returned to buddy before pipe page reclaim.
+
+Next steps:
+
+- Use debug-only kprobes to classify where no-kprobe candidates sit relative to `cnxret` and `cnxassign`.
+- Prefer futex-blocker release for 1024-blocker runs.
+- If kprobe classification shows candidates are mostly pre-`cnxret`, add a userspace-only pulse/fine delay after the stage gate before reclaim.
+- If candidates are within the exact window, focus on slab-page purity and pipe/page reclaim ordering.
+
+## 2026-05-08 - progressive entry pulse experiments
+
+Goal:
+
+- Improve no-kprobe race timing by pulsing the frozen SCHED_IDLE trigger forward until it reaches `TRIGGER_STAGE_SETSOCKOPT_ENTER`, then applying a smaller fine pulse before reclaim.
+
+Source/checkpoints:
+
+- Source changes are in `exp_x86.c`: added IPI storm knobs and `BAD_DST_PROGRESS_TO_SETSOCKOPT`.
+- Checkpoints/runs:
+  - `old/2026-05-08_ipi_storm_smp3_timerfd_sweep/`
+  - `old/2026-05-08_ipi_storm_triggerstart_smp3_timerfd_sweep/`
+  - `old/2026-05-08_ipi_triggerstart_pulse_smp3_sweep/`
+  - `old/2026-05-08_progressive_entry_noipi_smp3_sweep/`
+  - `old/2026-05-08_progressive_entry_noipi_128block_smp3_sweep/`
+  - `old/2026-05-08_progressive_entry_smp2_nooracle_root/`
+  - `old/2026-05-08_progressive_entry_smp2_8block_nooracle_root/`
+
+Results:
+
+- IPI storm from main, SMP3:
+  - 120 attempts, 1 candidate, 1 pipe fail, 0 Arb/RW/root.
+  - Mostly froze before the trigger armed or entered `setsockopt`.
+- IPI storm started from trigger after timer arm, SMP3:
+  - 120 attempts, 1 candidate, 1 pipe fail, 0 Arb/RW/root.
+  - Avoided pre-arm stalls, but shifted timing later and still did not corrupt pipe buffers.
+- Trigger-start IPI plus pulse sweep, SMP3:
+  - 160 attempts, 0 candidates, 0 Arb/RW/root.
+  - Pulse window mostly stayed too early or overshot to done.
+- Progressive entry, 128 blockers, SMP3:
+  - 160 attempts, 8 pthread-lock-oracle candidates, 8 pipe fails, 0 Arb/RW/root, 101 early/stage misses, 51 done misses.
+  - All pipe misses were clean: current vuln pipes stayed at `FIONREAD=0x3000`; leaked pipes also stayed clean after the first miss.
+- Progressive entry, 128 blockers, SMP2, no lock oracle:
+  - Interrupted as unproductive. It spent most attempts at `timer_armed` through 240 progress pulses with no exact-entry candidates.
+- Progressive entry, 8 blockers, SMP2, no lock oracle:
+  - 160 attempts, 11 `setsockopt_enter` candidates, 11 pipe fails, 0 Arb/RW/root, 149 done misses, 0 release failures.
+  - Candidate fine-pulse values included 0, 3500, 6000, 7500, 11500, 14000, 15000, 28000, 35500, 52500, and 57000 ns.
+
+Interpretation:
+
+- Reducing blockers from 128 to 8 makes the progressive pulse much more responsive. Trace markers show individual 2 us pulse requests usually taking hundreds of ns to a few us instead of hundreds of us, though occasional scheduler stalls remain.
+- The 8-blocker SMP2 run creates many broad entry-stage candidates but still no pipe overwrite. Because the lock oracle was disabled, these should not be treated as proven socket-lock-held hits.
+- The 128-blocker SMP3 run did prove socket-lock-held candidates with the pthread oracle, but all failed as clean pipe misses. This still points to either false candidates outside the exact refdrop-before-NULL window, or a stale-dst/free path that is not actually reached from those candidates.
+
+Next steps:
+
+- Repeat the 8-blocker SMP2 progressive run with the pthread lock oracle enabled on CPU0 and a short timeout, to see whether the broad entry-stage candidates actually hold the socket lock.
+- If the lock oracle rejects most of them, tune the fine pulse smaller/earlier after `setsockopt_enter`.
+- If the oracle accepts them but pipe misses remain clean, use a debug-only kprobe classification run around this exact wrapper to locate candidates relative to `cnxret`/`cnxassign`.
+
+Follow-up strict oracle run:
+
+- Folder: `old/2026-05-08_progressive_entry_smp2_8block_pthreadoracle_root/`
+- Same 8-blocker SMP2 progressive wrapper, but with `BAD_DST_LOCK_ORACLE=1`, `BAD_DST_LOCK_ORACLE_THREAD=1`, `BAD_DST_LOCK_ORACLE_CPU=0`, and `BAD_DST_LOCK_ORACLE_US=5000`.
+- Results:
+  - `attempt_count`: 160
+  - `candidate_count`: 12
+  - `lock_blocked_count`: 12
+  - `pipe_fail_count`: 12
+  - `done_miss_count`: 145
+  - `miss_before_freeze_count`: 3
+  - `arb_rw_count`: 0
+  - `root_count`: 0
+  - `release_fail_count`: 0
+- Interpretation:
+  - The 8-blocker progressive path does produce real socket-lock-held states without kprobes.
+  - However, every oracle-confirmed candidate still produced a clean pipe miss (`FIONREAD=0x3000` across current/leaked vuln pipes).
+  - The likely problem is now finer than "socket lock held": we are probably freezing before `ipv4_negative_advice()` has dropped the dst ref, after `sk_dst_cache` has already been assigned NULL, or otherwise outside the stale-dst reclaimable window.
+- Next step:
+  - Run a debug-only kprobe classification using this exact 8-blocker wrapper to correlate accepted candidates with `cnxret`/`cnxassign`.
+
+## 2026-05-07 21:45 EDT - kprobe classification and CPU0-noise hold attempts
+
+Goal:
+
+- Classify the 8-blocker progressive pthread-oracle candidates relative to the actual `ipv4_negative_advice()` return and `sk_dst_cache = NULL` assignment.
+- Try to keep the trigger thread from advancing through the `cnxret` -> `cnxassign` gap long enough for stale-dst reclaim.
+
+Debug classification run:
+
+- Folder: `old/2026-05-08_progressive_8block_kprobe_classify_smp2/`
+- Kprobes:
+  - `cnxret sock_setsockopt+0xf00`
+  - `cnxassign sock_setsockopt+0xf09`
+  - `negadv ipv4_negative_advice`
+  - `negadvret ipv4_negative_advice`
+- Settings:
+  - SMP2, 8 CPU1 futex blockers, progressive 2 us entry pulses, pthread lock oracle on CPU0, root payload enabled.
+- Results:
+  - `attempt_count`: 18
+  - `candidate_count`: 8
+  - `lock_blocked_count`: 8
+  - `pipe_fail_count`: 8
+  - `arb_rw_count`: 0
+  - `root_count`: 0
+- Key trace evidence:
+  - Several accepted candidates were pre-`cnxret`; for example attempt 1 reported a candidate around 17.975s while `negadvret`/`cnxret`/`cnxassign` did not occur until 26.418s-26.421s.
+  - Attempt 9 landed in the important post-refdrop/pre-NULL window: `negadvret` at about 57.324968s, `cnxret` at 57.324995s, lock-oracle candidate at about 57.330847s, and `cnxassign` at about 57.378787s.
+  - The reclaim path did not run before `cnxassign`; `candidate_pipe_fail_release` started much later, around 65.983s.
+- Interpretation:
+  - The userspace path can reach the exact stale-dst window in debug, but the trigger is not being held there. It resumes through the NULL assignment long before the reclaim/fake-free path consumes the stale socket state.
+  - Socket-lock-held is still too weak as an oracle: it accepts both pre-refdrop candidates and at least one exact-window candidate that is not frozen long enough.
+
+CPU0-noise runs:
+
+- Folder: `old/2026-05-08_progressive_8block_cpu0noise_hold_smp2/`
+  - Woke CPU0 CFS noise after the final fine pulse.
+  - Interrupted as unproductive; it mostly shifted attempts too late / already-done and did not show useful candidates before stopping.
+- Folder: `old/2026-05-08_progressive_8block_cpu0noise_beforefine_smp2/`
+  - Woke 8 CPU0 CFS noise threads before the final fine pulse.
+  - Important knobs:
+    - `BAD_DST_CPU0_NOISE_THREADS=8`
+    - `BAD_DST_CPU0_NOISE_NICE=0`
+    - `BAD_DST_CPU0_NOISE_DURATION_NS=2200000000`
+    - `BAD_DST_CPU0_NOISE_SPIN_NS=500000`
+    - `BAD_DST_CPU0_NOISE_SLEEP_NS=0`
+    - `BAD_DST_CPU0_NOISE_BEFORE_FINE_PULSE=1`
+    - `BAD_DST_CPU0_NOISE_AFTER_FINE_PULSE=0`
+  - Results:
+    - `attempt_count`: 100
+    - `candidate_count`: 1
+    - `lock_blocked_count`: 1
+    - `pipe_fail_count`: 1
+    - `done_miss_count`: 99
+    - `arb_rw_count`: 0
+    - `root_count`: 0
+  - The single candidate clean-missed (`current_max=0x3000`, no leaked corruption). One logged critical section took about 1.98s before `MSG_PROBE`, so CPU0 CFS pressure slowed the main/reclaim side too much without proving a longer trigger hold.
+
+Current interpretation:
+
+- The likely blocker is no longer finding a socket-lock-held state; it is freezing the trigger precisely after refcount drop and keeping it frozen across the whole reclaim/fake-free sequence.
+- CPU0 CFS noise is too blunt as currently used. A more direct next experiment is to repin the trigger to the blocked CPU after the CPU1 block state is re-enabled, because the trace suggests the trigger may continue on CPU0 after the pulse instead of being forced onto the busy CPU1 blocker set.
+
+Next steps:
+
+- Add an opt-in post-block repin loop around `pulse_frozen_trigger()` so the trigger is forced onto CPU1 again after blockers are active.
+- Start with the same 8-blocker SMP2 progressive wrapper and pthread oracle, root payload enabled.
+
+Follow-up post-block repin run:
+
+- Source/checkpoint:
+  - Checkpoint before edit: `old/2026-05-07_before_post_block_repin/`
+  - Run folder: `old/2026-05-07_progressive_8block_postblock_repin_smp2/`
+  - Added opt-in knobs in `exp_x86.c`: `BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK` and `BAD_DST_RACE_PULSE_REPIN_GAP_NS`.
+- Settings:
+  - SMP2, 8 CPU1 futex blockers, progressive 2 us entry pulses, pthread lock oracle, root payload enabled.
+  - CPU0 noise disabled.
+  - `BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK=8`
+  - `BAD_DST_RACE_PULSE_REPIN_GAP_NS=0`
+- Results:
+  - `attempt_count`: 120
+  - `candidate_count`: 5
+  - `lock_blocked_count`: 5
+  - `pipe_fail_count`: 5
+  - `done_miss_count`: 113
+  - `miss_before_freeze_count`: 2
+  - `arb_rw_count`: 0
+  - `root_count`: 0
+- Candidate critical elapsed before `MSG_PROBE`: about 0.96s to 1.29s.
+- All candidates were clean pipe misses (`current_max=0x3000`; leaked vuln pipes also stayed at `0x3000` after the first leak).
+- Interpretation:
+  - Repeated post-block `sched_setaffinity()` did not fix the hold or reclaim behavior.
+  - The implementation applied the repin loop to every progressive 2 us pulse, which introduced extra millisecond-scale overhead before the final candidate path. That makes this run useful as a negative signal, but the cleaner experiment is to repin only after the final fine pulse.
+
+Follow-up final-only repin run:
+
+- Source/run folder: `old/2026-05-07_progressive_8block_final_repin_smp2/`
+- Source adjustment:
+  - Split `pulse_frozen_trigger_with_repin()` so normal progress pulses do not run the repin loop.
+  - Only the final fine pulse passes `enable_post_block_repin=true`.
+- Settings:
+  - Same 8-blocker SMP2 progressive wrapper.
+  - `BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK=8`
+  - `BAD_DST_RACE_PULSE_REPIN_GAP_NS=0`
+  - Root payload enabled, CPU0 noise disabled.
+- Results:
+  - `attempt_count`: 80
+  - `candidate_count`: 1
+  - `lock_blocked_count`: 1
+  - `pipe_fail_count`: 1
+  - `done_miss_count`: 77
+  - `miss_before_freeze_count`: 2
+  - `arb_rw_count`: 0
+  - `root_count`: 0
+- The single candidate was attempt 9 and clean-missed after `critical elapsed before MSG_PROBE: 1175165 us`.
+- Interpretation:
+  - Scoping repin to the final pulse removes the progress-pulse overhead, but it still does not keep a stale dst live long enough for the fake-free/page-reclaim sequence.
+- Current evidence favors a stronger hold problem: after an oracle-confirmed candidate, the trigger either has already passed the useful `cnxret` -> `cnxassign` window or is not actually starved on CPU1 during the reclaim path.
+
+## 2026-05-07 22:05 EDT - pre-race FNHE cleanup to shorten the hold requirement
+
+Goal:
+
+- Avoid needing to hold the trigger for the one-second PMTU/FNHE expiry delay after a race candidate.
+- Test whether setting `mtu_expires=0`, waiting briefly, and forcing FNHE cleanup before the race leaves the socket as the final rtable reference so `ipv4_negative_advice()` frees immediately in the raced `setsockopt()`.
+
+Source/checkpoints:
+
+- Checkpoint before edit: `old/2026-05-07_before_pre_race_fnhe_cleanup/`
+- Added `BAD_DST_PRE_RACE_CLEANUP_FNHE` to `exp_x86.c`.
+- Run folder: `old/2026-05-07_pre_race_fnhe_cleanup_mtu0_fast_smp2/`
+
+Run settings:
+
+- Wrapper set `/proc/sys/net/ipv4/route/mtu_expires` to `0`; guest confirmed `mtu_expires_value=0`.
+- `BAD_DST_PRE_RACE_EXPIRE_US=50000`
+- `BAD_DST_PRE_RACE_CLEANUP_FNHE=1`
+- `BAD_DST_FNHE_EXPIRE_TOTAL_US=0`
+- `BAD_DST_RTABLE_RCU_US=5000`
+- `BAD_DST_SPRAY_BLOCK_US=10000`
+- SMP2, 8 CPU1 futex blockers, progressive entry pulses, pthread lock oracle, root payload enabled.
+
+Results:
+
+- `attempt_count`: 120
+- `candidate_count`: 8
+- `lock_blocked_count`: 8
+- `pipe_fail_count`: 8
+- `done_miss_count`: 112
+- `miss_before_freeze_count`: 0
+- `arb_rw_count`: 0
+- `root_count`: 0
+
+Evidence:
+
+- The privileged wrapper successfully set `mtu_expires=0`; the unprivileged exploit process later still logged permission denied when its internal best-effort sysctl write ran after dropping privileges.
+- Candidate-to-`MSG_PROBE` critical times dropped from roughly 1.0s-1.3s to 316ms-373ms, confirming the post-candidate FNHE wait was removed.
+- All candidates still clean-missed pipe corruption (`current_max=0x3000`; leaked pipes stayed clean).
+
+Interpretation:
+
+- Pre-race FNHE cleanup is a useful direction because it shortens the required hold by about one second and produces more candidates.
+- The remaining blocker is critical-path length before `MSG_PROBE`, now dominated by closing thousands of sockets and the `NUM_SPRAY=0xa00` sendmsg spray. To make this viable without a privileged scheduler freeze, the spray/close path likely needs to get well below the observed 300ms range.
+
+Next step:
+
+- Add an environment-controlled active sendmsg spray count (`BAD_DST_NUM_SPRAY`) so the reclaim spray can be tuned down quickly for timing experiments.
+
+## 2026-05-07 22:20 EDT - active sendmsg spray-count tuning knob
+
+Goal:
+
+- Reduce post-candidate critical-path time after pre-race FNHE cleanup by tuning the active sendmsg spray size without recompiling between runs.
+
+Source/checkpoint:
+
+- Checkpoint before edit: `old/2026-05-07_before_active_spray_count/`
+- Added `BAD_DST_NUM_SPRAY` to `exp_x86.c`.
+- Rebuilt `bad_dst_cache` with `./compile_x86.sh`.
+
+Implementation notes:
+
+- `NUM_SPRAY` remains the maximum allocated spray socket array size.
+- `spray_active_count` is initialized from `BAD_DST_NUM_SPRAY`, clamped to `[1, NUM_SPRAY]`, and used by setup/spray/free/reset loops.
+
+Next run:
+
+- Repeat the pre-race FNHE cleanup wrapper with `BAD_DST_NUM_SPRAY=512` first.
+- Keep `mtu_expires=0`, `BAD_DST_PRE_RACE_CLEANUP_FNHE=1`, `BAD_DST_FNHE_EXPIRE_TOTAL_US=0`, and root payload enabled.
+
+Follow-up spray-512 run:
+
+- Run folder: `old/2026-05-07_pre_race_fnhe_cleanup_spray512_smp2/`
+- Settings:
+  - SMP2, no kprobes, `mtu_expires=0`.
+  - `BAD_DST_NUM_SPRAY=512`
+  - `BAD_DST_PRE_RACE_CLEANUP_FNHE=1`
+  - `BAD_DST_FNHE_EXPIRE_TOTAL_US=0`
+  - `BAD_DST_RTABLE_RCU_US=5000`
+  - `BAD_DST_SPRAY_BLOCK_US=10000`
+  - `BAD_DST_GET_ROOT=1`
+- Results:
+  - `attempt_count`: 120
+  - `candidate_count`: 7
+  - `lock_blocked_count`: 7
+  - `pipe_fail_count`: 7
+  - `done_miss_count`: 113
+  - `arb_rw_count`: 0
+  - `root_count`: 0
+  - `release_fail_count`: 0
+- Evidence:
+  - Candidate critical times before `MSG_PROBE`: 198830 us to 226372 us.
+  - Console showed a `dst_release underflow` in `udp_sendmsg` on attempt 53, proving at least one candidate reached the fake-dst invalid-free path.
+  - All candidates still clean-missed pipe corruption (`current_max=0x3000`; leaked vuln pipes also stayed at `0x3000`).
+- Interpretation:
+  - Reducing the sendmsg spray to 512 shortened the post-candidate path and can preserve the stale socket long enough to reach the fake-dst path.
+  - The current blocker is now pipe-buffer/page reclaim reliability, not only race timing.
+
+Follow-up larger vuln-pipe / CPU0 resize run:
+
+- Run folder: `old/2026-05-07_pre_race_fnhe_cleanup_spray512_vuln1024_cpu0resize_smp2/`
+- Settings:
+  - Same spray-512 pre-race cleanup setup.
+  - `BAD_DST_VULN_PIPES=1024`
+  - `BAD_DST_PAGE_PIPES=6144`
+  - `BAD_DST_VULN_PIPE_RESIZE_PERCPU=0`
+  - Captured `dmesg.txt` in addition to `trace.txt`.
+- Results:
+  - `attempt_count`: 42
+  - `candidate_count`: 4
+  - `lock_blocked_count`: 4
+  - `pipe_fail_count`: 4
+  - `done_miss_count`: 38
+  - `arb_rw_count`: 0
+  - `root_count`: 0
+  - `release_fail_count`: 0
+- Evidence:
+  - Candidate critical times before `MSG_PROBE`: 195763 us to 225447 us.
+  - `dmesg.txt` captured `dst_release underflow` and `dst_release: dst:(____ptrval____) refcnt:-1` for the attempt-41 candidate.
+  - Attempt-41 trace timing:
+    - `before_spray` 73.024650
+    - `after_spray` 73.064611
+    - `before_msg_probe` 73.066439
+    - `after_msg_probe` 73.093455
+    - `after_fake_dst_rcu` 74.098540
+    - `after_pipe_resize` 74.149031
+    - `after_free_spray` 75.038967
+    - `after_pipe_page_reclaim` 75.143102
+    - `pipe_corrupt_fail` 75.195112
+- Interpretation:
+  - More vulnerable pipes and CPU0-only ring resize did not improve overlap in this small sample.
+  - Since `free_spray()` takes close to 0.9s in the large-vuln run but happens after the fake invalid free, the remaining problem looks like the fake-freed kmalloc-256 slot/page is not being turned into a vulnerable pipe ring that is later reclaimed by pipe backing pages.
+  - The known no-kprobe root run in `old/2026-05-07_no_cnxret_no_kprobe_earlytimer_smp2/` needed 21 pipe misses before winning, so the current no-kprobe path may still need long repeated runs while reclaim is tuned.
+
+## 2026-05-08 EDT - current race-technique status after timing/classification runs
+
+Goal:
+
+- Evaluate the newer non-root race-hold techniques: futex blocker release, pthread lock oracle, progressive entry pulses, post-block repin, CPU0 noise, pre-race FNHE cleanup, and kprobe-only classification of where candidates land.
+
+Important implemented/debugged techniques:
+
+- `BAD_DST_CPU1_BLOCK_FUTEX=1`: futex-gated CPU1 blockers so large blocker sets can release cleanly after a failed candidate.
+- Pthread socket-lock oracle: preferred over fork oracle; it avoids fork setup noise and reliably tells whether the trigger thread is still holding the socket lock.
+- Progressive entry/fine pulse approach: wakes the trigger in small pulses to walk it toward `ipv4_negative_advice()` instead of relying only on a coarse timerfd expiration.
+- Post-block repin knobs: `BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK` and `BAD_DST_RACE_PULSE_REPIN_GAP_NS`, intended to force the trigger back onto the blocked CPU after a fine pulse.
+- CPU0 noise knobs: tested as a way to slow the main/reclaim path or perturb scheduling.
+- Pre-race FNHE cleanup: `BAD_DST_PRE_RACE_CLEANUP_FNHE=1` with `mtu_expires=0`/short expiry path, intended to avoid holding the race for the full post-candidate PMTU expiry delay.
+- Active spray tuning: `BAD_DST_NUM_SPRAY` so the sendmsg spray can be reduced without recompiling.
+
+Representative runs and results:
+
+- `old/2026-05-08_current_oldtiming_1024futex_nokprobe_smp2/`
+  - Current binary, no kprobes, old timer timing, 1024 futex blockers.
+  - `attempt_count=21`, `candidate_count=20`, `pipe_fail_count=20`, `arb_rw_count=0`, `root_count=0`, `release_fail_count=0`.
+  - All candidates were clean pipe misses (`current_max=0x3000`; leaked pipes also clean).
+  - No `dst_release underflow`; likely false candidates.
+- `old/2026-05-08_current_oldtiming_kprobe_classify_smp2/`
+  - Added classification kprobes (`cnxret`, `cnxassign`, `skcheck`, `skgot`, `sknull`).
+  - `attempt_count=5`, `candidate_count=3`, `pipe_fail_count=3`, no arb/root.
+  - Trace showed `MSG_PROBE` / `skcheck` before `cnxret` on candidates; the real negative-advice return happened later during release. This means the old-timing candidates are generally too early.
+- `old/2026-05-08_current_latewindow_kprobe_classify_smp2/`
+  - Late timer window 85-115 us.
+  - `attempt_count=4`, `candidate_count=4`, `pipe_fail_count=3`, no arb/root.
+  - Same failure pattern: `skcheck` before `cnxret`; late timer window did not fix candidate placement.
+- `old/2026-05-08_progressive_8block_kprobe_classify_smp2/`
+  - Progressive pulse run with 8 blockers.
+  - `attempt_count=18`, `candidate_count=8`, `pipe_fail_count=8`, no arb/root.
+  - Some traces put `cnxret/cnxassign` before `critical_before_msg_probe`, which means this technique can get closer to the right region, but it often overshoots through the `sk_dst_cache = NULL` assignment before reclaim begins.
+- `old/2026-05-07_pre_race_fnhe_cleanup_spray512_smp2/`
+  - Pre-race FNHE cleanup plus `BAD_DST_NUM_SPRAY=512`.
+  - `attempt_count=120`, `candidate_count=7`, `pipe_fail_count=7`, no arb/root.
+  - Candidate critical times dropped to roughly 199-226 ms.
+  - One `dst_release underflow` in `udp_sendmsg` proved at least one candidate reached the fake-dst invalid-free path.
+- `old/2026-05-07_pre_race_fnhe_cleanup_spray512_vuln1024_cpu0resize_smp2/`
+  - Larger vulnerable-pipe pool and CPU0-only pipe resize.
+  - `attempt_count=42`, `candidate_count=4`, `pipe_fail_count=4`, no arb/root.
+  - Captured `dst_release underflow` in dmesg, but pipe/page reclaim still missed.
+
+Interpretation:
+
+- The best new race-timing technique is the progressive pulse path; it can get near `cnxret/cnxassign`, unlike the old broad timer candidates that are often too early.
+- The post-block repin and CPU0 noise variants did not materially improve reliability in the tested form.
+- Pre-race FNHE cleanup is useful because it cuts the required post-candidate hold from about 1.0-1.3 seconds to about 200-370 ms, and it has produced real `dst_release underflow` evidence.
+- Current blockers are split:
+  - Timing: freeze after the refcount drop but before `sk_dst_cache = NULL`, without kprobes extending `cnxret`.
+  - Reclaim: even when the fake-dst invalid-free happens, pipe-buffer/page overlap often still misses.
+
+Next likely experiment:
+
+- Continue from `old/2026-05-08_progressive_1024block_repin_kprobe_smp2/`, which was prepared but not launched.
+- Run progressive pulses with 1024 futex blockers and final/post-block repin to see whether stronger starvation prevents the overshoot seen in the 8-blocker progressive run.
+- Keep kprobes classification-only for this debug pass, then remove them once the candidate lands in the right window.
+
+## 2026-05-14 EDT - progressive 1024-blocker repin checkpoint run
+
+Goal:
+
+- Run the prepared progressive-pulse + 1024 futex blocker + post-block repin checkpoint to test whether stronger starvation fixes the 8-blocker overshoot.
+
+Checkpoint/run folder:
+
+- Base prepared checkpoint: `old/2026-05-08_progressive_1024block_repin_kprobe_smp2/`
+- Actual run folder: `old/2026-05-14_progressive_1024block_repin_kprobe_run1/`
+- I copied the prepared checkpoint into the May 14 run folder, replaced the stale checkpoint binary with current `bad_dst_cache`, and patched only the run-folder wrapper.
+- Binary used: `sha256 9642da5c82bc12acc2fc2c6b542365a11c3dfd1c114c18f21817d29eb321375f`.
+
+Run command:
+
+```sh
+testvm run new_kernel/bzImage --nokaslr --smp 2 --memory 1G \
+  --network tap --network-tap tap0testvm \
+  --network-host-ip 192.168.10.1 --network-ip 192.168.10.2/24 \
+  --network-gateway 192.168.10.1 --network-dns 1.1.1.1 \
+  --share-dir old/2026-05-14_progressive_1024block_repin_kprobe_run1/share \
+  --share-mode ext4 --sync-share-back \
+  --autorun-vm-path /mnt/testvm-share/run.sh \
+  --append bad_dst_attempts=60 --append bad_dst_deadline=500 --append bad_dst_pipe_fail_limit=3
+```
+
+Important settings:
+
+- `BAD_DST_CPU1_BLOCK_THREADS=1024`
+- `BAD_DST_CPU1_BLOCK_FUTEX=1`
+- `BAD_DST_PROGRESS_TO_SETSOCKOPT=1`
+- `BAD_DST_PROGRESS_PULSE_NS=2000`
+- `BAD_DST_PROGRESS_MAX_PULSES=400`
+- `BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK=8`
+- `BAD_DST_RACE_PULSE_REPIN_GAP_NS=0`
+- Kprobes: `cnxret`, `cnxassign`, `negadv`, `negadvret`
+- `mtu_expires_value=1`
+- Note: wrapper had `BAD_DST_GET_ROOT=1` but `BAD_DST_RUN_ROOT_PAYLOAD=0`, so this was a race-classification/debug run, not an actual root-payload run.
+
+Results:
+
+- `attempt_count=60`
+- `candidate_count=0`
+- `lock_blocked_count=0`
+- `miss_before_freeze_count=57`
+- `done_miss_count=3`
+- `pipe_fail_count=0`
+- `arb_rw_count=0`
+- `root_count=0`
+- `release_fail_count=0`
+- Miss distribution:
+  - `race miss before freeze: trigger stage timer_armed`: 34
+  - `race miss before freeze: trigger stage woken`: 23
+  - `race miss after timer: trigger already returned`: 3
+- Trace counts:
+  - `cnxret=60`
+  - `cnxassign=60`
+  - `negadv=60`
+  - `negadvret=60`
+
+Evidence and interpretation:
+
+- Almost every attempt exhausted all 400 progress pulses without reaching the lock-oracle/candidate stage.
+- The trigger was usually still at `timer_armed` or `woken` when the progress loop gave up.
+- The kprobe events did still fire once per attempt, but after the exploit had already classified the attempt as a pre-freeze miss and released/cleaned up. Example from attempt 60: `progress_max` at trace time 223.851207, then `negadv`, `negadvret`, `cnxret`, and `cnxassign` at 223.892289-223.892412 on CPU1.
+- This is the opposite failure mode from the 8-blocker progressive run: 1024 blockers are too strong for the current `2 us * 400` progress scheme, preventing forward progress instead of preventing overshoot.
+
+Next step:
+
+- Do not continue with 1024 blockers at the current pulse size.
+- Sweep intermediate blocker counts or increase progress-pulse duration/max pulses. A reasonable next range is 32, 64, 128, and 256 blockers, with the same kprobe classification, looking for attempts where `cnxret/cnxassign` occurs near the final candidate path instead of after cleanup.
+
+## 2026-05-18/19 EDT - progressive pulse blocker sweep and pre-race cleanup
+
+Goal:
+
+- Continue testing the progressive-pulse race trigger after the 1024-blocker run proved too strong.
+- Sweep intermediate CPU1 blocker counts and then combine the best timing setting with pre-race FNHE cleanup.
+- Keep kprobes for classification only in these debug runs: `cnxret`, `cnxassign`, `negadv`, `negadvret`.
+
+Common setup:
+
+- Kernel: `new_kernel/bzImage`, `--nokaslr --smp 2 --memory 1G`, tap networking on `tap0testvm`.
+- Exploit binary: current `bad_dst_cache`, sha256 `9642da5c82bc12acc2fc2c6b542365a11c3dfd1c114c18f21817d29eb321375f`.
+- Progressive knobs: `BAD_DST_PROGRESS_TO_SETSOCKOPT=1`, `BAD_DST_PROGRESS_PULSE_NS=2000`, `BAD_DST_PROGRESS_MAX_PULSES=400`, `BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK=4`, `BAD_DST_RACE_PULSE_REPIN_GAP_NS=0`.
+- Root payload note: most classification runs set `BAD_DST_GET_ROOT=1` but `BAD_DST_RUN_ROOT_PAYLOAD=0`; the final long pre-cleanup run enabled `BAD_DST_RUN_ROOT_PAYLOAD=1` but never reached arb R/W.
+
+Run results:
+
+- `old/2026-05-18_progressive_64block_kprobe_smp2_run1/`
+  - `attempt_count=18`, `candidate_count=8`, `pipe_fail_count=8`, `done_miss_count=10`, `arb_rw_count=0`, `root_count=0`, `mtu_expires_value=1`.
+  - Candidates were generally too early. Trace showed `critical_before_msg_probe` before the associated `cnxret`; the real negative-advice return happened later during release.
+- `old/2026-05-18_progressive_16block_kprobe_smp2_run1/`
+  - `attempt_count=6`, `candidate_count=3`, `pipe_fail_count=3`, `done_miss_count=2`, `arb_rw_count=0`, `root_count=0`, `mtu_expires_value=1`.
+  - Best timing among the plain `mtu_expires=1` sweep. Attempts included `dst_release` underflow evidence and one candidate with `cnxret` before `MSG_PROBE` and `cnxassign` after `MSG_PROBE`.
+  - Critical times remained about 1.18-1.22 s because the run still waited for normal PMTU expiry.
+- `old/2026-05-18_progressive_32block_kprobe_smp2_run1/`
+  - `attempt_count=41`, `candidate_count=3`, `miss_before_freeze_count=2`, `done_miss_count=35`, `pipe_fail_count=3`, `arb_rw_count=0`, `root_count=0`, `mtu_expires_value=1`.
+  - More overshoot than 16 blockers. Attempts 7/17/39 were lock-held candidates, but all were clean pipe misses (`current_max=0x3000`).
+
+Pre-race cleanup run:
+
+- `old/2026-05-18_progressive_16block_prerace_cleanup_smp2_run1/`
+  - Based on the 16-blocker wrapper, with `mtu_expires=0`, `BAD_DST_PRE_RACE_CLEANUP_FNHE=1`, `BAD_DST_PRE_RACE_EXPIRE_US=50000`, `BAD_DST_FNHE_EXPIRE_TOTAL_US=0`, `BAD_DST_RTABLE_RCU_US=5000`, `BAD_DST_SPRAY_BLOCK_US=10000`, `BAD_DST_NUM_SPRAY=512`.
+  - `attempt_count=9`, `candidate_count=3`, `pipe_fail_count=3`, `done_miss_count=5`, `arb_rw_count=0`, `root_count=0`.
+  - Critical times dropped to 222-299 ms.
+  - Attempts 3 and 8 showed the desired fake-dst/free behavior: `negadv/cnxret` before `MSG_PROBE`, `dst_release refcnt:-1` from `udp_sendmsg`, then clean pipe misses.
+
+Long root-payload-enabled pre-cleanup run:
+
+- `old/2026-05-18_progressive_16block_prerace_cleanup_root_smp2_run2/`
+  - Same as the pre-race cleanup run, but `BAD_DST_RUN_ROOT_PAYLOAD=1` and the host command used `bad_dst_attempts=120`, `bad_dst_deadline=700`, `bad_dst_pipe_fail_limit=25`.
+  - The VM panicked before a clean wrapper exit, so the synchronized share counters are missing; use `host.log` for this run.
+  - Host log counts before the panic/reboot: `attempt=72`, `candidate=21`, `pipefail=20`, `lock_blocked=21`, `race_miss_before_freeze=3`, `race_miss_after_timer=48`, `arb=0`, `root=0`.
+  - Repeated real fake-dst invalid-free evidence: many candidates logged `dst_release: dst:(____ptrval____) refcnt:-1`, with critical times mostly about 186-338 ms and one outlier at 451 ms.
+  - Attempt 72 crashed with `BUG: unable to handle page fault for address: 0000000100000001`, RIP `0x100000001`, call trace through `sk_dst_check+0x55/0xb0` and `udp_sendmsg+0x783/0xc70`.
+  - Interpretation: after many clean misses, the socket still hit a corrupted dst path, but not through the intended fake `dst_ops`/pipe-buffer overlap path. This looks like stale/corrupted dst reuse during `sk_dst_check`, not successful arbitrary R/W.
+
+Current interpretation:
+
+- Progressive pulsing with 16 CPU1 futex blockers is currently the strongest race-timing approach.
+- Pre-race FNHE cleanup is clearly useful: it preserves real invalid-free behavior while shrinking the hold window from about 1.2 s to about 200-300 ms.
+- The active blocker has shifted toward reclaim/page overlap. We can repeatedly reach the fake-dst invalid-free path, but pipe buffers still usually do not land on the relevant page; leaked vulnerable pipes remain clean at `current_max=0x3000`.
+- The attempt-72 `sk_dst_check` crash is useful evidence that corrupted dst state persists into later socket use. It may be possible to turn this into an oracle or use it to distinguish "fake dst installed but wrong object/value" from "pipe page overlap missed".
+- Source check: `net/core/sock_old.c::sk_dst_check()` does `dst = sk_dst_get(sk)` and, when `dst->obsolete` is set, directly calls `dst->ops->check(dst, cookie)`. The RIP `0x100000001` therefore most likely means the cached dst survived long enough for `dst->ops->check` to be read from corrupted object contents, rather than hitting the intended `ipv4_dst_blackhole_ops.check == dst_blackhole_check`.
+
+Next ideas:
+
+- Keep 16-block pre-cleanup as the timing baseline and focus on reclaim constants rather than more timing sweeps.
+- Try reducing or eliminating leaked vulnerable-pipe accumulation after clean misses; the long run accumulated thousands of leaked vuln pipes and eventually crashed in `sk_dst_check`.
+- Add debug-only kprobes/tracepoints around `sk_dst_check`, `dst_check`, and the fake-dst free path to identify whether `0x100000001` comes from a corrupted `dst->ops`, `dst->ops->check`, or a freelist/value overlay.
+- For root runs, use a lower pipe-fail cap until the `sk_dst_check` corruption is understood, because a long run can panic before producing synced guest counters.
+
+## 2026-05-19 EDT - no-kprobe progressive pulse validation
+
+Goal:
+
+- Test whether the 16-block pre-race-cleanup progressive-pulse technique still lands the race with no `cnxret`/`cnxassign`/`negadv` kprobes installed.
+
+Run folder:
+
+- `old/2026-05-19_progressive_16block_prerace_cleanup_nokprobe_root_smp2_run1/`
+- Based on the previous 16-block pre-race-cleanup root wrapper, but with all kprobe event registration and enable lines removed.
+- `kprobe_events.actual` has 0 lines.
+
+Command:
+
+```sh
+testvm run new_kernel/bzImage --nokaslr --smp 2 --memory 1G \
+  --network tap --network-tap tap0testvm \
+  --network-host-ip 192.168.10.1 --network-ip 192.168.10.2/24 \
+  --network-gateway 192.168.10.1 --network-dns 1.1.1.1 \
+  --share-dir old/2026-05-19_progressive_16block_prerace_cleanup_nokprobe_root_smp2_run1/share \
+  --share-mode ext4 --sync-share-back \
+  --autorun-vm-path /mnt/testvm-share/run.sh \
+  --append bad_dst_attempts=120 --append bad_dst_deadline=600 --append bad_dst_pipe_fail_limit=10
+```
+
+Important settings:
+
+- `BAD_DST_CPU1_BLOCK_THREADS=16`
+- `BAD_DST_PROGRESS_TO_SETSOCKOPT=1`
+- `BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK=4`
+- `mtu_expires=0`
+- `BAD_DST_PRE_RACE_CLEANUP_FNHE=1`
+- `BAD_DST_NUM_SPRAY=512`
+- `BAD_DST_RUN_ROOT_PAYLOAD=1`
+- Trace markers remained enabled, but no kprobes were installed.
+
+Results:
+
+- `attempt_count=120`
+- `candidate_count=2`
+- `lock_blocked_count=2`
+- `miss_before_freeze_count=1`
+- `done_miss_count=117`
+- `pipe_fail_count=2`
+- `arb_rw_count=0`
+- `root_count=0`
+- `release_fail_count=0`
+- `mtu_expires_value=0`
+
+Evidence:
+
+- Attempt 46 was a real no-kprobe race-hit signal:
+  - `race candidate: lock held`
+  - `critical elapsed before MSG_PROBE: 191105 us`
+  - kernel warning: `dst_release underflow`
+  - call trace: `ipv4_negative_advice+0x2a/0x30` -> `sock_setsockopt+0xf00/0x1050`
+  - `dst_release: dst:(____ptrval____) refcnt:-1`
+  - then clean pipe miss: `current_max=0x3000`, `leaked_max=0x3000`, `leaked_count=256`
+- Attempt 1 also produced a lock-held candidate and pipe miss, but no visible underflow in the host log.
+
+Interpretation:
+
+- This validates that the progressive-pulse method can land the race without `cnxret` or other kprobe window expansion.
+- It is not currently reliable in the no-kprobe form: only 2 lock-held candidates in 120 attempts, and only one had strong underflow evidence.
+- Removing the kprobes appears to shift timing toward overshoot/normal completion: 117/120 attempts were `trigger already returned`.
+- Current no-kprobe pulse baseline is therefore "possible, not reliable." The next timing work should retune the pulse/final-delay sweep for the no-kprobe timing, probably around the observed attempt-46 region rather than carrying over the kprobe-tuned sweep unchanged.
+
+## 2026-05-18 EDT - active kernel identity recheck
+
+Goal:
+
+- Answer whether current testing is using `new_kernel/` and summarize how that kernel differs from the original top-level kernel artifacts.
+
+Checks performed:
+
+- `file new_kernel/bzImage bzImage vmlinux new_kernel/vmlinux`
+- `sha256sum new_kernel/bzImage bzImage new_kernel/vmlinux vmlinux bad_dst_cache`
+- `scripts/extract-ikconfig` on both `new_kernel/bzImage` and top-level `bzImage`
+- `nm -n` for `_stext`, `anon_pipe_buf_ops`, and `dst_blackhole_ops`
+- `objdump` spot-check of `sock_setsockopt` for the debug-67 compare and `dst_release` call.
+
+Findings:
+
+- Recent experiment wrappers/logs use `new_kernel/bzImage`; older helper scripts `run_testvm.sh` and `debug_testvm.sh` still point at top-level `bzImage`, so those helpers would boot the old kernel unless edited or bypassed.
+- `new_kernel/bzImage`: `5.10.107+ #2 SMP PREEMPT Sun May 3 07:40:16 UTC 2026`, sha256 `96e0bcd01a35cb0c689e7f78f4bbcd7176139688af286b4a2ad2a0106bf6a670`.
+- Top-level `bzImage`: `5.10.107+ #1 SMP Mon Apr 27 21:55:53 UTC 2026`, sha256 `84e3fb33efd5077ee4f5e57dd477a38fcd545798b3e711b8fbe5fcb46f6bcc32`.
+- The current `exp_x86.c` hardcoded symbols match `new_kernel/vmlinux`:
+  - `_stext = 0xffffffff81000000`
+  - `anon_pipe_buf_ops = 0xffffffff827bf740`
+  - `dst_blackhole_ops = 0xffffffff836a9c40`
+- The older top-level `vmlinux` has different symbol addresses:
+  - `anon_pipe_buf_ops = 0xffffffff827bf3c0`
+  - `dst_blackhole_ops = 0xffffffff836a8e40`
+- Config diff is small and intentional:
+  - old: `CONFIG_PREEMPT_NONE=y`
+  - new: `CONFIG_PREEMPT=y`, `CONFIG_PREEMPT_COUNT=y`, `CONFIG_PREEMPTION=y`, `CONFIG_PREEMPT_RCU=y`, `CONFIG_TASKS_RCU=y`, `CONFIG_DEBUG_PREEMPT=y`
+  - old inline unlock options were replaced by `CONFIG_UNINLINE_SPIN_UNLOCK=y`.
+- Both extracted configs keep important shared options such as `CONFIG_HZ=1000`, `CONFIG_RANDOMIZE_BASE=y`, `CONFIG_KPROBES=y`, `CONFIG_FTRACE=y`, `CONFIG_FUNCTION_TRACER=y`, `CONFIG_DEBUG_INFO=y`, and `CONFIG_SLUB=y`.
+- Current kernel source still has the x86 test compatibility patch `#define ARCH_DMA_MINALIGN 128`, which makes the rebuilt test kernel route 136..192 byte kmalloc requests to `kmalloc-256`; previous runtime slabinfo confirmed no effective `kmalloc-192` cache in the rebuilt `new_kernel`.
+- Both top-level and `new_kernel` binaries contain the local debug-67 path in `sock_setsockopt`, but only `new_kernel` is the PREEMPT/no-effective-`kmalloc-192` build currently matched by the exploit constants.
+
+Interpretation:
+
+- The intended current target is `new_kernel/bzImage` plus `new_kernel/vmlinux`.
+- Avoid the older top-level `bzImage` unless intentionally testing the non-PREEMPT/original bucket layout, because the current exploit binary/source constants are keyed to `new_kernel`.
+
+## 2026-05-18 EDT - kernel post-race debug logging patch
+
+Goal:
+
+- Add diagnostic logging to `/home/jack/Documents/college/purdue/research/linux_src/linux_stable` without placing new logging in the race-critical `sock_setsockopt()` / `dst_negative_advice()` path.
+
+Checkpoint:
+
+- `old/2026-05-18_before_kernel_postrace_debug_logging/`
+- Saved pre-edit copies of:
+  - `RUNNING_LOG.md`
+  - `net/core/dst.c`
+  - `net/core/sock.c`
+  - `net/ipv4/udp.c`
+  - `fs/pipe.c`
+
+Files changed:
+
+- `/home/jack/Documents/college/purdue/research/linux_src/linux_stable/net/core/dst.c`
+- `/home/jack/Documents/college/purdue/research/linux_src/linux_stable/net/core/sock.c`
+- `/home/jack/Documents/college/purdue/research/linux_src/linux_stable/net/ipv4/udp.c`
+- `/home/jack/Documents/college/purdue/research/linux_src/linux_stable/fs/pipe.c`
+
+Added logging:
+
+- `bad_dst_dbg dst_destroy_rcu`: logs suspicious dst destruction after RCU callback when `obsolete != 0` or `flags == 0xffff`.
+- `bad_dst_dbg dst_blackhole_check`: logs fake/blackhole dst check calls, including dst pointer, refcount, obsolete, flags, ops, cookie, and CPU.
+- `bad_dst_dbg sk_dst_check obsolete/reset` and `__sk_dst_check obsolete/reset`: logs only when cached dst is already obsolete, immediately around the post-race `dst->ops->check()` path.
+- `bad_dst_dbg udp_sendmsg MSG_PROBE before/after sk_dst_check`: logs the exploit's post-race `MSG_PROBE` route check path.
+- `bad_dst_dbg pipe_resize_ring`: logs 4-slot pipe ring resize with active occupancy, which corresponds to the pipe-buffer ring reclaim shape used by the exploit.
+
+Race-impact note:
+
+- No new logging was added to `sock_setsockopt()`, `dst_negative_advice()`, `ipv4_negative_advice()`, or `dst_release()`.
+- `dst_release()` was intentionally left untouched because it is directly used by the vulnerable negative-advice path and would perturb the race window.
+- The existing local debug-67 hook in `sock_setsockopt()` was already present in the source and was not part of this edit.
+
+Validation:
+
+- Ran `git -C /home/jack/Documents/college/purdue/research/linux_src/linux_stable diff --check -- net/core/dst.c net/core/sock.c net/ipv4/udp.c fs/pipe.c`; it produced no warnings.
+- Did not compile in-place because the kernel source tree currently has no `.config` / `include/generated/autoconf.h`; use the existing `build_linux.py` flow for the real build verification.
+
+## 2026-05-18 EDT - logged-kernel reclaim diagnostics
+
+Goal:
+
+- Boot the rebuilt logged kernel in `new_kernel/` and use the new post-race logging to separate race/fake-dst failures from pipe reclaim failures.
+
+Kernel used:
+
+- `new_kernel/bzImage`: `5.10.107+ #1 SMP PREEMPT Tue May 19 02:38:04 UTC 2026`
+- `new_kernel/vmlinux` symbols:
+  - `_stext = 0xffffffff81000000`
+  - `anon_pipe_buf_ops = 0xffffffff827bf880`
+  - `dst_blackhole_ops = 0xffffffff836a9e40`
+  - `init_task = 0xffffffff83415940`
+
+### No-kprobe race/reclaim diagnostic
+
+Checkpoint:
+
+- `old/2026-05-18_logged_kernel_reclaim_debug_nokprobe_run1/`
+
+Command shape:
+
+- `testvm run new_kernel/bzImage --nokaslr --smp 2 --memory 1G --network tap --network-tap tap0testvm ... --append bad_dst_attempts=120 --append bad_dst_deadline=650 --append bad_dst_pipe_fail_limit=4`
+
+Result:
+
+- `attempt_count=27`
+- `candidate_count=4`
+- `lock_blocked_count=4`
+- `pipe_fail_count=4`
+- `arb_rw_count=0`
+- `root_count=0`
+
+Evidence:
+
+- One strong candidate hit a real `dst_release underflow` in `udp_sendmsg+0x854`, but the logged cached dst still looked like an old IPv4 route rather than the fake cmsg payload:
+  - `UDP before sk_dst_check ... cached=ffff88801f5ffa80`
+  - `UDP after sk_dst_check ... rt=0 cached=ffff88801f5ffa80`
+  - no `bad_dst_dbg dst_blackhole_check`
+- Other candidates either had `cached=0` by `MSG_PROBE` time or showed old-route fields (`ops=ffffffff836b8c40`, flags 0).
+- No logged `flags=0xffff` / `ops=ffffffff836a9e40` fake dst was observed in this run.
+
+Interpretation:
+
+- For these no-kprobe samples, the main failure is usually before final pipe backing-page reclaim: either the stale socket cache is gone by the probe, or the sendmsg fake-dst reclaim did not overwrite the stale dst.
+
+### sock_kmalloc kprobe diagnostic
+
+Checkpoint:
+
+- `old/2026-05-18_logged_kernel_reclaim_debug_sockkmalloc_run1/`
+
+Changes:
+
+- Added post-race allocation probes only:
+  - `p:kmal sock_kmalloc sk=%di size=%si:s32`
+  - `r10:kmalret sock_kmalloc ret=$retval:x64`
+  - `p:kfree_s sock_kfree_s sk=%di mem=%si:x64 size=%dx:s32`
+- Filtered `kmal` / `kfree_s` for size 256.
+- Used `BAD_DST_FAKE_DST_OPS=0xffffffff836a9e40`, `BAD_DST_RUN_ROOT_PAYLOAD=0`, and `BAD_DST_SPRAY_BLOCK_US=100000`.
+
+Result:
+
+- `attempt_count=26`
+- `candidate_count=3`
+- `lock_blocked_count=3`
+- `pipe_fail_count=2`
+- `arb_rw_count=0`
+- `root_count=0`
+
+Evidence:
+
+- Kprobe trace confirms the sendmsg cmsg spray really allocates many 256-byte `sock_kmalloc` objects.
+- The candidates in this run all had `cached=0` by `MSG_PROBE`, so they did not test fake-dst reclaim against a stale cached route.
+
+Interpretation:
+
+- The spray mechanism is active; the remaining question is whether it lands on the stale dst page in the rare race-hit attempts.
+
+### DEBUG=67 control and pipe-ops mismatch
+
+Checkpoints:
+
+- `old/2026-05-18_logged_kernel_debug67_reclaim_check_smp1/`
+- `old/2026-05-18_before_pipe_ops_env_override/`
+
+Initial DEBUG=67 control:
+
+- Built `exp_x86.c` with `-DDEBUG` and ran SMP=1 with `BAD_DST_FAKE_DST_OPS=0xffffffff836a9e40`, root payload disabled.
+- First run proved the forced stale-free path can hit the fake dst:
+  - `sk_dst_check obsolete ... flags=0xffff ops=ffffffff836a9e40`
+  - `bad_dst_dbg dst_blackhole_check dst=... flags=0xffff ops=ffffffff836a9e40`
+  - `UDP after sk_dst_check ... cached=0`
+- It then frequently failed with `FAIL: could not corrupt pipe`.
+- One later attempt found a corrupted pipe, but rejected it:
+  - `found corrupted pipe FIONREAD source=current index=14 size=0xc3c3c3c3`
+  - `FAIL: corrupted pipe source=current index=14 had no matching pipe-buffer probe`
+
+Root cause found:
+
+- The rebuilt logged kernel moved `anon_pipe_buf_ops` from the exploit's compiled default `0xffffffff827bf740` to `0xffffffff827bf880`.
+- The pipe-buffer probe uses `pipe_buffer->ops - PIPE_OPS_OFFSET` as a KASLR sanity check, so valid overlaps were rejected with the stale offset.
+
+Code change:
+
+- Updated `exp_x86.c` to allow `BAD_DST_PIPE_OPS` to override the compiled `PIPE_OPS_OFFSET` default.
+- Checkpoint-local wrapper sets:
+  - `BAD_DST_FAKE_DST_OPS=0xffffffff836a9e40`
+  - `BAD_DST_PIPE_OPS=0xffffffff827bf880`
+
+Validation after fix:
+
+- Rebuilt DEBUG binary and reran SMP=1 with root payload disabled.
+- Artifact: `old/2026-05-18_logged_kernel_debug67_reclaim_check_smp1/host_pipeops_fix.log`
+- Result counts from host log:
+  - `start trigger attempt`: 3
+  - `FAIL: could not corrupt pipe`: 2
+  - `dst_blackhole_check`: 1
+  - `pipe probe leak accepted`: 1
+  - `Arb R/W setup`: 1
+  - `Kernel panic`: 0
+- Accepted overlap:
+  - `found corrupted pipe FIONREAD source=current index=14 size=0xc3c3c3c3`
+  - `pipe probe leak accepted: page_index=158 probe=0x8b8 pipe_base=0x840 active_before=3 page=0xffffea00003a96c0 ops=0xffffffff827bf880 offset=0x0 len=0x4 flags=0x4141414100000010`
+  - `kaslr base: ffffffff81000000`
+  - `Arb R/W setup`
+
+Interpretation:
+
+- The apparent "corrupted pipe but no matching probe" failure on the rebuilt kernel was a stale symbol issue, not a reclaim design issue.
+- With the pipe ops address corrected, the DEBUG=67 forced path can reach a valid arbitrary R/W setup on the logged kernel.
+
+### DEBUG=67 root-payload control
+
+Checkpoint:
+
+- `old/2026-05-18_logged_kernel_debug67_root_pipeops_fix/`
+
+Configuration:
+
+- DEBUG=67 forced trigger.
+- `BAD_DST_FAKE_DST_OPS=0xffffffff836a9e40`
+- `BAD_DST_PIPE_OPS=0xffffffff827bf880`
+- Root payload enabled.
+
+Result:
+
+- Host log: `old/2026-05-18_logged_kernel_debug67_root_pipeops_fix/host.log`
+- Counts before manual stop after VM panic/reboot:
+  - `start trigger attempt`: 14
+  - `FAIL: could not corrupt pipe`: 13
+  - `dst_blackhole_check`: 1
+  - `pipe probe leak accepted`: 0
+  - `Arb R/W setup`: 0
+  - `now uid/gid/euid/egid`: 0
+  - `Kernel panic`: 1
+
+Panic:
+
+- On attempt 14, after many clean pipe misses, kernel panicked while opening pipes:
+  - `general protection fault, probably for non-canonical address ...`
+  - `RIP: kmem_cache_alloc_trace+0xdd/0x2d0`
+  - call trace: `alloc_pipe_info -> create_pipe_files -> do_pipe2`
+
+Interpretation:
+
+- Root was not reached in this run.
+- This is a separate cleanup/retry reliability issue: failed reclaim attempts can leave corrupted kmalloc/slab state that later trips allocation. A future retry loop should either stop after a strong fake-dst/free signal, leak more potentially touched pipe state, or reboot/re-exec between aggressive DEBUG attempts rather than continuing indefinitely in the same kernel.
+
+Current conclusions:
+
+- The logged kernel instrumentation is useful and does not block the forced DEBUG=67 path.
+- The symbol mismatch for `anon_pipe_buf_ops` was a real bug in the exploit diagnostics and is now fixed via `BAD_DST_PIPE_OPS`.
+- Reclaim is possible on the logged kernel: one DEBUG=67 run reached valid pipe-buffer leak and `Arb R/W setup`.
+- Reclaim is still stochastic, and failed attempts can corrupt allocator state enough to panic later attempts. The next practical work should improve failed-attempt isolation before using long root-payload retry loops.
+
+### Race-change impact matrix
+
+Goal:
+
+- Compare the old no-kprobe root timing against the newer progressive trigger path while keeping the current logged kernel symbols fixed.
+- Identify which race changes move the exploit closer to or farther from a useful stale `sk_dst_cache` at `udp_sendmsg(MSG_PROBE)`.
+
+Checkpoint:
+
+- `old/2026-05-19_race_change_matrix_prepare/`
+
+Common setup:
+
+- Kernel: `new_kernel/bzImage`
+  - `5.10.107+ #1 SMP PREEMPT Tue May 19 02:38:04 UTC 2026`
+  - `dst_blackhole_ops=0xffffffff836a9e40`
+  - `anon_pipe_buf_ops=0xffffffff827bf880`
+- QEMU: `testvm run new_kernel/bzImage --nokaslr --smp 2 --memory 1G --network tap --network-tap tap0testvm ...`
+- Wrapper set `/proc/sys/net/ipv4/route/mtu_expires=1` before dropping privileges.
+- Root payload disabled for the matrix; the goal was race/reclaim signal, not credential overwrite.
+- Shared reclaim settings were restored to the old successful values where possible:
+  - `BAD_DST_PRE_RACE_EXPIRE_US=700000`
+  - `BAD_DST_FNHE_EXPIRE_TOTAL_US=1300000`
+  - `BAD_DST_FAKE_DST_RCU_US=1000000`
+  - `BAD_DST_SPRAY_BLOCK_US=250000`
+  - `BAD_DST_NUM_SPRAY=2560`
+  - `BAD_DST_PREPARE_PIPES_BEFORE_RACE=1`
+  - `BAD_DST_VULN_PIPES=256`
+  - `BAD_DST_LEAK_VULN_PIPES_ON_CLEAN_FAIL=1`
+  - `BAD_DST_FAKE_DST_OPS=0xffffffff836a9e40`
+  - `BAD_DST_PIPE_OPS=0xffffffff827bf880`
+
+Variants:
+
+- A: `old/2026-05-19_matrix_A_oldtimer_oldreclaim_currentkernel/`
+  - Old successful timer/blocker settings: `BAD_DST_TIMER_SWEEP_START_NS=25000`, `BAD_DST_TIMER_SWEEP_STEP_NS=4096`, `BAD_DST_TIMER_SWEEP_COUNT=20`, `BAD_DST_CPU1_BLOCK_THREADS=1024`, no futex blockers, no lock oracle, no progress gate.
+- B: `old/2026-05-19_matrix_B_progressive_oldreclaim_currentkernel/`
+  - Progressive settings with old reclaim restored: `BAD_DST_CPU1_BLOCK_THREADS=16`, futex blocker enabled, timer sweep `5000 + 2048*n`, progress-to-setsockopt enabled, `BAD_DST_PROGRESS_PULSE_NS=2000`, `BAD_DST_RACE_PULSE_SWEEP_COUNT=120`, pthread lock oracle enabled, require setsockopt-enter stage.
+- C: `old/2026-05-19_matrix_C_oldtimer_lockoracle_currentkernel/`
+  - Same as A, but pthread lock oracle enabled.
+- D: `old/2026-05-19_matrix_D_futex_timer_nopulse_currentkernel/`
+  - Same futex/timer family as B, but progress gate, pulse sweep, setsockopt-enter requirement, and lock oracle disabled.
+
+Results:
+
+| Variant | Attempts | Candidates | Oracle blocked | MSG_PROBE cached non-NULL | MSG_PROBE cached NULL | Pipe misses | Arb R/W | Root | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| A old timer/no oracle | 1 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | Hit a stale cached route, but it was the old IPv4 route (`flags=0`, IPv4 dst ops), not fake dst. Trigger cleanup hung after miss. |
+| B progressive gate+pulse+oracle | 58 | 4 | 4 | 0 | 4 | 4 | 0 | 0 | Oracle produced real blocked candidates, but all four were too late: `MSG_PROBE before sk_dst_check ... cached=0`. |
+| C old timer+oracle | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | Lock oracle itself did not force lateness in this sample; still saw a non-NULL stale old route. Trigger cleanup hung after miss. |
+| D futex/timer, no pulse/oracle | 6 | 6 | 0 | 3 | 3 | 5 | 0 | 0 | Removing progress/pulse gate brought back frequent non-NULL cached routes, but still no fake-dst reclaim. |
+
+Important evidence:
+
+- B candidates were cleaner from the oracle perspective but too late for exploitation:
+  - attempt 17, 33, 37, 52: `lock oracle: blocked`
+  - each corresponding `udp_sendmsg MSG_PROBE before sk_dst_check` had `cached=0000000000000000`
+- A/C/D no-gate samples often had a stale cached dst at `MSG_PROBE`, but it was not the fake cmsg dst:
+  - `sk_dst_check obsolete ... ref=2 obsolete=2 flags=0x0 ops=ffffffff836b8c40`
+  - no `flags=0xffff ops=ffffffff836a9e40`
+  - no `bad_dst_dbg dst_blackhole_check`
+- No variant in this matrix hit pipe-buffer overlap or arbitrary R/W.
+
+Interpretation:
+
+- The most impactful negative change appears to be the progressive `setsockopt_enter` gate plus pulse/lock-oracle timing, not the lock oracle alone. It filters for real socket-lock blocking, but by the time the exploit performs the fake-dst free path the socket cache is usually already cleared.
+- The old/no-gate timing family and the futex/no-pulse ablation more often reach `MSG_PROBE` with a non-NULL cached dst, so they are closer to the useful UAF timing window.
+- The remaining major issue in those non-gated runs is not "socket cache already NULL"; it is that sendmsg fake-dst reclaim is not landing on the stale route object. The stale cached object still looks like a normal IPv4 route at `sk_dst_check`.
+- The trigger-release hang is specific to the old candidate path in these samples and should be fixed before long retries, but it is probably secondary to the fake-dst reclaim miss.
+
+Next steps:
+
+- Prefer the old/no-gate or futex/no-pulse race path for the next root attempts.
+- Keep the pthread oracle only as optional diagnostics, not as a required gate for the final timing path.
+- Focus next on why the stale cached route remains an old route after the fake-dst spray: validate the exact dst address being freed, whether the cmsg spray lands in the same slab/page, and whether pipe/leaked-vuln cleanup is perturbing the kmalloc-256 reclaim before `MSG_PROBE`.
+
+### SLUB slab-return investigation
+
+Goal:
+
+- Investigate whether clean pipe misses can be explained by the kmalloc slab not being returned to the page allocator even after all cmsg spray objects on that slab are freed.
+- Record the most promising next approaches in `NOTE.md`.
+
+Checkpoint:
+
+- `old/2026-05-19_slab_reclaim_investigation_note/`
+
+Files reviewed:
+
+- `/home/jack/Documents/college/purdue/research/linux_src/linux_stable/mm/slub.c`
+- `/home/jack/Documents/college/purdue/research/linux_src/linux_stable/mm/page_alloc.c`
+- `exp_x86.c`
+
+Kernel/config facts:
+
+- Current config has `CONFIG_SLUB=y`, `CONFIG_SLUB_CPU_PARTIAL=y`, `CONFIG_SLAB_FREELIST_HARDENED=y`, and `CONFIG_SLUB_DEBUG=y`; `CONFIG_SLUB_DEBUG_ON` and `CONFIG_SLUB_STATS` are off.
+- `set_cpu_partial()` sets `cpu_partial=13` for caches with `s->size >= 256 && < 1024`.
+- `set_min_partial()` floors `min_partial` to `MIN_PARTIAL=5`, so `kmalloc-256` should keep at least 5 node partial slabs before discarding empty ones.
+
+SLUB behavior relevant to this exploit:
+
+- `__slab_free()` does not necessarily discard a slab when an object is freed.
+- If a full slab first becomes partial and `CONFIG_SLUB_CPU_PARTIAL` is enabled, SLUB can freeze it and put it on the freeing CPU's per-CPU partial list with `put_cpu_partial()`.
+- Later frees into a frozen slab can reduce `inuse` to 0 without immediately discarding it; the slab remains frozen until a CPU partial drain/unfreeze path runs.
+- `unfreeze_partials()` discards an empty slab only when `n->nr_partial >= s->min_partial`; otherwise it adds the empty slab to the node partial list.
+- `deactivate_slab()` has the same empty-slab rule: empty slabs are discarded only if the node already has at least `min_partial` partial slabs.
+- Therefore "all cmsg objects freed" is not enough. The target `kmalloc-256` slab may remain in the CPU partial list or node partial list and never reach `discard_slab()`.
+
+Page allocator behavior after SLUB discard:
+
+- `discard_slab()` calls `free_slab()`, then `__free_slab()`, then `__free_pages()`.
+- For order-0 slabs, `free_unref_page_commit()` places the page on the freeing CPU's per-CPU page list first.
+- Order-0 pipe backing allocations use `rmqueue_pcplist()` first. That is good only if the pipe page allocations run on the same CPU whose PCP received the freed slab page, or if enough pages are drained/refilled to move it where the allocating CPU can see it.
+
+Interpretation:
+
+- The latest no-gate candidates often still had a non-NULL cached route at `MSG_PROBE`, but it was an old route object, not the fake cmsg dst. That points to fake-dst reclaim not landing on the stale route.
+- Separately, even when the fake unaligned free succeeds, pipe-page overlap can fail if the fake pipe-ring slab page is retained by SLUB partial lists or by the wrong CPU's PCP page list.
+- This makes the "kmalloc slab not freed" hypothesis plausible and worth testing directly.
+
+Most promising next approaches recorded in `NOTE.md`:
+
+- Use old/no-gate or futex/no-pulse race timing, not progressive gate+pulse as a required final path.
+- Pre-fill `kmalloc-256` node partials so an empty target slab is discarded instead of retained under the 5-partial minimum.
+- Force per-CPU partial drains after the target slab is likely empty.
+- Keep cmsg allocation/free, invalid free, pipe ring allocation, and pipe page backing reclaim on CPU0 where possible; if a freed page lands on CPU1's PCP, CPU0-only reclaim can miss.
+- Add debug-only probes/logging for `discard_slab`, `__free_slab`, `free_unref_page_commit`, and `rmqueue_pcplist` to prove whether the target page reaches SLUB discard and which CPU receives/reallocates it.
+
+### Expire-FNHE-first / race-final-decrement implementation
+
+Goal:
+
+- Implement and test the variant where the FNHE expiry path drops the table reference before the race, so the raced `SO_CNX_ADVICE` / `ipv4_negative_advice()` path should perform the final `dst_release()` and execute the `call_rcu()` slow path before `sk_dst_cache` is nulled.
+
+Checkpoints:
+
+- Before edits: `old/2026-05-19_before_expire_first_race_second/`
+- Implementation and diagnostic wrapper: `old/2026-05-19_expire_first_race_second_impl/`
+- Test share directory used by `testvm`: `old/2026-05-19_expire_first_diag_run/share/`
+
+Code changes:
+
+- Added `trigger_pre_race_fnhe_expiry()` in `exp_x86.c`.
+- Added knobs:
+  - `BAD_DST_EXPIRE_FNHE_BEFORE_RACE=1` enables the new order.
+  - `BAD_DST_PRE_RACE_FNHE_EXPIRE_US` controls the wait before issuing the lookup that expires FNHE; default is `1200000` when not otherwise configured.
+  - `BAD_DST_PRE_RACE_FNHE_SETTLE_US` optionally sleeps after the expiry lookup.
+  - `BAD_DST_PRE_RACE_FNHE_SYNC_RCU` optionally does a userland RCU sync after the expiry lookup; default off because the route table ref drop is synchronous and the final route free should happen in the raced path.
+  - `BAD_DST_SKIP_POST_RACE_FNHE_CLEANUP` defaults to on when pre-race expiry is enabled, preventing the old post-race cleanup from racing against the new sequence.
+- Added `vm_run_expire_first_diag.sh` for bounded `MSG_PROBE` diagnostics with the new sequence.
+- Preserved the legacy `BAD_DST_PRE_RACE_CLEANUP_FNHE` behavior by making it imply the new mode if explicitly set.
+
+Build:
+
+- Plain `./compile_x86.sh` failed in the ambient shell because static libc was missing from the linker path.
+- `nix-shell -p glibc.static --run './compile_x86.sh'` succeeded; warnings were the existing format/ignored-return warnings.
+
+Diagnostic setup:
+
+- Kernel: `new_kernel/bzImage`, `--nokaslr --smp 2 --memory 1G`, tap network on `tap0testvm`.
+- ICMP4 server was already running on the host.
+- Wrapper set:
+  - `/proc/sys/net/ipv4/route/mtu_expires=1`
+  - `BAD_DST_EXPIRE_FNHE_BEFORE_RACE=1`
+  - `BAD_DST_PRE_RACE_FNHE_EXPIRE_US=1200000`
+  - `BAD_DST_SKIP_POST_RACE_FNHE_CLEANUP=1`
+  - `BAD_DST_EXPIRE_WITH_LOOKUP_ONLY=1`
+  - `BAD_DST_STOP_AFTER_MSG_PROBE=1`
+  - `BAD_DST_FAKE_DST_OFFSET_AUTO=0`
+  - `BAD_DST_FAKE_DST_OFFSET=64`
+  - `BAD_DST_FAKE_DST_OPS=0xffffffff836a9e40`
+  - `BAD_DST_PIPE_OPS=0xffffffff827bf880`
+  - old no-gate timer sweep family: start `25000`, step `4096`, count `20`
+  - CFS blockers: `BAD_DST_CPU1_BLOCK_THREADS=1024`
+  - release timeout increased to `5000000` after the first cleanup failure.
+
+Results:
+
+- First diagnostic run reached pre-race FNHE expiry, but auto fake-dst offset selected `192`, so `try_run_main_exploit()` skipped before `MSG_PROBE`. The trigger release then timed out; this was an artifact of aborting early with 1024 blockers and the short default release timeout.
+- Second diagnostic run pinned fake-dst offset to `64` and reached `MSG_PROBE` without the lock oracle. It was not a confirmed race hit:
+  - `MSG_PROBE before sk_dst_check ... cached=ffff88800fd776c0`
+  - `sk_dst_check obsolete ... ref=2 obsolete=2 flags=0x0 ops=ffffffff836b8c40`
+  - Interpretation: the pre-race expiry made the cached route obsolete, but without the oracle the main thread probably arrived before the trigger had performed the final decrement. The main thread consumed the obsolete route instead.
+- Third diagnostic enabled the pthread lock oracle. Attempt 1 was classified as too early (`lock oracle: done_ok` / `race miss before freeze: too_early`) and cleanup initially timed out before the release-timeout fix.
+- Fourth diagnostic with the longer release timeout produced a lock-oracle blocked candidate:
+  - `lock oracle: blocked`
+  - `race candidate: lock held`
+  - `critical elapsed before MSG_PROBE: 620417 us`
+  - `MSG_PROBE before sk_dst_check ... cached=ffff88800f95e6c0`
+  - `sk_dst_check obsolete ... ref=3 obsolete=-1 flags=0x0 ops=ffffffff836b8c40`
+  - `MSG_PROBE after sk_dst_check ... rt=ffff88800f95e6c0 cached=ffff88800f95e6c0`
+- This did not hit fake-dst reclaim. The cached object visible to `MSG_PROBE` was a normal IPv4 route, not the cmsg fake dst (`flags` not `0xffff`, `ops` not `dst_blackhole_ops`).
+
+Interpretation:
+
+- The new ordering is implemented and can get to a lock-oracle candidate, but the first confirmed candidate did not prove that the raced trigger performed the final decrement in the intended window.
+- The pre-race expiry path itself works enough to make the route obsolete; in the no-oracle diagnostic the main thread saw `obsolete=2`.
+- The lock-oracle candidate still suffered from the same broad failure mode as prior runs: by `MSG_PROBE`, the stale cached pointer is not backed by the fake sendmsg payload. In this sample it looked like a normal IPv4 route.
+- The next debugging target is to distinguish:
+  - trigger frozen before final decrement despite lock oracle,
+  - trigger reached final decrement but the freed route was reclaimed by normal route allocations before cmsg spray,
+  - or `sk_dst_cache` was refreshed/reassigned before `MSG_PROBE`.
+- The compiled-in kernel logging currently does not directly print the specific `fnhe_flush_routes()` route pointer/refcount or the specific `ipv4_negative_advice()` `ip_rt_put()` pointer/refcount, so those would be useful non-window-affecting logs for this new sequence.
+
+### Kernel logging patch for reclaim/FNHE diagnosis
+
+Goal:
+
+- Add kernel-side diagnostics to the source tree at `/home/jack/Documents/college/purdue/research/linux_src/linux_stable` for the current reclaim failure investigation, without changing exploit code.
+
+Checkpoint:
+
+- `old/2026-05-20_kernel_logging_patch/`
+
+Files changed:
+
+- `net/ipv4/route.c`
+- `mm/slub.c`
+- `mm/page_alloc.c`
+
+Logging added:
+
+- IPv4 route/FNHE path:
+  - `fnhe_flush_routes()` before/after `dst_dev_put()` and `dst_release()`.
+  - `update_or_create_fnhe()` for FNHE create/update state.
+  - `ipv4_negative_advice()` before/after `ip_rt_put()` on obsolete/redirect/expiry paths.
+  - `ip_del_fnhe()` and `find_exception()` expiry path.
+  - `rt_bind_exception()` before/after `dst_hold()` and when replacing an old FNHE route.
+- SLUB allocator:
+  - kmalloc-256-only logs for empty-slab decisions, `discard_slab()` paths, CPU partial insertion, and `__slab_free()` state after the successful cmpxchg.
+- Page allocator:
+  - ratelimited PCP free/alloc logs with PFN, migratetype, zone, PCP count, and CPU.
+
+Notes:
+
+- The negative-advice and route/FNHE logs are diagnostic and can perturb race timing, so use this kernel to explain allocator/FNHE behavior rather than measure final exploit reliability.
+- The source tree did not have a local `.config` or build outputs, so no object compile was run from this tree. Verification done here was `git diff --check -- net/ipv4/route.c mm/slub.c mm/page_alloc.c`, which passed.
+
+### Logging kernel diagnostic run
+
+Goal:
+
+- Boot the newly rebuilt logging kernel and use the added route/FNHE/SLUB/page allocator logs to explain why the current candidate does not reach fake-dst reclaim.
+
+Checkpoints/artifacts:
+
+- Failed launch due to missing shared binary: `old/2026-05-21_logging_kernel_reclaim_run1/`
+- Useful diagnostic run: `old/2026-05-21_logging_kernel_reclaim_run2/`
+  - Full serial log: `serial.log`
+  - Filtered event log: `key_events.log`
+  - Allocator excerpt: `allocator_excerpt.log`
+  - Guest share: `share/`
+
+Command/setup:
+
+- Kernel: `new_kernel/bzImage`, version string `5.10.107+ #1 SMP PREEMPT Thu May 21 01:17:53 UTC 2026`.
+- QEMU/testvm: `--nokaslr --smp 2 --memory 1G --network tap --network-tap tap0testvm --append ignore_loglevel`.
+- Wrapper: `vm_run_expire_first_diag.sh`, with:
+  - `BAD_DST_MAX_ATTEMPTS=6`
+  - `BAD_DST_STOP_AFTER_MSG_PROBE=1`
+  - `BAD_DST_GET_ROOT=0`
+  - `BAD_DST_RUN_ROOT_PAYLOAD=0`
+- ICMP4 MTU server was already running on `br0testvm`.
+
+Run notes:
+
+- First launch used `--autorun vm_run_expire_first_diag.sh`; testvm exposed only the wrapper, so the guest failed with `./bad_dst_cache: not found`. Retried with explicit `--share-dir`.
+- Second run reached one lock-oracle candidate and then hung after `FAIL: trigger did not release after failed candidate`; the VM was killed manually after useful logs were captured.
+
+Key evidence:
+
+- FNHE creation/bind:
+  - `fnhe_create fnhe=ffff88800fd6b480 ... pmtu=1200`
+  - `rt_bind_exception_before_hold output rt=ffff88800fd6a3c0 ... ref=1`
+  - `rt_bind_exception_after_hold output rt=ffff88800fd6a3c0 ... ref=2`
+- Pre-race FNHE expiry worked as expected:
+  - `fnhe_expired ... output=ffff88800fd6a3c0`
+  - `fnhe_flush_before output rt=ffff88800fd6a3c0 ... ref=2 obsolete=-1`
+  - `fnhe_flush_after_dev_put ... ref=2 obsolete=2`
+  - `fnhe_flush_after_release ... ref=1 obsolete=2`
+- Lock oracle reported a candidate:
+  - `lock oracle: blocked`
+  - `race candidate: lock held`
+- No `negative_advice_put_before` / `negative_advice_put_after` logs appeared for the candidate.
+- `MSG_PROBE` did not see the expired FNHE route:
+  - expired FNHE route: `ffff88800fd6a3c0`
+  - `MSG_PROBE before sk_dst_check ... cached=ffff88800fd6af00`
+  - `sk_dst_check obsolete ... dst=ffff88800fd6af00 ref=3 obsolete=-1 flags=0x0 ops=ffffffff836b8ec0`
+- The observed `MSG_PROBE` route is a normal route, not the fake dst:
+  - fake-dst payload was configured with `flags=0xffff` and `ops=0xffffffff836a9e40`
+  - `MSG_PROBE` observed `flags=0x0` and normal IPv4 route ops `0xffffffff836b8ec0`
+- SLUB/page allocator logs show the kmalloc-256 cross-cache machinery is active:
+  - CPU0 retained the first empty slabs up to `min_partial=5`, then discarded later empty kmalloc-256 slabs.
+  - Several discarded kmalloc-256 pages were then allocated from PCP by CPU0 shortly after `MSG_PROBE`.
+
+Interpretation:
+
+- This run confirms the pre-race FNHE expiry sequence drops the exception-table route reference from 2 to 1 and marks it obsolete, but the race candidate did not reach the final `ipv4_negative_advice()` decrement before the main thread's `MSG_PROBE`.
+- The pthread lock oracle is currently only proving that the trigger thread holds the socket lock somewhere in `setsockopt(SO_CNX_ADVICE)`. It is not strong enough to prove the trigger reached the exact post-`ip_rt_put()` / pre-null window.
+- The reclaim machinery did discard and recycle kmalloc-256 pages, but not the stale route object needed for fake-dst reclaim in this sample. The main thread saw a different normal route in the same rough allocation region (`ffff88800fd6af00` instead of `ffff88800fd6a3c0`).
+- Next useful debug step is to add a non-window-affecting progress marker before entering `ipv4_negative_advice()` or right before `dst_negative_advice()` is called, or make the trigger release/failure path robust enough that repeated candidates can be collected without hanging.

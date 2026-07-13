@@ -1,0 +1,4 @@
+interface:
+  display_name: "android-kdebug"
+  short_description: "Intructions for using kdebug Android app debugging cli"
+  default_prompt: "Use the $android-kdebug skill when debugging Android apps over ADB. The $android-kdebug skill documents using kdebug Frida CLI, the kdebug LLDB CLI, or common adb commands."

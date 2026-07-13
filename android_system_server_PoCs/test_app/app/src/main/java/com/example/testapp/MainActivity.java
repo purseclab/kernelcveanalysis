@@ -46,7 +46,8 @@ public class  MainActivity extends AppCompatActivity {
     
     // public static final String EXP_NAME = "bad_io_uring_5.10.101";
     // public static final String EXP_NAME = "bad_io_uring_5.10.101_log";
-    public static final String EXP_NAME = "bad_io_uring_5.10.101_log.so";
+    // public static final String EXP_NAME = "bad_io_uring_5.10.101_log.so";
+    public static final String EXP_NAME = null;
 
     void runPoc(String poc) {
         if (poc == null) {

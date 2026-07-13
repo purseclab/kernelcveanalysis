@@ -1,0 +1,4 @@
+interface:
+  display_name: "Testvm"
+  short_description: "Kernel VM and initrd CLI workflows"
+  default_prompt: "Use $testvm to run the testvm CLI for initrd packing, BusyBox initrd builds, and QEMU kernel boot workflows."

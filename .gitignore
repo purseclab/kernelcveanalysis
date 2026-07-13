@@ -44,6 +44,42 @@ syzploit/vmlinux_extracted
 syzploit/initramfs_check.img
 syzploit/core.*
 
+# Python caches and local environments
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging artifacts
+.eggs/
+**/build/
+**/dist/
+pip-wheel-metadata/
+*.egg
+*.whl
+
+# Gradle generated outputs
+**/.gradle/
+
+# Local physical-device research workspace
+kernel_PoCs/physical_phone/
+
+# Local bad-dst baseline workspace
+kernel_PoCs/bad_dst_cache/src_orig/
+
+# Local debugger and agent state
+.codex
+.gdb_history
+
+# Generated exploit executables
+badnode
+
 # Logs
 nohup.out
 syzploit/nohup.out

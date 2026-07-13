@@ -1,0 +1,4 @@
+interface:
+  display_name: "cuttle-cli"
+  short_description: "Cuttlefish Android emulator instance manager cli"
+  default_prompt: "Use $cuttle-cli to start, stop, and setup adb access to Cuttlefish Android emulator instances."

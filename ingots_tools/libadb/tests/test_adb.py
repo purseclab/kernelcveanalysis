@@ -1,3 +1,4 @@
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -67,14 +68,97 @@ class AdbClientTests(unittest.TestCase):
 
     def test_upload_file_uses_client_remote_addr(self):
         adb = AdbClient("192.0.2.10:4444")
+        with tempfile.NamedTemporaryFile() as src:
+            src.write(b"payload")
+            src.flush()
 
-        with patch("libadb.adb.subprocess.run") as run:
-            adb.upload_file(Path("/tmp/src"), Path("/data/local/tmp/dst"))
+            with patch.object(adb, "remote_file_sha256", return_value=None), patch(
+                "libadb.adb.subprocess.run"
+            ) as run:
+                uploaded = adb.upload_file(Path(src.name), Path("/data/local/tmp/dst"))
 
+        self.assertTrue(uploaded)
         run.assert_called_once_with(
-            ["adb", "-s", "192.0.2.10:4444", "push", "/tmp/src", "/data/local/tmp/dst"],
+            ["adb", "-s", "192.0.2.10:4444", "push", src.name, "/data/local/tmp/dst"],
             check=True,
         )
+
+    def test_remote_file_sha256_parses_hash(self):
+        adb = AdbClient("192.0.2.10:4444")
+
+        with patch.object(adb, "shell_text", return_value="abc123  /data/local/tmp/dst\n") as shell_text:
+            digest = adb.remote_file_sha256(Path("/data/local/tmp/dst"))
+
+        self.assertEqual(digest, "abc123")
+        shell_text.assert_called_once_with("sha256sum /data/local/tmp/dst", root=False)
+
+    def test_remote_file_sha256_returns_none_on_error(self):
+        adb = AdbClient("192.0.2.10:4444")
+
+        with patch.object(adb, "shell_text", side_effect=AdbCommandError("sha256sum")):
+            digest = adb.remote_file_sha256(Path("/data/local/tmp/missing"))
+
+        self.assertIsNone(digest)
+
+    def test_upload_file_pushes_when_remote_hash_differs(self):
+        adb = AdbClient("192.0.2.10:4444")
+        with tempfile.NamedTemporaryFile() as src:
+            src.write(b"payload")
+            src.flush()
+
+            with patch.object(adb, "remote_file_sha256", return_value="different"), patch(
+                "libadb.adb.subprocess.run"
+            ) as run:
+                uploaded = adb.upload_file(Path(src.name), Path("/data/local/tmp/dst"))
+
+        self.assertTrue(uploaded)
+        run.assert_called_once()
+
+    def test_upload_file_skips_when_remote_hash_matches(self):
+        adb = AdbClient("192.0.2.10:4444")
+        with tempfile.NamedTemporaryFile() as src:
+            src.write(b"payload")
+            src.flush()
+            digest = hashlib.sha256(b"payload").hexdigest()
+
+            with patch.object(adb, "remote_file_sha256", return_value=digest), patch(
+                "libadb.adb.subprocess.run"
+            ) as run:
+                uploaded = adb.upload_file(Path(src.name), Path("/data/local/tmp/dst"))
+
+        self.assertFalse(uploaded)
+        run.assert_not_called()
+
+    def test_upload_file_chmods_when_executable_even_if_skipped(self):
+        adb = AdbClient("192.0.2.10:4444")
+        with tempfile.NamedTemporaryFile() as src:
+            src.write(b"payload")
+            src.flush()
+            digest = hashlib.sha256(b"payload").hexdigest()
+
+            with patch.object(adb, "remote_file_sha256", return_value=digest), patch(
+                "libadb.adb.subprocess.run"
+            ) as run, patch.object(adb, "run_adb_command") as run_adb_command:
+                uploaded = adb.upload_file(Path(src.name), Path("/data/local/tmp/dst"), executable=True)
+
+        self.assertFalse(uploaded)
+        run.assert_not_called()
+        run_adb_command.assert_called_once_with("chmod +x /data/local/tmp/dst", root=True)
+
+    def test_upload_file_force_pushes_when_hash_matches(self):
+        adb = AdbClient("192.0.2.10:4444")
+        with tempfile.NamedTemporaryFile() as src:
+            src.write(b"payload")
+            src.flush()
+            digest = hashlib.sha256(b"payload").hexdigest()
+
+            with patch.object(adb, "remote_file_sha256", return_value=digest), patch(
+                "libadb.adb.subprocess.run"
+            ) as run:
+                uploaded = adb.upload_file(Path(src.name), Path("/data/local/tmp/dst"), force=True)
+
+        self.assertTrue(uploaded)
+        run.assert_called_once()
 
     def test_install_app_uses_client_remote_addr(self):
         adb = AdbClient("198.51.100.8:7777")
@@ -103,7 +187,7 @@ class AdbClientTests(unittest.TestCase):
                 adb,
                 "run_adb_command",
                 return_value="",
-            ) as run_adb_command:
+            ) as run_adb_command, patch.object(adb, "remote_file_sha256", return_value=None):
                 adb.install_app(archive_path)
 
         self.assertEqual(len(run.call_args_list), 2)

@@ -1,3 +1,4 @@
+import hashlib
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -67,6 +68,14 @@ class AdbCommandError(RuntimeError):
         super().__init__(
             f"ADB command failed: {command}\nstdout: {stdout_text}\nstderr: {stderr_text}"
         )
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class AdbClient:
@@ -169,14 +178,30 @@ class AdbClient:
             print("Error: 'adb' command not found. Is Android Debug Bridge installed and in your PATH?")
             return None
 
-    def upload_file(self, src_path: Path, dst_path: Path, executable: bool = False):
-        subprocess.run(
-            ["adb", "-s", self.remote_addr, "push", str(src_path), str(dst_path)],
-            check=True,
-        )
+    def remote_file_sha256(self, path: Path, root: bool = False) -> str | None:
+        try:
+            output = self.shell_text(f"sha256sum {quote(str(path))}", root=root).strip()
+        except AdbCommandError:
+            return None
+        if not output:
+            return None
+        return output.split(maxsplit=1)[0]
+
+    def upload_file(self, src_path: Path, dst_path: Path, executable: bool = False, force: bool = False) -> bool:
+        src_hash = _file_sha256(src_path)
+        uploaded = False
+
+        if force or self.remote_file_sha256(dst_path) != src_hash:
+            subprocess.run(
+                ["adb", "-s", self.remote_addr, "push", str(src_path), str(dst_path)],
+                check=True,
+            )
+            uploaded = True
 
         if executable:
             self.run_adb_command(f"chmod +x {dst_path}", root=True)
+
+        return uploaded
 
     def install_app(self, app: Path):
         suffix = app.suffix.lower()

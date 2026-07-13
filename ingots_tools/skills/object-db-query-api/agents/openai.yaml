@@ -1,0 +1,4 @@
+interface:
+  display_name: "objectdb"
+  short_description: "Kernel object database inspection and scanning"
+  default_prompt: Use the high-level $objectdb wrapper API to scan kernel objects in Python by loading an ObjectSet and filtering HeapObject entries with helper predicates.

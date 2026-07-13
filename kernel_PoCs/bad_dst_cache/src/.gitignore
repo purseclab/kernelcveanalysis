@@ -1,2 +1,7 @@
 bzImage
 vmlinux
+old/
+
+# Local rebuilt kernel artifacts and alternate executable
+new_kernel/
+bad_dst_cache_*

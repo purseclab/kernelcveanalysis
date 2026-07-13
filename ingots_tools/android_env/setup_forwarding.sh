@@ -2,7 +2,7 @@
 
 if [ -z "$1" ]
 then
-HOST=cuttlefish
+HOST=neil_cuttlefish
 else
 HOST="$1"
 fi
