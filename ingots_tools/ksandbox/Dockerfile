@@ -5,7 +5,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
-    python3-pydantic \
     build-essential \
     fd-find \
     ripgrep \
@@ -31,18 +30,11 @@ RUN wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-
     rm android-ndk-${NDK_VERSION}-linux.zip
 
 ENV PATH=${ANDROID_NDK_HOME}:${PATH}
-ENV PYTHONUNBUFFERED=1
-
 # path where all mounts are put in
 RUN mkdir /data
-RUN mkdir /sandbox_runtime
-
-COPY src/kexploit_agent /opt/kexploit_agent
 
 # Create a non-root user
 # RUN useradd -m -s /bin/bash user
 # just run as root for now
 
 WORKDIR /
-
-ENTRYPOINT ["python3", "/opt/kexploit_agent/container_daemon.py", "--runtime-dir", "/sandbox_runtime"]

@@ -14,6 +14,7 @@ members = [
     "kexploit",
     "kexploit-agent",
     "kexploit-utils",
+    "ksandbox",
     "libadb",
     "object-db",
     "primitives",
@@ -993,6 +994,7 @@ dependencies = [
     { name = "kexploit" },
     { name = "kexploit-agent" },
     { name = "kexploit-utils" },
+    { name = "ksandbox" },
     { name = "libadb" },
     { name = "object-db" },
     { name = "primitives" },
@@ -1010,6 +1012,7 @@ requires-dist = [
     { name = "kexploit", editable = "kexploit" },
     { name = "kexploit-agent", editable = "kexploit_agent" },
     { name = "kexploit-utils", editable = "kexploit_utils" },
+    { name = "ksandbox", editable = "ksandbox" },
     { name = "libadb", editable = "libadb" },
     { name = "object-db", editable = "object_db" },
     { name = "primitives", editable = "primitives" },
@@ -1277,8 +1280,8 @@ version = "0.1.0"
 source = { editable = "kexploit_agent" }
 dependencies = [
     { name = "deepagents" },
-    { name = "docker" },
     { name = "kexploit-utils" },
+    { name = "ksandbox" },
     { name = "langchain" },
     { name = "langchain-google-genai" },
     { name = "langchain-openai" },
@@ -1290,8 +1293,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "deepagents" },
-    { name = "docker", specifier = ">=7.0.0" },
     { name = "kexploit-utils", editable = "kexploit_utils" },
+    { name = "ksandbox", editable = "ksandbox" },
     { name = "langchain", specifier = ">=1.2.10" },
     { name = "langchain-google-genai", specifier = ">=4.2.0" },
     { name = "langchain-openai", specifier = ">=1.1.9" },
@@ -1326,6 +1329,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/01/5c/40ffbec589262f49ff7c463d96ff0bfab0fbd98d9d869c370a70853a13fb/keystone_engine-0.9.2-py2.py3-none-manylinux1_x86_64.whl", hash = "sha256:5a5316a34323620b1bba31dcfe9e4b4ca6f0c030e82fc7a151da7c8fbe81a379", size = 1766182, upload-time = "2020-06-21T14:13:55.817Z" },
     { url = "https://files.pythonhosted.org/packages/88/b9/a9d8b6837346b86bcdda56e5c3fe4ac51f98f4ed40bf71fb6bd8605516da/keystone_engine-0.9.2-py2.py3-none-win32.whl", hash = "sha256:9f81e480904a405ef008f1d9f0e4a05e37d2bd83c5218a27136e1a294b02c1f6", size = 1318239, upload-time = "2020-06-21T14:13:57.122Z" },
     { url = "https://files.pythonhosted.org/packages/a4/8d/58471cb026de45397b29ba4b37ae3e20b434fae14c4b92fd3e9771a7bac8/keystone_engine-0.9.2-py2.py3-none-win_amd64.whl", hash = "sha256:c91db1ff16d9d094e00d1827107d1b4afd5e63ce19b491a0140e660635000e8b", size = 1370823, upload-time = "2020-06-21T14:13:58.476Z" },
+]
+
+[[package]]
+name = "ksandbox"
+version = "0.1.0"
+source = { editable = "ksandbox" }
+dependencies = [
+    { name = "docker" },
+    { name = "pydantic" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "docker", specifier = ">=7.0.0" },
+    { name = "pydantic", specifier = ">=2.11.5" },
+    { name = "typer", specifier = ">=0.21.1" },
 ]
 
 [[package]]
@@ -1841,14 +1861,22 @@ name = "object-db"
 version = "0.1.0"
 source = { editable = "object_db" }
 dependencies = [
+    { name = "kexploit-utils" },
     { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "rich" },
     { name = "sqlalchemy" },
+    { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "kexploit-utils", editable = "kexploit_utils" },
     { name = "pydantic", specifier = ">=2.11.5" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
+    { name = "rich", specifier = ">=14.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
+    { name = "typer", specifier = ">=0.21.1" },
 ]
 
 [[package]]

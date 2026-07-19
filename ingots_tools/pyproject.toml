@@ -10,6 +10,7 @@ dependencies = [
     "libadb",
     "scripts",
     "kexploit_agent",
+    "ksandbox",
     "kexploit_utils",
     "primitives",
     "object_db",
@@ -27,6 +28,7 @@ members = [
     "libadb",
     "scripts",
     "kexploit_agent",
+    "ksandbox",
     "kexploit_utils",
     "primitives",
     "object_db",
@@ -43,6 +45,7 @@ kdebug = { workspace = true }
 libadb = { workspace = true }
 scripts = { workspace = true }
 kexploit_agent = { workspace = true }
+ksandbox = { workspace = true }
 kexploit_utils = { workspace = true }
 primitives = { workspace = true }
 object_db = { workspace = true }

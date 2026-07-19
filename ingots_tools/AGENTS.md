@@ -24,13 +24,20 @@ The project is organized as a `uv` workspace with the following members:
     *   `uv run aenv selinux diff <type1> <type2>`: Compare SELinux types.
 
 ### 3. `kexploit_agent` (Tool: `kexploit_agent`)
-*   **Purpose:** Secure Docker-based sandbox implementation for DeepAgents.
+*   **Purpose:** DeepAgents integration for exploit-analysis agents.
+*   **Key Features:**
+    *   **Agent Integration:** Integration with `deepagents` for creating autonomous exploit analysis agents, including automatic system prompt injection of sandbox mount information.
+    *   **Sandbox Adapter:** Uses `ksandbox` as the reusable sandbox backend while preserving existing `kexploit_agent` sandbox imports.
+*   **Usage:** `uv run kagent view-log <history.jsons>`
+
+### 3a. `ksandbox` (Tool: `ksandbox`)
+*   **Purpose:** Reusable Docker sandbox package for command and file operations through a Unix-socket daemon.
 *   **Key Features:**
     *   **Docker Sandboxing:** `DockerSandbox` and `DockerSandboxProvider` for managing isolated environments with restricted capabilities (`cap_drop=['ALL']`) for secure execution.
-    *   **Resource Mounting:** Support for mounting host folders (read-only or read-write) to provide context (e.g., kernel source code) or workspace for agents.
-    *   **Agent Integration:** Integration with `deepagents` for creating autonomous exploit analysis agents, including automatic system prompt injection of sandbox mount information.
+    *   **Resource Mounting:** Support for mounting host folders (read-only or read-write) to provide context (e.g., kernel source code) or workspace.
+    *   **Daemon Interface:** Command execution, single-file byte read/write/edit, directory listing, grep, and glob through `/tmp/ksandbox/<uuid>/daemon.sock` runtime sockets.
     *   **Automated Image Building:** CLI tool to build the standardized Docker image used for the sandbox environment.
-*   **Usage:** `uv run kexploit_agent build_image`
+*   **Usage:** `uv run ksandbox build-image`
 
 ### 4. `kexploit_utils`
 *   **Purpose:** Shared utility library for the `ingots_tools` workspace.

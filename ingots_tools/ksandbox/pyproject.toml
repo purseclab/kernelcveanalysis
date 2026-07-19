@@ -1,0 +1,20 @@
+[project]
+name = "ksandbox"
+version = "0.1.0"
+description = "Reusable Docker sandbox with a Unix-socket daemon interface"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "docker>=7.0.0",
+    "pydantic>=2.11.5",
+    "typer>=0.21.1",
+]
+
+[tool.uv]
+package = true
+
+[tool.mypy]
+mypy_path = "src"
+
+[project.scripts]
+ksandbox = "ksandbox.cli:main"

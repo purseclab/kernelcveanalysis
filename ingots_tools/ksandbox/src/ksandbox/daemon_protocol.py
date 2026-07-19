@@ -39,45 +39,29 @@ class KillRequest(ProtocolMessage):
     signal: int = 15
 
 
-class UploadFilePayload(ProtocolMessage):
-    path: str
-    content_b64: str
-
-
-class UploadFilesRequest(ProtocolMessage):
-    type: Literal["upload_files"] = "upload_files"
-    files: list[UploadFilePayload]
-
-
-class DownloadFilesRequest(ProtocolMessage):
-    type: Literal["download_files"] = "download_files"
-    paths: list[str]
-
-
-class ListDirectoryRequest(ProtocolMessage):
-    type: Literal["list_directory"] = "list_directory"
-    path: str
-
-
 class ReadFileRequest(ProtocolMessage):
     type: Literal["read_file"] = "read_file"
     path: str
-    offset: int = 0
-    limit: int = 2000
 
 
 class WriteFileRequest(ProtocolMessage):
     type: Literal["write_file"] = "write_file"
     path: str
-    content: str
+    content_b64: str
+    overwrite: bool = False
 
 
 class EditFileRequest(ProtocolMessage):
     type: Literal["edit_file"] = "edit_file"
     path: str
-    old: str
-    new: str
+    old_b64: str
+    new_b64: str
     replace_all: bool = False
+
+
+class ListDirectoryRequest(ProtocolMessage):
+    type: Literal["list_directory"] = "list_directory"
+    path: str
 
 
 class GrepRequest(ProtocolMessage):
@@ -130,26 +114,39 @@ FileOperationError = Literal[
     "permission_denied",
     "is_directory",
     "invalid_path",
+    "already_exists",
+    "unknown_error",
+]
+
+EditFileError = Literal[
+    "file_not_found",
+    "permission_denied",
+    "is_directory",
+    "invalid_path",
+    "string_not_found",
+    "multiple_occurrences",
+    "unknown_error",
 ]
 
 
-class FileTransferResult(ProtocolMessage):
+class ReadFileResponse(ProtocolMessage):
+    type: Literal["read_file_result"] = "read_file_result"
+    path: str
+    content_b64: str | None = None
+    error: FileOperationError | None = None
+
+
+class WriteFileResponse(ProtocolMessage):
+    type: Literal["write_file_result"] = "write_file_result"
     path: str
     error: FileOperationError | None = None
 
 
-class DownloadedFileResult(FileTransferResult):
-    content_b64: str | None = None
-
-
-class UploadFilesResponse(ProtocolMessage):
-    type: Literal["upload_files_result"] = "upload_files_result"
-    results: list[FileTransferResult]
-
-
-class DownloadFilesResponse(ProtocolMessage):
-    type: Literal["download_files_result"] = "download_files_result"
-    results: list[DownloadedFileResult]
+class EditFileResponse(ProtocolMessage):
+    type: Literal["edit_file_result"] = "edit_file_result"
+    path: str
+    occurrences: int = 0
+    error: EditFileError | None = None
 
 
 class DirectoryEntry(ProtocolMessage):
@@ -159,46 +156,8 @@ class DirectoryEntry(ProtocolMessage):
 
 class ListDirectoryResponse(ProtocolMessage):
     type: Literal["list_directory_result"] = "list_directory_result"
-    entries: list[DirectoryEntry]
-
-
-ReadFileStatus = Literal["ok", "file_not_found", "permission_denied", "unknown_error"]
-
-
-class ReadFileResponse(ProtocolMessage):
-    type: Literal["read_file_result"] = "read_file_result"
-    status: ReadFileStatus
-    empty: bool = False
-    lines: list[str] = []
-    error: str | None = None
-
-
-WriteFileStatus = Literal[
-    "ok", "already_exists", "permission_denied", "invalid_path", "unknown_error"
-]
-
-
-class WriteFileResponse(ProtocolMessage):
-    type: Literal["write_file_result"] = "write_file_result"
-    status: WriteFileStatus
-    error: str | None = None
-
-
-EditFileStatus = Literal[
-    "ok",
-    "string_not_found",
-    "multiple_occurrences",
-    "file_not_found",
-    "permission_denied",
-    "unknown_error",
-]
-
-
-class EditFileResponse(ProtocolMessage):
-    type: Literal["edit_file_result"] = "edit_file_result"
-    status: EditFileStatus
-    occurrences: int = 0
-    error: str | None = None
+    entries: list[DirectoryEntry] = []
+    error: FileOperationError | None = None
 
 
 class GrepMatchEntry(ProtocolMessage):
@@ -209,14 +168,14 @@ class GrepMatchEntry(ProtocolMessage):
 
 class GrepResponse(ProtocolMessage):
     type: Literal["grep_result"] = "grep_result"
-    matches: list[GrepMatchEntry]
+    matches: list[GrepMatchEntry] = []
     timed_out: bool = False
     error: str | None = None
 
 
 class GlobResponse(ProtocolMessage):
     type: Literal["glob_result"] = "glob_result"
-    entries: list[DirectoryEntry]
+    entries: list[DirectoryEntry] = []
     timed_out: bool = False
     error: str | None = None
 
@@ -227,12 +186,10 @@ DaemonRequest = Annotated[
     | StdinRequest
     | CloseStdinRequest
     | KillRequest
-    | UploadFilesRequest
-    | DownloadFilesRequest
-    | ListDirectoryRequest
     | ReadFileRequest
     | WriteFileRequest
     | EditFileRequest
+    | ListDirectoryRequest
     | GrepRequest
     | GlobRequest,
     Field(discriminator="type"),
@@ -243,19 +200,17 @@ DaemonResponse = Annotated[
     | OutputEvent
     | ExitEvent
     | ErrorEvent
-    | UploadFilesResponse
-    | DownloadFilesResponse
-    | ListDirectoryResponse
     | ReadFileResponse
     | WriteFileResponse
     | EditFileResponse
+    | ListDirectoryResponse
     | GrepResponse
     | GlobResponse,
     Field(discriminator="type"),
 ]
 
-REQUEST_ADAPTER = TypeAdapter(DaemonRequest)
-RESPONSE_ADAPTER = TypeAdapter(DaemonResponse)
+REQUEST_ADAPTER: TypeAdapter[DaemonRequest] = TypeAdapter(DaemonRequest)
+RESPONSE_ADAPTER: TypeAdapter[DaemonResponse] = TypeAdapter(DaemonResponse)
 
 MessageT = TypeVar("MessageT")
 
