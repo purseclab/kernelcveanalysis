@@ -141,4 +141,3 @@ def ensure_tool_bundle(*, force: bool = False, client=None) -> Path:
         if not force and _valid_bundle(destination):
             return destination
         return _build_bundle(client or docker.from_env())
-

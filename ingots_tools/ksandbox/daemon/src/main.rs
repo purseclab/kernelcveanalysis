@@ -11,7 +11,6 @@ use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use uuid::Uuid;
 
 const SOCKET_NAME: &str = "daemon.sock";
 
@@ -22,18 +21,24 @@ enum Request {
     Health,
     #[serde(rename = "spawn")]
     Spawn {
-        command: String,
-        timeout_secs: Option<u64>,
+        argv: Option<Vec<String>>,
+        command: Option<String>,
+        #[serde(default)]
+        shell: bool,
         cwd: Option<String>,
         env: Option<std::collections::HashMap<String, String>>,
     },
     #[serde(rename = "stdin")]
-    Stdin { data_b64: String },
+    Stdin {
+        request_id: String,
+        data_b64: String,
+    },
     #[serde(rename = "close_stdin")]
-    CloseStdin,
+    CloseStdin { request_id: String },
     #[serde(rename = "kill")]
     Kill {
-        #[serde(default = "default_signal")]
+        request_id: String,
+        #[serde(default = "default_kill_signal")]
         signal: i32,
     },
     #[serde(rename = "read_file")]
@@ -71,8 +76,8 @@ enum Request {
     },
 }
 
-fn default_signal() -> i32 {
-    libc::SIGTERM
+fn default_kill_signal() -> i32 {
+    libc::SIGKILL
 }
 fn root_path() -> String {
     "/".to_owned()
@@ -119,16 +124,18 @@ fn sibling_binary(name: &str) -> io::Result<PathBuf> {
         .join(name))
 }
 
-fn kill_process_group(pid: u32, signal: i32) {
-    unsafe {
-        libc::kill(-(pid as i32), signal);
-    }
+fn kill_process_group(pid: u32, signal: i32) -> bool {
+    // `Child::kill` only signals the direct child.  The spawned command is made
+    // the leader of its own process group below, so the negative PID targets
+    // that entire group: a shell and any children it started cannot outlive it.
+    // Rust's process API does not expose POSIX's negative-PID group form, hence
+    // the direct libc call.
+    unsafe { libc::kill(-(pid as i32), signal) == 0 }
 }
 
 fn stream_output<R: Read + Send + 'static>(
     mut reader: R,
     event_type: &'static str,
-    command_id: String,
     stream: Arc<Mutex<UnixStream>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
@@ -141,7 +148,6 @@ fn stream_output<R: Read + Send + 'static>(
                         &stream,
                         json!({
                             "type": event_type,
-                            "id": command_id,
                             "data_b64": BASE64.encode(&buffer[..count]),
                         }),
                     );
@@ -152,7 +158,12 @@ fn stream_output<R: Read + Send + 'static>(
     })
 }
 
-fn control_messages(stream: UnixStream, stdin: ChildStdin, pid: u32) {
+fn control_messages(
+    stream: UnixStream,
+    stdin: ChildStdin,
+    pid: u32,
+    writer: Arc<Mutex<UnixStream>>,
+) {
     thread::spawn(move || {
         let mut stdin = Some(stdin);
         let mut reader = BufReader::new(stream);
@@ -160,19 +171,53 @@ fn control_messages(stream: UnixStream, stdin: ChildStdin, pid: u32) {
         loop {
             line.clear();
             match reader.read_line(&mut line) {
-                Ok(0) | Err(_) => break,
+                Ok(0) | Err(_) => {
+                    kill_process_group(pid, libc::SIGKILL);
+                    break;
+                }
                 Ok(_) => match serde_json::from_str::<Request>(&line) {
-                    Ok(Request::Stdin { data_b64 }) => {
-                        if let (Ok(data), Some(handle)) = (BASE64.decode(data_b64), stdin.as_mut())
-                        {
-                            let _ = handle.write_all(&data);
-                            let _ = handle.flush();
-                        }
+                    Ok(Request::Stdin {
+                        request_id,
+                        data_b64,
+                    }) => {
+                        let error = match (BASE64.decode(data_b64), stdin.as_mut()) {
+                            (Err(_), _) => Some("invalid stdin encoding"),
+                            (_, None) => Some("stdin is closed"),
+                            (Ok(data), Some(handle)) => handle
+                                .write_all(&data)
+                                .and_then(|_| handle.flush())
+                                .err()
+                                .map(|error| {
+                                    if error.kind() == io::ErrorKind::BrokenPipe {
+                                        "stdin is closed"
+                                    } else {
+                                        "failed to write stdin"
+                                    }
+                                }),
+                        };
+                        let _ = send_locked(
+                            &writer,
+                            json!({"type":"stdin_result", "request_id":request_id, "error":error}),
+                        );
                     }
-                    Ok(Request::CloseStdin) => {
-                        stdin.take();
+                    Ok(Request::CloseStdin { request_id }) => {
+                        let error = if stdin.take().is_some() {
+                            None
+                        } else {
+                            Some("stdin is closed")
+                        };
+                        let _ = send_locked(
+                            &writer,
+                            json!({"type":"close_stdin_result", "request_id":request_id, "error":error}),
+                        );
                     }
-                    Ok(Request::Kill { signal }) => kill_process_group(pid, signal),
+                    Ok(Request::Kill { request_id, signal }) => {
+                        let delivered = kill_process_group(pid, signal);
+                        let _ = send_locked(
+                            &writer,
+                            json!({"type":"kill_result", "request_id":request_id, "delivered":delivered}),
+                        );
+                    }
                     _ => {}
                 },
             }
@@ -182,16 +227,34 @@ fn control_messages(stream: UnixStream, stdin: ChildStdin, pid: u32) {
 
 fn handle_spawn(
     stream: UnixStream,
-    command: String,
-    timeout_secs: Option<u64>,
+    argv: Option<Vec<String>>,
+    command: Option<String>,
+    shell: bool,
     cwd: Option<String>,
     request_env: Option<std::collections::HashMap<String, String>>,
 ) -> io::Result<()> {
-    let command_id = Uuid::new_v4().simple().to_string();
-    let mut process = Command::new("/bin/sh");
+    let mut process = match (shell, argv, command) {
+        (true, None, Some(command)) => {
+            let mut process = Command::new("/bin/sh");
+            process.arg("-c").arg(command);
+            process
+        }
+        (false, Some(argv), None) if !argv.is_empty() => {
+            let mut values = argv.into_iter();
+            let executable = values.next().expect("non-empty argv");
+            let mut process = Command::new(executable);
+            process.args(values);
+            process
+        }
+        _ => {
+            let mut stream = stream;
+            return send(
+                &mut stream,
+                &json!({"type":"error", "message":"invalid spawn command specification"}),
+            );
+        }
+    };
     process
-        .arg("-c")
-        .arg(command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -215,60 +278,35 @@ fn handle_spawn(
     };
     let pid = child.id();
     let writer = Arc::new(Mutex::new(stream.try_clone()?));
-    send_locked(&writer, json!({"type":"spawned", "id":command_id}))?;
+    send_locked(&writer, json!({"type":"spawned"}))?;
 
     let stdout_thread = stream_output(
         child.stdout.take().expect("piped stdout"),
         "stdout",
-        command_id.clone(),
         writer.clone(),
     );
     let stderr_thread = stream_output(
         child.stderr.take().expect("piped stderr"),
         "stderr",
-        command_id.clone(),
         writer.clone(),
     );
-    control_messages(stream, child.stdin.take().expect("piped stdin"), pid);
+    control_messages(
+        stream,
+        child.stdin.take().expect("piped stdin"),
+        pid,
+        writer.clone(),
+    );
 
-    let start = Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if timeout_secs.is_some_and(|timeout| start.elapsed() >= Duration::from_secs(timeout)) {
-            timed_out = true;
-            kill_process_group(pid, libc::SIGTERM);
-            let grace = Instant::now();
-            let timeout_status = loop {
-                if let Some(status) = child.try_wait()? {
-                    break status;
-                }
-                if grace.elapsed() >= Duration::from_secs(2) {
-                    kill_process_group(pid, libc::SIGKILL);
-                    break child.wait()?;
-                }
-                thread::sleep(Duration::from_millis(20));
-            };
-            break timeout_status;
-        }
-        thread::sleep(Duration::from_millis(20));
-    };
+    let status = child.wait()?;
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
-    let exit_code = if timed_out {
-        124
-    } else {
-        status
-            .code()
-            .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
-    };
+    let exit_code = status
+        .code()
+        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
     send_locked(
         &writer,
         json!({
-            "type":"exit", "id":command_id, "exit_code":exit_code,
-            "timed_out":timed_out, "timeout_secs":timeout_secs,
+            "type":"exit", "exit_code":exit_code,
         }),
     )
 }
@@ -329,11 +367,12 @@ fn handle_request(mut stream: UnixStream) -> io::Result<()> {
     match request {
         Request::Health => send(&mut stream, &json!({"type":"health", "status":"ok"})),
         Request::Spawn {
+            argv,
             command,
-            timeout_secs,
+            shell,
             cwd,
             env,
-        } => handle_spawn(stream, command, timeout_secs, cwd, env),
+        } => handle_spawn(stream, argv, command, shell, cwd, env),
         Request::ReadFile { path } => match fs::read(&path) {
             Ok(content) => send(
                 &mut stream,
@@ -564,7 +603,7 @@ fn handle_request(mut stream: UnixStream) -> io::Result<()> {
                 ),
             }
         }
-        Request::Stdin { .. } | Request::CloseStdin | Request::Kill { .. } => send(
+        Request::Stdin { .. } | Request::CloseStdin { .. } | Request::Kill { .. } => send(
             &mut stream,
             &json!({"type":"error", "message":"unsupported request type"}),
         ),

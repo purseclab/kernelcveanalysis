@@ -16,6 +16,8 @@ from ksandbox.docker_sandbox import (
 
 class DockerSandboxProviderTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.database_path = Path(self.tempdir.name) / "sandboxes.sqlite3"
         self.client = MagicMock()
         self.docker_patch = patch(
             "ksandbox.docker_sandbox.docker.from_env", return_value=self.client
@@ -24,17 +26,7 @@ class DockerSandboxProviderTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.docker_patch.stop()
-
-    def test_build_image_accepts_custom_context_dockerfile_and_tag(self) -> None:
-        provider = DockerSandboxProvider(image_tag="configured:latest")
-        provider.build_image(".", dockerfile="images/Customfile", tag="custom:test")
-
-        self.client.images.build.assert_called_once_with(
-            path=str(Path(".").resolve()),
-            dockerfile="images/Customfile",
-            rm=True,
-            tag="custom:test",
-        )
+        self.tempdir.cleanup()
 
     def test_create_overrides_entrypoint_and_cmd(self) -> None:
         image = MagicMock()
@@ -42,10 +34,12 @@ class DockerSandboxProviderTests(unittest.TestCase):
         self.client.images.get.return_value = image
         container = MagicMock()
         container.id = "container-id"
-        self.client.containers.run.return_value = container
+        container.attrs = {}
+        container.name = "sandbox-name"
+        self.client.containers.create.return_value = container
 
         with tempfile.TemporaryDirectory() as tempdir, patch(
-            "ksandbox.docker_sandbox.HOST_RUNTIME_ROOT", Path(tempdir)
+            "ksandbox.docker_sandbox._persistent_runtime_root", return_value=Path(tempdir)
         ), patch(
             "ksandbox.docker_sandbox.ensure_tool_bundle",
             return_value=Path(tempdir) / "shared-tools",
@@ -54,13 +48,14 @@ class DockerSandboxProviderTests(unittest.TestCase):
         ):
             mount_source = Path(tempdir) / "input"
             mount_source.mkdir()
-            provider = DockerSandboxProvider(image_tag="custom:test")
-            sandbox = provider.create_instance(
-                [MountInfo(mount_source, "input", "test input", False)]
+            provider = DockerSandboxProvider(database_path=self.database_path)
+            sandbox = provider.create(
+                "custom:test",
+                [MountInfo(mount_source, "input", "test input", False)],
             )
 
             ensure_bundle.assert_called_once_with(client=self.client)
-            kwargs = self.client.containers.run.call_args.kwargs
+            kwargs = self.client.containers.create.call_args.kwargs
             self.assertEqual(kwargs["entrypoint"], [
                 DAEMON_IN_CONTAINER,
                 "--runtime-dir",
@@ -82,10 +77,53 @@ class DockerSandboxProviderTests(unittest.TestCase):
         image = MagicMock()
         image.attrs = {"Architecture": "arm64"}
         self.client.images.get.return_value = image
-        provider = DockerSandboxProvider(image_tag="arm:test")
+        provider = DockerSandboxProvider(database_path=self.database_path)
 
         with self.assertRaisesRegex(RuntimeError, "only linux/amd64"):
-            provider.create_instance()
+            provider.create("arm:test")
+
+    def test_start_stop_persists_state_and_rejects_second_handle(self) -> None:
+        image = MagicMock()
+        image.attrs = {"Architecture": "amd64"}
+        self.client.images.get.return_value = image
+        container = MagicMock()
+        container.id = "container-id"
+        container.attrs = {}
+        container.name = "sandbox-name"
+        container.status = "created"
+        self.client.containers.create.return_value = container
+        self.client.containers.get.return_value = container
+
+        with tempfile.TemporaryDirectory() as tempdir, patch(
+            "ksandbox.docker_sandbox._persistent_runtime_root", return_value=Path(tempdir)
+        ), patch(
+            "ksandbox.docker_sandbox.ensure_tool_bundle",
+            return_value=Path(tempdir) / "shared-tools",
+        ), patch.object(DockerSandboxProvider, "_wait_for_daemon"):
+            mount_source = Path(tempdir) / "input"
+            mount_source.mkdir()
+            provider = DockerSandboxProvider(database_path=self.database_path)
+            sandbox = provider.create(
+                "custom:test", [MountInfo(mount_source, "input", "test", True)]
+            )
+            self.assertEqual(sandbox.state, "stopped")
+            container.start.assert_not_called()
+
+            sandbox.start()
+            self.assertEqual(sandbox.state, "running")
+            with self.assertRaisesRegex(RuntimeError, "already running"):
+                provider.get_sandbox(sandbox.id).start()
+            with self.assertRaisesRegex(RuntimeError, "pass force=True"):
+                provider.delete(sandbox.id)
+
+            (mount_source / "sandbox-write").write_text("persisted")
+            sandbox.stop()
+            self.assertEqual(provider.get_sandbox(sandbox.id).state, "stopped")
+            sandbox.start()
+            container.start.assert_called()
+            sandbox.stop()
+            provider.delete(sandbox.id)
+            self.assertEqual(provider.list(), [])
 
 
 if __name__ == "__main__":

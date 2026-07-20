@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -70,26 +71,69 @@ class DaemonExecutionTests(unittest.TestCase):
     def test_healthcheck(self) -> None:
         SandboxDaemonClient(self.socket_path).healthcheck()
 
-    def test_execute_returns_raw_bytes_without_truncation(self) -> None:
+    def test_exec_sync_preserves_separate_raw_streams(self) -> None:
         client = SandboxDaemonClient(self.socket_path, default_timeout_secs=5)
-        result = client.execute(
-            "python3 -c \"import sys; print('out'); sys.stderr.write('err\\n'); print('A'*120)\""
+        result = client.exec_sync(
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('out'); sys.stderr.write('err\\n'); print('A'*120)",
+            ]
         )
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIsNone(result.transport_error)
-        self.assertIn(b"out", result.output)
-        self.assertIn(b"err", result.output)
-        self.assertIn(b"A" * 120, result.output)
+        self.assertIn(b"out", result.stdout)
+        self.assertIn(b"err", result.stderr)
+        self.assertIn(b"A" * 120, result.stdout)
 
-    def test_execute_timeout_is_structured(self) -> None:
+    def test_exec_sync_timeout_kills_and_raises(self) -> None:
         client = SandboxDaemonClient(self.socket_path, default_timeout_secs=1)
-        result = client.execute("python3 -c \"import time; time.sleep(3)\"")
+        with self.assertRaises(TimeoutError):
+            client.exec_sync([sys.executable, "-c", "import time; time.sleep(3)"])
 
-        self.assertEqual(result.exit_code, 124)
-        self.assertTrue(result.timed_out)
-        self.assertEqual(result.timeout_secs, 1)
-        self.assertEqual(result.output, b"")
+    def test_interactive_process_streams_and_accepts_stdin(self) -> None:
+        client = SandboxDaemonClient(self.socket_path, default_timeout_secs=2)
+        process = client.exec(
+            [
+                sys.executable,
+                "-c",
+                "import sys; data=sys.stdin.buffer.readline(); sys.stdout.buffer.write(b'out:'+data); sys.stderr.buffer.write(b'err:'+data)",
+            ]
+        )
+        try:
+            process.stdin_write(b"hello\n")
+            process.close_stdin()
+            self.assertEqual(process.wait_finish(), 0)
+            self.assertEqual(process.read_stdout(), b"out:hello\n")
+            self.assertEqual(process.read_stderr(), b"err:hello\n")
+            self.assertEqual(process.read_stdout(), b"")
+            self.assertEqual(process.read_stderr(), b"")
+        finally:
+            process.close()
+
+    def test_shell_execution_is_explicit(self) -> None:
+        client = SandboxDaemonClient(self.socket_path)
+        result = client.exec_sync("printf shell-ok", shell=True)
+        self.assertEqual(result.stdout, b"shell-ok")
+        direct = client.exec_sync(
+            [sys.executable, "-c", "import sys; print(sys.argv[1])", "$(literal); *"]
+        )
+        self.assertEqual(direct.stdout, b"$(literal); *\n")
+        with self.assertRaises(TypeError):
+            client.exec("printf direct-not-ok")
+
+    def test_wait_timeout_leaves_process_available_for_kill(self) -> None:
+        client = SandboxDaemonClient(self.socket_path, default_timeout_secs=1)
+        process = client.exec([sys.executable, "-c", "import time; time.sleep(10)"])
+        try:
+            with self.assertRaises(TimeoutError):
+                process.read_stdout(timeout_secs=0.05)
+            with self.assertRaises(TimeoutError):
+                process.wait_finish(timeout_secs=0.05)
+            self.assertTrue(process.kill())
+            self.assertEqual(process.wait_finish(), 137)
+        finally:
+            process.close()
 
     def test_read_write_and_edit_use_single_file_byte_rpc(self) -> None:
         client = SandboxDaemonClient(self.socket_path)

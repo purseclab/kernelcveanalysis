@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import base64
 import socket
-from typing import Annotated, Literal, TypeVar
+from typing import Annotated, Literal, Self, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 SOCKET_NAME = "daemon.sock"
 
@@ -19,24 +19,37 @@ class HealthRequest(ProtocolMessage):
 
 class SpawnRequest(ProtocolMessage):
     type: Literal["spawn"] = "spawn"
-    command: str
-    timeout_secs: int | None = None
+    argv: list[str] | None = None
+    command: str | None = None
+    shell: bool = False
     cwd: str | None = None
     env: dict[str, str] | None = None
+
+    @model_validator(mode="after")
+    def validate_command_spec(self) -> Self:
+        if self.shell:
+            if self.command is None or self.argv is not None:
+                raise ValueError("shell spawn requires command and forbids argv")
+        elif self.command is not None or not self.argv:
+            raise ValueError("direct spawn requires a non-empty argv and forbids command")
+        return self
 
 
 class StdinRequest(ProtocolMessage):
     type: Literal["stdin"] = "stdin"
+    request_id: str
     data_b64: str
 
 
 class CloseStdinRequest(ProtocolMessage):
     type: Literal["close_stdin"] = "close_stdin"
+    request_id: str
 
 
 class KillRequest(ProtocolMessage):
     type: Literal["kill"] = "kill"
-    signal: int = 15
+    request_id: str
+    signal: int = 9
 
 
 class ReadFileRequest(ProtocolMessage):
@@ -86,27 +99,39 @@ class HealthResponse(ProtocolMessage):
 
 class SpawnedEvent(ProtocolMessage):
     type: Literal["spawned"] = "spawned"
-    id: str
 
 
 class OutputEvent(ProtocolMessage):
     type: Literal["stdout", "stderr"]
-    id: str
     data_b64: str
 
 
 class ExitEvent(ProtocolMessage):
     type: Literal["exit"] = "exit"
-    id: str
     exit_code: int
-    timed_out: bool = False
-    timeout_secs: int | None = None
 
 
 class ErrorEvent(ProtocolMessage):
     type: Literal["error"] = "error"
     message: str
-    id: str | None = None
+
+
+class StdinResponse(ProtocolMessage):
+    type: Literal["stdin_result"] = "stdin_result"
+    request_id: str
+    error: str | None = None
+
+
+class CloseStdinResponse(ProtocolMessage):
+    type: Literal["close_stdin_result"] = "close_stdin_result"
+    request_id: str
+    error: str | None = None
+
+
+class KillResponse(ProtocolMessage):
+    type: Literal["kill_result"] = "kill_result"
+    request_id: str
+    delivered: bool
 
 
 FileOperationError = Literal[
@@ -200,6 +225,9 @@ DaemonResponse = Annotated[
     | OutputEvent
     | ExitEvent
     | ErrorEvent
+    | StdinResponse
+    | CloseStdinResponse
+    | KillResponse
     | ReadFileResponse
     | WriteFileResponse
     | EditFileResponse

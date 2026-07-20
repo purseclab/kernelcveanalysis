@@ -3,8 +3,10 @@ from logging import getLogger
 from pathlib import Path
 from secrets import token_hex
 
-from kexploit_agent import Agent, DockerSandboxProvider, Model, MountInfo
-from kexploit_agent.agent import BaseTool
+from kexploit_agent import KexploitAgent, Model
+from kexploit_agent.agents.kexploit_agent import DockerSandboxProvider, MountInfo
+from kexploit_utils import DockerTag
+from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage
 from langchain_tavily import TavilySearch
 
@@ -49,11 +51,11 @@ class BugHunter:
                 "TAVILY_API_KEY not set, TavilySearch tool will not be available."
             )
 
-    def _make_agent(self, name: str) -> Agent:
+    def _make_agent(self, name: str) -> KexploitAgent:
         assert self.sandbox is not None, (
             "sandbox not started, can't create bug hunter agent"
         )
-        return Agent(
+        return KexploitAgent(
             model=self.model.create_model(),
             tools=self.tools,
             system_prompt=BUG_HUNTER_PROMPT,
@@ -62,7 +64,8 @@ class BugHunter:
         )
 
     def run(self) -> None:
-        with DockerSandboxProvider.get().create_instance(
+        with DockerSandboxProvider.get().create_and_run(
+            DockerTag.CODEX_SANDBOX,
             mounts=[
                 self.input_mount,
                 self.output_mount,

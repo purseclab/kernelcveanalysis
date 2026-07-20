@@ -1,9 +1,8 @@
 from .docker_sandbox import (
-    CommandResult,
-    DockerMetadata,
     DockerSandbox,
     DockerSandboxProvider,
     EditResult,
+    ExecResult,
     FileInfo,
     GlobResult,
     GrepMatch,
@@ -12,16 +11,16 @@ from .docker_sandbox import (
     MountInfo,
     ReadFileResult,
     SandboxDaemonClient,
+    SandboxProcess,
     WriteFileResult,
     path_for_mount_name,
 )
 
 __all__ = [
-    "CommandResult",
-    "DockerMetadata",
     "DockerSandbox",
     "DockerSandboxProvider",
     "EditResult",
+    "ExecResult",
     "FileInfo",
     "GlobResult",
     "GrepMatch",
@@ -30,6 +29,7 @@ __all__ = [
     "MountInfo",
     "ReadFileResult",
     "SandboxDaemonClient",
+    "SandboxProcess",
     "WriteFileResult",
     "path_for_mount_name",
 ]

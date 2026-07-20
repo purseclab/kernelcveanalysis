@@ -5,7 +5,9 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
+from kexploit_utils import build_docker
 from ksandbox.docker_sandbox import DockerSandboxProvider, MountInfo
 
 
@@ -17,21 +19,46 @@ class DockerIntegrationTests(unittest.TestCase):
     def test_minimal_custom_image_uses_mounted_daemon_and_tools(self) -> None:
         tag = f"ksandbox-integration:{uuid.uuid4().hex}"
         fixtures = Path(__file__).resolve().parent / "fixtures"
-        provider = DockerSandboxProvider(image_tag=tag, default_timeout_secs=5)
-        provider.build_image(fixtures, dockerfile="minimal.Dockerfile")
         try:
             with tempfile.TemporaryDirectory() as tempdir:
-                mount_path = Path(tempdir)
+                provider = DockerSandboxProvider(
+                    default_timeout_secs=5,
+                    database_path=Path(tempdir) / "sandboxes.sqlite3",
+                )
+                build_docker(
+                    fixtures,
+                    dockerfile=Path("minimal.Dockerfile"),
+                    tag=tag,
+                )
+                mount_path = Path(tempdir) / "input"
+                mount_path.mkdir()
                 (mount_path / "sample.txt").write_text("alpha\nneedle\nomega\n")
                 mount = MountInfo(mount_path, "input", "integration input", False)
-                with provider.create_instance([mount]) as sandbox:
-                    command = sandbox.execute("printf arbitrary-image-ok")
+                with patch(
+                    "ksandbox.docker_sandbox._persistent_runtime_root",
+                    return_value=Path(tempdir) / "runtimes",
+                ), provider.create_and_run(tag, [mount]) as sandbox:
+                    command = sandbox.exec_sync("printf arbitrary-image-ok", shell=True)
                     self.assertEqual(command.exit_code, 0)
-                    self.assertEqual(command.output, b"arbitrary-image-ok")
+                    self.assertEqual(command.stdout, b"arbitrary-image-ok")
 
-                    mount_layout = sandbox.execute(
+                    direct = sandbox.exec_sync(["/bin/busybox", "printf", "argv-ok"])
+                    self.assertEqual(direct.exit_code, 0)
+                    self.assertEqual(direct.stdout, b"argv-ok")
+
+                    process = sandbox.exec(["/bin/busybox", "cat"])
+                    try:
+                        process.stdin_write(b"interactive\n")
+                        process.close_stdin()
+                        self.assertEqual(process.wait_finish(), 0)
+                        self.assertEqual(process.read_stdout(), b"interactive\n")
+                    finally:
+                        process.close()
+
+                    mount_layout = sandbox.exec_sync(
                         "test ! -e /sandbox_runtime/bin && "
-                        "! touch /opt/ksandbox/bin/must-not-write 2>/dev/null"
+                        "! touch /opt/ksandbox/bin/must-not-write 2>/dev/null",
+                        shell=True,
                     )
                     self.assertEqual(mount_layout.exit_code, 0)
 
