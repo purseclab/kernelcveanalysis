@@ -80,6 +80,7 @@ class BugHunter:
 
             for app in self.input_dir.iterdir():
                 if app.is_file():
+                    print(f"analyzing app '{app}'")
                     self.analyze_app(app.name)
 
             self.write_final_report()

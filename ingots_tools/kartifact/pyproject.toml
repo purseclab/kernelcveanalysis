@@ -1,0 +1,26 @@
+[project]
+name = "kartifact"
+version = "0.1.0"
+description = "System which manages exploitation artifacts to keep track of more easily."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "kexploit_utils",
+    "pydantic>=2.12.5",
+    "sqlalchemy>=2.0.45",
+    "tomli-w>=1.2.0",
+    "typer>=0.21.1",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+kexploit_utils = { workspace = true }
+
+[project.scripts]
+kartifact = "kartifact.cli:main"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+exclude = ["tests/"]

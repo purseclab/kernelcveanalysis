@@ -6,6 +6,7 @@ dependencies = [
     "android_env",
     "cuttleagent",
     "kexploit",
+    "kartifact",
     "kdebug",
     "libadb",
     "scripts",
@@ -24,6 +25,7 @@ members = [
     "android_env",
     "cuttleagent",
     "kexploit",
+    "kartifact",
     "kdebug",
     "libadb",
     "scripts",
@@ -41,6 +43,7 @@ members = [
 android_env = { workspace = true }
 cuttleagent = { workspace = true }
 kexploit = { workspace = true }
+kartifact = { workspace = true }
 kdebug = { workspace = true }
 libadb = { workspace = true }
 scripts = { workspace = true }

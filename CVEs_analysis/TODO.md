@@ -11,6 +11,7 @@ Jack TODO list for ingots stuff
 
 - [ ] Overall an easier way to manage in progress exploits, finished exploits, and keep track of what targets they are for, some sort of central management system
 	- [ ] Also manage kernel images, from ingots and built, source code, provenance etc.
+	- [ ] Can integrate with the existing bug scraper for android advisories, and extend it
 - [ ] Building android easier
 - [ ] possible better debugging, though agent seems pretty able to debug with kprobes
 
@@ -42,6 +43,10 @@ Jack TODO list for ingots stuff
 - [ ] Overall this needs a more complete extraction phase and knowledge database for reusable techniques
 	- [ ] should support easy ingestion from human input as well
 - [ ] Look at exiting todo list for new primitivies
+
+### bug scraper
+
+- [ ] extend with several more sources
 
 ### android_env
 

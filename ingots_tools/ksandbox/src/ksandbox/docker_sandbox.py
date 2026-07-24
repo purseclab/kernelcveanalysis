@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Iterator, Optional, Self, Sequence
 
 import docker  # type: ignore
-from kexploit_utils import kexploit_data_dir  # type: ignore[attr-defined]
+from kexploit_utils import ksandbox_dir # type: ignore[attr-defined]
 
 from .daemon_protocol import (
     RESPONSE_ADAPTER,
@@ -68,7 +68,7 @@ logger = get_logger(__name__)
 
 
 def _persistent_runtime_root() -> Path:
-    return kexploit_data_dir("ksandbox") / "runtimes"
+    return ksandbox_dir() / "runtimes"
 
 
 @dataclass
@@ -226,7 +226,7 @@ class _StoredSandbox:
 class _SandboxStore:
     def __init__(self, database_path: Path | None = None) -> None:
         self.database_path = database_path or (
-            kexploit_data_dir("ksandbox") / "sandboxes.sqlite3"
+            ksandbox_dir() / "sandboxes.sqlite3"
         )
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
