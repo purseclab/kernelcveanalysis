@@ -1,6 +1,7 @@
 from .models import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CuttlefishBackendKind,
     CvdCommandMode,
     InstanceListResponse,
     InstanceLogsView,
@@ -16,6 +17,7 @@ from .models import (
 __all__ = [
     "CreateInstanceRequest",
     "CreateInstanceResponse",
+    "CuttlefishBackendKind",
     "CvdCommandMode",
     "InstanceListResponse",
     "InstanceLogsView",

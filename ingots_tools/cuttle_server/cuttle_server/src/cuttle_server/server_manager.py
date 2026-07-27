@@ -4,12 +4,13 @@ import shutil
 import threading
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
+from typing import Mapping
 from uuid import UUID
 
 from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CuttlefishBackendKind,
     InstanceListResponse,
     InstanceLogsView,
     InstanceState,
@@ -19,9 +20,9 @@ from cuttle_types import (
     TemplateView,
 )
 
-from .app_loader import CuttlefishAppLoader
+from .app_loader import AppLoader, CuttlefishAppLoader
+from .backends import CuttlefishBackend
 from .config import CuttlefishSettings
-from .cvd_cli import CuttlefishCli
 from .db import InstanceDb
 from .models import (
     ACTIVE_STATES,
@@ -58,14 +59,23 @@ class CuttlefishServerManager:
         self,
         settings: CuttlefishSettings,
         db: InstanceDb,
-        cli: CuttlefishCli,
-        app_loader: CuttlefishAppLoader | None = None,
+        backends: Mapping[CuttlefishBackendKind, CuttlefishBackend],
+        app_loader: AppLoader | None = None,
     ) -> None:
         self.settings = settings
         self.db = db
-        self.cli = cli
+        self.backends = dict(backends)
         self.app_loader = app_loader or CuttlefishAppLoader()
         self.lock = threading.RLock()
+
+        missing_backends = {
+            template.backend
+            for template in settings.templates.values()
+            if template.backend not in self.backends
+        }
+        if missing_backends:
+            names = ", ".join(sorted(backend.value for backend in missing_backends))
+            raise ValueError(f"missing configured Cuttlefish backends: {names}")
 
     def initialize(self) -> None:
         self.settings.instance_runtime_root.mkdir(parents=True, exist_ok=True)
@@ -107,6 +117,7 @@ class CuttlefishServerManager:
                 adb_port=None,
                 adb_serial=None,
                 webrtc_port=None,
+                backend_runtime_id=None,
                 expires_at=expires_at,
                 failure_reason=None,
             )
@@ -126,8 +137,9 @@ class CuttlefishServerManager:
         return CreateInstanceResponse(instance=instance_view_from_record(record))
 
     def _complete_instance_start(self, record: InstanceRecord) -> None:
+        backend = self._backend_for(record)
         try:
-            launch_result = self.cli.start_instance(record)
+            launch_result = backend.start_instance(record)
         except Exception as exc:
             record.state = InstanceState.CRASHED
             record.failure_reason = str(exc)
@@ -138,6 +150,7 @@ class CuttlefishServerManager:
         record.adb_port = launch_result.adb_port
         record.adb_serial = launch_result.adb_serial
         record.webrtc_port = launch_result.webrtc_port
+        record.backend_runtime_id = launch_result.backend_runtime_id
         self.db.upsert(record)
 
         if record.config.load_apps and record.config.apps:
@@ -180,15 +193,15 @@ class CuttlefishServerManager:
     ) -> InstanceLogsView:
         with self.lock:
             record = self._get_visible_instance_record(user_id, is_admin, instance_id)
-            paths = CuttlefishCli.log_paths(record)
+            logs = self._backend_for(record).read_logs(record)
             return InstanceLogsView(
                 instance_id=record.instance_id,
                 instance_name=record.effective_instance_name,
                 state=record.state,
                 launch_command=record.launch_command,
                 failure_reason=record.failure_reason,
-                start_log=self._read_log(paths.start_log),
-                stop_log=self._read_log(paths.stop_log),
+                start_log=logs.start_log,
+                stop_log=logs.stop_log,
             )
 
     def renew_lease(
@@ -224,7 +237,7 @@ class CuttlefishServerManager:
             self.db.upsert(record)
 
             try:
-                self.cli.stop_instance(record)
+                self._backend_for(record).stop_instance(record)
                 record.state = InstanceState.STOPPED
                 record.failure_reason = None
             except Exception as exc:
@@ -273,6 +286,8 @@ class CuttlefishServerManager:
 
     def reconcile_expired_instances(self) -> None:
         with self.lock:
+            records = self.db.list_instances()
+            self._reconcile_backends(records)
             for record in self.db.list_instances():
                 if record.state in TERMINAL_STATES:
                     continue
@@ -281,7 +296,7 @@ class CuttlefishServerManager:
 
     def _expire_instance(self, record: InstanceRecord) -> None:
         try:
-            self.cli.stop_instance(record)
+            self._backend_for(record).stop_instance(record)
             record.state = InstanceState.EXPIRED
             record.failure_reason = None
         except Exception as exc:
@@ -307,7 +322,7 @@ class CuttlefishServerManager:
         record.state = InstanceState.CRASHED
         record.failure_reason = failure_reason
         try:
-            self.cli.stop_instance(record)
+            self._backend_for(record).stop_instance(record)
         except Exception as stop_exc:
             record.failure_reason = f"{failure_reason}; cleanup stop failed: {stop_exc}"
             self.db.upsert(record)
@@ -317,17 +332,33 @@ class CuttlefishServerManager:
         self.db.upsert(record)
 
     def _build_launch_command(self, record: InstanceRecord) -> list[str]:
-        build_start_command = getattr(self.cli, "build_start_command", None)
-        if build_start_command is None:
-            return []
-        return list(build_start_command(record))
+        return list(self._backend_for(record).build_start_command(record))
 
-    @staticmethod
-    def _read_log(path: Path) -> str:
+    def _backend_for(self, record: InstanceRecord) -> CuttlefishBackend:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
-            return ""
+            return self.backends[record.config.backend]
+        except KeyError as exc:
+            raise InstanceError(
+                f"backend {record.config.backend.value!r} is unavailable"
+            ) from exc
+
+    def _reconcile_backends(self, records: list[InstanceRecord]) -> None:
+        required_backend_kinds = {
+            template.backend for template in self.settings.templates.values()
+        }
+        required_backend_kinds.update(record.config.backend for record in records)
+        for backend_kind in required_backend_kinds:
+            backend = self.backends.get(backend_kind)
+            if backend is None:
+                continue
+            for failure in backend.reconcile(records):
+                record = self.db.get(failure.instance_id)
+                if record is None or record.state not in ACTIVE_STATES:
+                    continue
+                record.state = InstanceState.CRASHED
+                record.failure_reason = failure.reason
+                self._cleanup_runtime_dir(record, state=InstanceState.CRASHED)
+                self.db.upsert(record)
 
     def _get_instance_record(self, instance_id: str) -> InstanceRecord:
         record = self.db.get(instance_id)
@@ -448,5 +479,7 @@ class CuttlefishServerManager:
                 else True
             ),
             command_mode=template.command_mode,
+            backend=template.backend,
+            docker_image=template.docker_image,
             cvd_binary=template.cvd_binary,
         )

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from cuttle_types import CvdCommandMode
+from cuttle_types import CuttlefishBackendKind, CvdCommandMode
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 
@@ -26,12 +26,15 @@ class ServerConfigFile(BaseModel):
     reconcile_interval_sec: int = Field(default=30, ge=1)
     base_instance_num: int = Field(default=0, ge=0)
     max_instances: int = Field(default=10, ge=1)
+    docker_image: str | None = Field(default=None, min_length=1)
 
 
 class TemplateConfigFile(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     runtime_root: Path
     command_mode: CvdCommandMode = CvdCommandMode.CVD
+    backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
+    docker_image: str | None = Field(default=None, min_length=1)
     cpus: int = Field(ge=1, le=64)
     kernel_path: Path | None = None
     initrd_path: Path | None = None
@@ -60,6 +63,8 @@ class InstanceTemplate:
     initrd_path: Path | None
     selinux: bool
     apps: tuple[Path, ...]
+    backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
+    docker_image: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +81,7 @@ class CuttlefishSettings:
     base_instance_num: int
     max_instances: int
     templates: dict[str, InstanceTemplate]
+    docker_image: str | None = None
 
 
 def load_settings(config_dir: Path) -> CuttlefishSettings:
@@ -92,6 +98,14 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
     templates: dict[str, InstanceTemplate] = {}
     for template_path in sorted(templates_dir.glob("*.toml")):
         template = _load_template(template_path)
+        if template.backend == CuttlefishBackendKind.DOCKER:
+            resolved_image = template.docker_image or main_config.docker_image
+            if resolved_image is None:
+                raise ConfigError(
+                    f"template {template.name!r} uses the docker backend but neither "
+                    "the template nor cuttle_server.toml defines docker_image"
+                )
+            template = replace(template, docker_image=resolved_image)
         if template.name in templates:
             raise ConfigError(
                 f"duplicate template name {template.name!r} in {template_path}"
@@ -117,6 +131,7 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
         reconcile_interval_sec=main_config.reconcile_interval_sec,
         base_instance_num=main_config.base_instance_num,
         max_instances=main_config.max_instances,
+        docker_image=main_config.docker_image,
         templates=templates,
     )
 
@@ -179,6 +194,8 @@ def _load_template(template_path: Path) -> InstanceTemplate:
         name=parsed.name,
         runtime_root=runtime_root,
         command_mode=parsed.command_mode,
+        backend=parsed.backend,
+        docker_image=parsed.docker_image,
         cvd_binary=cvd_binary,
         cpus=parsed.cpus,
         kernel_path=kernel_path,

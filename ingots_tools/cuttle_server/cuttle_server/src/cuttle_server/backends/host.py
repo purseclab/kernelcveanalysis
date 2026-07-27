@@ -6,20 +6,14 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
-from cuttle_types import CvdCommandMode
+from cuttle_types import CuttlefishBackendKind, CvdCommandMode
 
-from .models import InstanceRecord
+from ..models import InstanceRecord
+from .base import BackendLogs, BackendReconcileFailure, LaunchResult
 
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class LaunchResult:
-    launch_command: list[str]
-    adb_port: int
-    adb_serial: str | None
-    webrtc_port: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,8 +22,10 @@ class CuttlefishLogPaths:
     stop_log: Path
 
 
-class CuttlefishCli:
-    """Handles spawning Cuttlefish instances."""
+class HostCuttlefishBackend:
+    """Runs Cuttlefish directly in the server host namespace."""
+
+    kind = CuttlefishBackendKind.HOST
 
     def __init__(self, *, start_timeout_sec: int = 120) -> None:
         self.start_timeout_sec = start_timeout_sec
@@ -45,10 +41,9 @@ class CuttlefishCli:
             action="start",
             timeout_sec=self.start_timeout_sec,
         )
-        adb_port = self._resolve_adb_port(record)
         return LaunchResult(
             launch_command=command,
-            adb_port=adb_port,
+            adb_port=self._resolve_adb_port(record),
             adb_serial=None,
             webrtc_port=None,
         )
@@ -91,6 +86,19 @@ class CuttlefishCli:
 
     def _build_start_command(self, record: InstanceRecord) -> list[str]:
         return self.build_start_command(record)
+
+    def read_logs(self, record: InstanceRecord) -> BackendLogs:
+        paths = self.log_paths(record)
+        return BackendLogs(
+            start_log=self._read_log(paths.start_log),
+            stop_log=self._read_log(paths.stop_log),
+        )
+
+    def reconcile(
+        self, records: Sequence[InstanceRecord]
+    ) -> list[BackendReconcileFailure]:
+        del records
+        return []
 
     @staticmethod
     def log_paths(record: InstanceRecord) -> CuttlefishLogPaths:
@@ -176,10 +184,14 @@ class CuttlefishCli:
 
     @staticmethod
     def read_log_tail(path: Path, *, max_chars: int = 4096) -> str:
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
-            return ""
+        text = HostCuttlefishBackend._read_log(path)
         if len(text) <= max_chars:
             return text
         return text[-max_chars:]
+
+    @staticmethod
+    def _read_log(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            return ""

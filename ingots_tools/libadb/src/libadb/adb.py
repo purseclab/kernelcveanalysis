@@ -7,7 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from posixpath import normpath
 from shutil import copyfileobj
-from shlex import quote
+from shlex import join, quote
 from time import sleep
 from typing import Optional, Self
 from zipfile import ZipFile
@@ -216,16 +216,30 @@ class AdbClient:
     def install_multiple_apps(self, apps: list[Path]):
         if not apps:
             raise ValueError("install_multiple_apps requires at least one apk")
-        subprocess.run(
-            ["adb", "-s", self.remote_addr, "install-multiple", "-t", *map(str, apps)],
-            check=True,
+        self._run_install_command(
+            "install-multiple",
+            "-t",
+            *map(str, apps),
         )
 
     def _install_apk(self, app: Path) -> None:
-        subprocess.run(
-            ["adb", "-s", self.remote_addr, "install", "-t", str(app)],
-            check=True,
-        )
+        self._run_install_command("install", "-t", str(app))
+
+    def _run_install_command(self, *args: str) -> None:
+        command = self.adb_args(*args)
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise AdbCommandError(
+                join(command),
+                exc.stdout or "",
+                exc.stderr or "",
+            ) from exc
 
     def _install_bundle_archive(self, app: Path) -> None:
         with self._extract_app_bundle(app) as extracted:

@@ -16,6 +16,27 @@ Optional bind overrides:
 uv run cuttle-server /path/to/config-dir --host 0.0.0.0 --port 9000
 ```
 
+### Docker Image Setup
+
+Before using Docker-backed templates, build the default image from the
+`cuttle_server` package directory:
+
+```sh
+./setup.sh
+```
+
+The script builds `cuttlefish-host:latest`, matching the default
+`docker_image` shown below. It uses Google's stable Cuttlefish orchestration
+image as its base and refreshes that base when rebuilding.
+
+The image tag and base image can be overridden when needed:
+
+```sh
+CUTTLEFISH_DOCKER_IMAGE=my-cuttlefish:latest \
+CUTTLEFISH_BASE_IMAGE=registry.example.com/cuttlefish:version \
+./setup.sh
+```
+
 ## Config Layout
 
 The config directory must contain:
@@ -43,10 +64,12 @@ cvd_start_timeout_sec = 120
 reconcile_interval_sec = 30
 base_instance_num = 0
 max_instances = 10
+docker_image = "cuttlefish-host:latest"
 ```
 
 - Relative paths are resolved relative to the config directory.
 - `server_host` and `server_port` control the default FastAPI bind address. CLI `--host` and `--port` still override them for one-off runs.
+- Docker-published ADB ports bind to the configured `server_host`; a one-off HTTP `--host` override does not change their binding.
 - `auth_token` is the shared bearer token required on every request.
 - `admin_user_id` is the only user allowed to reconcile and bypass normal per-user instance visibility.
 - Per-instance runtime state is stored under `/tmp/cvd` using short generated directory names to avoid Unix socket path-length failures.
@@ -54,6 +77,7 @@ max_instances = 10
 - `cvd_start_timeout_sec` bounds the `cvd start --daemon` subprocess so failed launches do not hang forever.
 - `reconcile_interval_sec` controls how often the server's background cleanup task checks for expired instances.
 - `base_instance_num` reserves the first `N` Cuttlefish instance numbers for manually launched devices. When set to `N`, the server allocates from `N + 1` through `N + max_instances`.
+- `docker_image` is the default prebuilt image for Docker-backed templates. Run `./setup.sh` to build the provided default image; the server itself does not build or pull images automatically.
 
 ### Template Config
 
@@ -63,6 +87,7 @@ Each `templates/*.toml` file defines one launch template:
 name = "phone"
 runtime_root = "/opt/cuttlefish"
 command_mode = "cvd"
+backend = "host"
 cpus = 4
 kernel_path = "/srv/kernels/bzImage"
 initrd_path = "/srv/kernels/initramfs.img"
@@ -77,6 +102,8 @@ apps = [
 - `name` is the template identifier used as `template_name`.
 - `runtime_root` is the Cuttlefish installation directory. Relative values are resolved relative to the template file.
 - `command_mode` chooses which Cuttlefish command wrapper to use. It defaults to `cvd`, which runs `bin/cvd start` and `bin/cvd stop`. Set it to `legacy` to run `bin/launch_cvd` and `bin/stop_cvd`.
+- `backend` selects `host` or `docker` and defaults to `host`.
+- A Docker template may set `docker_image` to override the server default. A Docker template must resolve an image from one of those locations.
 - `kernel_path` and `initrd_path` are optional. When omitted, the server does not pass the corresponding Cuttlefish launch argument, allowing the image defaults such as `boot.img` to be used.
 - Relative `kernel_path`, `initrd_path`, and `apps` entries are resolved relative to the template file.
 - `apps` are parsed, validated, persisted, returned by the API, and auto-installed in order during startup unless disabled per request.
@@ -131,10 +158,13 @@ Notes:
 ## Runtime Behavior
 
 - Each instance gets a unique runtime directory under `/tmp/cvd/<short-instance-id>`.
-- The configured start and stop commands run with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
+- Host templates run the configured start and stop commands directly with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
+- Docker templates mount `runtime_root` read-only at `/opt/cuttlefish`, mount the instance runtime directory read-write at `/var/lib/cuttlefish`, and run one internal Cuttlefish instance numbered `1`.
+- Docker templates require a local Docker daemon, `/dev/kvm`, `/dev/net/tun`, and an image containing the host-side runtime dependencies. Available vhost devices are passed through automatically.
 - CVD stdout/stderr are written to `cvd-start.log` and `cvd-stop.log` in the instance runtime directory and are available through the logs endpoint while that directory exists.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
-- Each instance publishes an ADB TCP port derived from its Cuttlefish instance number. The launcher binds that listener on `0.0.0.0`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
+- Host instances publish an ADB TCP port derived from their logical instance number.
+- Docker instances always use port `6520` internally. Docker assigns a unique host port bound to the configured `server_host`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
 - `max_instances` still means the number of instances managed by the server, not the highest raw Cuttlefish instance number.
 - When `load_apps` is enabled and the template has apps, the server connects to the instance over server-local ADB, waits for boot completion, installs each `.apk` directly or unpacks and installs `.xapk`/`.apkm` bundles in template order, then disconnects before marking the instance `ACTIVE`.
 - The server runs a background task on startup that periodically reconciles and stops expired instances, and it also performs one reconciliation pass immediately during startup.
@@ -174,10 +204,15 @@ With `command_mode = "legacy"`, the server runs `launch_cvd` with the same launc
 stop_cvd
 ```
 
+Docker templates use the equivalent container paths, force
+`--base_instance_num=1`, disable WebRTC, and use `--daemon=false` so the
+container lifecycle follows the launcher. Stop uses Docker's hardcoded graceful
+timeout and force-removes the container when necessary.
+
 ## Current Limitations
 
 - Authorization is still a single shared bearer token; user identity is a separate header, not a signed credential.
 - The admin user can see all instances; stop-by-name is ambiguous for admin if multiple users have the same explicit active name.
-- `adb_port` is exposed, but `adb_serial` and `webrtc_port` are still returned as `null`.
+- `webrtc_port` is returned as `null`; the first Docker backend version deliberately disables WebRTC.
 - Template config is loaded once at startup; there is no hot reload.
 - App loading always uses the server-local standard `adb` client/server flow; there is no custom raw-ADB transport in `libadb`.

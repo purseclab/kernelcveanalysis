@@ -409,6 +409,8 @@ def show_template(
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"name: {template.template_name}")
+    typer.echo(f"backend: {template.backend.value}")
+    typer.echo(f"docker_image: {template.docker_image or '<none>'}")
     typer.echo(f"runtime_root: {template.runtime_root}")
     typer.echo(f"command_mode: {template.command_mode.value}")
     typer.echo(f"cpus: {template.cpus}")
@@ -427,6 +429,7 @@ def _echo_template_summary(template: TemplateSummary) -> None:
     typer.echo(
         f"{template.template_name}\tcpus={template.cpus}\tselinux={template.selinux}"
         f"\tcommand_mode={template.command_mode.value}"
+        f"\tbackend={template.backend.value}"
     )
 
 

@@ -3,14 +3,19 @@ from __future__ import annotations
 import subprocess
 import time
 from dataclasses import dataclass
+from typing import Protocol
 
-from libadb import AdbClient
+from libadb import AdbClient  # type: ignore[attr-defined]
 
 from .models import InstanceRecord
 
 ADB_CONNECT_TIMEOUT_SEC = 60.0
 ADB_BOOT_TIMEOUT_SEC = 180.0
 ADB_CONNECT_RETRY_INTERVAL_SEC = 1.0
+
+
+class AppLoader(Protocol):
+    def load_apps(self, record: InstanceRecord) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +30,7 @@ class CuttlefishAppLoader:
         if record.adb_port is None:
             raise RuntimeError("instance does not have an adb port")
 
-        adb = AdbClient(f"127.0.0.1:{record.adb_port}")
+        adb = AdbClient(record.adb_serial or f"127.0.0.1:{record.adb_port}")
         connected = False
         try:
             self._connect_until_ready(adb)

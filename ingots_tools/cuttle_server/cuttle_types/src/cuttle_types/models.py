@@ -37,6 +37,11 @@ class CvdCommandMode(str, Enum):
     LEGACY = "legacy"
 
 
+class CuttlefishBackendKind(str, Enum):
+    HOST = "host"
+    DOCKER = "docker"
+
+
 class InstanceView(BaseModel):
     instance_id: str
     owner_id: str
@@ -51,6 +56,8 @@ class InstanceView(BaseModel):
     apps: list[Path]
     load_apps: bool
     command_mode: CvdCommandMode = CvdCommandMode.CVD
+    backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
+    docker_image: str | None = None
     runtime_dir: Path
     launch_command: list[str]
     adb_port: int | None
@@ -83,6 +90,7 @@ class TemplateSummary(BaseModel):
     cpus: int
     selinux: bool
     command_mode: CvdCommandMode = CvdCommandMode.CVD
+    backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
 
 
 class TemplateView(BaseModel):
@@ -94,6 +102,8 @@ class TemplateView(BaseModel):
     selinux: bool
     apps: list[Path]
     command_mode: CvdCommandMode = CvdCommandMode.CVD
+    backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
+    docker_image: str | None = None
 
 
 class TemplateListResponse(BaseModel):

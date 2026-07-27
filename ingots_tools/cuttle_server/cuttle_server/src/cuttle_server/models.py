@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cuttle_types import (
+    CuttlefishBackendKind,
     CvdCommandMode,
     InstanceState,
     InstanceView,
@@ -31,6 +32,8 @@ class ResolvedLaunchConfig(BaseModel):
     apps: list[Path] = Field(default_factory=list)
     load_apps: bool = True
     command_mode: CvdCommandMode = CvdCommandMode.CVD
+    backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
+    docker_image: str | None = None
     cvd_binary: Path
 
 
@@ -54,6 +57,7 @@ class InstanceRecord(BaseModel):
     adb_port: int | None = None
     adb_serial: str | None = None
     webrtc_port: int | None = None
+    backend_runtime_id: str | None = None
     expires_at: datetime | None
     failure_reason: str | None = None
 
@@ -87,6 +91,8 @@ def instance_view_from_record(record: InstanceRecord) -> InstanceView:
         apps=record.config.apps,
         load_apps=record.config.load_apps,
         command_mode=record.config.command_mode,
+        backend=record.config.backend,
+        docker_image=record.config.docker_image,
         runtime_dir=record.runtime_dir,
         launch_command=record.launch_command,
         adb_port=record.adb_port,
@@ -103,6 +109,7 @@ def template_summary_from_template(template: "InstanceTemplate") -> TemplateSumm
         cpus=template.cpus,
         selinux=template.selinux,
         command_mode=template.command_mode,
+        backend=template.backend,
     )
 
 
@@ -116,4 +123,6 @@ def template_view_from_template(template: "InstanceTemplate") -> TemplateView:
         selinux=template.selinux,
         apps=list(template.apps),
         command_mode=template.command_mode,
+        backend=template.backend,
+        docker_image=template.docker_image,
     )

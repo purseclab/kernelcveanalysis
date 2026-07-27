@@ -7,6 +7,7 @@ from typing import Annotated
 from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CuttlefishBackendKind,
     InstanceListResponse,
     InstanceLogsView,
     InstanceView,
@@ -16,8 +17,12 @@ from cuttle_types import (
 )
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 
+from .backends import (
+    CuttlefishBackend,
+    DockerCuttlefishBackend,
+    HostCuttlefishBackend,
+)
 from .config import CuttlefishSettings
-from .cvd_cli import CuttlefishCli
 from .db import InstanceDb
 from .server_manager import (
     AuthorizationError,
@@ -90,8 +95,16 @@ async def reconcile_expired_instances_periodically(
 
 def create_app(settings: CuttlefishSettings) -> FastAPI:
     db = InstanceDb(settings.database_path)
-    cli = CuttlefishCli(start_timeout_sec=settings.cvd_start_timeout_sec)
-    server_manager = CuttlefishServerManager(settings, db, cli)
+    backends: dict[CuttlefishBackendKind, CuttlefishBackend] = {
+        CuttlefishBackendKind.HOST: HostCuttlefishBackend(
+            start_timeout_sec=settings.cvd_start_timeout_sec
+        ),
+        CuttlefishBackendKind.DOCKER: DockerCuttlefishBackend(
+            server_host=settings.server_host,
+            start_timeout_sec=settings.cvd_start_timeout_sec,
+        ),
+    }
+    server_manager = CuttlefishServerManager(settings, db, backends)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

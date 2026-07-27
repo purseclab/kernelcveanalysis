@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "cuttle_types",
+    "docker>=7.0.0",
     "fastapi>=0.136.0",
     "libadb",
     "pydantic>=2.12.5",

@@ -514,6 +514,7 @@ version = "0.1.0"
 source = { editable = "cuttle_server/cuttle_server" }
 dependencies = [
     { name = "cuttle-types" },
+    { name = "docker" },
     { name = "fastapi" },
     { name = "libadb" },
     { name = "pydantic" },
@@ -524,6 +525,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cuttle-types", editable = "cuttle_server/cuttle_types" },
+    { name = "docker", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.136.0" },
     { name = "libadb", editable = "libadb" },
     { name = "pydantic", specifier = ">=2.12.5" },

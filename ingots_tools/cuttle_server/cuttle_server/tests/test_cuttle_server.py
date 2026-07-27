@@ -1,4 +1,6 @@
 import asyncio
+import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -8,10 +10,12 @@ from unittest.mock import Mock, patch
 
 from cuttle_types import (
     CreateInstanceRequest,
+    CuttlefishBackendKind,
     CvdCommandMode,
     InstanceState,
     RenewLeaseRequest,
 )
+from cuttle_server.backends import BackendLogs, HostCuttlefishBackend
 from fastapi import HTTPException
 from typer.testing import CliRunner
 
@@ -27,7 +31,6 @@ from cuttle_server.config import (
     InstanceTemplate,
     load_settings,
 )
-from cuttle_server.cvd_cli import CuttlefishCli
 from cuttle_server.db import InstanceDb
 from cuttle_server.main import app
 from cuttle_server.models import ResolvedLaunchConfig
@@ -96,7 +99,76 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(template.initrd_path, initrd.resolve())
         self.assertEqual(template.apps, (app_one.resolve(), app_two.resolve()))
         self.assertEqual(template.command_mode, CvdCommandMode.CVD)
+        self.assertEqual(template.backend, CuttlefishBackendKind.HOST)
+        self.assertIsNone(template.docker_image)
         self.assertEqual(template.cvd_binary, install_dir.resolve() / "bin" / "cvd")
+
+    def test_load_settings_resolves_docker_image_override_and_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            bin_dir = install_dir / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "cvd").write_text("")
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "data/cuttlefish.db"\n'
+                'docker_image = "cuttlefish:default"\n'
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "default"\n'
+                f'runtime_root = "{install_dir}"\n'
+                'backend = "docker"\n'
+                "cpus = 4\n"
+                "selinux = false\n"
+            )
+            (root / "templates" / "override.toml").write_text(
+                'name = "override"\n'
+                f'runtime_root = "{install_dir}"\n'
+                'backend = "docker"\n'
+                'docker_image = "cuttlefish:override"\n'
+                "cpus = 4\n"
+                "selinux = false\n"
+            )
+
+            settings = load_settings(root)
+
+        self.assertEqual(
+            settings.templates["default"].docker_image,
+            "cuttlefish:default",
+        )
+        self.assertEqual(
+            settings.templates["override"].docker_image,
+            "cuttlefish:override",
+        )
+
+    def test_load_settings_rejects_docker_template_without_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install_dir = root / "cf"
+            bin_dir = install_dir / "bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "cvd").write_text("")
+            (root / "templates").mkdir()
+            (root / "cuttle_server.toml").write_text(
+                'auth_token = "secret-token"\n'
+                'admin_user_id = "admin"\n'
+                'database_path = "data/cuttlefish.db"\n'
+            )
+            (root / "templates" / "default.toml").write_text(
+                'name = "phone"\n'
+                f'runtime_root = "{install_dir}"\n'
+                'backend = "docker"\n'
+                "cpus = 4\n"
+                "selinux = false\n"
+            )
+
+            with self.assertRaises(ConfigError) as exc_info:
+                load_settings(root)
+
+        self.assertIn("defines docker_image", str(exc_info.exception))
 
     def test_load_settings_accepts_legacy_command_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -332,6 +404,78 @@ class ApiAuthTests(unittest.TestCase):
         self.assertTrue(identity.is_admin)
 
 
+class DatabaseMigrationTests(unittest.TestCase):
+    def test_legacy_record_defaults_to_host_backend_and_adds_runtime_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database_path = Path(tmp) / "instances.sqlite"
+            connection = sqlite3.connect(database_path)
+            connection.executescript(
+                """
+                CREATE TABLE instances (
+                    instance_id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    instance_name TEXT,
+                    state TEXT NOT NULL,
+                    instance_num INTEGER NOT NULL,
+                    config_json TEXT NOT NULL,
+                    runtime_dir TEXT NOT NULL,
+                    launch_command_json TEXT NOT NULL,
+                    adb_port INTEGER,
+                    adb_serial TEXT,
+                    webrtc_port INTEGER,
+                    expires_at TEXT,
+                    failure_reason TEXT
+                );
+                """
+            )
+            legacy_config = {
+                "template_name": "phone",
+                "cpus": 2,
+                "selinux": True,
+                "runtime_root": "/cf",
+                "kernel_path": None,
+                "initrd_path": None,
+                "apps": [],
+                "load_apps": True,
+                "command_mode": "cvd",
+                "cvd_binary": "/cf/bin/cvd",
+            }
+            connection.execute(
+                """
+                INSERT INTO instances VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    "legacy",
+                    "alice",
+                    None,
+                    "active",
+                    1,
+                    json.dumps(legacy_config),
+                    "/tmp/cvd/legacy",
+                    "[]",
+                    6520,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            database = InstanceDb(database_path)
+            database.initialize()
+            record = database.get("legacy")
+            database.close()
+
+        assert record is not None
+        self.assertEqual(record.config.backend, CuttlefishBackendKind.HOST)
+        self.assertIsNone(record.config.docker_image)
+        self.assertIsNone(record.backend_runtime_id)
+
+
 class ApiBackgroundTaskTests(unittest.TestCase):
     def test_periodic_reconcile_runs_until_stop_requested(self):
         class FakeManager:
@@ -399,9 +543,9 @@ class ApiBackgroundTaskTests(unittest.TestCase):
         fake_db.close.assert_called_once()
 
 
-class CvdCliTests(unittest.TestCase):
+class HostCuttlefishBackendTests(unittest.TestCase):
     def test_start_and_stop_use_instance_runtime_dir_and_android_host_env(self):
-        cli = CuttlefishCli()
+        cli = HostCuttlefishBackend()
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
             config = ResolvedLaunchConfig(
@@ -420,7 +564,7 @@ class CvdCliTests(unittest.TestCase):
             record.runtime_dir = runtime_dir
             record.config = config
 
-            with patch("cuttle_server.cvd_cli.subprocess.run") as run:
+            with patch("cuttle_server.backends.host.subprocess.run") as run:
                 launch_result = cli.start_instance(record)
                 cli.stop_instance(record)
 
@@ -459,7 +603,7 @@ class CvdCliTests(unittest.TestCase):
         self.assertEqual(stop_call.args[0], ["/cf/bin/cvd", "stop"])
 
     def test_legacy_mode_uses_launch_and_stop_cvd_binaries(self):
-        cli = CuttlefishCli()
+        cli = HostCuttlefishBackend()
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
             config = ResolvedLaunchConfig(
@@ -479,7 +623,7 @@ class CvdCliTests(unittest.TestCase):
             record.runtime_dir = runtime_dir
             record.config = config
 
-            with patch("cuttle_server.cvd_cli.subprocess.run") as run:
+            with patch("cuttle_server.backends.host.subprocess.run") as run:
                 launch_result = cli.start_instance(record)
                 cli.stop_instance(record)
 
@@ -499,7 +643,7 @@ class CvdCliTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[1].args[0], ["/cf/bin/stop_cvd"])
 
     def test_start_omits_kernel_and_initrd_args_when_paths_are_unset(self):
-        cli = CuttlefishCli()
+        cli = HostCuttlefishBackend()
         config = ResolvedLaunchConfig(
             template_name="phone",
             cpus=4,
@@ -531,7 +675,7 @@ class CvdCliTests(unittest.TestCase):
         )
 
     def test_start_includes_only_configured_kernel_or_initrd_args(self):
-        cli = CuttlefishCli()
+        cli = HostCuttlefishBackend()
         record = type("Record", (), {})()
         record.instance_num = 3
         record.runtime_dir = Path("/runtime")
@@ -559,7 +703,7 @@ class CvdCliTests(unittest.TestCase):
         self.assertIn("--initramfs_path=/initrd", initrd_only_command)
 
     def test_failed_start_logs_stdout_and_stderr(self):
-        cli = CuttlefishCli()
+        cli = HostCuttlefishBackend()
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
             config = ResolvedLaunchConfig(
@@ -586,9 +730,9 @@ class CvdCliTests(unittest.TestCase):
                 kwargs["stdout"].write("launch stdout\nlaunch stderr\n")
                 raise error
 
-            with self.assertLogs("cuttle_server.cvd_cli", level="ERROR") as logs:
+            with self.assertLogs("cuttle_server.backends.host", level="ERROR") as logs:
                 with patch(
-                    "cuttle_server.cvd_cli.subprocess.run",
+                    "cuttle_server.backends.host.subprocess.run",
                     side_effect=fail_start,
                 ):
                     with self.assertRaises(RuntimeError) as exc_info:
@@ -602,7 +746,7 @@ class CvdCliTests(unittest.TestCase):
         self.assertIn("launch stdout", str(exc_info.exception))
 
     def test_start_timeout_reports_log_tail(self):
-        cli = CuttlefishCli(start_timeout_sec=5)
+        cli = HostCuttlefishBackend(start_timeout_sec=5)
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp) / "runtime"
             config = ResolvedLaunchConfig(
@@ -625,8 +769,11 @@ class CvdCliTests(unittest.TestCase):
                 kwargs["stdout"].write("still booting\n")
                 raise subprocess.TimeoutExpired(args[0], 5)
 
-            with self.assertLogs("cuttle_server.cvd_cli", level="ERROR"):
-                with patch("cuttle_server.cvd_cli.subprocess.run", side_effect=timeout):
+            with self.assertLogs("cuttle_server.backends.host", level="ERROR"):
+                with patch(
+                    "cuttle_server.backends.host.subprocess.run",
+                    side_effect=timeout,
+                ):
                     with self.assertRaises(RuntimeError) as exc_info:
                         cli.start_instance(record)
 
@@ -634,24 +781,35 @@ class CvdCliTests(unittest.TestCase):
         self.assertIn("still booting", str(exc_info.exception))
 
 
-class FakeCli:
-    def __init__(self) -> None:
+class FakeBackend:
+    def __init__(
+        self,
+        kind: CuttlefishBackendKind = CuttlefishBackendKind.HOST,
+    ) -> None:
+        self.kind = kind
+        self.start_calls: list[str] = []
         self.stop_calls: list[str] = []
 
     def build_start_command(self, record):
         return ["launch", record.instance_id]
 
     def start_instance(self, record):
+        self.start_calls.append(record.instance_id)
         record.runtime_dir.mkdir(parents=True, exist_ok=True)
         (record.runtime_dir / "cvd-start.log").write_text("started\n")
         return type(
-                "LaunchResult",
-                (),
-                {
-                    "launch_command": self.build_start_command(record),
-                    "adb_port": 6520 + record.instance_num - 1,
-                    "adb_serial": None,
+            "LaunchResult",
+            (),
+            {
+                "launch_command": self.build_start_command(record),
+                "adb_port": 6520 + record.instance_num - 1,
+                "adb_serial": None,
                 "webrtc_port": None,
+                "backend_runtime_id": (
+                    "docker-runtime"
+                    if self.kind == CuttlefishBackendKind.DOCKER
+                    else None
+                ),
             },
         )()
 
@@ -659,6 +817,20 @@ class FakeCli:
         self.stop_calls.append(record.instance_id)
         record.runtime_dir.mkdir(parents=True, exist_ok=True)
         (record.runtime_dir / "cvd-stop.log").write_text("stopped\n")
+
+    def read_logs(self, record):
+        return BackendLogs(
+            start_log=(record.runtime_dir / "cvd-start.log").read_text(),
+            stop_log=(
+                (record.runtime_dir / "cvd-stop.log").read_text()
+                if (record.runtime_dir / "cvd-stop.log").exists()
+                else ""
+            ),
+        )
+
+    def reconcile(self, records):
+        del records
+        return []
 
 
 class FakeAppLoader:
@@ -679,7 +851,7 @@ class ServerManagerTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.db = InstanceDb(self.root / "db.sqlite")
-        self.cli = FakeCli()
+        self.backend = FakeBackend()
         self.app_loader = FakeAppLoader()
         self.settings = type(
             "Settings",
@@ -713,7 +885,7 @@ class ServerManagerTests(unittest.TestCase):
         self.manager = CuttlefishServerManager(
             self.settings,
             self.db,
-            self.cli,
+            {CuttlefishBackendKind.HOST: self.backend},
             self.app_loader,
         )
         self.manager.initialize()
@@ -741,6 +913,44 @@ class ServerManagerTests(unittest.TestCase):
         self.assertEqual(record.runtime_dir.parent, self.root / "instances")
         self.assertEqual(len(record.runtime_dir.name), 32)
         self.assertEqual(record.launch_command, ["launch", created.instance_id])
+
+    def test_manager_dispatches_to_template_backend_and_persists_runtime_id(self):
+        docker_backend = FakeBackend(CuttlefishBackendKind.DOCKER)
+        self.settings.templates["docker-phone"] = InstanceTemplate(
+            name="docker-phone",
+            runtime_root=Path("/cf"),
+            command_mode=CvdCommandMode.CVD,
+            cvd_binary=Path("/cf/bin/cvd"),
+            cpus=2,
+            kernel_path=None,
+            initrd_path=None,
+            selinux=True,
+            apps=(),
+            backend=CuttlefishBackendKind.DOCKER,
+            docker_image="cuttlefish:test",
+        )
+        manager = CuttlefishServerManager(
+            self.settings,
+            self.db,
+            {
+                CuttlefishBackendKind.HOST: self.backend,
+                CuttlefishBackendKind.DOCKER: docker_backend,
+            },
+            self.app_loader,
+        )
+
+        created = manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="docker-phone"),
+        ).instance
+        record = self.db.get(created.instance_id)
+        assert record is not None
+
+        self.assertEqual(docker_backend.start_calls, [created.instance_id])
+        self.assertEqual(self.backend.start_calls, [])
+        self.assertEqual(created.backend, CuttlefishBackendKind.DOCKER)
+        self.assertEqual(created.docker_image, "cuttlefish:test")
+        self.assertEqual(record.backend_runtime_id, "docker-runtime")
 
     def test_base_instance_num_offsets_allocated_slots(self):
         self.settings.base_instance_num = 5
@@ -803,7 +1013,7 @@ class ServerManagerTests(unittest.TestCase):
         manager = CuttlefishServerManager(
             self.settings,
             self.db,
-            self.cli,
+            {CuttlefishBackendKind.HOST: self.backend},
             FailingAppLoader(),
         )
 
@@ -815,7 +1025,7 @@ class ServerManagerTests(unittest.TestCase):
         self.assertEqual(len(crashed_records), 1)
         self.assertEqual(crashed_records[0].state, InstanceState.CRASHED)
         self.assertIn("install failed", crashed_records[0].failure_reason or "")
-        self.assertEqual(self.cli.stop_calls, [crashed_records[0].instance_id])
+        self.assertEqual(self.backend.stop_calls, [crashed_records[0].instance_id])
         self.assertFalse(crashed_records[0].runtime_dir.exists())
 
     def test_explicit_names_are_unique_per_user_but_shared_across_users(self):

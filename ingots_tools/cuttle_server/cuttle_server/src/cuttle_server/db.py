@@ -38,6 +38,7 @@ class InstanceDb:
                     adb_port INTEGER,
                     adb_serial TEXT,
                     webrtc_port INTEGER,
+                    backend_runtime_id TEXT,
                     expires_at TEXT,
                     failure_reason TEXT
                 );
@@ -56,6 +57,7 @@ class InstanceDb:
             self._migrate_add_instance_name_column()
             self._migrate_add_adb_port_column()
             self._migrate_nullable_expires_at_column()
+            self._migrate_add_backend_runtime_id_column()
             self._connection.commit()
 
     def close(self) -> None:
@@ -82,9 +84,10 @@ class InstanceDb:
                     adb_port,
                     adb_serial,
                     webrtc_port,
+                    backend_runtime_id,
                     expires_at,
                     failure_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(instance_id) DO UPDATE SET
                     owner_id = excluded.owner_id,
                     instance_name = excluded.instance_name,
@@ -96,6 +99,7 @@ class InstanceDb:
                     adb_port = excluded.adb_port,
                     adb_serial = excluded.adb_serial,
                     webrtc_port = excluded.webrtc_port,
+                    backend_runtime_id = excluded.backend_runtime_id,
                     expires_at = excluded.expires_at,
                     failure_reason = excluded.failure_reason
                 """,
@@ -111,6 +115,7 @@ class InstanceDb:
                     record.adb_port,
                     record.adb_serial,
                     record.webrtc_port,
+                    record.backend_runtime_id,
                     record.expires_at.isoformat() if record.expires_at else None,
                     record.failure_reason,
                 ),
@@ -384,6 +389,17 @@ class InstanceDb:
             """
         )
 
+    def _migrate_add_backend_runtime_id_column(self) -> None:
+        connection = self._require_connection()
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(instances)").fetchall()
+        }
+        if "backend_runtime_id" not in columns:
+            connection.execute(
+                "ALTER TABLE instances ADD COLUMN backend_runtime_id TEXT"
+            )
+
     def _row_to_record(self, row: sqlite3.Row) -> InstanceRecord:
         return InstanceRecord.model_validate(
             {
@@ -398,6 +414,7 @@ class InstanceDb:
                 "adb_port": row["adb_port"],
                 "adb_serial": row["adb_serial"],
                 "webrtc_port": row["webrtc_port"],
+                "backend_runtime_id": row["backend_runtime_id"],
                 "expires_at": row["expires_at"],
                 "failure_reason": row["failure_reason"],
             }

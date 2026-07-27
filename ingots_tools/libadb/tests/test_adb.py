@@ -169,7 +169,26 @@ class AdbClientTests(unittest.TestCase):
         run.assert_called_once_with(
             ["adb", "-s", "198.51.100.8:7777", "install", "-t", "/tmp/app.apk"],
             check=True,
+            capture_output=True,
+            text=True,
         )
+
+    def test_install_app_reports_adb_stdout_and_stderr(self):
+        adb = AdbClient("198.51.100.8:7777")
+        error = subprocess.CalledProcessError(
+            1,
+            ["adb", "install"],
+            output="Failure [INSTALL_FAILED_TEST_ONLY]\n",
+            stderr="package manager rejected apk\n",
+        )
+
+        with patch("libadb.adb.subprocess.run", side_effect=error):
+            with self.assertRaises(AdbCommandError) as exc_info:
+                adb.install_app(Path("/tmp/app.apk"))
+
+        message = str(exc_info.exception)
+        self.assertIn("INSTALL_FAILED_TEST_ONLY", message)
+        self.assertIn("package manager rejected apk", message)
 
     def test_install_app_installs_xapk_splits_and_pushes_obb(self):
         adb = AdbClient("198.51.100.8:7777")
