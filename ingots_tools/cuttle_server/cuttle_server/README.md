@@ -159,8 +159,8 @@ Notes:
 
 - Each instance gets a unique runtime directory under `/tmp/cvd/<short-instance-id>`.
 - Host templates run the configured start and stop commands directly with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
-- Docker templates mount `runtime_root` read-only at `/opt/cuttlefish`, mount the instance runtime directory read-write at `/var/lib/cuttlefish`, and run one internal Cuttlefish instance numbered `1`.
-- Docker templates require a local Docker daemon, `/dev/kvm`, `/dev/net/tun`, and an image containing the host-side runtime dependencies. Available vhost devices are passed through automatically.
+- Docker templates mount `runtime_root` read-only at `/opt/cuttlefish`, use an anonymous Docker volume at `/var/lib/cuttlefish`, and run one internal Cuttlefish instance numbered `1`. The anonymous volume is removed with the container; server-owned CVD stdout/stderr logs remain in the instance runtime directory.
+- Docker templates require a local Docker daemon, `/dev/kvm`, `/dev/net/tun`, and an image containing the host-side runtime dependencies. Available vhost devices are passed through automatically. Docker's seccomp filter is disabled for these containers because Cuttlefish requires `AF_VSOCK`, which the default profile blocks.
 - CVD stdout/stderr are written to `cvd-start.log` and `cvd-stop.log` in the instance runtime directory and are available through the logs endpoint while that directory exists.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Host instances publish an ADB TCP port derived from their logical instance number.

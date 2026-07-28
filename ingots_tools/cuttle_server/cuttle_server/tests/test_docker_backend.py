@@ -8,6 +8,9 @@ from cuttle_types import CuttlefishBackendKind, InstanceState
 from cuttle_server.backends.docker import (
     BACKEND_LABEL,
     CONTAINER_ADB_PORT,
+    CONTAINER_INPUT_ROOT,
+    CONTAINER_INSTANCE_HOME,
+    CONTAINER_RUNTIME_ROOT,
     INSTANCE_ID_LABEL,
     MANAGED_LABEL,
     DockerCuttlefishBackend,
@@ -86,8 +89,36 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
             {f"{CONTAINER_ADB_PORT}/tcp": ("0.0.0.0", None)},
         )
         self.assertEqual(create_kwargs["cap_add"], ["NET_ADMIN"])
+        self.assertEqual(
+            create_kwargs["security_opt"],
+            ["seccomp=unconfined"],
+        )
         self.assertEqual(create_kwargs["network_mode"], "bridge")
         self.assertTrue(create_kwargs["init"])
+        self.assertEqual(
+            create_kwargs["volumes"],
+            [
+                (
+                    f"{record.config.runtime_root}:"
+                    f"{CONTAINER_RUNTIME_ROOT}:ro"
+                ),
+                str(CONTAINER_INSTANCE_HOME),
+                (
+                    f"{record.config.kernel_path}:"
+                    f"{CONTAINER_INPUT_ROOT / 'kernel'}:ro"
+                ),
+                (
+                    f"{record.config.initrd_path}:"
+                    f"{CONTAINER_INPUT_ROOT / 'initrd'}:ro"
+                ),
+            ],
+        )
+        self.assertFalse(
+            any(
+                str(record.runtime_dir) in volume
+                for volume in create_kwargs["volumes"]
+            )
+        )
         self.assertEqual(create_kwargs["labels"][MANAGED_LABEL], "true")
         self.assertEqual(
             create_kwargs["labels"][INSTANCE_ID_LABEL],

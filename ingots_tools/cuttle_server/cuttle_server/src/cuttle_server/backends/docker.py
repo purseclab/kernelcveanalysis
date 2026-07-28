@@ -108,6 +108,7 @@ class DockerCuttlefishBackend:
                 volumes=self._build_volumes(record),
                 devices=self._available_devices(),
                 cap_add=["NET_ADMIN"],
+                security_opt=["seccomp=unconfined"],
                 network_mode="bridge",
                 ports={
                     f"{CONTAINER_ADB_PORT}/tcp": (bind_host, None),
@@ -261,27 +262,26 @@ class DockerCuttlefishBackend:
         return failures
 
     @staticmethod
-    def _build_volumes(record: InstanceRecord) -> dict[str, dict[str, str]]:
-        volumes = {
-            str(record.config.runtime_root): {
-                "bind": str(CONTAINER_RUNTIME_ROOT),
-                "mode": "ro",
-            },
-            str(record.runtime_dir): {
-                "bind": str(CONTAINER_INSTANCE_HOME),
-                "mode": "rw",
-            },
-        }
+    def _build_volumes(record: InstanceRecord) -> list[str]:
+        volumes = [
+            (
+                f"{record.config.runtime_root}:"
+                f"{CONTAINER_RUNTIME_ROOT}:ro"
+            ),
+            # A destination-only volume specification asks Docker to create an
+            # anonymous volume. Container removal with v=True removes it.
+            str(CONTAINER_INSTANCE_HOME),
+        ]
         if record.config.kernel_path is not None:
-            volumes[str(record.config.kernel_path)] = {
-                "bind": str(CONTAINER_INPUT_ROOT / "kernel"),
-                "mode": "ro",
-            }
+            volumes.append(
+                f"{record.config.kernel_path}:"
+                f"{CONTAINER_INPUT_ROOT / 'kernel'}:ro"
+            )
         if record.config.initrd_path is not None:
-            volumes[str(record.config.initrd_path)] = {
-                "bind": str(CONTAINER_INPUT_ROOT / "initrd"),
-                "mode": "ro",
-            }
+            volumes.append(
+                f"{record.config.initrd_path}:"
+                f"{CONTAINER_INPUT_ROOT / 'initrd'}:ro"
+            )
         return volumes
 
     @staticmethod
