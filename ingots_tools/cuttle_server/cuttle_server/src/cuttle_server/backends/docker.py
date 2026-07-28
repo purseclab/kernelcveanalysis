@@ -96,7 +96,6 @@ class DockerCuttlefishBackend:
             container = self.client.containers.create(
                 image=image,
                 command=command,
-                entrypoint=[],
                 name=f"cuttle-server-{record.instance_id.replace('-', '')}",
                 detach=True,
                 init=True,

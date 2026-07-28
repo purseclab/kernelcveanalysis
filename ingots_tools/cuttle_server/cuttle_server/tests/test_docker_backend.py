@@ -83,7 +83,7 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
 
         create_kwargs = client.containers.create.call_args.kwargs
         self.assertEqual(create_kwargs["image"], "cuttlefish:test")
-        self.assertEqual(create_kwargs["entrypoint"], [])
+        self.assertNotIn("entrypoint", create_kwargs)
         self.assertEqual(
             create_kwargs["ports"],
             {f"{CONTAINER_ADB_PORT}/tcp": ("0.0.0.0", None)},

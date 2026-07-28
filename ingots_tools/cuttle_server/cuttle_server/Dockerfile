@@ -7,8 +7,10 @@ FROM ${CUTTLEFISH_BASE_IMAGE}
 # /opt/cuttlefish. Root avoids host/runtime ownership and device-access issues.
 USER root
 
+COPY --chmod=0755 container-entrypoint.sh /usr/local/bin/cuttlefish-entrypoint
+
 EXPOSE 6520/tcp
 
-# Commands are supplied by DockerCuttlefishBackend, not the orchestration
-# image's multi-service entrypoint.
-ENTRYPOINT []
+# Initialize the per-container Cuttlefish network resources before executing
+# the launch command supplied by DockerCuttlefishBackend.
+ENTRYPOINT ["/usr/local/bin/cuttlefish-entrypoint"]
