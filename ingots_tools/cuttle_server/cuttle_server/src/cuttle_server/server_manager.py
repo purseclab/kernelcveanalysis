@@ -202,6 +202,9 @@ class CuttlefishServerManager:
                 failure_reason=record.failure_reason,
                 start_log=logs.start_log,
                 stop_log=logs.stop_log,
+                kernel_log=logs.kernel_log,
+                launcher_log=logs.launcher_log,
+                logcat=logs.logcat,
             )
 
     def renew_lease(
@@ -328,7 +331,6 @@ class CuttlefishServerManager:
             self.db.upsert(record)
             return
 
-        self._cleanup_runtime_dir(record, state=InstanceState.CRASHED)
         self.db.upsert(record)
 
     def _build_launch_command(self, record: InstanceRecord) -> list[str]:
@@ -357,7 +359,6 @@ class CuttlefishServerManager:
                     continue
                 record.state = InstanceState.CRASHED
                 record.failure_reason = failure.reason
-                self._cleanup_runtime_dir(record, state=InstanceState.CRASHED)
                 self.db.upsert(record)
 
     def _get_instance_record(self, instance_id: str) -> InstanceRecord:

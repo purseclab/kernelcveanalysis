@@ -1,3 +1,5 @@
+import io
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +12,9 @@ from cuttle_server.backends.docker import (
     CONTAINER_ADB_PORT,
     CONTAINER_INPUT_ROOT,
     CONTAINER_INSTANCE_HOME,
+    CONTAINER_KERNEL_LOG,
+    CONTAINER_LAUNCHER_LOG,
+    CONTAINER_LOGCAT,
     CONTAINER_RUNTIME_ROOT,
     DOCKER_VSOCK_CID_BASE,
     INSTANCE_ID_LABEL,
@@ -17,6 +22,16 @@ from cuttle_server.backends.docker import (
     DockerCuttlefishBackend,
 )
 from cuttle_server.models import InstanceRecord, ResolvedLaunchConfig
+
+
+def make_archive(name: str, contents: str) -> tuple[list[bytes], dict[str, str]]:
+    buffer = io.BytesIO()
+    encoded = contents.encode()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        member = tarfile.TarInfo(name=name)
+        member.size = len(encoded)
+        archive.addfile(member, io.BytesIO(encoded))
+    return [buffer.getvalue()], {"name": name}
 
 
 def make_record(root: Path, *, state: InstanceState = InstanceState.STARTING) -> InstanceRecord:
@@ -166,6 +181,43 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
         self.assertIn("graceful stop failed", stop_log)
         self.assertIn("container removed", stop_log)
         self.assertIn("cuttlefish output", start_log)
+
+    def test_failed_instance_snapshots_internal_cuttlefish_logs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_record(Path(tmp), state=InstanceState.CRASHED)
+            record.backend_runtime_id = "container-id"
+            container = Mock()
+            container.id = "container-id"
+            container.logs.return_value = b"cuttlefish output\n"
+            container.get_archive.side_effect = [
+                make_archive("kernel.log", "kernel failure\n"),
+                make_archive("launcher.log", "launcher failure\n"),
+                make_archive("logcat", "logcat failure\n"),
+            ]
+            client = Mock()
+            client.containers.get.return_value = container
+            backend = DockerCuttlefishBackend(
+                server_host="0.0.0.0",
+                client=client,
+            )
+
+            backend.stop_instance(record)
+            record.backend_runtime_id = None
+            client.containers.list.return_value = []
+            logs = backend.read_logs(record)
+
+            self.assertEqual(logs.kernel_log, "kernel failure\n")
+            self.assertEqual(logs.launcher_log, "launcher failure\n")
+            self.assertEqual(logs.logcat, "logcat failure\n")
+
+        self.assertEqual(
+            [call.args[0] for call in container.get_archive.call_args_list],
+            [
+                str(CONTAINER_KERNEL_LOG),
+                str(CONTAINER_LAUNCHER_LOG),
+                str(CONTAINER_LOGCAT),
+            ],
+        )
 
     def test_reconcile_reports_missing_active_container(self):
         with tempfile.TemporaryDirectory() as tmp:

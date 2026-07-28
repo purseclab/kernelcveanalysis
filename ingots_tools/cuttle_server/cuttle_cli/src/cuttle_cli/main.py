@@ -137,6 +137,7 @@ def start(
         raise typer.Exit(code=1) from exc
 
     if instance.state == InstanceState.CRASHED:
+        _echo_cuttlefish_diagnostic_logs(logs)
         detail = instance.failure_reason or "startup failed"
         typer.echo(f"failed to start {instance.instance_name}: {detail}", err=True)
         raise typer.Exit(code=1)
@@ -475,8 +476,29 @@ def _echo_logs_view(logs: InstanceLogsView) -> None:
     if logs.stop_log:
         typer.echo("== cvd stop ==")
         typer.echo(logs.stop_log, nl=not logs.stop_log.endswith("\n"))
-    if not logs.start_log and not logs.stop_log:
+    _echo_cuttlefish_diagnostic_logs(logs)
+    if not any(
+        (
+            logs.start_log,
+            logs.stop_log,
+            logs.kernel_log,
+            logs.launcher_log,
+            logs.logcat,
+        )
+    ):
         typer.echo("No logs.")
+
+
+def _echo_cuttlefish_diagnostic_logs(logs: InstanceLogsView) -> None:
+    for heading, contents in (
+        ("kernel.log", logs.kernel_log),
+        ("launcher.log", logs.launcher_log),
+        ("logcat", logs.logcat),
+    ):
+        if not contents:
+            continue
+        typer.echo(f"== {heading} ==")
+        typer.echo(contents, nl=not contents.endswith("\n"))
 
 
 def _client_from_ctx(ctx: typer.Context) -> CuttleApiClient:

@@ -83,6 +83,9 @@ class InstanceLogsView(BaseModel):
     failure_reason: str | None
     start_log: str
     stop_log: str
+    kernel_log: str = ""
+    launcher_log: str = ""
+    logcat: str = ""
 
 
 class TemplateSummary(BaseModel):

@@ -35,7 +35,9 @@ The CLI auto-starts the managed daemon for `start`, `list`, and `stop`. The daem
 `start` also supports `--load-apps/--no-load-apps` to control whether the server should auto-install the template APK list during instance startup.
 `start` prints new CVD launch log output while the instance is starting.
 `list` shows only non-terminal instances by default; pass `--all` or `-a` to include stopped, crashed, and expired instances.
-`logs` prints the latest CVD start/stop logs for a visible instance by id or name.
+`logs` prints the latest CVD start/stop output plus Cuttlefish `kernel.log`,
+`launcher.log`, and `logcat` for a visible instance by id or name. These
+diagnostic logs are also printed automatically when `start` fails.
 `stop` can target one instance by effective name, `--stop-all` visible non-terminal instances, or `--stop-all-user <user-id>` for a specific visible owner.
 `templates list` and `templates show` include each template's CVD command mode
 and host/Docker backend. `templates show` also reports the resolved Docker image.

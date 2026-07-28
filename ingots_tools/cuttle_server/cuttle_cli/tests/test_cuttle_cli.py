@@ -86,6 +86,7 @@ class CliCommandTests(unittest.TestCase):
         owner_id: str = "alice",
         state: InstanceState = InstanceState.ACTIVE,
         instance_id: str = "inst-1",
+        failure_reason: str | None = None,
     ) -> InstanceView:
         return InstanceView(
             instance_id=instance_id,
@@ -106,7 +107,7 @@ class CliCommandTests(unittest.TestCase):
             adb_serial=None,
             webrtc_port=None,
             expires_at="2026-01-01T00:00:00Z",
-            failure_reason=None,
+            failure_reason=failure_reason,
         )
 
     def _mock_logs(
@@ -118,6 +119,9 @@ class CliCommandTests(unittest.TestCase):
         start_log: str = "",
         stop_log: str = "",
         failure_reason: str | None = None,
+        kernel_log: str = "",
+        launcher_log: str = "",
+        logcat: str = "",
     ) -> InstanceLogsView:
         return InstanceLogsView(
             instance_id=instance_id,
@@ -127,6 +131,9 @@ class CliCommandTests(unittest.TestCase):
             failure_reason=failure_reason,
             start_log=start_log,
             stop_log=stop_log,
+            kernel_log=kernel_log,
+            launcher_log=launcher_log,
+            logcat=logcat,
         )
 
     def test_start_command_uses_optional_name(self):
@@ -199,6 +206,44 @@ class CliCommandTests(unittest.TestCase):
         self.assertIn("booting", result.output)
         self.assertIn("done", result.output)
         mock_client.get_instance.assert_called_once_with("inst-1")
+
+    def test_failed_start_prints_internal_cuttlefish_logs(self):
+        mock_client = Mock()
+        mock_client.start_instance.return_value = CreateInstanceResponse(
+            instance=self._mock_instance(
+                instance_name="demo",
+                state=InstanceState.STARTING,
+            )
+        )
+        mock_client.get_instance_logs.side_effect = [
+            self._mock_logs(state=InstanceState.STARTING, start_log="booting\n"),
+            self._mock_logs(
+                state=InstanceState.CRASHED,
+                kernel_log="kernel failure\n",
+                launcher_log="launcher failure\n",
+                logcat="logcat failure\n",
+            ),
+        ]
+        mock_client.get_instance.return_value = self._mock_instance(
+            instance_name="demo",
+            state=InstanceState.CRASHED,
+            failure_reason="adb timed out",
+        )
+        with patch("cuttle_cli.main.load_cli_settings"), patch(
+            "cuttle_cli.main.CuttleApiClient.from_settings",
+            return_value=mock_client,
+        ), patch("cuttle_cli.main.ensure_managed_daemon_running"), patch(
+            "cuttle_cli.main.time.sleep"
+        ):
+            result = self.runner.invoke(app, ["start", "phone", "--name", "demo"])
+
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn("== kernel.log ==", result.output)
+        self.assertIn("kernel failure", result.output)
+        self.assertIn("== launcher.log ==", result.output)
+        self.assertIn("launcher failure", result.output)
+        self.assertIn("== logcat ==", result.output)
+        self.assertIn("logcat failure", result.output)
 
     def test_logs_command_prints_logs_by_name(self):
         mock_client = Mock()

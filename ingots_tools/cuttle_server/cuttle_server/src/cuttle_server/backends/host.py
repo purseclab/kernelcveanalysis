@@ -20,6 +20,9 @@ LOGGER = logging.getLogger(__name__)
 class CuttlefishLogPaths:
     start_log: Path
     stop_log: Path
+    kernel_log: Path
+    launcher_log: Path
+    logcat: Path
 
 
 class HostCuttlefishBackend:
@@ -92,6 +95,9 @@ class HostCuttlefishBackend:
         return BackendLogs(
             start_log=self._read_log(paths.start_log),
             stop_log=self._read_log(paths.stop_log),
+            kernel_log=self._read_log(paths.kernel_log),
+            launcher_log=self._read_log(paths.launcher_log),
+            logcat=self._read_log(paths.logcat),
         )
 
     def reconcile(
@@ -102,9 +108,18 @@ class HostCuttlefishBackend:
 
     @staticmethod
     def log_paths(record: InstanceRecord) -> CuttlefishLogPaths:
+        instance_dir = (
+            record.runtime_dir
+            / "cuttlefish"
+            / "instances"
+            / f"cvd-{record.instance_num}"
+        )
         return CuttlefishLogPaths(
             start_log=record.runtime_dir / "cvd-start.log",
             stop_log=record.runtime_dir / "cvd-stop.log",
+            kernel_log=instance_dir / "kernel.log",
+            launcher_log=instance_dir / "logs" / "launcher.log",
+            logcat=instance_dir / "logs" / "logcat",
         )
 
     @staticmethod

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import ipaddress
 import logging
 import shlex
 import socket
+import tarfile
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -22,6 +24,12 @@ CONTAINER_INPUT_ROOT = Path("/cuttlefish-inputs")
 CONTAINER_ADB_PORT = 6520
 DOCKER_VSOCK_CID_BASE = 10_000
 DOCKER_STOP_TIMEOUT_SEC = 10
+CONTAINER_CVD_INSTANCE_DIR = (
+    CONTAINER_INSTANCE_HOME / "cuttlefish" / "instances" / "cvd-1"
+)
+CONTAINER_KERNEL_LOG = CONTAINER_CVD_INSTANCE_DIR / "kernel.log"
+CONTAINER_LAUNCHER_LOG = CONTAINER_CVD_INSTANCE_DIR / "logs" / "launcher.log"
+CONTAINER_LOGCAT = CONTAINER_CVD_INSTANCE_DIR / "logs" / "logcat"
 MANAGED_LABEL = "cuttle_server.managed"
 INSTANCE_ID_LABEL = "cuttle_server.instance_id"
 OWNER_ID_LABEL = "cuttle_server.owner_id"
@@ -142,6 +150,7 @@ class DockerCuttlefishBackend:
         except Exception as exc:
             if container is not None:
                 self._snapshot_container_logs(record, container)
+                self._snapshot_cuttlefish_logs(record, container)
                 self._force_remove(container)
             log_tail = self._read_text(self._start_log_path(record))[-4096:]
             raise RuntimeError(
@@ -175,6 +184,8 @@ class DockerCuttlefishBackend:
                     warnings.append(f"force kill failed: {kill_exc}")
         finally:
             self._snapshot_container_logs(record, container)
+            if record.state == InstanceState.CRASHED:
+                self._snapshot_cuttlefish_logs(record, container)
             try:
                 container.remove(force=True, v=True)
             except docker.errors.NotFound:
@@ -200,6 +211,9 @@ class DockerCuttlefishBackend:
         return BackendLogs(
             start_log=start_log,
             stop_log=self._read_text(self._stop_log_path(record)),
+            kernel_log=self._read_text(self._kernel_log_path(record)),
+            launcher_log=self._read_text(self._launcher_log_path(record)),
+            logcat=self._read_text(self._logcat_path(record)),
         )
 
     def reconcile(
@@ -257,6 +271,7 @@ class DockerCuttlefishBackend:
                 continue
             if status != "running":
                 self._snapshot_container_logs(record, container)
+                self._snapshot_cuttlefish_logs(record, container)
                 self._force_remove(container)
                 failures.append(
                     BackendReconcileFailure(
@@ -416,6 +431,53 @@ class DockerCuttlefishBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{header}\n\n{logs}", encoding="utf-8")
 
+    def _snapshot_cuttlefish_logs(
+        self,
+        record: InstanceRecord,
+        container: Any,
+    ) -> None:
+        log_paths = (
+            (CONTAINER_KERNEL_LOG, self._kernel_log_path(record)),
+            (CONTAINER_LAUNCHER_LOG, self._launcher_log_path(record)),
+            (CONTAINER_LOGCAT, self._logcat_path(record)),
+        )
+        for container_path, snapshot_path in log_paths:
+            contents = self._read_container_file(container, container_path)
+            if contents is None:
+                continue
+            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_path.write_text(contents, encoding="utf-8")
+
+    @staticmethod
+    def _read_container_file(container: Any, path: Path) -> str | None:
+        try:
+            chunks, _ = container.get_archive(str(path))
+            archive_bytes = b"".join(chunks)
+            with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
+                member = next(
+                    (
+                        candidate
+                        for candidate in archive.getmembers()
+                        if candidate.isfile()
+                    ),
+                    None,
+                )
+                if member is None:
+                    return None
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    return None
+                return extracted.read().decode("utf-8", errors="replace")
+        except docker.errors.NotFound:
+            return None
+        except Exception:
+            LOGGER.warning(
+                "failed to copy Cuttlefish diagnostic log %s",
+                path,
+                exc_info=True,
+            )
+            return None
+
     @staticmethod
     def _container_logs(container: Any) -> str:
         try:
@@ -455,6 +517,18 @@ class DockerCuttlefishBackend:
     @staticmethod
     def _stop_log_path(record: InstanceRecord) -> Path:
         return record.runtime_dir / "cvd-stop.log"
+
+    @staticmethod
+    def _kernel_log_path(record: InstanceRecord) -> Path:
+        return record.runtime_dir / "kernel.log"
+
+    @staticmethod
+    def _launcher_log_path(record: InstanceRecord) -> Path:
+        return record.runtime_dir / "launcher.log"
+
+    @staticmethod
+    def _logcat_path(record: InstanceRecord) -> Path:
+        return record.runtime_dir / "logcat"
 
     @staticmethod
     def _read_text(path: Path) -> str:

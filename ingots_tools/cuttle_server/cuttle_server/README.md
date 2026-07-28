@@ -161,7 +161,8 @@ Notes:
 - Host templates run the configured start and stop commands directly with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
 - Docker templates mount `runtime_root` read-only at `/opt/cuttlefish`, use an anonymous Docker volume at `/var/lib/cuttlefish`, and run one internal Cuttlefish instance numbered `1`. Each container receives a host-global vsock guest CID starting at `10000`, offset by its allocated logical instance number, so concurrent containers do not contend for the same CID. The anonymous volume is removed with the container; server-owned CVD stdout/stderr logs remain in the instance runtime directory.
 - Docker templates require a local Docker daemon, `/dev/kvm`, `/dev/net/tun`, and an image containing the host-side runtime dependencies. Available vhost devices are passed through automatically. The image entrypoint provisions one isolated set of Cuttlefish Ethernet, mobile, and Wi-Fi interfaces before launching the instance. Docker's seccomp filter is disabled for these containers because Cuttlefish requires `AF_VSOCK`, which the default profile blocks.
-- CVD stdout/stderr are written to `cvd-start.log` and `cvd-stop.log` in the instance runtime directory and are available through the logs endpoint while that directory exists.
+- CVD stdout/stderr are written to `cvd-start.log` and `cvd-stop.log` in the instance runtime directory. The logs endpoint also returns Cuttlefish's `kernel.log`, `launcher.log`, and `logcat`.
+- Before removing a failed Docker container and its anonymous volume, the server copies those three internal Cuttlefish logs into the instance runtime directory.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Host instances publish an ADB TCP port derived from their logical instance number.
 - Docker instances always use port `6520` internally. Docker assigns a unique host port bound to the configured `server_host`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
@@ -171,7 +172,7 @@ Notes:
 - If automatic expiration is disabled globally, new instances are created without an `expires_at` deadline until a client explicitly renews them with a timeout.
 - After a successful explicit stop or expiration cleanup, the runtime directory is removed.
 - If stop or cleanup fails, the instance record is updated with `failure_reason` and the runtime directory is left in place for inspection.
-- If app loading fails, instance creation fails, the instance is stopped, and the record is left in `crashed` state with a failure reason.
+- If startup or app loading fails, the instance is stopped and left in `crashed` state with its failure reason and runtime logs preserved. Explicitly stopping the crashed instance removes its runtime directory.
 
 Current `command_mode = "cvd"` start command shape:
 

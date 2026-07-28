@@ -22,6 +22,9 @@ class LaunchResult:
 class BackendLogs:
     start_log: str
     stop_log: str
+    kernel_log: str = ""
+    launcher_log: str = ""
+    logcat: str = ""
 
 
 @dataclass(frozen=True, slots=True)

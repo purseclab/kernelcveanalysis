@@ -780,6 +780,29 @@ class HostCuttlefishBackendTests(unittest.TestCase):
         self.assertIn("timed out after 5s", str(exc_info.exception))
         self.assertIn("still booting", str(exc_info.exception))
 
+    def test_read_logs_includes_internal_cuttlefish_logs(self):
+        cli = HostCuttlefishBackend()
+        with tempfile.TemporaryDirectory() as tmp:
+            record = type("Record", (), {})()
+            record.instance_num = 3
+            record.runtime_dir = Path(tmp) / "runtime"
+            paths = cli.log_paths(record)
+            for path, contents in (
+                (paths.start_log, "start\n"),
+                (paths.stop_log, "stop\n"),
+                (paths.kernel_log, "kernel\n"),
+                (paths.launcher_log, "launcher\n"),
+                (paths.logcat, "logcat\n"),
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents)
+
+            logs = cli.read_logs(record)
+
+        self.assertEqual(logs.kernel_log, "kernel\n")
+        self.assertEqual(logs.launcher_log, "launcher\n")
+        self.assertEqual(logs.logcat, "logcat\n")
+
 
 class FakeBackend:
     def __init__(
@@ -1026,7 +1049,7 @@ class ServerManagerTests(unittest.TestCase):
         self.assertEqual(crashed_records[0].state, InstanceState.CRASHED)
         self.assertIn("install failed", crashed_records[0].failure_reason or "")
         self.assertEqual(self.backend.stop_calls, [crashed_records[0].instance_id])
-        self.assertFalse(crashed_records[0].runtime_dir.exists())
+        self.assertTrue(crashed_records[0].runtime_dir.exists())
 
     def test_explicit_names_are_unique_per_user_but_shared_across_users(self):
         self.manager.create_instance(
