@@ -159,7 +159,7 @@ Notes:
 
 - Each instance gets a unique runtime directory under `/tmp/cvd/<short-instance-id>`.
 - Host templates run the configured start and stop commands directly with `cwd=<runtime_dir>` and `HOME=<runtime_dir>`.
-- Docker templates mount `runtime_root` read-only at `/opt/cuttlefish`, use an anonymous Docker volume at `/var/lib/cuttlefish`, and run one internal Cuttlefish instance numbered `1`. The anonymous volume is removed with the container; server-owned CVD stdout/stderr logs remain in the instance runtime directory.
+- Docker templates mount `runtime_root` read-only at `/opt/cuttlefish`, use an anonymous Docker volume at `/var/lib/cuttlefish`, and run one internal Cuttlefish instance numbered `1`. Each container receives a host-global vsock guest CID starting at `10000`, offset by its allocated logical instance number, so concurrent containers do not contend for the same CID. The anonymous volume is removed with the container; server-owned CVD stdout/stderr logs remain in the instance runtime directory.
 - Docker templates require a local Docker daemon, `/dev/kvm`, `/dev/net/tun`, and an image containing the host-side runtime dependencies. Available vhost devices are passed through automatically. The image entrypoint provisions one isolated set of Cuttlefish Ethernet, mobile, and Wi-Fi interfaces before launching the instance. Docker's seccomp filter is disabled for these containers because Cuttlefish requires `AF_VSOCK`, which the default profile blocks.
 - CVD stdout/stderr are written to `cvd-start.log` and `cvd-stop.log` in the instance runtime directory and are available through the logs endpoint while that directory exists.
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
@@ -205,7 +205,8 @@ stop_cvd
 ```
 
 Docker templates use the equivalent container paths, force
-`--base_instance_num=1`, disable WebRTC, and use `--daemon=false` so the
+`--base_instance_num=1`, set `--vsock_guest_cid` to `10000` plus the allocated
+logical instance offset, disable WebRTC, and use `--daemon=false` so the
 container lifecycle follows the launcher. Stop uses Docker's hardcoded graceful
 timeout and force-removes the container when necessary.
 

@@ -11,6 +11,7 @@ from cuttle_server.backends.docker import (
     CONTAINER_INPUT_ROOT,
     CONTAINER_INSTANCE_HOME,
     CONTAINER_RUNTIME_ROOT,
+    DOCKER_VSOCK_CID_BASE,
     INSTANCE_ID_LABEL,
     MANAGED_LABEL,
     DockerCuttlefishBackend,
@@ -129,6 +130,10 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
             CuttlefishBackendKind.DOCKER.value,
         )
         self.assertIn("--base_instance_num=1", create_kwargs["command"])
+        self.assertIn(
+            f"--vsock_guest_cid={DOCKER_VSOCK_CID_BASE + record.instance_num - 1}",
+            create_kwargs["command"],
+        )
         self.assertIn("--start_webrtc=false", create_kwargs["command"])
         self.assertIn("--daemon=false", create_kwargs["command"])
         self.assertEqual(result.adb_port, 49152)

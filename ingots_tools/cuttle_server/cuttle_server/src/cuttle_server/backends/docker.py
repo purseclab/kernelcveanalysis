@@ -20,6 +20,7 @@ CONTAINER_RUNTIME_ROOT = Path("/opt/cuttlefish")
 CONTAINER_INSTANCE_HOME = Path("/var/lib/cuttlefish")
 CONTAINER_INPUT_ROOT = Path("/cuttlefish-inputs")
 CONTAINER_ADB_PORT = 6520
+DOCKER_VSOCK_CID_BASE = 10_000
 DOCKER_STOP_TIMEOUT_SEC = 10
 MANAGED_LABEL = "cuttle_server.managed"
 INSTANCE_ID_LABEL = "cuttle_server.instance_id"
@@ -60,6 +61,7 @@ class DockerCuttlefishBackend:
         command.extend(
             [
                 "--base_instance_num=1",
+                f"--vsock_guest_cid={self._vsock_guest_cid(record)}",
                 f"--cpus={config.cpus}",
                 "--start_webrtc=false",
             ]
@@ -81,6 +83,10 @@ class DockerCuttlefishBackend:
         if not config.selinux:
             command.append("--extra_kernel_cmdline=androidboot.selinux=permissive")
         return command
+
+    @staticmethod
+    def _vsock_guest_cid(record: InstanceRecord) -> int:
+        return DOCKER_VSOCK_CID_BASE + record.instance_num - 1
 
     def start_instance(self, record: InstanceRecord) -> LaunchResult:
         image = record.config.docker_image
