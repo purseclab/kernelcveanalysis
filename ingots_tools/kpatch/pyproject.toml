@@ -1,0 +1,20 @@
+[project]
+name = "kpatch"
+version = "0.1.0"
+description = "Experiments related to scraping linux patches cost efficiently for lpe looking ones."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.12.5",
+    "typer>=0.21.1",
+]
+
+[tool.uv]
+package = true
+
+[project.scripts]
+kpatch = "kpatch.cli:main"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+exclude = ["tests/"]

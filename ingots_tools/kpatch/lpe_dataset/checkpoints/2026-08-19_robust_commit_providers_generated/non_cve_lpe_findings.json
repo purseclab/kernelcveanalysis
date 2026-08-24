@@ -1,0 +1,19 @@
+[
+  {
+    "identifier": "linux-commit-35f56c554eb1",
+    "cve": null,
+    "source_url": "https://www.anthropic.com/research/mythos-preview",
+    "summary": "Anthropic reports that Mythos Preview built an exploit from a syzbot report for the Linux ipset bitmap_ip_uadt out-of-bounds bug and obtained full root. The upstream fix identifies the missing lower-bound range check and the syzbot origin of the report.",
+    "evidence_group": "Anthropic Mythos Preview",
+    "certainty": "high",
+    "caveat": "No CVE assignment was located in the checked NVD/CVE and kernel references. Syzbot found and reported the bug; Anthropic's model demonstrated the exploit chain from that report.",
+    "type": "lpe",
+    "commit_hash": "35f56c554eb1b56b77b3cf197a6b00922d49033d",
+    "commit_url": "https://github.com/torvalds/linux/commit/35f56c554eb1b56b77b3cf197a6b00922d49033d",
+    "additional_source_urls": [
+      "https://lkml.iu.edu/2411.1/04642.html",
+      "https://github.com/torvalds/linux/commit/35f56c554eb1b56b77b3cf197a6b00922d49033d"
+    ],
+    "checked_on": "2026-08-13"
+  }
+]

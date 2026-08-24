@@ -8,6 +8,7 @@ dependencies = [
     "kexploit",
     "kartifact",
     "kdebug",
+    "kpatch",
     "libadb",
     "scripts",
     "kexploit_agent",
@@ -27,6 +28,7 @@ members = [
     "kexploit",
     "kartifact",
     "kdebug",
+    "kpatch",
     "libadb",
     "scripts",
     "kexploit_agent",
@@ -45,6 +47,7 @@ cuttleagent = { workspace = true }
 kexploit = { workspace = true }
 kartifact = { workspace = true }
 kdebug = { workspace = true }
+kpatch = { workspace = true }
 libadb = { workspace = true }
 scripts = { workspace = true }
 kexploit_agent = { workspace = true }

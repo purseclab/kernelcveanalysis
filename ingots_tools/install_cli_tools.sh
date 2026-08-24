@@ -6,7 +6,8 @@ set -- \
     "cuttle_server/cuttle_cli" \
     "kdebug" \
     "kexploit" \
-    "object_db"
+    "object_db" \
+    "kpatch"
 
 for package in "$@"
 do
