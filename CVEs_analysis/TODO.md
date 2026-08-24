@@ -19,6 +19,7 @@ Jack TODO list for ingots stuff
 
 - [ ] LLM made report of issues encountered with the objectdb on first run, resolve them
 - [ ] Future work on allocation reachability from android apps
+- [ ] mainly switch to have agent write sqlite, only basic special case cli functionality
 
 ### kexploit agent
 
@@ -52,3 +53,7 @@ Jack TODO list for ingots stuff
 
 - [ ] potentially can improve, it is not super well tested, but multi stage exploits where we care about permissions of all parts have been relatively less common, it is mostly 1 app 1 kernel exploit
 	- [ ] Think reformat as llm cli and skill, with structured report is more valueable
+
+### primitives
+
+- [ ] more generic primitives, less special case, works with all sorts of targets not just kernel
