@@ -2,16 +2,19 @@
 
 `cuttle_cli` is a Typer-based client for `cuttle_server`.
 
-Default config path:
+Default config path (provided by `platformdirs`):
 
 ```text
-~/.config/cuttle_cli/config.toml
+macOS: ~/Library/Application Support/cuttle_cli/config.toml
+Linux: ~/.config/cuttle_cli/config.toml
 ```
 
-State files for the managed daemon live under:
+State files for the managed daemon live under the platform-specific user state
+directory:
 
 ```text
-~/.local/state/cuttle_cli/
+macOS: ~/Library/Application Support/cuttle_cli/
+Linux: ~/.local/state/cuttle_cli/
 ```
 
 Supported commands:

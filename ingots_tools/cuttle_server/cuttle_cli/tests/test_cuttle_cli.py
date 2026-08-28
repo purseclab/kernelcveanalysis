@@ -16,7 +16,12 @@ from cuttle_types import (
 )
 from typer.testing import CliRunner
 
-from cuttle_cli.config import CliSettings, load_cli_settings
+from cuttle_cli.config import (
+    CliSettings,
+    default_config_path,
+    default_state_dir,
+    load_cli_settings,
+)
 from cuttle_cli.client import CliError
 from cuttle_cli.daemon import (
     DaemonMetadata,
@@ -29,6 +34,20 @@ from cuttle_cli.main import app
 
 
 class CliConfigTests(unittest.TestCase):
+    def test_default_config_path_uses_platformdirs(self):
+        config_dir = Path("/config")
+        with patch("cuttle_cli.config.user_config_path", return_value=config_dir) as path:
+            self.assertEqual(default_config_path(), config_dir / "config.toml")
+
+        path.assert_called_once_with("cuttle_cli", appauthor=False)
+
+    def test_default_state_dir_uses_platformdirs(self):
+        state_dir = Path("/state")
+        with patch("cuttle_cli.config.user_state_path", return_value=state_dir) as path:
+            self.assertEqual(default_state_dir(), state_dir)
+
+        path.assert_called_once_with("cuttle_cli", appauthor=False)
+
     def test_load_cli_settings_reads_default_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.toml"

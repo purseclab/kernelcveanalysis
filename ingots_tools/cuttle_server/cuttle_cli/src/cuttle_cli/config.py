@@ -4,6 +4,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from platformdirs import user_config_path, user_state_path
 from pydantic import BaseModel, Field, ValidationError
 
 
@@ -27,11 +28,11 @@ class CliSettings:
 
 
 def default_config_path() -> Path:
-    return Path.home() / ".config" / "cuttle_cli" / "config.toml"
+    return user_config_path("cuttle_cli", appauthor=False) / "config.toml"
 
 
 def default_state_dir() -> Path:
-    return Path.home() / ".local" / "state" / "cuttle_cli"
+    return user_state_path("cuttle_cli", appauthor=False)
 
 
 def load_cli_settings(

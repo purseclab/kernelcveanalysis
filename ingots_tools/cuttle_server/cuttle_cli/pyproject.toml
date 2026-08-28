@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "cuttle_types",
+    "platformdirs>=4.9.4",
     "pydantic>=2.12.5",
     "typer>=0.24.1",
 ]
