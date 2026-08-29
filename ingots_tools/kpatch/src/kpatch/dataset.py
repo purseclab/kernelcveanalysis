@@ -1,172 +1,17 @@
-from pathlib import Path
-from enum import StrEnum
-from typing import Self
 from dataclasses import dataclass
-from difflib import SequenceMatcher
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from enum import StrEnum
+from pathlib import Path
 import re
+from typing import Self
 
 from pydantic import BaseModel, PrivateAttr
 
+from .diff import Diff
+from .git import GitCommit
+
 DATASET_PATH = Path(__file__).parent.parent.parent / "lpe_dataset" / "linux_lpe_rce_fix_commits.json"
-
-@dataclass(slots=True)
-class PatchChunk:
-    header: str
-    lines: list[str]
-    old_start: int
-    old_count: int
-    new_start: int
-    new_count: int
-    section: str | None
-
-    @property
-    def line_count(self) -> int:
-        return len(self.lines)
-
-    @property
-    def changed_line_count(self) -> int:
-        return sum(line.startswith(("+", "-")) for line in self.lines)
-
-
-@dataclass(slots=True)
-class PatchFile:
-    old_path: str | None
-    new_path: str | None
-    header_lines: list[str]
-    chunks: list[PatchChunk]
-
-    @property
-    def path(self) -> str:
-        return self.new_path or self.old_path or ""
-
-
-@dataclass(slots=True)
-class Patch:
-    text: str
-    files: list[PatchFile]
-
-    @classmethod
-    def parse(cls, patch_text: str) -> Self:
-        """Parse a unified diff into files and hunks."""
-
-        lines = patch_text.splitlines()
-        file_starts = [
-            index for index, line in enumerate(lines) if line.startswith("diff --git ")
-        ]
-        if not file_starts and lines:
-            file_starts = [
-                index
-                for index, line in enumerate(lines[:-1])
-                if line.startswith("--- ") and lines[index + 1].startswith("+++ ")
-            ]
-
-        def parse_path(value: str, prefix: str) -> str | None:
-            value = value.split("\t", 1)[0].strip()
-            if value == "/dev/null":
-                return None
-            return value.removeprefix(prefix)
-
-        parsed_files: list[PatchFile] = []
-        for file_index, start in enumerate(file_starts):
-            end = file_starts[file_index + 1] if file_index + 1 < len(file_starts) else len(lines)
-            file_lines = lines[start:end]
-            hunk_starts = [
-                index for index, line in enumerate(file_lines) if line.startswith("@@ ")
-            ]
-            header_end = hunk_starts[0] if hunk_starts else len(file_lines)
-            header_lines = file_lines[:header_end]
-            old_path = None
-            new_path = None
-
-            for line in header_lines:
-                if line.startswith("--- "):
-                    old_path = parse_path(line[4:], "a/")
-                elif line.startswith("+++ "):
-                    new_path = parse_path(line[4:], "b/")
-
-            if old_path is None and new_path is None and file_lines:
-                diff_match = re.match(r"^diff --git (.+?) (.+)$", file_lines[0])
-                if diff_match:
-                    old_path = parse_path(diff_match.group(1), "a/")
-                    new_path = parse_path(diff_match.group(2), "b/")
-
-            chunks: list[PatchChunk] = []
-            for chunk_index, chunk_start in enumerate(hunk_starts):
-                chunk_end = (
-                    hunk_starts[chunk_index + 1]
-                    if chunk_index + 1 < len(hunk_starts)
-                    else len(file_lines)
-                )
-                chunk_header = file_lines[chunk_start]
-                chunk_match = re.match(
-                    r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: ?(.*))?$",
-                    chunk_header,
-                )
-                if chunk_match is None:
-                    continue
-                chunks.append(
-                    PatchChunk(
-                        header=chunk_header,
-                        lines=file_lines[chunk_start + 1 : chunk_end],
-                        old_start=int(chunk_match.group(1)),
-                        old_count=int(chunk_match.group(2) or "1"),
-                        new_start=int(chunk_match.group(3)),
-                        new_count=int(chunk_match.group(4) or "1"),
-                        section=chunk_match.group(5) or None,
-                    )
-                )
-
-            parsed_files.append(
-                PatchFile(
-                    old_path=old_path,
-                    new_path=new_path,
-                    header_lines=header_lines,
-                    chunks=chunks,
-                )
-            )
-
-        return cls(text=patch_text, files=parsed_files)
-
-    def patch_similarity(self, other: Self) -> float:
-        """Compare corresponding files after combining all of their hunks."""
-
-        self_files = {file.path: file for file in self.files}
-        other_files = {file.path: file for file in other.files}
-        if len(self_files) != len(self.files) or len(other_files) != len(other.files):
-            return 0.0
-        if set(self_files) != set(other_files):
-            return 0.0
-
-        weighted_similarity = 0.0
-        total_changed_lines = 0
-        for path, self_file in self_files.items():
-            other_file = other_files[path]
-            self_lines = [
-                line
-                for chunk in self_file.chunks
-                for line in chunk.lines
-            ]
-            other_lines = [
-                line
-                for chunk in other_file.chunks
-                for line in chunk.lines
-            ]
-            changed_lines = max(
-                sum(line.startswith(("+", "-")) for line in self_lines),
-                sum(line.startswith(("+", "-")) for line in other_lines),
-                1,
-            )
-            similarity = SequenceMatcher(
-                None,
-                self_lines,
-                other_lines,
-                autojunk=False,
-            ).ratio()
-            weighted_similarity += similarity * changed_lines
-            total_changed_lines += changed_lines
-
-        return weighted_similarity / total_changed_lines if total_changed_lines else 1.0
-
 
 @dataclass(slots=True)
 class ParsedPatchText:
@@ -176,7 +21,7 @@ class ParsedPatchText:
     date: str | None
     subject: str | None
     description: str
-    patch: Patch
+    patch: Diff
     trailers: dict[str, list[str]]
     raw_text: str
 
@@ -301,7 +146,7 @@ class ParsedPatchText:
             date=date,
             subject=subject,
             description=description,
-            patch=Patch.parse(actual_patch),
+            patch=Diff.parse(actual_patch),
             trailers=trailers,
             raw_text=patch_text,
         )
@@ -346,7 +191,7 @@ class Commit(BaseModel):
     # which tree commit is from
     commit_scope: CommitScope
 
-    _cached_parsed_patch: ParsedPatchText | None = PrivateAttr()
+    _cached_parsed_patch: ParsedPatchText | None = PrivateAttr(default=None)
 
     @property
     def parsed_patch(self) -> ParsedPatchText:
@@ -371,7 +216,7 @@ class Dataset(BaseModel):
 
             dedup = False
             for parsed_commit in out_parsed:
-                if patch.patch.patch_similarity(parsed_commit.patch) >= threshhold:
+                if patch.patch.diff_similarity(parsed_commit.patch) >= threshhold:
                     dedup = True
                     break
 
@@ -380,6 +225,81 @@ class Dataset(BaseModel):
                 out_parsed.append(patch)
 
         return out
+
+    def to_git_commits(self) -> list[GitCommit]:
+        """Convert dataset records into the repository commit model.
+
+        Dataset records do not include parent commits or a separate committer
+        date. When patch-email metadata is present, its author and date are
+        used for both Git date fields. Raw unified diffs use an empty author
+        and the Unix epoch as a timezone-aware sentinel.
+        """
+
+        git_commits: list[GitCommit] = []
+        for record in self.records:
+            parsed_patch = record.parsed_patch
+            commit_date = _parse_patch_date(parsed_patch.date)
+            git_commits.append(
+                GitCommit(
+                    commit_id=record.commit_id,
+                    author=parsed_patch.author or "",
+                    author_date=commit_date,
+                    committer_date=commit_date,
+                    parents=(),
+                    message=_patch_message(parsed_patch),
+                    diff_str=parsed_patch.patch.text,
+                )
+            )
+
+        return git_commits
+
+
+_MISSING_PATCH_DATE = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _parse_patch_date(value: str | None) -> datetime:
+    if value is None:
+        return _MISSING_PATCH_DATE
+
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError) as error:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            raise ValueError(f"Unable to parse patch date: {value!r}") from error
+
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _patch_message(parsed_patch: ParsedPatchText) -> str:
+    sections: list[str] = []
+    if parsed_patch.subject:
+        sections.append(parsed_patch.subject)
+    if parsed_patch.description:
+        sections.append(parsed_patch.description)
+
+    trailer_lines = [
+        f"{name}: {value}"
+        for name, values in parsed_patch.trailers.items()
+        for value in values
+    ]
+    if trailer_lines:
+        sections.append("\n".join(trailer_lines))
+
+    return "\n\n".join(sections)
+
+
+def load_git_commits(file: Path = DATASET_PATH, dedup: bool = False) -> list[GitCommit]:
+    """Load the configured dataset and return its records as Git commits."""
+
+    dataset = Dataset.load(file)
+    if dedup:
+        dataset.records = dataset.deduplicate()
+
+    return dataset.to_git_commits()
 
 
 
