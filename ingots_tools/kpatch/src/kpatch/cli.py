@@ -5,7 +5,7 @@ import typer
 
 from .dataset import load_git_commits
 from .git import GitDb, GitRepo, extract_to_db, parse_time
-from .filter import filter_commits, FileFilter
+from .filter import FileFilter
 
 app = typer.Typer()
 
@@ -31,21 +31,26 @@ def run():
     commits = db.commits_between(start, end)
 
     # permissive arm filter
+    # TODO: decide about kconfig, if it should be included
     filter = FileFilter(
         ["arch/arm", "arch/arm64", "block", "crypto", "drivers", "fs", "include", "init", "io_uring", "ipc", "kernel", "lib", "mm", "net", "rust", "security", "sound", "virt"],
-        [".c", ".h"],
+        [".c", ".h", ".S"],
     )
 
     dataset_commits = load_git_commits()
-    dataset_filtered = filter_commits(filter, dataset_commits)
-    for commit in dataset_commits:
-        if commit not in dataset_filtered:
-            print("warn")
-    assert len(dataset_commits) == len(dataset_filtered)
+    _dataset_filtered = filter.filter_commits(dataset_commits)
+    print("Dataset report:")
+    print(filter.render_report())
+    # for commit in dataset_commits:
+    #     if commit not in dataset_filtered:
+    #         print("warning: dataset lpe commit missed by filter")
+    #         print(commit.diff_str)
+    #         print("\n\n\n\n\n")
 
     print(f"Original commits: {len(commits)}")
-    commits_filtered = filter_commits(filter, commits)
+    commits_filtered = filter.filter_commits(commits)
     print(f"Filtered commits: {len(commits_filtered)}")
+    print(filter.render_report())
     # analyze_dataset()
     # git_scan()
 

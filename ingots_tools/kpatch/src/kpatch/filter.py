@@ -1,11 +1,17 @@
-import re
-from re import Pattern
+from dataclasses import dataclass
 
 from .git import GitCommit
-from .diff import DiffFileType
+from .diff import DiffFile, DiffFileType
 
 
 # this performs the trivial filtering on commits, before any classifiers or model calls
+
+
+@dataclass(slots=True)
+class FilterStats:
+    paths: dict[str, int]
+    extensions: dict[str, int]
+
 
 class FileFilter:
     """Filters systems we are interested in."""
@@ -19,70 +25,100 @@ class FileFilter:
     # this is list of file extensions we care about
     extensions: list[str]
 
-    regex: Pattern[str]
+    _stats: FilterStats
 
     def __init__(self, paths: list[str], extensions: list[str]):
         self.paths = paths
         self.extensions = extensions
-        self.regex = self.build_regex()
-
-    def build_regex(self) -> Pattern[str]:
-        """Build a regex for files below one of the configured paths.
-
-        Paths are treated as directory prefixes, and extensions may be given
-        either with or without their leading dot. Both the directory prefix
-        and extension are escaped, so values such as ``drivers/net+`` and
-        ``.c++`` are matched literally.
-        """
-
-        prefixes = []
-        for path in self.paths:
-            normalized_path = path.removeprefix("./").rstrip("/")
-            prefixes.append(
-                f"{re.escape(normalized_path)}/" if normalized_path else ""
-            )
-
-        extensions = []
-        for extension in self.extensions:
-            normalized_extension = (
-                extension if extension.startswith(".") else f".{extension}"
-            )
-            if normalized_extension == ".":
-                raise ValueError("file extensions must not be empty")
-            extensions.append(re.escape(normalized_extension))
-
-        if not prefixes:
-            prefixes.append(r"(?!)")
-        if not extensions:
-            extensions.append(r"(?!)")
-
-        prefix_regex = "(?:" + "|".join(prefixes) + ")"
-        extension_regex = "(?:" + "|".join(extensions) + ")"
-        return re.compile(
-            rf"\A{prefix_regex}(?:[^/]+/)*[^/]+{extension_regex}\Z"
+        for extension in extensions:
+            self._normalize_extension(extension)
+        self._stats = FilterStats(
+            paths={path: 0 for path in paths},
+            extensions={extension: 0 for extension in extensions},
         )
 
     def matches_file(self, file: str) -> bool:
-        return self.regex.fullmatch(file) is not None
+        return any(
+            self._matches_path(file, path) and self._matches_extension(file, extension)
+            for path in self.paths
+            for extension in self.extensions
+        )
 
+    @staticmethod
+    def _matches_path(file: str, path: str) -> bool:
+        normalized_path = path.removeprefix("./").rstrip("/")
+        return not normalized_path or file.startswith(f"{normalized_path}/")
 
-def filter_commit(filter: FileFilter, commit: GitCommit) -> bool:
-    """Return false if commit should be pruned before pipeline."""
+    @staticmethod
+    def _normalize_extension(extension: str) -> str:
+        normalized_extension = (
+            extension if extension.startswith(".") else f".{extension}"
+        )
+        if normalized_extension == ".":
+            raise ValueError("file extensions must not be empty")
+        return normalized_extension
 
-    for file_change in commit.diff.files:
-        # for now, we filter out big changes creating new files
-        # these can sometimes be accidentel lpe fixes when refactoring,
-        # but they are large and difficult to determine cheaply if lpe fixing commit
-        # and all the llm bug scanners people run to geenerate commits,
-        # will not be making these sort of commits
-        #
-        # TODO: regression tests might make new file?
-        if file_change.kind != DiffFileType.DEFAULT:
+    @classmethod
+    def _matches_extension(cls, file: str, extension: str) -> bool:
+        normalized_extension = cls._normalize_extension(extension)
+        filename = file.rsplit("/", 1)[-1]
+        return filename != normalized_extension and filename.endswith(normalized_extension)
+
+    def _record_matches(self, files: list[DiffFile]) -> None:
+        for path in self._stats.paths:
+            if any(self._matches_path(file.file, path) for file in files):
+                self._stats.paths[path] += 1
+
+        for extension in self._stats.extensions:
+            if any(self._matches_extension(file.file, extension) for file in files):
+                self._stats.extensions[extension] += 1
+
+    def stats(self) -> FilterStats:
+        return FilterStats(
+            paths=self._stats.paths.copy(),
+            extensions=self._stats.extensions.copy(),
+        )
+
+    def render_report(self) -> str:
+        stats = self.stats()
+        lines = ["Filter report:", "Paths:"]
+        lines.extend(f"  {path}: {count} commits" for path, count in stats.paths.items())
+        lines.append("Extensions:")
+        lines.extend(
+            f"  {extension}: {count} commits"
+            for extension, count in stats.extensions.items()
+        )
+        return "\n".join(lines)
+
+    def filter_commit(self, commit: GitCommit) -> bool:
+        """Return whether the commit contains an included file change."""
+
+        for file_change in commit.diff.files:
+            # for now, we filter out big changes creating new files
+            # these can sometimes be accidentel lpe fixes when refactoring,
+            # but they are large and difficult to determine cheaply if lpe fixing commit
+            # and all the llm bug scanners people run to geenerate commits,
+            # will not be making these sort of commits
+            #
+            # TODO: regression tests might make new file?
+            if file_change.kind != DiffFileType.DEFAULT:
+                return False
+
+        matching_files = [
+            file_change
+            for file_change in commit.diff.files
+            if self.matches_file(file_change.file)
+        ]
+        if not matching_files:
             return False
 
-    # only keep changes we care about, prune if none we care about
-    commit.diff.files = [file_change for file_change in commit.diff.files if filter.matches_file(file_change.file)]
-    return len(commit.diff.files) == 0
+        self._record_matches(matching_files)
+        commit.diff.files = matching_files
+        return True
 
-def filter_commits(filter: FileFilter, commits: list[GitCommit]) -> list[GitCommit]:
-    return [commit for commit in commits if filter_commit(filter, commit)]
+    def filter_commits(self, commits: list[GitCommit]) -> list[GitCommit]:
+        self._stats = FilterStats(
+            paths={path: 0 for path in self.paths},
+            extensions={extension: 0 for extension in self.extensions},
+        )
+        return [commit for commit in commits if self.filter_commit(commit)]
