@@ -44,10 +44,10 @@ def run():
         [".c", ".h", ".S"],
     )
 
-    dataset_commits = load_git_commits()
-    _dataset_filtered = filter.filter_commits(dataset_commits)
-    print("Dataset report:")
-    print(filter.render_report())
+    # dataset_commits = load_git_commits()
+    # _dataset_filtered = filter.filter_commits(dataset_commits)
+    # print("Dataset report:")
+    # print(filter.render_report())
     # for commit in dataset_commits:
     #     if commit not in dataset_filtered:
     #         print("warning: dataset lpe commit missed by filter")
@@ -58,6 +58,7 @@ def run():
     commits_filtered = filter.filter_commits(commits)
     print(f"Filtered commits: {len(commits_filtered)}")
     print(filter.render_report())
+    show_commit_sunburst(commits)
     # analyze_dataset()
     # git_scan()
 

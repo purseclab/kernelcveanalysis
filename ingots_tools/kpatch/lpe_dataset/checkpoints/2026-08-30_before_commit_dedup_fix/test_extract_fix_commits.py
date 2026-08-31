@@ -60,19 +60,6 @@ class CommitUrlTests(unittest.TestCase):
         assert link is not None
         self.assertIn("/pub/scm/linux/kernel/git/torvalds/linux.git/patch/", link.patch_url)
 
-    def test_duplicate_commit_id_keeps_first_provider_candidate(self) -> None:
-        commit_id = "4" * 40
-        stable = subject.parse_commit_url(
-            f"https://git.kernel.org/stable/c/{commit_id}"
-        )
-        upstream = subject.parse_commit_url(
-            f"https://github.com/torvalds/linux/commit/{commit_id}"
-        )
-        assert stable is not None and upstream is not None
-        links = subject.deduplicate_links([stable, upstream])
-        self.assertEqual(len(links), 1)
-        self.assertEqual(links[0].patch_url, stable.patch_url)
-
     def test_gitlab_and_android_gitiles_urls(self) -> None:
         gitlab = subject.parse_commit_url(
             "https://gitlab.freedesktop.org/polkit/polkit/-/commit/"

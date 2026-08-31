@@ -328,13 +328,9 @@ def unique_commit_links(urls: Iterable[str]) -> list[CommitLink]:
 
 def deduplicate_links(links: Iterable[CommitLink]) -> list[CommitLink]:
     result: list[CommitLink] = []
-    # Different providers can identify the same commit with different tree
-    # URL forms and therefore different patch endpoints.  Keep one candidate
-    # per finding/commit ID so a stale duplicate URL cannot create a spurious
-    # fetch error after another provider supplied the usable patch.
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for link in links:
-        key = link.commit_id.lower()
+        key = (link.commit_id, link.patch_url)
         if key not in seen:
             seen.add(key)
             result.append(link)

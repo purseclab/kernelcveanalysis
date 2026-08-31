@@ -14,6 +14,7 @@ from kpatch.visualization.sunburst import (
     _ViewNode,
     _build_chart_view,
     _build_commit_tree,
+    _build_directory_views,
 )
 
 
@@ -62,6 +63,9 @@ class CommitSunburstTests(unittest.TestCase):
         self.assertEqual((root.file_touches, root.unique_commits), (4, 2))
         self.assertEqual((drivers.file_touches, drivers.unique_commits), (3, 2))
         self.assertEqual((file_a.file_touches, file_a.unique_commits), (2, 2))
+        self.assertEqual(root.exclusive_commits, 2)
+        self.assertEqual(drivers.exclusive_commits, 1)
+        self.assertEqual(file_a.exclusive_commits, 0)
 
     def test_file_touch_geometry_is_additive(self) -> None:
         root = _build_commit_tree(
@@ -96,6 +100,35 @@ class CommitSunburstTests(unittest.TestCase):
         self.assertTrue(math.isclose(nodes["file:drivers/net/b.c"].value, 2 / 9))
         self.assertEqual(nodes["dir:drivers"].unique_commits, 2)
         self.assertEqual(nodes["dir:fs"].unique_commits, 1)
+        self.assertEqual(
+            nodes["file:drivers/net/a.c"].sidebar_item_ids,
+            ("dir:drivers",),
+        )
+
+    def test_exclusive_geometry_keeps_cross_child_commits_at_parent(self) -> None:
+        root = _build_commit_tree(
+            [
+                self.make_commit("one", ["drivers/a.c"]),
+                self.make_commit("two", ["drivers/a.c", "drivers/b.c"]),
+                self.make_commit("three", ["drivers/a.c", "fs/x.c"]),
+            ]
+        )
+
+        view = _build_chart_view(root, _MetricMode.EXCLUSIVE_COMMITS, 0)
+        nodes = self.view_nodes_by_id(view)
+
+        self.assertEqual(root.exclusive_commits, 3)
+        self.assertTrue(math.isclose(nodes["dir:drivers"].value, 2 / 3))
+        self.assertTrue(math.isclose(nodes["file:drivers/a.c"].value, 1 / 3))
+        self.assertNotIn("dir:fs", nodes)
+        self.assertNotIn("file:drivers/b.c", nodes)
+        self.assertEqual(
+            [
+                (item.id, item.exclusive_commits)
+                for item in view.sidebar_items
+            ],
+            [("dir:drivers", 2), ("dir:fs", 0)],
+        )
 
     def test_threshold_grouping_is_recomputed_for_each_mode(self) -> None:
         commits = [
@@ -110,9 +143,8 @@ class CommitSunburstTests(unittest.TestCase):
         )
         root = _build_commit_tree(commits)
 
-        file_view = self.view_nodes_by_id(
-            _build_chart_view(root, _MetricMode.FILE_TOUCHES, 0.1)
-        )
+        file_chart = _build_chart_view(root, _MetricMode.FILE_TOUCHES, 0.1)
+        file_view = self.view_nodes_by_id(file_chart)
         unique_view = self.view_nodes_by_id(
             _build_chart_view(root, _MetricMode.UNIQUE_COMMITS, 0.1)
         )
@@ -121,6 +153,20 @@ class CommitSunburstTests(unittest.TestCase):
         self.assertNotIn("dir:popular", file_view)
         self.assertNotIn("dir:bulk", unique_view)
         self.assertIn("dir:popular", unique_view)
+        self.assertEqual(
+            [item.id for item in file_chart.sidebar_items],
+            ["dir:bulk", "dir:popular"],
+        )
+        grouped = next(
+            node
+            for node in file_chart.nodes
+            if node.parent_id == root.id and node.kind is _NodeKind.OTHER
+        )
+        self.assertEqual(grouped.sidebar_item_ids, ("dir:popular",))
+        self.assertEqual(grouped.exclusive_commits, 10)
+
+        all_views = _build_directory_views(root, 0.1)
+        self.assertIn("dir:popular", all_views[_MetricMode.FILE_TOUCHES])
 
     def test_threshold_uses_full_circle_and_rerooting_reveals_children(self) -> None:
         commits = [
@@ -149,6 +195,7 @@ class CommitSunburstTests(unittest.TestCase):
         self.assertEqual(len(grouped), 1)
         self.assertEqual(grouped[0].hidden_items, 2)
         self.assertEqual((grouped[0].file_touches, grouped[0].unique_commits), (10, 5))
+        self.assertEqual(grouped[0].exclusive_commits, 0)
         self.assertTrue(math.isclose(grouped[0].value, 0.1))
 
         parent_tree = self.find_tree_node(root, "dir:parent")
@@ -198,7 +245,14 @@ class CommitSunburstTests(unittest.TestCase):
             rendered = output_path.read_text(encoding="utf-8")
             self.assertIn("File touches", rendered)
             self.assertIn("Unique commits", rendered)
+            self.assertIn("Exclusive commits", rendered)
             self.assertIn("plotly_sunburstclick", rendered)
+            self.assertIn("plotly_hover", rendered)
+            self.assertIn("kpatch-sidebar", rendered)
+            self.assertIn("Visible child layers", rendered)
+            self.assertIn("let maxDepth = 3", rendered)
+            self.assertIn('"maxdepth":4', rendered)
+            self.assertIn("maxdepth: maxDepth + 1", rendered)
             self.assertIn('separator.textContent = "/"', rendered)
             self.assertNotIn("let history", rendered)
             self.assertIn("Plotly.newPlot", rendered)
@@ -211,9 +265,17 @@ class CommitSunburstTests(unittest.TestCase):
             if output_path is not None:
                 output_path.unlink(missing_ok=True)
 
-        output_path = show_commit_sunburst([commit], open_browser=False)
+        output_path = show_commit_sunburst(
+            [commit],
+            max_depth=5,
+            open_browser=False,
+        )
         try:
             self.assertTrue(output_path.exists())
+            self.assertIn(
+                "let maxDepth = 5",
+                output_path.read_text(encoding="utf-8"),
+            )
         finally:
             output_path.unlink(missing_ok=True)
 
@@ -228,6 +290,15 @@ class CommitSunburstTests(unittest.TestCase):
                     show_commit_sunburst(
                         [commit],
                         min_sector_fraction=threshold,
+                        open_browser=False,
+                    )
+
+        for max_depth in (0, -1, True):
+            with self.subTest(max_depth=max_depth):
+                with self.assertRaisesRegex(ValueError, "max_depth"):
+                    show_commit_sunburst(
+                        [commit],
+                        max_depth=max_depth,
                         open_browser=False,
                     )
 

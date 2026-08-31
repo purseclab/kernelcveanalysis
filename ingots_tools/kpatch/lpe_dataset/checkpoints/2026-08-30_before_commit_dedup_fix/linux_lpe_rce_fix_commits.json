@@ -43,7 +43,7 @@
       "stable": 441
     },
     "cves_without_fix_commits": 31,
-    "errors": 0
+    "errors": 1
   },
   "cves_without_fix_commits": [
     "CVE-2015-3245",
@@ -111,7 +111,13 @@
     "CVE-2026-79619",
     "CVE-2026-8933"
   ],
-  "errors": [],
+  "errors": [
+    {
+      "identifier": "CVE-2025-38500",
+      "stage": "patch",
+      "error": "failed to fetch https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/patch/?id=bfebdb85496e1da21d3cf05de099210915c3e706: HTTP Error 404: Not Found"
+    }
+  ],
   "records": [
     {
       "cve": "CVE-2014-3153",

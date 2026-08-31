@@ -296,6 +296,11 @@ def load_git_commits(file: Path = DATASET_PATH, dedup: bool = False) -> list[Git
     """Load the configured dataset and return its records as Git commits."""
 
     dataset = Dataset.load(file)
+
+    # only linux commits from dataset, some are in libraries used by linux,
+    # or some gpt just straight up pull from other random stuff
+    dataset.records = [record for record in dataset.records if record.commit_scope != CommitScope.LIB]
+
     if dedup:
         dataset.records = dataset.deduplicate()
 
