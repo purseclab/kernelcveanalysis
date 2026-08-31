@@ -5,6 +5,7 @@ description = "Experiments related to scraping linux patches cost efficiently fo
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "plotly>=6.0.0",
     "pydantic>=2.12.5",
     "typer>=0.21.1",
 ]

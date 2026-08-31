@@ -6,6 +6,7 @@ import typer
 from .dataset import load_git_commits
 from .git import GitDb, GitRepo, extract_to_db, parse_time
 from .filter import FileFilter
+from .visualization import show_commit_sunburst
 
 app = typer.Typer()
 
@@ -20,6 +21,12 @@ def extract_commits(
     end_date = parse_time(end) if end is not None else None
     processed = extract_to_db(GitRepo(repo), GitDb(db), start_date, end_date)
     print(f"stored {processed} commits to database `{str(db)}`.")
+
+@app.command("visualize", help="Visualize lpe dataset for testing.")
+def visualize():
+    dataset = load_git_commits()
+    result = show_commit_sunburst(dataset)
+    print(f"Visualization saved to `{result}`")
 
 @app.command("test", help="Temporary function for testing.")
 def run():
