@@ -44,8 +44,9 @@ _UPSERT_COMMIT_SQL = """
         committer_timestamp,
         parents,
         message,
-        diff
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        diff,
+        is_merge
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(commit_id) DO UPDATE SET
         author_name = excluded.author_name,
         author_email = excluded.author_email,
@@ -55,7 +56,8 @@ _UPSERT_COMMIT_SQL = """
         committer_timestamp = excluded.committer_timestamp,
         parents = excluded.parents,
         message = excluded.message,
-        diff = excluded.diff
+        diff = excluded.diff,
+        is_merge = excluded.is_merge
 """
 
 
@@ -71,6 +73,7 @@ class GitCommit:
     parents: tuple[str, ...]
     message: str
     diff_str: str
+    is_merge: bool = False
 
     @cached_property
     def diff(self) -> Diff:
@@ -98,8 +101,9 @@ class GitStore(Protocol):
         self,
         start: datetime | None = None,
         end: datetime | None = None,
+        include_merges: bool = False,
     ) -> list[GitCommit]:
-        """Return commits in ``[start, end)``; either bound may be omitted."""
+        """Return commits in ``[start, end)``; optionally include merges."""
 
         ...
 
@@ -149,6 +153,18 @@ class GitRepo(GitStore):
 
     def __init__(self, repo: Path):
         self.repo = repo
+
+    def _run_git(self, args: list[str]) -> bytes:
+        return subprocess.check_output(
+            ["git", "-C", str(self.repo)] + args,
+            text=False,
+        )
+
+    def checkout(self, commit: str):
+        _ = self._run_git(["checkout", commit])
+
+    def read_file(self, commit: str, path: str) -> bytes:
+        return self._run_git(["show", f"{commit}:{path}"])
 
     def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
         command = ["git", "-C", str(self.repo)] + args
@@ -214,6 +230,7 @@ class GitRepo(GitStore):
         self,
         start: datetime | None = None,
         end: datetime | None = None,
+        include_merges: bool = False,
     ) -> Iterator[GitCommit]:
         """Yield commits in ``[start, end)`` with their messages and diffs."""
 
@@ -229,8 +246,9 @@ class GitRepo(GitStore):
         if end is not None:
             query_end = end + _GIT_TIMESTAMP_RESOLUTION
             args.append(f"--before={self._format_git_time(query_end)}")
+        if not include_merges:
+            args.append("--no-merges")
         args.extend([
-            "--no-merges",
             f"--format={GIT_LOG_FORMAT}",
             "--patch",
             "--no-color",
@@ -264,6 +282,7 @@ class GitRepo(GitStore):
                 parents=tuple(parents.split()),
                 message=message,
                 diff_str=diff.lstrip(b"\n").decode("utf-8", errors="replace"),
+                is_merge=len(parents.split()) > 1,
             )
             if start is not None and commit.committer_date < start:
                 continue
@@ -271,14 +290,16 @@ class GitRepo(GitStore):
                 continue
             yield commit
 
+    @override
     def commits_between(
         self,
         start: datetime | None = None,
         end: datetime | None = None,
+        include_merges: bool = False,
     ) -> list[GitCommit]:
         """Return commits in ``[start, end)`` with their messages and diffs."""
 
-        return list(self.iter_commits_between(start, end))
+        return list(self.iter_commits_between(start, end, include_merges))
 
 
 class GitDb(GitStore):
@@ -312,10 +333,12 @@ class GitDb(GitStore):
                         committer_timestamp INTEGER NOT NULL,
                         parents TEXT NOT NULL,
                         message TEXT NOT NULL,
-                        diff TEXT NOT NULL
+                        diff TEXT NOT NULL,
+                        is_merge INTEGER NOT NULL DEFAULT 0
                     )
                     """
                 )
+
                 _ = connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS commits_committer_timestamp_idx
@@ -346,6 +369,7 @@ class GitDb(GitStore):
                             json.dumps(commit.parents),
                             commit.message,
                             commit.diff_str,
+                            commit.is_merge,
                         ),
                     )
                     stored += 1
@@ -353,15 +377,19 @@ class GitDb(GitStore):
             connection.close()
         return stored
 
+    @override
     def commits_between(
         self,
         start: datetime | None = None,
         end: datetime | None = None,
+        include_merges: bool = False,
     ) -> list[GitCommit]:
         """Return stored commits in ``[start, end)`` by committer date."""
 
         where_clauses: list[str] = []
         parameters: list[int] = []
+        if not include_merges:
+            where_clauses.append("is_merge = 0")
         if start is not None:
             where_clauses.append("committer_timestamp >= ?")
             parameters.append(_timestamp(start))
@@ -382,7 +410,8 @@ class GitDb(GitStore):
                     committer_date,
                     parents,
                     message,
-                    diff
+                    diff,
+                    is_merge
                 FROM commits
                 {where_clause}
                 ORDER BY committer_timestamp DESC, rowid DESC
@@ -402,6 +431,7 @@ class GitDb(GitStore):
                 parents=tuple(json.loads(row["parents"])),
                 message=row["message"],
                 diff_str=row["diff"],
+                is_merge=bool(row["is_merge"]),
             )
             for row in rows
         ]
@@ -415,7 +445,7 @@ def extract_to_db(
 ) -> int:
     """Stream repository commits directly into the SQLite store."""
 
-    return db.store_commits(repo.iter_commits_between(start, end))
+    return db.store_commits(repo.iter_commits_between(start, end, include_merges=True))
 
 
 def _path_for_db_name(db_name: str) -> Path:
