@@ -1,10 +1,11 @@
 from typing import Annotated
 from pathlib import Path
+import random
 
 import typer
 
 from .dataset import load_git_commits
-from .git import GitDb, GitRepo, extract_to_db, parse_time
+from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db
 from .filter import FileFilter
 from .visualization import show_commit_sunburst
 
@@ -22,9 +23,19 @@ def extract_commits(
     processed = extract_to_db(GitRepo(repo), GitDb(db), start_date, end_date)
     print(f"stored {processed} commits to database `{str(db)}`.")
 
+@app.command("gen-dataset", help="Generate dataset of kernel commits, along with other train / test splits.")
+def gen_dataset(
+    seed: Annotated[int, typer.Option(help="Seed for randomly partitioning train and test sets.")] = 67,
+):
+    lpe_commits = load_git_commits(dedup=True)
+
+    # all lpe commits
+    # all commits are already stored separately
+    save_commits_to_db("lpe_commits", lpe_commits)
+
 @app.command("visualize", help="Visualize lpe dataset for testing.")
 def visualize():
-    dataset = load_git_commits()
+    dataset = load_git_commits(dedup=True)
     result = show_commit_sunburst(dataset)
     print(f"Visualization saved to `{result}`")
 
@@ -34,7 +45,7 @@ def run():
     start = parse_time("06-14-2026")
     end = parse_time("08-16-2026")
 
-    db = GitDb(Path("commit.db"))
+    db = GitDb(Path("db/all_commits.sqlite"))
     commits = db.commits_between(start, end)
 
     # permissive arm filter
@@ -44,21 +55,21 @@ def run():
         [".c", ".h", ".S"],
     )
 
-    # dataset_commits = load_git_commits()
+    dataset_commits = load_git_commits()
     # _dataset_filtered = filter.filter_commits(dataset_commits)
     # print("Dataset report:")
     # print(filter.render_report())
-    # for commit in dataset_commits:
-    #     if commit not in dataset_filtered:
-    #         print("warning: dataset lpe commit missed by filter")
-    #         print(commit.diff_str)
-    #         print("\n\n\n\n\n")
+    for commit in random.sample(dataset_commits, k=10):
+        # if commit not in dataset_filtered:
+        #     print("warning: dataset lpe commit missed by filter")
+        print(commit)
+        print("\n\n\n\n\n")
 
     print(f"Original commits: {len(commits)}")
     commits_filtered = filter.filter_commits(commits)
     print(f"Filtered commits: {len(commits_filtered)}")
     print(filter.render_report())
-    show_commit_sunburst(commits)
+    _ = show_commit_sunburst(commits)
     # analyze_dataset()
     # git_scan()
 

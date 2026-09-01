@@ -1,6 +1,8 @@
+# this file just involved in parsing the gpt researched dataset of patches
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from enum import StrEnum
 from pathlib import Path
 import re
@@ -17,7 +19,8 @@ DATASET_PATH = Path(__file__).parent.parent.parent / "lpe_dataset" / "linux_lpe_
 class ParsedPatchText:
     fixing_commit: str | None
     upstream_commit: str | None
-    author: str | None
+    author_name: str | None
+    author_email: str | None
     date: str | None
     subject: str | None
     description: str
@@ -32,7 +35,8 @@ class ParsedPatchText:
         lines = patch_text.splitlines()
         fixing_commit = None
         upstream_commit = None
-        author = None
+        author_name = None
+        author_email = None
         date = None
         subject = None
 
@@ -66,8 +70,8 @@ class ParsedPatchText:
         if header_end is not None:
             header_lines = lines[:header_end]
             for index, line in enumerate(header_lines):
-                if line.startswith("From: ") and author is None:
-                    author = line.removeprefix("From: ")
+                if line.startswith("From: ") and author_name is None:
+                    author_name, author_email = parseaddr(line.removeprefix("From: "))
                 elif line.startswith("Date: ") and date is None:
                     date = line.removeprefix("Date: ")
                 elif line.startswith("Subject: ") and subject is None:
@@ -142,7 +146,8 @@ class ParsedPatchText:
         return cls(
             fixing_commit=fixing_commit,
             upstream_commit=upstream_commit,
-            author=author,
+            author_name=author_name,
+            author_email=author_email,
             date=date,
             subject=subject,
             description=description,
@@ -230,9 +235,9 @@ class Dataset(BaseModel):
         """Convert dataset records into the repository commit model.
 
         Dataset records do not include parent commits or a separate committer
-        date. When patch-email metadata is present, its author and date are
-        used for both Git date fields. Raw unified diffs use an empty author
-        and the Unix epoch as a timezone-aware sentinel.
+        date. When patch-email metadata is present, its author name, email,
+        and date are used for the Git commit fields. Raw unified diffs use
+        empty author fields and the Unix epoch as a timezone-aware sentinel.
         """
 
         git_commits: list[GitCommit] = []
@@ -242,7 +247,8 @@ class Dataset(BaseModel):
             git_commits.append(
                 GitCommit(
                     commit_id=record.commit_id,
-                    author=parsed_patch.author or "",
+                    author_name=parsed_patch.author_name or "",
+                    author_email=parsed_patch.author_email or "",
                     author_date=commit_date,
                     committer_date=commit_date,
                     parents=(),
@@ -305,15 +311,3 @@ def load_git_commits(file: Path = DATASET_PATH, dedup: bool = False) -> list[Git
         dataset.records = dataset.deduplicate()
 
     return dataset.to_git_commits()
-
-
-
-def analyze_dataset():
-    dataset = Dataset.load(DATASET_PATH)
-    dedup = dataset.deduplicate()
-    # dataset.inspect_threshhold_diff(0.7, 0.8)
-    for commit in dedup:
-        print("\n\n\n\n\n")
-        print(commit.patch_text)
-        # print(ParsedCommitText.parse(commit.patch_text).patch.text)
-    print(len(dedup))

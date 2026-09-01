@@ -32,7 +32,7 @@ class CommitSunburstTests(unittest.TestCase):
             for path in paths
         )
         date = datetime(2024, 1, 1, tzinfo=UTC)
-        return GitCommit(commit_id, "", date, date, (), "", patch_text)
+        return GitCommit(commit_id, "", "", date, date, (), "", patch_text)
 
     @staticmethod
     def find_tree_node(root: _TreeNode, node_id: str) -> _TreeNode:

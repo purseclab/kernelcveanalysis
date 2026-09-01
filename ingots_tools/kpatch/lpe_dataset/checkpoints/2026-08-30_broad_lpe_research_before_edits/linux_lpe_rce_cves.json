@@ -19,14 +19,14 @@
     ]
   },
   "summary": {
-    "records": 203,
+    "records": 180,
     "by_type": {
-      "lpe": 198,
+      "lpe": 175,
       "rce": 5
     },
     "by_certainty": {
-      "high": 139,
-      "medium": 64
+      "high": 134,
+      "medium": 46
     }
   },
   "records": [
@@ -1171,19 +1171,6 @@
       "checked_on": "2026-08-13"
     },
     {
-      "cve": "CVE-2024-43859",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Linux F2FS issue as a critical elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream F2FS",
-      "certainty": "medium",
-      "caveat": "This is Android upstream-kernel scope and requires a device using the affected F2FS path; the official bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2024-43859"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
       "cve": "CVE-2024-45016",
       "source_url": "https://github.com/google/security-research/tree/master/pocs/linux/kernelctf/CVE-2024-45016_lts_cos_mitigation",
       "summary": "Google's kernelCTF repository contains an accepted Linux-kernel exploit submission for this CVE, with an exploit artifact and submission documentation. A working kernel exploit is direct evidence of practical kernel code execution and therefore supports local privilege escalation classification in the kernelCTF target context.",
@@ -1628,71 +1615,6 @@
       "checked_on": "2026-08-13"
     },
     {
-      "cve": "CVE-2025-38618",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Linux vsock issue as a high-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream vsock",
-      "certainty": "medium",
-      "caveat": "This is Android upstream-kernel scope and requires the affected vsock functionality; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2025-38618"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2025-39682",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Linux Transport Layer Security issue as a high-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream TLS",
-      "certainty": "medium",
-      "caveat": "This is Android upstream-kernel scope and requires the affected kernel TLS path; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2025-39682"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2025-39946",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Linux Transport Layer Security issue as a high-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream TLS",
-      "certainty": "medium",
-      "caveat": "This is Android upstream-kernel scope and requires the affected kernel TLS path; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2025-39946"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2025-40214",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-06-01",
-      "summary": "The official Android June 2026 bulletin lists the upstream Linux Net issue as a high-severity local elevation-of-privilege vulnerability with no additional execution privileges needed.",
-      "evidence_group": "Google Android Security Bulletin / upstream Linux Net",
-      "certainty": "medium",
-      "caveat": "This is Android upstream-kernel scope and requires the affected Net path; the bulletin provides direct EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2025-40214"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2025-40266",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream pKVM kernel-component issue as a high-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM component",
-      "certainty": "medium",
-      "caveat": "The bulletin's kernel-components section says System execution privileges are needed; this is Android-specific upstream-kernel scope and no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2025-40266"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
       "cve": "CVE-2025-41244",
       "source_url": "https://www.openwall.com/lists/oss-security/2025/09/29/10",
       "summary": "VMware's security advisory states that a non-admin guest user can exploit the open-vm-tools issue to escalate to root on the same virtual machine; the advisory does not publish a detailed exploit.",
@@ -1781,156 +1703,12 @@
       "checked_on": "2026-08-13"
     },
     {
-      "cve": "CVE-2026-0027",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Protected Kernel-Based Virtual Machine kernel-component issue as a critical elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM component",
-      "certainty": "medium",
-      "caveat": "The bulletin's kernel-components section says System execution privileges are needed; this is Android-specific upstream-kernel scope and no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0027"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0028",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream pKVM kernel-component issue as a critical elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM component",
-      "certainty": "medium",
-      "caveat": "The bulletin's kernel-components section says System execution privileges are needed; this is Android-specific upstream-kernel scope and no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0028"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0029",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Linux Protected Kernel-Based Virtual Machine issue as a high-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM",
-      "certainty": "medium",
-      "caveat": "This applies to Android devices using the affected upstream pKVM configuration; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0029"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0030",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream pKVM kernel-component issue as a critical elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM component",
-      "certainty": "medium",
-      "caveat": "The bulletin's kernel-components section says System execution privileges are needed; this is Android-specific upstream-kernel scope and no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0030"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0031",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream pKVM kernel-component issue as a critical elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM component",
-      "certainty": "medium",
-      "caveat": "The bulletin's kernel-components section says System execution privileges are needed; this is Android-specific upstream-kernel scope and no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0031"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0032",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream pKVM kernel-component issue as a high-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM component",
-      "certainty": "medium",
-      "caveat": "The bulletin's kernel-components section says System execution privileges are needed; this is Android-specific upstream-kernel scope and no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0032"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0037",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Linux Protected Kernel-Based Virtual Machine issue as a critical elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream pKVM",
-      "certainty": "medium",
-      "caveat": "This applies to Android devices using the affected upstream pKVM configuration; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0037"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0038",
-      "source_url": "https://source.android.com/docs/security/bulletin/2026/2026-03-01",
-      "summary": "The official Android March 2026 bulletin lists the upstream Linux hypervisor issue as a critical elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Android Security Bulletin / upstream hypervisor",
-      "certainty": "medium",
-      "caveat": "This applies to Android devices using the affected upstream hypervisor path; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0038"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0125",
-      "source_url": "https://source.android.com/docs/security/bulletin/pixel/2026/2026-06-01",
-      "summary": "The official Pixel June 2026 bulletin lists a Video Processing Unit kernel-component issue as a high-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Pixel Security Bulletin / kernel component",
-      "certainty": "medium",
-      "caveat": "This is device-specific Android kernel-component scope for supported Pixel devices; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0125"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-0137",
-      "source_url": "https://source.android.com/docs/security/bulletin/pixel/2026/2026-06-01",
-      "summary": "The official Pixel June 2026 bulletin lists an EdgeTPU Kernel Driver issue as a moderate-severity elevation-of-privilege vulnerability.",
-      "evidence_group": "Google Pixel Security Bulletin / EdgeTPU kernel driver",
-      "certainty": "medium",
-      "caveat": "This is a device-specific Pixel kernel-driver finding; the bulletin provides EoP classification but no detailed public exploitation demonstration was verified.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-0137"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
       "cve": "CVE-2026-15226",
       "source_url": "https://ubuntu.com/security/CVE-2026-15226",
       "summary": "Ubuntu describes a local snap confinement/namespace escalation in which a confined snap can create and execute setuid binaries and perform privileged actions inside its container namespace. This is included as scoped LPE evidence, not as a demonstrated host-root escape.",
       "evidence_group": "Ubuntu snap advisory",
       "certainty": "medium",
       "caveat": "The documented impact is inside the snap's container/namespace boundary; no host-root escape is established by the cited Ubuntu advisory.",
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-23111",
-      "source_url": "https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a-use-after-free-in-the-linux-kernel/",
-      "summary": "Exodus Intelligence documents a Linux nftables use-after-free caused by an inverted generation-mask check and demonstrates local privilege escalation from an unprivileged user to root on Debian and Ubuntu targets; the Linux CNA record identifies the affected net/netfilter/nf_tables_api.c path and upstream fix.",
-      "evidence_group": "Exodus Intelligence / Linux kernel CNA",
-      "certainty": "high",
-      "caveat": "The demonstrated targets require the vulnerable nf_tables path, user namespaces, and matching distro kernel conditions; the public result is not a claim of universal exploitability, and exploit source is not copied here.",
-      "additional_source_urls": [
-        "https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/cf1a7ca9a451562cdad63413e4f86ea380b2d86c/cve/published/2026/CVE-2026-23111.json",
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-23111"
-      ],
       "type": "lpe",
       "checked_on": "2026-08-13"
     },
@@ -2043,21 +1821,6 @@
       "checked_on": "2026-08-13"
     },
     {
-      "cve": "CVE-2026-46243",
-      "source_url": "https://access.redhat.com/solutions/7143183",
-      "summary": "Red Hat identifies CIFSwitch as a local privilege-escalation issue in the Linux CIFS/SMB client and cifs-utils interaction; Ubuntu describes the kernel-side rejection of forged userspace cifs.spnego descriptions containing authority-bearing fields.",
-      "evidence_group": "Red Hat / Ubuntu CIFS",
-      "certainty": "medium",
-      "caveat": "Exploitation requires the affected CIFS upcall path, cifs-utils interaction, and a local environment where the attacker can influence the relevant userspace description; no detailed public root demonstration was verified in this sweep.",
-      "additional_source_urls": [
-        "https://ubuntu.com/security/CVE-2026-46243",
-        "https://access.redhat.com/security/vulnerabilities/RHSB-2026-005",
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-46243"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
       "cve": "CVE-2026-46300",
       "source_url": "https://canonical.com/blog/fragnesia-linux-vulnerability-fixes-available",
       "summary": "Canonical explicitly identifies Fragnesia as a Linux-kernel local privilege escalation affecting ESP-in-TCP/IPsec components.",
@@ -2081,79 +1844,6 @@
       "summary": "Qualys describes a Linux-kernel ptrace-path logic flaw permitting unprivileged local users to disclose sensitive files and execute arbitrary commands as root.",
       "evidence_group": "Qualys ssh-keysign-pwn",
       "certainty": "high",
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-50292",
-      "source_url": "https://www.openwall.com/lists/oss-security/2026/06/04/5",
-      "summary": "The libinput maintainer disclosure explains that a malicious uinput or uhid device can place newline content in phys output, inject udev properties, and cause arbitrary execution as root; the CVE record and Red Hat tracker classify it as a local privilege-escalation issue.",
-      "evidence_group": "libinput / Openwall / Red Hat",
-      "certainty": "high",
-      "caveat": "The attacker needs access to create a malicious uinput or uhid device; uinput access is commonly restricted but may be granted by downstream udev rules or packages, so the practical local precondition is deployment-specific.",
-      "additional_source_urls": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-50292",
-        "https://bugzilla.redhat.com/show_bug.cgi?id=2485390",
-        "https://gitlab.freedesktop.org/libinput/libinput/-/commit/76f0d8a7f57e2868882864b4611281f12f704b55"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-53264",
-      "source_url": "https://thehackernews.com/2026/07/researcher-says-ai-helped-develop-linux.html",
-      "summary": "STAR Labs is reported to have published a Linux act_api use-after-free exploit that turns an ordinary local user into root on CentOS Stream 9; the Linux CNA record describes the net/sched race and its RCU-based fix.",
-      "evidence_group": "STAR Labs / Linux kernel CNA",
-      "certainty": "high",
-      "caveat": "The public demonstration targets CentOS Stream 9 and requires unprivileged namespaces plus CONFIG_NET_ACT_GACT and CONFIG_NET_CLS_FLOWER; kernel-specific exploit conditions and offsets are not universal, and exploit source is not copied here.",
-      "additional_source_urls": [
-        "https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/143cc1d80fcbd962a17ccea5438f6c801a8274d8/cve/published/2026/CVE-2026-53264.json",
-        "https://starlabs.sg/blog/2026/07-when-ai-makes-0-days-feel-like-n-days/",
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-53264"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-53613",
-      "source_url": "https://github.com/util-linux/util-linux/security/advisories/GHSA-8gj5-72r3-428g",
-      "summary": "The util-linux maintainer advisory documents a SUID mount(8) target-path TOCTOU: an attacker can redirect an authorized user-directory mount into a root-owned location and the advisory demonstrates escalation to root through a mounted sudoers rule.",
-      "evidence_group": "util-linux upstream advisory",
-      "certainty": "high",
-      "caveat": "The demonstrated path requires an /etc/fstab user/users entry and an attacker-writable ancestor of the mount target; it affects deployments using the vulnerable SUID mount configuration, not every util-linux installation.",
-      "additional_source_urls": [
-        "https://ubuntu.com/security/CVE-2026-53613",
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-53613"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-53614",
-      "source_url": "https://github.com/util-linux/util-linux/security/advisories/GHSA-67r7-8m5w-22wx",
-      "summary": "The util-linux maintainer advisory documents a SUID mount(8) nosuid/noexec bypass caused by trusting LIBMOUNT_FORCE_MOUNT2 and reports a persistent root shell from the resulting legacy bind-mount race.",
-      "evidence_group": "util-linux upstream advisory",
-      "certainty": "high",
-      "caveat": "The affected configuration requires util-linux 2.39.1 or newer, an /etc/fstab bind,user,nosuid,noexec entry, a suitable SUID source, and concurrent execution; the advisory reported upstream master as unfixed when disclosed.",
-      "additional_source_urls": [
-        "https://ubuntu.com/security/CVE-2026-53614",
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-53614"
-      ],
-      "type": "lpe",
-      "checked_on": "2026-08-13"
-    },
-    {
-      "cve": "CVE-2026-7867",
-      "source_url": "https://github.com/storaged-project/udisks/security/advisories/GHSA-j42g-v9jw-6ph3",
-      "summary": "The udisks2 maintainer advisory describes a missing authorization check on the Filesystem.Mount D-Bus method: an unprivileged local user can spoof as-user and mount fstab-managed block devices as root, providing a local privilege-escalation path; Red Hat and Debian corroborate the CVE.",
-      "evidence_group": "udisks2 upstream / Red Hat / Debian",
-      "certainty": "medium",
-      "caveat": "The path requires local session D-Bus access and applicable fstab entries such as x-udisks-auth, user, or users; it is a userspace desktop/storage-service finding rather than a mainline kernel vulnerability, and no independent working exploit was verified here.",
-      "additional_source_urls": [
-        "https://access.redhat.com/security/cve/cve-2026-7867",
-        "https://tracker.debian.org/news/1783246/accepted-udisks2-2101-121deb13u2-source-into-stable-security/",
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-7867"
-      ],
       "type": "lpe",
       "checked_on": "2026-08-13"
     },

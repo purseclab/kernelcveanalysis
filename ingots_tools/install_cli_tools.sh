@@ -7,7 +7,8 @@ set -- \
     "kdebug" \
     "kexploit" \
     "object_db" \
-    "kpatch"
+    "kpatch" \
+    "kartifact"
 
 for package in "$@"
 do

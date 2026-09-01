@@ -190,38 +190,6 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual([link.commit_id for link in links], [commit_id])
         self.assertEqual(links[0].provider, "ubuntu-kernel-mailing-list")
 
-    def test_source_backed_cve_advisory_requires_mapped_fix_links(self) -> None:
-        entry = subject.SOURCE_BACKED_CVE_ADVISORIES["CVE-2026-53613"]
-        page = (
-            "CVE-2026-53613 Patch details "
-            + " ".join(entry["commit_urls"])
-        ).encode()
-        with patch.object(subject, "fetch_cached", return_value=page):
-            links = subject.discover_source_backed_cve_links(
-                "CVE-2026-53613",
-                source_cache_dir=Path("/unused"),
-                refresh=False,
-            )
-        self.assertEqual(
-            [link.commit_id for link in links],
-            [
-                "0d3d55975aa3492c62fd345eac38f41cd166c0b0",
-                "0b010025a0e429bc80355c94db86a843395d49e2",
-            ],
-        )
-        self.assertTrue(all(link.provider == "source-backed-cve-advisory" for link in links))
-
-        incomplete_page = (
-            "CVE-2026-53613 Patch details " + entry["commit_urls"][0]
-        ).encode()
-        with patch.object(subject, "fetch_cached", return_value=incomplete_page):
-            with self.assertRaises(subject.FetchError):
-                subject.discover_source_backed_cve_links(
-                    "CVE-2026-53613",
-                    source_cache_dir=Path("/unused"),
-                    refresh=False,
-                )
-
 
 class DatasetTests(unittest.TestCase):
     def test_cve_and_non_cve_findings_are_combined(self) -> None:

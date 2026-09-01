@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sqlite3
 import subprocess
-from typing import Iterable, Iterator, Protocol, runtime_checkable
+from typing import Iterable, Iterator, Protocol, runtime_checkable, override
 from functools import cached_property
 
 from .diff import Diff
@@ -21,7 +21,8 @@ def _git_format_bytes(value: bytes) -> str:
 
 GIT_LOG_FORMAT = (
     f"{_git_format_bytes(LOG_RECORD_START)}%H"
-    f"{_git_format_bytes(LOG_FIELD_SEPARATOR)}%an <%ae>"
+    f"{_git_format_bytes(LOG_FIELD_SEPARATOR)}%an"
+    f"{_git_format_bytes(LOG_FIELD_SEPARATOR)}%ae"
     f"{_git_format_bytes(LOG_FIELD_SEPARATOR)}%aI"
     f"{_git_format_bytes(LOG_FIELD_SEPARATOR)}%cI"
     f"{_git_format_bytes(LOG_FIELD_SEPARATOR)}%P"
@@ -35,7 +36,8 @@ _GIT_TIMESTAMP_RESOLUTION = timedelta(seconds=1)
 _UPSERT_COMMIT_SQL = """
     INSERT INTO commits (
         commit_id,
-        author,
+        author_name,
+        author_email,
         author_date,
         committer_date,
         author_timestamp,
@@ -43,9 +45,10 @@ _UPSERT_COMMIT_SQL = """
         parents,
         message,
         diff
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(commit_id) DO UPDATE SET
-        author = excluded.author,
+        author_name = excluded.author_name,
+        author_email = excluded.author_email,
         author_date = excluded.author_date,
         committer_date = excluded.committer_date,
         author_timestamp = excluded.author_timestamp,
@@ -61,7 +64,8 @@ class GitCommit:
     """A commit and the patch emitted for it by ``git log --patch``."""
 
     commit_id: str
-    author: str
+    author_name: str
+    author_email: str
     author_date: datetime
     committer_date: datetime
     parents: tuple[str, ...]
@@ -71,6 +75,19 @@ class GitCommit:
     @cached_property
     def diff(self) -> Diff:
         return Diff.parse(self.diff_str)
+
+    @override
+    def __repr__(self) -> str:
+        format = "%m-%d-%Y"
+        return f"""commit {self.commit_id}
+From: {self.author_name} <{self.author_email}>
+Author Date: {self.author_date.strftime(format)}
+Commit Date: {self.committer_date.strftime(format)}
+
+{self.message}
+------------------------------
+{self.diff_str}
+------------------------------"""
 
 
 @runtime_checkable
@@ -92,11 +109,11 @@ _UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 def _looks_like_record_start(data: bytearray, index: int) -> bool:
     metadata = data[index + len(_LOG_RECORD_START_BYTES) :]
-    fields = metadata.split(_LOG_FIELD_SEPARATOR_BYTES, 5)
-    if len(fields) != 6:
+    fields = metadata.split(_LOG_FIELD_SEPARATOR_BYTES, 6)
+    if len(fields) != 7:
         return False
 
-    commit_id, _, author_date, committer_date, _, _ = fields
+    commit_id, _, _, author_date, committer_date, _, _ = fields
     if len(commit_id) not in (40, 64) or any(
         byte not in b"0123456789abcdefABCDEF" for byte in commit_id
     ):
@@ -231,16 +248,17 @@ class GitRepo(GitStore):
             except ValueError as error:
                 raise ValueError("Unable to split git log message from diff") from error
 
-            fields = metadata.split(_LOG_FIELD_SEPARATOR_BYTES, 5)
-            if len(fields) != 6:
+            fields = metadata.split(_LOG_FIELD_SEPARATOR_BYTES, 6)
+            if len(fields) != 7:
                 raise ValueError("Unexpected git log record format")
 
-            commit_id, author, author_date, committer_date, parents, message = (
+            commit_id, author_name, author_email, author_date, committer_date, parents, message = (
                 field.decode("utf-8", errors="replace") for field in fields
             )
             commit = GitCommit(
                 commit_id=commit_id,
-                author=author,
+                author_name=author_name,
+                author_email=author_email,
                 author_date=datetime.fromisoformat(author_date),
                 committer_date=datetime.fromisoformat(committer_date),
                 parents=tuple(parents.split()),
@@ -282,11 +300,12 @@ class GitDb(GitStore):
         connection = self._connect()
         try:
             with connection:
-                connection.execute(
+                _ = connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS commits (
                         commit_id TEXT PRIMARY KEY,
-                        author TEXT NOT NULL,
+                        author_name TEXT NOT NULL,
+                        author_email TEXT NOT NULL,
                         author_date TEXT NOT NULL,
                         committer_date TEXT NOT NULL,
                         author_timestamp INTEGER NOT NULL,
@@ -297,7 +316,7 @@ class GitDb(GitStore):
                     )
                     """
                 )
-                connection.execute(
+                _ = connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS commits_committer_timestamp_idx
                     ON commits (committer_timestamp)
@@ -314,11 +333,12 @@ class GitDb(GitStore):
         try:
             with connection:
                 for commit in commits:
-                    connection.execute(
+                    _ = connection.execute(
                         _UPSERT_COMMIT_SQL,
                         (
                             commit.commit_id,
-                            commit.author,
+                            commit.author_name,
+                            commit.author_email,
                             commit.author_date.isoformat(),
                             commit.committer_date.isoformat(),
                             _timestamp(commit.author_date),
@@ -356,7 +376,8 @@ class GitDb(GitStore):
                 f"""
                 SELECT
                     commit_id,
-                    author,
+                    author_name,
+                    author_email,
                     author_date,
                     committer_date,
                     parents,
@@ -374,7 +395,8 @@ class GitDb(GitStore):
         return [
             GitCommit(
                 commit_id=row["commit_id"],
-                author=row["author"],
+                author_name=row["author_name"],
+                author_email=row["author_email"],
                 author_date=datetime.fromisoformat(row["author_date"]),
                 committer_date=datetime.fromisoformat(row["committer_date"]),
                 parents=tuple(json.loads(row["parents"])),
@@ -396,12 +418,22 @@ def extract_to_db(
     return db.store_commits(repo.iter_commits_between(start, end))
 
 
+def _path_for_db_name(db_name: str) -> Path:
+    db_folder = Path(__file__).parent.parent.parent / "db"
+
+    return db_folder / f"{db_name}.sqlite"
+
+def save_commits_to_db(db_name: str, commits: list[GitCommit]):
+    """Stores commits into a database in db folder."""
+
+    _ = GitDb(_path_for_db_name(db_name)).store_commits(commits)
+
+
+def load_commits_from_db(db_name: str) -> list[GitCommit]:
+    return GitDb(_path_for_db_name(db_name)).commits_between()
+
+
 def parse_time(time: str) -> datetime:
     return datetime.strptime(time, "%m-%d-%Y").replace(
         tzinfo=UTC,
     )
-
-
-def git_scan():
-    repo = GitRepo(Path("./linux"))
-    print(repo.commits_between(parse_time("01-01-2024"), parse_time("01-02-2024"))[0])

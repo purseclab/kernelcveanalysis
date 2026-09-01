@@ -64,7 +64,8 @@ class DatasetGitCommitTests(unittest.TestCase):
         commit = Dataset(records=[make_commit("commit", PATCH_EMAIL)]).to_git_commits()[0]
 
         self.assertEqual(commit.commit_id, "commit")
-        self.assertEqual(commit.author, "Alice Example <alice@example.com>")
+        self.assertEqual(commit.author_name, "Alice Example")
+        self.assertEqual(commit.author_email, "alice@example.com")
         self.assertEqual(
             commit.author_date,
             datetime(2014, 6, 3, 12, 27, 7, tzinfo=UTC),
@@ -84,7 +85,8 @@ class DatasetGitCommitTests(unittest.TestCase):
     def test_raw_patch_uses_metadata_sentinels(self) -> None:
         commit = Dataset(records=[make_commit("raw", RAW_PATCH)]).to_git_commits()[0]
 
-        self.assertEqual(commit.author, "")
+        self.assertEqual(commit.author_name, "")
+        self.assertEqual(commit.author_email, "")
         self.assertEqual(commit.author_date, datetime(1970, 1, 1, tzinfo=UTC))
         self.assertEqual(commit.committer_date, commit.author_date)
         self.assertEqual(commit.diff_str, RAW_PATCH.rstrip("\n"))

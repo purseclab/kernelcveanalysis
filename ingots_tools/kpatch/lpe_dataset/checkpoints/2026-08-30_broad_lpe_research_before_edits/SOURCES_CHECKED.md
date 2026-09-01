@@ -109,18 +109,6 @@ I searched and spot-checked Google kernelCTF, Canonical/Ubuntu CVE pages and sec
 | OpenZFS CVE-2026-79619 advisory | <https://github.com/advisories/GHSA-5v2p-vxxv-r62r> | read | The OpenZFS-backed advisory describes incorrect user-namespace capability checks in /dev/zfs ioctls that let an unprivileged user perform root-only pool operations; Ubuntu corroborates the Linux local privilege-escalation scope and affected releases. |
 | Rejected CVE-2025-21755 research result | <https://nvd.nist.gov/vuln/detail/CVE-2025-21755> | read | Although Android's September 2025 bulletin listed CVE-2025-21755 as a kernel EoP issue, NVD and Red Hat record that the upstream CVE was rejected; it was not added to the dataset. |
 | Insufficient-evidence driver research result | <https://access.redhat.com/security/cve/cve-2025-38474> | read | CVE-2025-38474 affects the Linux Sierra USB network driver, but the checked vendor/NVD evidence is centered on denial of service and has no defensible direct LPE/RCE claim; it was not added. |
-| Exodus Intelligence nftables research | <https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a-use-after-free-in-the-linux-kernel/> | read | Exodus Intelligence documents a Linux nftables use-after-free and reports a local exploit that escalates an unprivileged user to root on Debian and Ubuntu targets; the write-up identifies the user-namespace and kernel-target prerequisites without copying exploit code. |
-| Linux kernel CNA CVE-2026-23111 | <https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/cf1a7ca9a451562cdad63413e4f86ea380b2d86c/cve/published/2026/CVE-2026-23111.json> | read | The Linux kernel CNA record identifies the affected net/netfilter/nf_tables_api.c path and records the upstream CVE/fix for the nftables issue. |
-| Linux kernel CNA CVE-2026-53264 | <https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/143cc1d80fcbd962a17ccea5438f6c801a8274d8/cve/published/2026/CVE-2026-53264.json> | read | The Linux kernel CNA record describes a net/sched act_api use-after-free race between filter creation and deletion and records the RCU-based upstream fix. |
-| STAR Labs act_api research | <https://thehackernews.com/2026/07/researcher-says-ai-helped-develop-linux.html> | read | The report says STAR Labs published a Linux exploit for CVE-2026-53264 that turns an ordinary local user into root on CentOS Stream 9, with unprivileged namespaces and specific kernel configurations required. |
-| Red Hat CIFSwitch advisory | <https://access.redhat.com/solutions/7143183> | read | Red Hat explicitly labels CVE-2026-46243 a CIFS upcall local privilege-escalation issue; Ubuntu's tracker describes forged cifs.spnego userspace descriptions being rejected by the kernel fix. |
-| udisks2 upstream advisory | <https://github.com/storaged-project/udisks/security/advisories/GHSA-j42g-v9jw-6ph3> | read | The udisks2 maintainer advisory describes a missing authorization check on the Filesystem.Mount D-Bus method and an unprivileged-local-user-to-root LPE when applicable fstab entries are present; Red Hat and Debian corroborate the CVE. |
-| util-linux mount advisories | <https://github.com/util-linux/util-linux/security/advisories/GHSA-8gj5-72r3-428g> | read | The util-linux maintainer advisory documents a mount(8) target-path TOCTOU that redirects an authorized mount into a root-owned location and demonstrates root escalation; the related LIBMOUNT_FORCE_MOUNT2 advisory is tracked separately as CVE-2026-53614. |
-| libinput security disclosure | <https://www.openwall.com/lists/oss-security/2026/06/04/5> | read | The libinput maintainer disclosure explains that a malicious uinput/uhid phys attribute can inject udev properties and cause arbitrary execution as root, with device-access prerequisites; the assigned CVE and Red Hat tracker corroborate the local scope. |
-| Android Security Bulletin March 2026 kernel findings | <https://source.android.com/docs/security/bulletin/2026/2026-03-01> | read | The official Android March 2026 bulletin lists the selected upstream-kernel and kernel-components CVEs as EoP, including F2FS, vsock, TLS, hypervisor, and pKVM rows. The kernel-components section explicitly notes that System execution privileges are needed for those rows. |
-| Android Security Bulletin June 2026 kernel findings | <https://source.android.com/docs/security/bulletin/2026/2026-06-01> | read | The official Android June 2026 bulletin lists CVE-2025-40214 in the upstream Linux Net component as EoP with no additional execution privileges needed. |
-| Pixel Update Bulletin June 2026 kernel components | <https://source.android.com/docs/security/bulletin/pixel/2026/2026-06-01> | read | The official Pixel June 2026 bulletin lists CVE-2026-0125 in Kernel components and CVE-2026-0137 as an EdgeTPU Kernel Driver issue, both classified as EoP. |
-| Android July and August 2026 negative search | <https://source.android.com/docs/security/bulletin/2026/2026-07-01> | read | The July 2026 Android bulletin announces no security vulnerabilities, and the August 2026 bulletin did not expose an additional qualifying upstream-kernel/kernel-component EoP row in the checked English page; no records were added from those pages. |
 
 ## Non-CVE findings tracked separately
 
@@ -142,19 +130,15 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://access.redhat.com/articles/4292201> | CVE-2019-13272 | Red Hat advisory |
 | <https://access.redhat.com/errata/RHSA-2023%3A1984> | CVE-2023-0386 | Red Hat |
 | <https://access.redhat.com/errata/RHSA-2023%3A4828> | CVE-2023-3090 | Ubuntu / Linux ipvlan driver |
-| <https://access.redhat.com/security/cve/cve-2026-7867> | CVE-2026-7867 | udisks2 upstream / Red Hat / Debian |
 | <https://access.redhat.com/security/vulnerabilities/CVE-2017-2636> | CVE-2017-2636 | Alexander Popov research |
 | <https://access.redhat.com/security/vulnerabilities/DirtyCow> | CVE-2016-5195 | Red Hat advisory |
 | <https://access.redhat.com/security/vulnerabilities/RHSB-2022-002> | CVE-2022-0847 | Red Hat / CISA Dirty Pipe |
 | <https://access.redhat.com/security/vulnerabilities/RHSB-2026-002> | CVE-2026-31431 | CERT/CC / Ubuntu / CISA |
-| <https://access.redhat.com/security/vulnerabilities/RHSB-2026-005> | CVE-2026-46243 | Red Hat / Ubuntu CIFS |
 | <https://access.redhat.com/solutions/1539123> | CVE-2015-3245, CVE-2015-3246 | Red Hat advisory |
-| <https://access.redhat.com/solutions/7143183> | CVE-2026-46243 | Red Hat / Ubuntu CIFS |
 | <https://anatomic.rip/cve-2022-1015/> | CVE-2022-1015 | Detailed research blog |
 | <https://android.googlesource.com/kernel/common/+/0668e45a43398a07c3aa2ae08903097657efd87e> | CVE-2025-48624 | Google Android Security Bulletin / arm-smmu-v3 |
 | <https://android.googlesource.com/kernel/common/+/3b6fab0ff24f7108c71a4d9c12567455cb2a5a81> | CVE-2025-48623 | Google Android Security Bulletin / pKVM |
 | <https://android.googlesource.com/kernel/common/+/e76cff4952af4ac4652dc74ffbd134ff57c47895> | CVE-2025-48623 | Google Android Security Bulletin / pKVM |
-| <https://blog.exodusintel.com/2026/06/08/off-by-exploiting-a-use-after-free-in-the-linux-kernel/> | CVE-2026-23111 | Exodus Intelligence / Linux kernel CNA |
 | <https://blog.lexfo.fr/cve-2017-11176-linux-kernel-exploitation-part1.html> | CVE-2017-11176 | Lexfo research |
 | <https://blog.lexfo.fr/cve-2017-11176-linux-kernel-exploitation-part3.html> | CVE-2017-11176 | Lexfo research |
 | <https://blog.lexfo.fr/cve-2017-11176-linux-kernel-exploitation-part4.html> | CVE-2017-11176 | Lexfo research |
@@ -166,7 +150,6 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://blog.qualys.com/vulnerabilities-threat-research/2026/03/17/cve-2026-3888-important-snap-flaw-enables-local-privilege-escalation-to-root> | CVE-2026-3888 | Qualys / Ubuntu snap advisory |
 | <https://blog.qualys.com/vulnerabilities-threat-research/2026/05/20/cve-2026-46333-local-root-privilege-escalation-and-credential-disclosure-in-the-linux-kernel-ptrace-path> | CVE-2026-46333 | Qualys ssh-keysign-pwn |
 | <https://bugzilla.redhat.com/show_bug.cgi?id=2043520> | CVE-2022-23222 | Ubuntu / Red Hat |
-| <https://bugzilla.redhat.com/show_bug.cgi?id=2485390> | CVE-2026-50292 | libinput / Openwall / Red Hat |
 | <https://canonical.com/blog/dirty-frag-linux-vulnerability-fixes-available> | CVE-2026-43284, CVE-2026-43500 | Canonical Dirty Frag |
 | <https://canonical.com/blog/dirtyclone-linux-vulnerability-fixes-available> | CVE-2026-43503 | JFrog / Canonical DirtyClone |
 | <https://canonical.com/blog/fragnesia-linux-vulnerability-fixes-available> | CVE-2026-46300 | Canonical Fragnesia |
@@ -265,22 +248,16 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://github.com/openzfs/zfs/issues/18959> | CVE-2026-79619 | OpenZFS / Ubuntu advisory |
 | <https://github.com/openzfs/zfs/pull/18959> | CVE-2026-79619 | OpenZFS / Ubuntu advisory |
 | <https://github.com/scheatkode/CVE-2018-18955> | CVE-2018-18955 | Public exploit write-up |
-| <https://github.com/storaged-project/udisks/security/advisories/GHSA-j42g-v9jw-6ph3> | CVE-2026-7867 | udisks2 upstream / Red Hat / Debian |
 | <https://github.com/torvalds/linux/commit/2e95c4384438> | CVE-2024-47711, CVE-2024-53057 | Anthropic Mythos Preview |
 | <https://github.com/torvalds/linux/commit/35f56c554eb1b56b77b3cf197a6b00922d49033d> | linux-commit-35f56c554eb1 | Anthropic Mythos Preview |
 | <https://github.com/torvalds/linux/commit/5aa57d9f2d5311f19434d95b2a81610aa263e23b> | CVE-2024-47711 | Anthropic Mythos Preview |
-| <https://github.com/util-linux/util-linux/security/advisories/GHSA-67r7-8m5w-22wx> | CVE-2026-53614 | util-linux upstream advisory |
-| <https://github.com/util-linux/util-linux/security/advisories/GHSA-8gj5-72r3-428g> | CVE-2026-53613 | util-linux upstream advisory |
-| <https://gitlab.freedesktop.org/libinput/libinput/-/commit/76f0d8a7f57e2868882864b4611281f12f704b55> | CVE-2026-50292 | libinput / Openwall / Red Hat |
 | <https://goldbergsecurity.co.uk/writeups/cve-2024-1086-nftables> | CVE-2024-1086 | Google kernelCTF / Public PoC / KernelCTF |
 | <https://google.github.io/security-research/pocs/linux/cve-2021-22555/writeup.html> | CVE-2021-22555 | Google Project Zero / Netfilter |
 | <https://httpd.apache.org/security/vulnerabilities_24.html> | CVE-2021-42013 | Apache HTTP Server |
 | <https://kb.cert.org/vuls/id/260001> | CVE-2026-31431 | CERT/CC / Ubuntu / CISA |
-| <https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/143cc1d80fcbd962a17ccea5438f6c801a8274d8/cve/published/2026/CVE-2026-53264.json> | CVE-2026-53264 | STAR Labs / Linux kernel CNA |
 | <https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/756f6da54a4ca1a57cca630ba1efc9635a20c32a/cve/published/2025/CVE-2025-38352.cvss> | CVE-2025-38352 | Google Android Security Bulletin / Linux kernel |
 | <https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/756f6da54a4ca1a57cca630ba1efc9635a20c32a/cve/published/2026/CVE-2026-23268.cvss> | CVE-2026-23268 | Qualys CrackArmor / Ubuntu |
 | <https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/cea02d164d09a1f5649e317950ba272f48371460/cve/published/2025/CVE-2025-71089.json> | CVE-2025-71089 | Linux kernel CNA / Ubuntu IOMMU SVA |
-| <https://kernel.googlesource.com/pub/scm/linux/security/vulns/%2B/cf1a7ca9a451562cdad63413e4f86ea380b2d86c/cve/published/2026/CVE-2026-23111.json> | CVE-2026-23111 | Exodus Intelligence / Linux kernel CNA |
 | <https://lists.suse.com/pipermail/sle-security-updates/2023-July/015490.html> | CVE-2023-3090 | Ubuntu / Linux ipvlan driver |
 | <https://lkml.iu.edu/2411.1/04642.html> | linux-commit-35f56c554eb1 | Anthropic Mythos Preview |
 | <https://nebusec.ai/research/ionstack-part-2/> | CVE-2026-43499 | NebuSec / GhostLock research |
@@ -291,7 +268,6 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://nvd.nist.gov/vuln/detail/CVE-2023-0179> | CVE-2023-0179 | NVD / public security reporting |
 | <https://nvd.nist.gov/vuln/detail/CVE-2023-3090> | CVE-2023-3090 | Ubuntu / Linux ipvlan driver |
 | <https://nvd.nist.gov/vuln/detail/CVE-2023-39198> | CVE-2023-39198 | Ubuntu / Linux QXL driver |
-| <https://nvd.nist.gov/vuln/detail/CVE-2024-43859> | CVE-2024-43859 | Google Android Security Bulletin / upstream F2FS |
 | <https://nvd.nist.gov/vuln/detail/CVE-2024-47711> | CVE-2024-47711, CVE-2024-53057 | Anthropic Mythos Preview |
 | <https://nvd.nist.gov/vuln/detail/CVE-2024-53057> | CVE-2024-47711, CVE-2024-53057 | Anthropic Mythos Preview |
 | <https://nvd.nist.gov/vuln/detail/CVE-2024-53104> | CVE-2024-53104 | Google Android Security Bulletin / UVC |
@@ -300,31 +276,9 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://nvd.nist.gov/vuln/detail/CVE-2025-33219> | CVE-2025-33219 | NVIDIA Linux GPU Display Driver |
 | <https://nvd.nist.gov/vuln/detail/CVE-2025-37899> | CVE-2025-37899 | OpenAI o3 / Sean Heelan |
 | <https://nvd.nist.gov/vuln/detail/CVE-2025-38352> | CVE-2025-38352 | Google Android Security Bulletin / Linux kernel |
-| <https://nvd.nist.gov/vuln/detail/CVE-2025-38618> | CVE-2025-38618 | Google Android Security Bulletin / upstream vsock |
-| <https://nvd.nist.gov/vuln/detail/CVE-2025-39682> | CVE-2025-39682 | Google Android Security Bulletin / upstream TLS |
-| <https://nvd.nist.gov/vuln/detail/CVE-2025-39946> | CVE-2025-39946 | Google Android Security Bulletin / upstream TLS |
-| <https://nvd.nist.gov/vuln/detail/CVE-2025-40214> | CVE-2025-40214 | Google Android Security Bulletin / upstream Linux Net |
-| <https://nvd.nist.gov/vuln/detail/CVE-2025-40266> | CVE-2025-40266 | Google Android Security Bulletin / upstream pKVM component |
 | <https://nvd.nist.gov/vuln/detail/CVE-2025-48623> | CVE-2025-48623 | Google Android Security Bulletin / pKVM |
 | <https://nvd.nist.gov/vuln/detail/CVE-2025-48624> | CVE-2025-48624 | Google Android Security Bulletin / arm-smmu-v3 |
 | <https://nvd.nist.gov/vuln/detail/CVE-2025-71089> | CVE-2025-71089 | Linux kernel CNA / Ubuntu IOMMU SVA |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0027> | CVE-2026-0027 | Google Android Security Bulletin / upstream pKVM component |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0028> | CVE-2026-0028 | Google Android Security Bulletin / upstream pKVM component |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0029> | CVE-2026-0029 | Google Android Security Bulletin / upstream pKVM |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0030> | CVE-2026-0030 | Google Android Security Bulletin / upstream pKVM component |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0031> | CVE-2026-0031 | Google Android Security Bulletin / upstream pKVM component |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0032> | CVE-2026-0032 | Google Android Security Bulletin / upstream pKVM component |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0037> | CVE-2026-0037 | Google Android Security Bulletin / upstream pKVM |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0038> | CVE-2026-0038 | Google Android Security Bulletin / upstream hypervisor |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0125> | CVE-2026-0125 | Google Pixel Security Bulletin / kernel component |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-0137> | CVE-2026-0137 | Google Pixel Security Bulletin / EdgeTPU kernel driver |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-23111> | CVE-2026-23111 | Exodus Intelligence / Linux kernel CNA |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-46243> | CVE-2026-46243 | Red Hat / Ubuntu CIFS |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-50292> | CVE-2026-50292 | libinput / Openwall / Red Hat |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-53264> | CVE-2026-53264 | STAR Labs / Linux kernel CNA |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-53613> | CVE-2026-53613 | util-linux upstream advisory |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-53614> | CVE-2026-53614 | util-linux upstream advisory |
-| <https://nvd.nist.gov/vuln/detail/CVE-2026-7867> | CVE-2026-7867 | udisks2 upstream / Red Hat / Debian |
 | <https://nvd.nist.gov/vuln/detail/CVE-2026-79619> | CVE-2026-79619 | OpenZFS / Ubuntu advisory |
 | <https://nvidia.custhelp.com/app/answers/detail/a_id/5630> | CVE-2025-23244 | NVIDIA Linux GPU Display Driver |
 | <https://nvidia.custhelp.com/app/answers/detail/a_id/5703> | CVE-2025-23282 | NVIDIA Linux GPU Display Driver |
@@ -341,18 +295,12 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://source.android.com/docs/security/bulletin/2025-02-01> | CVE-2024-53104 | Google Android Security Bulletin / UVC |
 | <https://source.android.com/docs/security/bulletin/2025-09-01> | CVE-2025-38352 | Google Android Security Bulletin / Linux kernel |
 | <https://source.android.com/docs/security/bulletin/2025-12-01> | CVE-2025-48623, CVE-2025-48624 | Google Android Security Bulletin / pKVM, Google Android Security Bulletin / arm-smmu-v3 |
-| <https://source.android.com/docs/security/bulletin/2026/2026-03-01> | CVE-2024-43859, CVE-2025-38618, CVE-2025-39682, CVE-2025-39946, CVE-2025-40266, CVE-2026-0027, CVE-2026-0028, CVE-2026-0029, CVE-2026-0030, CVE-2026-0031, CVE-2026-0032, CVE-2026-0037, CVE-2026-0038 | Google Android Security Bulletin / upstream F2FS, Google Android Security Bulletin / upstream vsock, Google Android Security Bulletin / upstream TLS, Google Android Security Bulletin / upstream pKVM component, Google Android Security Bulletin / upstream pKVM, Google Android Security Bulletin / upstream hypervisor |
-| <https://source.android.com/docs/security/bulletin/2026/2026-06-01> | CVE-2025-40214 | Google Android Security Bulletin / upstream Linux Net |
-| <https://source.android.com/docs/security/bulletin/pixel/2026/2026-06-01> | CVE-2026-0125, CVE-2026-0137 | Google Pixel Security Bulletin / kernel component, Google Pixel Security Bulletin / EdgeTPU kernel driver |
 | <https://ssd-disclosure.com/ssd-advisory-linux-kernel-hfsplus-slab-out-of-bounds-write/> | CVE-2025-0927 | SSD research / Ubuntu advisory |
 | <https://starlabs.sg/advisories/24/24-36972/> | CVE-2024-36972 | Google kernelCTF / STAR Labs / KernelCTF |
-| <https://starlabs.sg/blog/2026/07-when-ai-makes-0-days-feel-like-n-days/> | CVE-2026-53264 | STAR Labs / Linux kernel CNA |
 | <https://support.broadcom.com/web/ecx/support-content-notification/-/external/content/SecurityAdvisories/0/36149> | CVE-2025-41244 | VMware / Openwall advisory |
 | <https://swarm.ptsecurity.com/kernel-hack-drill-and-a-new-approach-to-exploiting-cve-2024-50264-in-the-linux-kernel/> | CVE-2024-50264 | PT SWARM / Ubuntu |
-| <https://thehackernews.com/2026/07/researcher-says-ai-helped-develop-linux.html> | CVE-2026-53264 | STAR Labs / Linux kernel CNA |
 | <https://theori.io/blog/linux-kernel-exploit-cve-2022-32250-with-mqueue> | CVE-2022-32250 | Theori / NVD |
 | <https://threatprotect.qualys.com/2017/09/26/linux-piestack-corruption-cve-20171000253/> | CVE-2017-1000253 | Qualys |
-| <https://tracker.debian.org/news/1783246/accepted-udisks2-2101-121deb13u2-source-into-stable-security/> | CVE-2026-7867 | udisks2 upstream / Red Hat / Debian |
 | <https://ubuntu.com/blog/copy-fail-vulnerability-fixes-available> | CVE-2026-31431 | CERT/CC / Ubuntu / CISA |
 | <https://ubuntu.com/blog/pedit-cow-linux-vulnerability-fixes-available> | CVE-2026-46331 | Canonical pedit COW |
 | <https://ubuntu.com/security/CVE-2017-11176> | CVE-2017-11176 | Lexfo research |
@@ -378,9 +326,6 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://ubuntu.com/security/CVE-2026-15226> | CVE-2026-15226 | Ubuntu snap advisory |
 | <https://ubuntu.com/security/CVE-2026-23268> | CVE-2026-23268 | Qualys CrackArmor / Ubuntu |
 | <https://ubuntu.com/security/CVE-2026-3888> | CVE-2026-3888 | Qualys / Ubuntu snap advisory |
-| <https://ubuntu.com/security/CVE-2026-46243> | CVE-2026-46243 | Red Hat / Ubuntu CIFS |
-| <https://ubuntu.com/security/CVE-2026-53613> | CVE-2026-53613 | util-linux upstream advisory |
-| <https://ubuntu.com/security/CVE-2026-53614> | CVE-2026-53614 | util-linux upstream advisory |
 | <https://ubuntu.com/security/CVE-2026-79619> | CVE-2026-79619 | OpenZFS / Ubuntu advisory |
 | <https://ubuntu.com/security/CVE-2026-8933> | CVE-2026-8933 | Ubuntu snap advisory |
 | <https://ubuntu.com/security/notices/USN-5505-1> | CVE-2022-0330 | Intel i915 / Ubuntu |
@@ -416,7 +361,6 @@ This inventory includes every primary and additional evidence URL in the generat
 | <https://www.openwall.com/lists/oss-security/2025/09/29/10> | CVE-2025-41244 | VMware / Openwall advisory |
 | <https://www.openwall.com/lists/oss-security/2025/12/16/2> | CVE-2025-14282 | Dropbear / Openwall advisory |
 | <https://www.openwall.com/lists/oss-security/2026/03/26/5> | CVE-2026-23268 | Qualys CrackArmor / Ubuntu |
-| <https://www.openwall.com/lists/oss-security/2026/06/04/5> | CVE-2026-50292 | libinput / Openwall / Red Hat |
 | <https://www.openwall.com/lists/oss-security/2026/07/08/12> | CVE-2026-43499 | NebuSec / GhostLock research |
 | <https://www.openwall.com/lists/oss-security/2026/07/08/13> | CVE-2026-46242 | Openwall / Google kernelCTF |
 | <https://www.openwall.com/lists/oss-security/2026/08/16/5> | CVE-2026-79619 | OpenZFS / Ubuntu advisory |
@@ -429,7 +373,7 @@ This inventory includes every primary and additional evidence URL in the generat
 
 ## Generated record coverage
 
-The generated dataset contains **203 unique CVEs**: 198 LPE, 5 RCE, and 139 high-certainty records. A separate artifact contains **1 non-CVE finding(s)**.
+The generated dataset contains **180 unique CVEs**: 175 LPE, 5 RCE, and 134 high-certainty records. A separate artifact contains **1 non-CVE finding(s)**.
 
 Each JSON record has a primary `source_url`. When a CVE was independently supported by more than one source, the other URLs are retained under `additional_source_urls`. Records may include an optional `caveat` field for prerequisites, scope limits, conditional chains, disputed CVE scope, or evidence limitations.
 

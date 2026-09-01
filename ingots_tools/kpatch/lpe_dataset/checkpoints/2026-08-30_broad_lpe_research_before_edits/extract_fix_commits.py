@@ -58,27 +58,6 @@ LINUX_CVE_ALIAS_ANNOUNCEMENTS = {
     ],
 }
 
-# Ubuntu's tracker exposes the two util-linux fixes before NVD publishes the
-# corresponding CVE records.  Keep this deliberately small and source-bound:
-# the adapter below verifies that each expected full GitHub commit URL is
-# present in the named Ubuntu CVE page before emitting it.
-SOURCE_BACKED_CVE_ADVISORIES = {
-    "CVE-2026-53613": {
-        "url": "https://ubuntu.com/security/CVE-2026-53613",
-        "commit_urls": (
-            "https://github.com/util-linux/util-linux/commit/0d3d55975aa3492c62fd345eac38f41cd166c0b0",
-            "https://github.com/util-linux/util-linux/commit/0b010025a0e429bc80355c94db86a843395d49e2",
-        ),
-    },
-    "CVE-2026-53614": {
-        "url": "https://ubuntu.com/security/CVE-2026-53614",
-        "commit_urls": (
-            "https://github.com/util-linux/util-linux/commit/31e37c1c7dcf25b76ccf41391fe934a75644c661",
-            "https://github.com/util-linux/util-linux/commit/cc81bbcec598cb91f0eb8456282f33eed820ed5f",
-        ),
-    },
-}
-
 
 @dataclass(frozen=True)
 class CommitLink:
@@ -581,38 +560,6 @@ def discover_advisory_links(
     return deduplicate_links(links)
 
 
-def discover_source_backed_cve_links(
-    cve_id: str,
-    *,
-    source_cache_dir: Path,
-    refresh: bool,
-) -> list[CommitLink]:
-    """Read explicitly mapped fixing commits from an authoritative CVE page."""
-
-    entry = SOURCE_BACKED_CVE_ADVISORIES.get(cve_id)
-    if entry is None:
-        return []
-    source_url = entry["url"]
-    raw = fetch_cached(source_url, cache_dir=source_cache_dir, refresh=refresh)
-    page = html.unescape(raw.decode("utf-8", errors="replace"))
-    if cve_id not in page or "Patch details" not in page:
-        raise FetchError(f"source-backed CVE page does not identify {cve_id}: {source_url}")
-
-    links: list[CommitLink] = []
-    for commit_url in entry["commit_urls"]:
-        if commit_url not in page:
-            raise FetchError(f"expected fixing commit is absent from {source_url}: {commit_url}")
-        link = parse_commit_url(
-            commit_url,
-            provider="source-backed-cve-advisory",
-            discovery_url=source_url,
-            reference_tags=("Patch", "Vendor Advisory"),
-        )
-        if link:
-            links.append(link)
-    return deduplicate_links(links)
-
-
 def fetch_patch(
     link: CommitLink,
     *,
@@ -747,7 +694,6 @@ def build_dataset(args: argparse.Namespace) -> dict[str, Any]:
     for index, finding in enumerate(cve_records, start=1):
         cve_id = finding["cve"]
         print(f"[{index}/{len(cve_records)}] querying {cve_id}", file=sys.stderr)
-        source_only = False
         try:
             nvd_cve = nvd_record_for_cve(
                 cve_id,
@@ -757,36 +703,12 @@ def build_dataset(args: argparse.Namespace) -> dict[str, Any]:
                 refresh=args.refresh,
             )
         except FetchError as exc:
-            try:
-                links = discover_source_backed_cve_links(
-                    cve_id,
-                    source_cache_dir=source_cache_dir,
-                    refresh=args.refresh,
-                )
-            except FetchError as source_exc:
-                errors.append({"identifier": cve_id, "stage": "nvd", "error": str(exc)})
-                errors.append(
-                    {
-                        "identifier": cve_id,
-                        "stage": "source-backed-cve-advisory",
-                        "error": str(source_exc),
-                    }
-                )
-                continue
-            if not links:
-                errors.append({"identifier": cve_id, "stage": "nvd", "error": str(exc)})
-                continue
-            # Some newly assigned CVEs have an authoritative vendor/CNA page
-            # and fixes but no NVD record yet.  Preserve those associations
-            # without fabricating NVD metadata.
-            references = []
-            reference_urls = []
-            source_only = True
-        else:
-            references = nvd_cve.get("references", [])
-            reference_urls = [reference["url"] for reference in references if reference.get("url")]
-            links = links_from_nvd_references(references)
+            errors.append({"identifier": cve_id, "stage": "nvd", "error": str(exc)})
+            continue
 
+        references = nvd_cve.get("references", [])
+        reference_urls = [reference["url"] for reference in references if reference.get("url")]
+        links = links_from_nvd_references(references)
         providers = [
             (
                 "android-security-bulletin",
@@ -822,14 +744,6 @@ def build_dataset(args: argparse.Namespace) -> dict[str, Any]:
                     refresh=args.refresh,
                 ),
             ),
-            (
-                "source-backed-cve-advisory",
-                lambda: discover_source_backed_cve_links(
-                    cve_id,
-                    source_cache_dir=source_cache_dir,
-                    refresh=args.refresh,
-                ),
-            ),
         ]
         for provider_name, discover in providers:
             try:
@@ -849,7 +763,7 @@ def build_dataset(args: argparse.Namespace) -> dict[str, Any]:
                 source_kind="cve",
                 source_cache_dir=source_cache_dir,
                 refresh=args.refresh,
-                nvd_reference_urls=None if source_only else reference_urls,
+                nvd_reference_urls=reference_urls,
             )
             output_records.append(record)
             if error:
