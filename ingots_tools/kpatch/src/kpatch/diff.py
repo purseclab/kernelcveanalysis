@@ -5,6 +5,240 @@ import re
 from typing import Self
 
 
+_HUNK_HEADER_RE = re.compile(
+    r"^@@ -(\d+(?:,\d+)?) \+(\d+(?:,\d+)?) @@(.*)$"
+)
+
+
+def _line_ending(line: str) -> tuple[str, str]:
+    if line.endswith("\r\n"):
+        return line[:-2], "\r\n"
+    if line.endswith("\n"):
+        return line[:-1], "\n"
+    return line, ""
+
+
+def _split_git_path_pair(value: str) -> tuple[str, str]:
+    """Split the two optionally C-quoted paths in a ``diff --git`` line."""
+
+    if not value:
+        raise ValueError("invalid diff --git header: missing paths")
+
+    if value.startswith('"'):
+        escaped = False
+        for index, character in enumerate(value[1:], start=1):
+            if character == '"' and not escaped:
+                remainder = value[index + 1 :]
+                if not remainder.startswith(" "):
+                    break
+                return value[: index + 1], remainder.lstrip()
+            if character == "\\":
+                escaped = not escaped
+            else:
+                escaped = False
+        raise ValueError("invalid diff --git header: unterminated quoted path")
+
+    first, separator, second = value.partition(" ")
+    if not separator or not second:
+        raise ValueError("invalid diff --git header: missing second path")
+    return first, second.lstrip()
+
+
+def _with_git_side_prefix(value: str, prefix: str) -> str:
+    """Canonicalize an ``a/`` or ``b/`` path for one side of a Git diff."""
+
+    offset = 1 if value.startswith('"') else 0
+    if value[offset : offset + 2] in ("a/", "b/"):
+        return f"{value[:offset]}{prefix}{value[offset + 2:]}"
+    return value
+
+
+def _invert_binary_payload(lines: list[str]) -> list[str]:
+    section_starts = [
+        index
+        for index, line in enumerate(lines)
+        if _line_ending(line)[0].startswith(("literal ", "delta "))
+    ]
+    if len(section_starts) != 2:
+        raise ValueError(
+            "GIT binary patch must contain forward and reverse payloads"
+        )
+
+    first, second = section_starts
+    return lines[:first] + lines[second:] + lines[first:second]
+
+
+def _invert_hunk_lines(lines: list[str]) -> list[str]:
+    inverted: list[str] = []
+    changes: list[tuple[str, list[str]]] = []
+
+    def flush_changes() -> None:
+        for original_prefix, inverse_prefix in (("+", "-"), ("-", "+")):
+            for prefix, unit in changes:
+                if prefix != original_prefix:
+                    continue
+                body, ending = _line_ending(unit[0])
+                inverted.append(f"{inverse_prefix}{body[1:]}{ending}")
+                inverted.extend(unit[1:])
+        changes.clear()
+
+    index = 0
+    while index < len(lines):
+        body = _line_ending(lines[index])[0]
+        if body.startswith(("+", "-")):
+            unit = [lines[index]]
+            index += 1
+            if index < len(lines) and _line_ending(lines[index])[0].startswith("\\"):
+                unit.append(lines[index])
+                index += 1
+            changes.append((body[0], unit))
+            continue
+
+        flush_changes()
+        inverted.append(lines[index])
+        index += 1
+
+    flush_changes()
+    return inverted
+
+
+def _hunk_end(
+    lines: list[str], start: int, old_count: int, new_count: int
+) -> int:
+    index = start
+    while index < len(lines) and (old_count or new_count):
+        body = _line_ending(lines[index])[0]
+        if body.startswith("\\"):
+            index += 1
+            continue
+        if body.startswith("+"):
+            new_count -= 1
+        elif body.startswith("-"):
+            old_count -= 1
+        else:
+            old_count -= 1
+            new_count -= 1
+        index += 1
+
+    while index < len(lines) and _line_ending(lines[index])[0].startswith("\\"):
+        index += 1
+    return index
+
+
+def invert_diff(patch_text: str) -> str:
+    """Return a patch that reverses the supplied Git or unified diff.
+
+    Text hunks, paths, modes, rename metadata, object IDs, and Git binary
+    payloads are reversed. Copy diffs cannot be represented as a standalone
+    inverse without the copied file's complete post-image, so they are
+    rejected instead of producing a patch that only partially undoes them.
+    """
+
+    lines = patch_text.splitlines(keepends=True)
+    if any(
+        _line_ending(line)[0].startswith(("copy from ", "copy to "))
+        for line in lines
+    ):
+        raise ValueError(
+            "copy diffs cannot be inverted without the copied file contents"
+        )
+
+    inverted: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        body, ending = _line_ending(line)
+
+        if body == "GIT binary patch":
+            block_end = index + 1
+            while block_end < len(lines):
+                candidate = _line_ending(lines[block_end])[0]
+                if candidate.startswith("diff --git "):
+                    break
+                block_end += 1
+            inverted.append(line)
+            inverted.extend(_invert_binary_payload(lines[index + 1 : block_end]))
+            index = block_end
+            continue
+
+        if body.startswith("diff --git "):
+            old_path, new_path = _split_git_path_pair(body[len("diff --git ") :])
+            inverse_old = _with_git_side_prefix(new_path, "a/")
+            inverse_new = _with_git_side_prefix(old_path, "b/")
+            inverted.append(f"diff --git {inverse_old} {inverse_new}{ending}")
+            index += 1
+            continue
+
+        if match := re.match(
+            r"^index ([0-9a-fA-F]+)\.\.([0-9a-fA-F]+)(.*)$", body
+        ):
+            old_object, new_object, suffix = match.groups()
+            inverted.append(f"index {new_object}..{old_object}{suffix}{ending}")
+            index += 1
+            continue
+
+        if body.startswith("new file mode "):
+            inverted.append(f"deleted file mode {body[14:]}{ending}")
+            index += 1
+            continue
+        if body.startswith("deleted file mode "):
+            inverted.append(f"new file mode {body[18:]}{ending}")
+            index += 1
+            continue
+
+        if body.startswith("old mode ") and index + 1 < len(lines):
+            next_body, next_ending = _line_ending(lines[index + 1])
+            if next_body.startswith("new mode "):
+                inverted.append(f"old mode {next_body[9:]}{ending}")
+                inverted.append(f"new mode {body[9:]}{next_ending}")
+                index += 2
+                continue
+
+        if body.startswith("rename from ") and index + 1 < len(lines):
+            next_body, next_ending = _line_ending(lines[index + 1])
+            if next_body.startswith("rename to "):
+                inverted.append(f"rename from {next_body[10:]}{ending}")
+                inverted.append(f"rename to {body[12:]}{next_ending}")
+                index += 2
+                continue
+
+        if body.startswith("--- ") and index + 1 < len(lines):
+            next_body, next_ending = _line_ending(lines[index + 1])
+            if next_body.startswith("+++ "):
+                inverse_old = _with_git_side_prefix(next_body[4:], "a/")
+                inverse_new = _with_git_side_prefix(body[4:], "b/")
+                inverted.append(f"--- {inverse_old}{ending}")
+                inverted.append(f"+++ {inverse_new}{next_ending}")
+                index += 2
+                continue
+
+        if match := _HUNK_HEADER_RE.match(body):
+            old_range, new_range, section = match.groups()
+            inverted.append(f"@@ -{new_range} +{old_range} @@{section}{ending}")
+            old_count = int(old_range.split(",", 1)[1]) if "," in old_range else 1
+            new_count = int(new_range.split(",", 1)[1]) if "," in new_range else 1
+            hunk_end = _hunk_end(lines, index + 1, old_count, new_count)
+            inverted.extend(_invert_hunk_lines(lines[index + 1 : hunk_end]))
+            index = hunk_end
+            continue
+
+        if match := re.match(r"^Binary files (.+) and (.+) differ$", body):
+            old_path, new_path = match.groups()
+            inverse_old = _with_git_side_prefix(new_path, "a/")
+            inverse_new = _with_git_side_prefix(old_path, "b/")
+            inverted.append(
+                f"Binary files {inverse_old} and {inverse_new} differ{ending}"
+            )
+            index += 1
+            continue
+
+        inverted.append(line)
+        index += 1
+
+    return "".join(inverted)
+
+
 class DiffFileType(StrEnum):
     """The structural change represented by a file diff."""
 
@@ -251,6 +485,11 @@ class Diff:
             )
 
         return cls(text=patch_text, files=parsed_files)
+
+    def inverse(self) -> Self:
+        """Return a parsed diff that undoes this diff."""
+
+        return type(self).parse(invert_diff(self.text))
 
     def diff_similarity(self, other: Self) -> float:
         """Compare corresponding files after combining all of their hunks."""

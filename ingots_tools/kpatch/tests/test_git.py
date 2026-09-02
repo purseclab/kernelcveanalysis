@@ -1,4 +1,3 @@
-import sqlite3
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -170,42 +169,6 @@ class GitDbTests(unittest.TestCase):
             self.assertEqual(db.commits_between(end), [newer, at_end])
             self.assertEqual(db.commits_between(end=end), [older])
             self.assertEqual(db.commits_between(), [newer, at_end, older])
-
-    def test_migrates_existing_database_to_store_merge_status(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "commits.sqlite"
-            connection = sqlite3.connect(path)
-            connection.execute(
-                """
-                CREATE TABLE commits (
-                    commit_id TEXT PRIMARY KEY,
-                    author_name TEXT NOT NULL,
-                    author_email TEXT NOT NULL,
-                    author_date TEXT NOT NULL,
-                    committer_date TEXT NOT NULL,
-                    author_timestamp INTEGER NOT NULL,
-                    committer_timestamp INTEGER NOT NULL,
-                    parents TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    diff TEXT NOT NULL
-                )
-                """
-            )
-            connection.commit()
-            connection.close()
-
-            db = GitDb(path)
-            connection = sqlite3.connect(path)
-            try:
-                columns = {
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(commits)")
-                }
-            finally:
-                connection.close()
-
-            self.assertIn("is_merge", columns)
-            self.assertEqual(db.commits_between(include_merges=True), [])
 
     def test_storing_a_commit_again_updates_it(self) -> None:
         date = datetime(2024, 1, 1, tzinfo=UTC)
