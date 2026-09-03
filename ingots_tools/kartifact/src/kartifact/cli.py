@@ -7,6 +7,7 @@ from typing import Annotated, Any, Callable, TypeVar
 
 import typer
 
+from .artifacts.kernel import import_kernel_artifact
 from .errors import KartifactError, SourceUpdateError
 from .models import ArtifactInfo
 from .registry import default_registry
@@ -98,6 +99,34 @@ def write_artifact(
 
     info = _run(ctx, operation)
     _emit(ctx, f"Wrote {info.artifact_type}/{info.name} ({info.id})", _info_payload(info))
+
+
+@app.command("import-kernel")
+def import_kernel(
+    ctx: typer.Context,
+    image: Annotated[Path, typer.Argument(help="Path to kernel image (bzImage, Image, etc.).")],
+    name: Annotated[str, typer.Option("--name", help="Filesystem-safe artifact name.")],
+    initrd: Annotated[
+        Path | None,
+        typer.Option("--initrd", help="Optional path to initial ramdisk file."),
+    ] = None,
+) -> None:
+    def operation() -> ArtifactInfo:
+        with _build_store() as store:
+            return import_kernel_artifact(
+                store=store,
+                image=image,
+                name=name,
+                initrd=initrd,
+            )
+
+    info = _run(ctx, operation)
+    _emit(
+        ctx,
+        f"Imported kernel {info.name} ({info.id})",
+        _info_payload(info),
+    )
+
 
 
 @app.command("list")

@@ -23,6 +23,14 @@ class UnknownArtifactTypeError(KartifactError):
         self.artifact_type = artifact_type
 
 
+class CreateNotSupportedError(KartifactError):
+    code = "create_not_supported"
+
+    def __init__(self, artifact_type: str) -> None:
+        super().__init__(f"artifact type does not support create: {artifact_type}")
+        self.artifact_type = artifact_type
+
+
 class InvalidArtifactError(KartifactError):
     code = "invalid_artifact"
 

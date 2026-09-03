@@ -23,6 +23,9 @@ def parse_artifact(
         document = ArtifactDocument.model_validate(raw)
         definition = registry.get(document.artifact.artifact_type)
         metadata = definition.metadata_model.model_validate(document.metadata)
+        metadata.set_file_overrides(document.file_overrides)
+        metadata.bind_folder(path.parent)
+        metadata._header = document.artifact
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
         raise InvalidArtifactError(f"invalid {ARTIFACT_FILE_NAME}: {exc}") from exc
     return document.artifact, metadata, definition
@@ -31,6 +34,7 @@ def parse_artifact(
 def render_artifact(
     header: ArtifactHeader,
     metadata: ArtifactMetadata[Any],
+    file_overrides: dict[str, str] | None = None,
 ) -> str:
     document: dict[str, Any] = {
         "artifact": header.model_dump(
@@ -38,8 +42,11 @@ def render_artifact(
             by_alias=True,
             exclude_none=True,
         ),
-        "metadata": metadata.model_dump(mode="json", exclude_none=True),
     }
+    overrides = file_overrides if file_overrides is not None else metadata.file_overrides
+    if overrides:
+        document["file_overrides"] = overrides
+    document["metadata"] = metadata.model_dump(mode="json", exclude_none=True)
     try:
         return tomli_w.dumps(document)
     except (TypeError, ValueError) as exc:

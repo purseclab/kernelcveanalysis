@@ -12,10 +12,7 @@ class TargetType(StrEnum):
     Any = "any"
 
 
-class Architecture(StrEnum):
-    X86 = "x86"
-    AMD64 = "amd64"
-    AARCH64 = "aarch64"
+from kexploit_utils import Architecture
 
 
 class Metadata(BaseModel):

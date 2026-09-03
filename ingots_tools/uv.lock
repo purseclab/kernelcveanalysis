@@ -2149,11 +2149,15 @@ name = "primitives"
 version = "0.1.0"
 source = { editable = "primitives" }
 dependencies = [
+    { name = "kexploit-utils" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.12.5" }]
+requires-dist = [
+    { name = "kexploit-utils", editable = "kexploit_utils" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+]
 
 [[package]]
 name = "propcache"

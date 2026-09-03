@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import shutil
 import tempfile
-from typing import Any, cast
+from typing import Any, TypeVar, cast, overload
 from uuid import UUID, uuid4
 
 from kexploit_utils import artifact_folder  # type: ignore[attr-defined]
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .errors import (
     ArtifactConflictError,
     ArtifactNotFoundError,
+    CreateNotSupportedError,
     InvalidArtifactError,
     SourceUpdateError,
     UnsafeArtifactEntryError,
@@ -31,6 +32,9 @@ from .filesystem import (
 from .models import ArtifactHeader, ArtifactInfo, ArtifactMetadata, ArtifactRecord
 from .registry import ArtifactDefinition, ArtifactRegistry
 from .toml_io import ARTIFACT_FILE_NAME, parse_artifact, render_artifact
+
+ExpectedT = TypeVar("ExpectedT", bound=ArtifactMetadata[Any])
+
 
 
 class ArtifactStore:
@@ -79,6 +83,8 @@ class ArtifactStore:
         name: str,
     ) -> Path:
         definition = self.registry.get(artifact_type)
+        if not definition.supports_create:
+            raise CreateNotSupportedError(artifact_type)
         try:
             header = ArtifactHeader(type=artifact_type, name=name)
             metadata = definition.metadata_model.default()
@@ -108,6 +114,14 @@ class ArtifactStore:
             raise
 
     def write_artifact(self, folder: Path) -> ArtifactInfo:
+        return self._write_artifact_folder(folder, allow_unsupported_create=False)
+
+    def commit_imported_artifact(self, folder: Path) -> ArtifactInfo:
+        return self._write_artifact_folder(folder, allow_unsupported_create=True)
+
+    def _write_artifact_folder(
+        self, folder: Path, *, allow_unsupported_create: bool = False
+    ) -> ArtifactInfo:
         source = Path(folder)
         ensure_outside_storage(source, self.root)
         validate_tree(source)
@@ -116,11 +130,16 @@ class ArtifactStore:
             raise InvalidArtifactError(f"missing {ARTIFACT_FILE_NAME}: {artifact_toml}")
 
         header, metadata, definition = parse_artifact(artifact_toml, self.registry)
+        if not definition.supports_create and not allow_unsupported_create:
+            raise CreateNotSupportedError(definition.type_name)
+        metadata.verify_folder(source)
+        metadata.validate_store(self)
         new_id = uuid4()
         final_blob = self._blob_path(new_id, header.name)
         staging = Path(
             tempfile.mkdtemp(prefix=f".staging-{new_id.hex}-", dir=self.blob_folder)
         )
+
         final_created = False
         committed = False
         try:
@@ -141,12 +160,14 @@ class ArtifactStore:
                 record.parent_id = old.id if old is not None else None
                 record.created_at = datetime.now(UTC)
                 record.shadowed = False
+                record.file_overrides = metadata.file_overrides
                 if old is not None and old.name == header.name:
                     old.shadowed = True
                 session.add(record)
                 session.flush()
 
                 canonical_metadata = definition.metadata_model.from_record(record)
+                canonical_metadata.set_file_overrides(record.file_overrides)
                 if not isinstance(canonical_metadata, definition.metadata_model):
                     raise InvalidArtifactError(
                         "metadata from_record() returned the wrong model type"
@@ -157,7 +178,11 @@ class ArtifactStore:
                     id=record.id,
                     parent_id=record.parent_id,
                 )
-                rendered = render_artifact(canonical_header, canonical_metadata)
+                rendered = render_artifact(
+                    canonical_header,
+                    canonical_metadata,
+                    file_overrides=record.file_overrides,
+                )
                 (staging / ARTIFACT_FILE_NAME).write_text(rendered, encoding="utf-8")
                 staging.rename(final_blob)
                 final_created = True
@@ -217,7 +242,9 @@ class ArtifactStore:
                 id=record.id,
                 parent_id=record.parent_id,
             )
-            rendered = render_artifact(header, canonical_metadata)
+            rendered = render_artifact(
+                header, canonical_metadata, file_overrides=record.file_overrides
+            )
             info = self._info_from_record(record)
 
         blob = self._blob_path(record.id, record.name)
@@ -232,6 +259,114 @@ class ArtifactStore:
             cleanup_destination(destination, created)
             raise
         return info
+
+    @overload
+    def get_artifact(
+        self, artifact_id: UUID | str, expected_type: type[ExpectedT]
+    ) -> ExpectedT: ...
+
+    @overload
+    def get_artifact(
+        self, artifact_id: UUID | str, expected_type: None = None
+    ) -> ArtifactMetadata[Any]: ...
+
+    def get_artifact(
+        self, artifact_id: UUID | str, expected_type: type[ExpectedT] | None = None
+    ) -> ArtifactMetadata[Any]:
+        parsed_id = self._parse_uuid(artifact_id)
+        with self._sessions() as session:
+            record = session.get(ArtifactRecord, parsed_id)
+            if record is None:
+                raise ArtifactNotFoundError(parsed_id)
+            definition = self.registry.get(record.artifact_type)
+            metadata = definition.metadata_model.from_record(record)
+            metadata.set_file_overrides(record.file_overrides or {})
+            blob = self._blob_path(record.id, record.name)
+            if not blob.is_dir():
+                raise InvalidArtifactError(f"artifact blob is missing: {blob}")
+            metadata.bind_folder(blob)
+            metadata._header = ArtifactHeader(
+                type=record.artifact_type,
+                name=record.name,
+                id=record.id,
+                parent_id=record.parent_id,
+            )
+            if expected_type is not None and not isinstance(metadata, expected_type):
+                raise InvalidArtifactError(
+                    f"artifact {artifact_id} is of type '{record.artifact_type}', "
+                    f"expected '{expected_type.__name__}'"
+                )
+            return metadata
+
+    def has_artifact_name(
+        self, artifact_type: str, name: str, *, include_shadowed: bool = False
+    ) -> bool:
+        definition = self.registry.get(artifact_type)
+        with self._sessions() as session:
+            query = select(definition.record_model.id).where(
+                definition.record_model.name == name
+            )
+            if not include_shadowed:
+                query = query.where(definition.record_model.shadowed.is_(False))
+            return session.scalar(query) is not None
+
+    def ensure_artifact_exists(
+        self, artifact_type: str, name: str, *, include_shadowed: bool = False
+    ) -> None:
+        if not self.has_artifact_name(
+            artifact_type, name, include_shadowed=include_shadowed
+        ):
+            raise InvalidArtifactError(
+                f"referenced '{artifact_type}' artifact does not exist: '{name}'"
+            )
+
+    @overload
+    def get_artifact_by_name(
+        self,
+        artifact_type: str,
+        name: str,
+        expected_type: type[ExpectedT],
+        *,
+        include_shadowed: bool = False,
+    ) -> ExpectedT: ...
+
+    @overload
+    def get_artifact_by_name(
+        self,
+        artifact_type: str,
+        name: str,
+        expected_type: None = None,
+        *,
+        include_shadowed: bool = False,
+    ) -> ArtifactMetadata[Any]: ...
+
+    def get_artifact_by_name(
+        self,
+        artifact_type: str,
+        name: str,
+        expected_type: type[ExpectedT] | None = None,
+        *,
+        include_shadowed: bool = False,
+    ) -> ArtifactMetadata[Any]:
+        definition = self.registry.get(artifact_type)
+        with self._sessions() as session:
+            query = select(definition.record_model).where(
+                definition.record_model.name == name
+            )
+            if not include_shadowed:
+                query = query.where(definition.record_model.shadowed.is_(False))
+            query = query.order_by(
+                definition.record_model.created_at.desc(),
+                definition.record_model.id.desc(),
+            )
+            record = session.scalars(query).first()
+            if record is None:
+                raise ArtifactNotFoundError(
+                    f"no visible '{artifact_type}' artifact with name '{name}'"
+                )
+            return self.get_artifact(record.id, expected_type=expected_type)
+
+
 
     # given a new header to write, and an artifact type definition, validates write is allowed
     # returns old parent being overwritten if it exists, or None if no parent

@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 import tomllib
-from typing import ClassVar, Iterator, Self
+from typing import Any, ClassVar, Iterator, Self, cast
 from uuid import UUID
 from uuid import uuid4
 
@@ -22,6 +22,7 @@ from kartifact import (
     ArtifactRecord,
     ArtifactRegistry,
     ArtifactStore,
+    CreateNotSupportedError,
     DestinationNotEmptyError,
     InvalidArtifactError,
     RegistryError,
@@ -68,11 +69,45 @@ NOTE_DEFINITION = ArtifactDefinition(
 )
 
 
+class ReadOnlyRecord(ArtifactRecord):
+    __tablename__ = "readonly_artifacts"
+
+    id: Mapped[UUID] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    title: Mapped[str] = mapped_column(String(200), default="readonly")
+
+    __mapper_args__ = {"polymorphic_identity": "readonly"}
+
+
+class ReadOnlyMetadata(ArtifactMetadata[ReadOnlyRecord]):
+    title: str = "readonly"
+
+    @classmethod
+    def default(cls) -> Self:
+        return cls()
+
+    def build_updated_record(self, old: ReadOnlyRecord | None) -> ReadOnlyRecord:
+        del old
+        return ReadOnlyRecord(title=self.title)
+
+
+READONLY_DEFINITION = ArtifactDefinition(
+    type_name="readonly",
+    metadata_model=ReadOnlyMetadata,
+    record_model=ReadOnlyRecord,
+    supports_create=False,
+)
+
+
 @pytest.fixture
 def registry() -> ArtifactRegistry:
     value = ArtifactRegistry()
     value.register(NOTE_DEFINITION)
+    value.register(READONLY_DEFINITION)
     return value
+
 
 
 @pytest.fixture
@@ -336,3 +371,91 @@ def test_cli_human_and_json_workflows(
         ["--json", "pull", written_payload["id"], str(tmp_path / "pulled")],
     )
     assert pulled.exit_code == 0, pulled.output
+
+
+def test_supports_create_flag_and_validation(registry: ArtifactRegistry) -> None:
+    assert NOTE_DEFINITION.supports_create is True
+    assert READONLY_DEFINITION.supports_create is False
+
+    invalid_def = ArtifactDefinition(
+        type_name="invalid",
+        metadata_model=NoteMetadata,
+        record_model=NoteRecord,
+        supports_create=cast(Any, "not-a-bool"),
+    )
+    with pytest.raises(RegistryError, match="supports_create must be a boolean"):
+        registry.register(invalid_def)
+
+
+def test_create_and_write_not_supported_in_store(
+    tmp_path: Path, store: ArtifactStore
+) -> None:
+    destination = tmp_path / "readonly_dest"
+    with pytest.raises(CreateNotSupportedError) as exc_info:
+        store.create_template("readonly", destination, name="read-only-item")
+    assert exc_info.value.artifact_type == "readonly"
+    assert "artifact type does not support create: readonly" in str(exc_info.value)
+    assert not destination.exists()
+
+    working = tmp_path / "readonly_working"
+    working.mkdir()
+    artifact_toml_content = tomli_w.dumps({
+        "artifact": {"type": "readonly", "name": "sample"},
+        "metadata": {"title": "sample"},
+    })
+    (working / "artifact.toml").write_text(artifact_toml_content, encoding="utf-8")
+
+    with pytest.raises(CreateNotSupportedError) as exc_info:
+        store.write_artifact(working)
+    assert exc_info.value.artifact_type == "readonly"
+    assert "artifact type does not support create: readonly" in str(exc_info.value)
+
+
+def test_cli_rejects_create_and_write_when_not_supported(
+    tmp_path: Path,
+    registry: ArtifactRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "database"
+    monkeypatch.setattr(cli, "_build_store", lambda: ArtifactStore(registry, root))
+    runner = CliRunner()
+    working = tmp_path / "working_readonly"
+
+    # Test CLI create (human output)
+    result_create_human = runner.invoke(
+        cli.app,
+        ["create", "readonly", str(working), "--name", "my-readonly"],
+    )
+    assert result_create_human.exit_code == 1
+    assert "Error: artifact type does not support create: readonly" in result_create_human.output
+
+    # Test CLI create (json output)
+    result_create_json = runner.invoke(
+        cli.app,
+        ["--json", "create", "readonly", str(working), "--name", "my-readonly"],
+    )
+    assert result_create_json.exit_code == 1
+    payload = json.loads(result_create_json.output)
+    assert payload["error"] == "create_not_supported"
+    assert "artifact type does not support create: readonly" in payload["message"]
+
+    # Prepare a directory with artifact.toml of type "readonly"
+    working.mkdir()
+    artifact_toml_content = tomli_w.dumps({
+        "artifact": {"type": "readonly", "name": "my-readonly"},
+        "metadata": {"title": "my-readonly"},
+    })
+    (working / "artifact.toml").write_text(artifact_toml_content, encoding="utf-8")
+
+    # Test CLI write (human output)
+    result_write_human = runner.invoke(cli.app, ["write", str(working)])
+    assert result_write_human.exit_code == 1
+    assert "Error: artifact type does not support create: readonly" in result_write_human.output
+
+    # Test CLI write (json output)
+    result_write_json = runner.invoke(cli.app, ["--json", "write", str(working)])
+    assert result_write_json.exit_code == 1
+    payload = json.loads(result_write_json.output)
+    assert payload["error"] == "create_not_supported"
+    assert "artifact type does not support create: readonly" in payload["message"]
+

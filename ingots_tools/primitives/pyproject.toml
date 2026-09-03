@@ -5,8 +5,12 @@ description = "A collection of exploit primitives for Linux kernel research."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "kexploit_utils",
     "pydantic>=2.12.5",
 ]
 
 [tool.uv]
 package = true
+
+[tool.uv.sources]
+kexploit_utils = { workspace = true }

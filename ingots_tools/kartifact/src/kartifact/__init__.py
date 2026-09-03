@@ -1,6 +1,7 @@
 from .errors import (
     ArtifactConflictError,
     ArtifactNotFoundError,
+    CreateNotSupportedError,
     DestinationNotEmptyError,
     InvalidArtifactError,
     KartifactError,
@@ -22,6 +23,7 @@ __all__ = [
     "ArtifactRecord",
     "ArtifactRegistry",
     "ArtifactStore",
+    "CreateNotSupportedError",
     "DestinationNotEmptyError",
     "InvalidArtifactError",
     "KartifactError",
@@ -31,3 +33,4 @@ __all__ = [
     "UnsafeArtifactEntryError",
     "default_registry",
 ]
+

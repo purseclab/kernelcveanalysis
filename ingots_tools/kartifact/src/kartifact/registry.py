@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Generic, Iterator, TypeVar
 
 from sqlalchemy import inspect
@@ -22,6 +23,19 @@ class ArtifactDefinition(Generic[MetadataT, RecordT]):
     type_name: str
     metadata_model: type[MetadataT]
     record_model: type[RecordT]
+    supports_create: bool = True
+
+    @property
+    def mandatory_files(self) -> tuple[str, ...]:
+        return self.metadata_model.get_mandatory_files()
+
+    @property
+    def optional_files(self) -> tuple[str, ...]:
+        return self.metadata_model.get_optional_files()
+
+    def verify_folder(self, folder: Path) -> None:
+        self.metadata_model.verify_directory(folder)
+
 
 
 class ArtifactRegistry:
@@ -39,6 +53,8 @@ class ArtifactRegistry:
             raise RegistryError(
                 f"artifact type is already registered: {definition.type_name}"
             )
+        if not isinstance(definition.supports_create, bool):
+            raise RegistryError("supports_create must be a boolean")
         if not issubclass(definition.metadata_model, ArtifactMetadata):
             raise RegistryError("metadata_model must inherit ArtifactMetadata")
         if (
@@ -71,3 +87,23 @@ class ArtifactRegistry:
 
 
 default_registry = ArtifactRegistry()
+
+
+def _init_default_registry() -> None:
+    from .artifacts.android_app import ANDROID_APP_DEFINITION
+    from .artifacts.android_system import ANDROID_SYSTEM_DEFINITION
+    from .artifacts.chain import CHAIN_DEFINITION
+    from .artifacts.exploit import EXPLOIT_DEFINITION
+    from .artifacts.kernel import KERNEL_DEFINITION
+    from .artifacts.vulnerability import VULNERABILITY_DEFINITION
+
+    default_registry.register(KERNEL_DEFINITION)
+    default_registry.register(ANDROID_APP_DEFINITION)
+    default_registry.register(ANDROID_SYSTEM_DEFINITION)
+    default_registry.register(VULNERABILITY_DEFINITION)
+    default_registry.register(EXPLOIT_DEFINITION)
+    default_registry.register(CHAIN_DEFINITION)
+
+
+_init_default_registry()
+
