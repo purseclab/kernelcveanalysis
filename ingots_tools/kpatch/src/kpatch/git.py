@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import json
+from itertools import groupby
 from pathlib import Path
 import sqlite3
 import subprocess
-from typing import Iterable, Iterator, Protocol, runtime_checkable, override
+from typing import Self, Iterable, Iterator, Protocol, runtime_checkable, override
 from functools import cached_property
 
 from .diff import Diff
@@ -42,11 +42,9 @@ _UPSERT_COMMIT_SQL = """
         committer_date,
         author_timestamp,
         committer_timestamp,
-        parents,
         message,
-        diff,
         is_merge
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(commit_id) DO UPDATE SET
         author_name = excluded.author_name,
         author_email = excluded.author_email,
@@ -54,30 +52,60 @@ _UPSERT_COMMIT_SQL = """
         committer_date = excluded.committer_date,
         author_timestamp = excluded.author_timestamp,
         committer_timestamp = excluded.committer_timestamp,
-        parents = excluded.parents,
         message = excluded.message,
-        diff = excluded.diff,
         is_merge = excluded.is_merge
 """
 
 
 @dataclass
+class CommitParent:
+    """A parent edge and the patch from that parent to its child commit."""
+
+    commit_id: str
+    diff_str: str
+
+    @cached_property
+    def diff(self) -> Diff:
+        return Diff.parse(self.diff_str)
+
+
+@dataclass
 class GitCommit:
-    """A commit and the patch emitted for it by ``git log --patch``."""
+    """A commit whose ordered parent edges each carry their own patch."""
 
     commit_id: str
     author_name: str
     author_email: str
     author_date: datetime
     committer_date: datetime
-    parents: tuple[str, ...]
+    parents: tuple[CommitParent, ...]
     message: str
-    diff_str: str
-    is_merge: bool = False
 
-    @cached_property
+    @property
+    def parent(self) -> CommitParent | None:
+        """Return the first parent, or ``None`` for a root commit."""
+
+        return self.parents[0] if self.parents else None
+
+    @property
+    def secondary_parents(self) -> list[CommitParent]:
+        return list(self.parents[1:])
+
+    @property
+    def diff_str(self) -> str:
+        """Return the patch from the first parent to this commit."""
+
+        return self.parent.diff_str if self.parent is not None else ""
+
+    @property
     def diff(self) -> Diff:
-        return Diff.parse(self.diff_str)
+        """Return the parsed first-parent patch."""
+
+        return self.parent.diff if self.parent is not None else Diff.parse("")
+
+    @property
+    def is_merge(self) -> bool:
+        return len(self.parents) > 1
 
     @override
     def __repr__(self) -> str:
@@ -148,6 +176,100 @@ def _timestamp(value: datetime) -> int:
     return (delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds
 
 
+@dataclass
+class _GitLogRecord:
+    commit_id: str
+    author_name: str
+    author_email: str
+    author_date: datetime
+    committer_date: datetime
+    parent_ids: tuple[str, ...]
+    message: str
+    diff_str: str
+
+
+def _parse_git_log_record(record: bytes) -> _GitLogRecord:
+    try:
+        metadata, diff = record.removeprefix(_LOG_RECORD_START_BYTES).split(
+            _LOG_MESSAGE_END_BYTES,
+            1,
+        )
+    except ValueError as error:
+        raise ValueError("Unable to split git log message from diff") from error
+
+    fields = metadata.split(_LOG_FIELD_SEPARATOR_BYTES, 6)
+    if len(fields) != 7:
+        raise ValueError("Unexpected git log record format")
+
+    commit_id, author_name, author_email, author_date, committer_date, parents, message = (
+        field.decode("utf-8", errors="replace") for field in fields
+    )
+    return _GitLogRecord(
+        commit_id=commit_id,
+        author_name=author_name,
+        author_email=author_email,
+        author_date=datetime.fromisoformat(author_date),
+        committer_date=datetime.fromisoformat(committer_date),
+        parent_ids=tuple(parents.split()),
+        message=message,
+        diff_str=diff.lstrip(b"\n").decode("utf-8", errors="replace"),
+    )
+
+
+def _git_commit_from_records(
+    records: list[_GitLogRecord],
+    empty_parent_indexes: set[int] | None = None,
+) -> GitCommit:
+    first = records[0]
+    if any(
+        record.commit_id != first.commit_id
+        or record.parent_ids != first.parent_ids
+        for record in records[1:]
+    ):
+        raise ValueError("Mismatched per-parent Git log records")
+
+    empty_parent_indexes = empty_parent_indexes or set()
+    if any(
+        index < 0 or index >= len(first.parent_ids)
+        for index in empty_parent_indexes
+    ):
+        raise ValueError("Empty parent index is out of range")
+
+    expected_records = len(first.parent_ids) - len(empty_parent_indexes)
+    diff_records = records
+    if expected_records == 0 and len(records) == 1 and not records[0].diff_str:
+        # Git still emits one metadata record when every parent comparison is
+        # empty, even though that record does not represent a parent diff.
+        diff_records = []
+
+    if first.parent_ids and len(diff_records) != expected_records:
+        raise ValueError(
+            f"Expected one diff per parent for {first.commit_id}, "
+            f"got {len(diff_records)} diffs and {len(empty_parent_indexes)} "
+            f"empty parents for {len(first.parent_ids)} parents"
+        )
+
+    parents: list[CommitParent] = []
+    record_index = 0
+    for parent_index, parent_id in enumerate(first.parent_ids):
+        if parent_index in empty_parent_indexes:
+            diff_str = ""
+        else:
+            diff_str = diff_records[record_index].diff_str
+            record_index += 1
+        parents.append(CommitParent(commit_id=parent_id, diff_str=diff_str))
+
+    return GitCommit(
+        commit_id=first.commit_id,
+        author_name=first.author_name,
+        author_email=first.author_email,
+        author_date=first.author_date,
+        committer_date=first.committer_date,
+        parents=tuple(parents),
+        message=first.message,
+    )
+
+
 class GitRepo(GitStore):
     repo: Path
 
@@ -165,6 +287,28 @@ class GitRepo(GitStore):
 
     def read_file(self, commit: str, path: str) -> bytes:
         return self._run_git(["show", f"{commit}:{path}"])
+
+    def _empty_parent_indexes(
+        self,
+        commit_id: str,
+        parent_ids: tuple[str, ...],
+    ) -> set[int]:
+        tree_ids = self._run_git(
+            [
+                "rev-parse",
+                f"{commit_id}^{{tree}}",
+                *(f"{parent_id}^{{tree}}" for parent_id in parent_ids),
+            ]
+        ).decode("ascii").splitlines()
+        if len(tree_ids) != len(parent_ids) + 1:
+            raise ValueError(f"Unable to resolve parent trees for {commit_id}")
+
+        commit_tree = tree_ids[0]
+        return {
+            index
+            for index, parent_tree in enumerate(tree_ids[1:])
+            if parent_tree == commit_tree
+        }
 
     def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
         command = ["git", "-C", str(self.repo)] + args
@@ -248,6 +392,10 @@ class GitRepo(GitStore):
             args.append(f"--before={self._format_git_time(query_end)}")
         if not include_merges:
             args.append("--no-merges")
+        else:
+            # Emit one ordinary patch per parent, in parent order. Git repeats
+            # the commit record for each parent of a merge.
+            args.append("--diff-merges=separate")
         args.extend([
             f"--format={GIT_LOG_FORMAT}",
             "--patch",
@@ -257,33 +405,22 @@ class GitRepo(GitStore):
             "--binary",
         ])
 
-        for record in self._iter_git_records(args):
-            try:
-                metadata, diff = record.removeprefix(_LOG_RECORD_START_BYTES).split(
-                    _LOG_MESSAGE_END_BYTES,
-                    1,
+        parsed_records = (
+            _parse_git_log_record(record) for record in self._iter_git_records(args)
+        )
+        for _, grouped_records in groupby(
+            parsed_records,
+            key=lambda record: record.commit_id,
+        ):
+            records = list(grouped_records)
+            first = records[0]
+            empty_parent_indexes = None
+            if len(records) < len(first.parent_ids):
+                empty_parent_indexes = self._empty_parent_indexes(
+                    first.commit_id,
+                    first.parent_ids,
                 )
-            except ValueError as error:
-                raise ValueError("Unable to split git log message from diff") from error
-
-            fields = metadata.split(_LOG_FIELD_SEPARATOR_BYTES, 6)
-            if len(fields) != 7:
-                raise ValueError("Unexpected git log record format")
-
-            commit_id, author_name, author_email, author_date, committer_date, parents, message = (
-                field.decode("utf-8", errors="replace") for field in fields
-            )
-            commit = GitCommit(
-                commit_id=commit_id,
-                author_name=author_name,
-                author_email=author_email,
-                author_date=datetime.fromisoformat(author_date),
-                committer_date=datetime.fromisoformat(committer_date),
-                parents=tuple(parents.split()),
-                message=message,
-                diff_str=diff.lstrip(b"\n").decode("utf-8", errors="replace"),
-                is_merge=len(parents.split()) > 1,
-            )
+            commit = _git_commit_from_records(records, empty_parent_indexes)
             if start is not None and commit.committer_date < start:
                 continue
             if end is not None and commit.committer_date >= end:
@@ -315,12 +452,23 @@ class GitDb(GitStore):
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db)
         connection.row_factory = sqlite3.Row
+        _ = connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     def _initialize(self) -> None:
         connection = self._connect()
         try:
             with connection:
+                existing_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(commits)")
+                }
+                if "parents" in existing_columns or "diff" in existing_columns:
+                    raise RuntimeError(
+                        "Legacy commit database schema detected; regenerate "
+                        "the database to store per-parent diffs"
+                    )
+
                 _ = connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS commits (
@@ -331,10 +479,22 @@ class GitDb(GitStore):
                         committer_date TEXT NOT NULL,
                         author_timestamp INTEGER NOT NULL,
                         committer_timestamp INTEGER NOT NULL,
-                        parents TEXT NOT NULL,
                         message TEXT NOT NULL,
-                        diff TEXT NOT NULL,
                         is_merge INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+
+                _ = connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS commit_parents (
+                        commit_id TEXT NOT NULL,
+                        parent_index INTEGER NOT NULL CHECK (parent_index >= 0),
+                        parent_commit_id TEXT NOT NULL,
+                        diff TEXT NOT NULL,
+                        PRIMARY KEY (commit_id, parent_index),
+                        FOREIGN KEY (commit_id) REFERENCES commits(commit_id)
+                            ON DELETE CASCADE
                     )
                     """
                 )
@@ -343,6 +503,13 @@ class GitDb(GitStore):
                     """
                     CREATE INDEX IF NOT EXISTS commits_committer_timestamp_idx
                     ON commits (committer_timestamp)
+                    """
+                )
+
+                _ = connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS commit_parents_parent_commit_id_idx
+                    ON commit_parents (parent_commit_id)
                     """
                 )
         finally:
@@ -366,10 +533,31 @@ class GitDb(GitStore):
                             commit.committer_date.isoformat(),
                             _timestamp(commit.author_date),
                             _timestamp(commit.committer_date),
-                            json.dumps(commit.parents),
                             commit.message,
-                            commit.diff_str,
                             commit.is_merge,
+                        ),
+                    )
+                    _ = connection.execute(
+                        "DELETE FROM commit_parents WHERE commit_id = ?",
+                        (commit.commit_id,),
+                    )
+                    _ = connection.executemany(
+                        """
+                        INSERT INTO commit_parents (
+                            commit_id,
+                            parent_index,
+                            parent_commit_id,
+                            diff
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            (
+                                commit.commit_id,
+                                parent_index,
+                                parent.commit_id,
+                                parent.diff_str,
+                            )
+                            for parent_index, parent in enumerate(commit.parents)
                         ),
                     )
                     stored += 1
@@ -403,38 +591,108 @@ class GitDb(GitStore):
             rows = connection.execute(
                 f"""
                 SELECT
-                    commit_id,
-                    author_name,
-                    author_email,
-                    author_date,
-                    committer_date,
-                    parents,
-                    message,
-                    diff,
-                    is_merge
+                    commits.commit_id,
+                    commits.author_name,
+                    commits.author_email,
+                    commits.author_date,
+                    commits.committer_date,
+                    commits.message,
+                    commits.is_merge,
+                    commit_parents.parent_index,
+                    commit_parents.parent_commit_id,
+                    commit_parents.diff AS parent_diff
                 FROM commits
+                LEFT JOIN commit_parents
+                    ON commit_parents.commit_id = commits.commit_id
                 {where_clause}
-                ORDER BY committer_timestamp DESC, rowid DESC
+                ORDER BY
+                    commits.committer_timestamp DESC,
+                    commits.rowid DESC,
+                    commit_parents.parent_index
                 """,
                 parameters,
             ).fetchall()
         finally:
             connection.close()
 
-        return [
-            GitCommit(
+        commits: list[GitCommit] = []
+        for _, commit_rows_iter in groupby(rows, key=lambda row: row["commit_id"]):
+            commit_rows = list(commit_rows_iter)
+            row = commit_rows[0]
+            parents = tuple(
+                CommitParent(
+                    commit_id=parent_row["parent_commit_id"],
+                    diff_str=parent_row["parent_diff"],
+                )
+                for parent_row in commit_rows
+                if parent_row["parent_index"] is not None
+            )
+            commit = GitCommit(
                 commit_id=row["commit_id"],
                 author_name=row["author_name"],
                 author_email=row["author_email"],
                 author_date=datetime.fromisoformat(row["author_date"]),
                 committer_date=datetime.fromisoformat(row["committer_date"]),
-                parents=tuple(json.loads(row["parents"])),
+                parents=parents,
                 message=row["message"],
-                diff_str=row["diff"],
-                is_merge=bool(row["is_merge"]),
             )
-            for row in rows
-        ]
+            if commit.is_merge != bool(row["is_merge"]):
+                raise ValueError(
+                    f"Stored merge flag does not match parents for {commit.commit_id}"
+                )
+            commits.append(commit)
+
+        return commits
+
+@dataclass
+class CommitChildren:
+    # commits who have this commit as first child
+    primary_children: list[str]
+    # merge commits who have this commit as second or later child
+    secondary_children: list[str]
+
+@dataclass
+class StructuredCommits:
+    commits: dict[str, GitCommit]
+    commit_children: dict[str, CommitChildren]
+    # commits who have no primary parent
+    root_commits: set[str]
+    # commits who have no primary child
+    leaf_commits: set[str]
+
+    @classmethod
+    def from_commits(cls, commits: list[GitCommit]) -> Self:
+        all_commits = { commit.commit_id: commit for commit in commits }
+        root_commits: set[str] = set()
+
+        commit_children = { commit.commit_id: CommitChildren(
+            primary_children=[],
+            secondary_children=[],
+        ) for commit in commits }
+
+        for commit in commits:
+            parent = commit.parent
+            if parent is None or parent.commit_id not in all_commits:
+                root_commits.add(commit.commit_id)
+            else:
+                commit_children[parent.commit_id].primary_children.append(commit.commit_id)
+
+            for second_parent in commit.secondary_parents:
+                if second_parent.commit_id in all_commits:
+                    commit_children[second_parent.commit_id].secondary_children.append(commit.commit_id)
+
+        leaf_commits: set[str] = {
+            commit_id for commit_id, child_info in commit_children.items() if len(child_info.primary_children) == 0
+        }
+
+        return cls(
+            commits=all_commits,
+            commit_children=commit_children,
+            root_commits=root_commits,
+            leaf_commits=leaf_commits,
+        )
+
+
 
 
 def extract_to_db(

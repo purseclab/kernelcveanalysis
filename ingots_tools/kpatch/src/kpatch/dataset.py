@@ -11,7 +11,7 @@ from typing import Self
 from pydantic import BaseModel, PrivateAttr
 
 from .diff import Diff
-from .git import GitCommit
+from .git import CommitParent, GitCommit
 
 DATASET_PATH = Path(__file__).parent.parent.parent / "lpe_dataset" / "linux_lpe_rce_fix_commits.json"
 
@@ -251,9 +251,13 @@ class Dataset(BaseModel):
                     author_email=parsed_patch.author_email or "",
                     author_date=commit_date,
                     committer_date=commit_date,
-                    parents=(),
+                    parents=(
+                        CommitParent(
+                            commit_id="",
+                            diff_str=parsed_patch.patch.text,
+                        ),
+                    ),
                     message=_patch_message(parsed_patch),
-                    diff_str=parsed_patch.patch.text,
                 )
             )
 

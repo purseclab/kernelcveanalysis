@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from kpatch.git import GitCommit
+from kpatch.git import CommitParent, GitCommit
 from kpatch.visualization import show_commit_sunburst
 from kpatch.visualization.sunburst import (
     _ChartView,
@@ -32,7 +32,15 @@ class CommitSunburstTests(unittest.TestCase):
             for path in paths
         )
         date = datetime(2024, 1, 1, tzinfo=UTC)
-        return GitCommit(commit_id, "", "", date, date, (), "", patch_text)
+        return GitCommit(
+            commit_id,
+            "",
+            "",
+            date,
+            date,
+            (CommitParent("", patch_text),),
+            "",
+        )
 
     @staticmethod
     def find_tree_node(root: _TreeNode, node_id: str) -> _TreeNode:

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from .git import GitCommit
-from .diff import DiffFile, DiffFileType
+from ..git import GitCommit
+from ..diff import DiffFile, DiffFileType
 
 
 # this performs the trivial filtering on commits, before any classifiers or model calls
@@ -101,7 +101,7 @@ class FileFilter:
             # will not be making these sort of commits
             #
             # TODO: regression tests might make new file?
-            if file_change.kind != DiffFileType.DEFAULT:
+            if file_change.change_type != DiffFileType.DEFAULT:
                 return False
 
         matching_files = [

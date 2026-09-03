@@ -2,7 +2,7 @@ import unittest
 from datetime import UTC, datetime
 
 from kpatch.filter import FileFilter
-from kpatch.git import GitCommit
+from kpatch.git import CommitParent, GitCommit
 
 
 class FileFilterTests(unittest.TestCase):
@@ -19,7 +19,15 @@ class FileFilterTests(unittest.TestCase):
             for path in paths
         )
         date = datetime(2024, 1, 1, tzinfo=UTC)
-        return GitCommit(commit_id, "", "", date, date, (), "", patch)
+        return GitCommit(
+            commit_id,
+            "",
+            "",
+            date,
+            date,
+            (CommitParent("", patch),),
+            "",
+        )
 
     def test_matches_path_prefix_and_exact_extensions(self) -> None:
         file_filter = FileFilter(["drivers", "fs"], ["c", ".h"])

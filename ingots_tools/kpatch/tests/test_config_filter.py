@@ -1,6 +1,6 @@
 import unittest
 
-from kpatch.config_filter import (
+from kpatch.filter.config_filter import (
     ConfigFilter,
     ConfigValue,
     KbuildMakefile,
@@ -24,14 +24,14 @@ class MemoryGitRepo(GitRepo):
 def make_diff(
     path: str,
     change_type: DiffFileType,
-    old_path: str | None = None,
+    old_file: str | None = None,
 ) -> Diff:
     return Diff(
         text="",
         files=[
             DiffFile(
                 file=path,
-                old_file=old_path,
+                old_file=old_file,
                 old_mode=None,
                 new_mode=None,
                 change_type=change_type,
@@ -272,6 +272,47 @@ class ConfigFilterTests(unittest.TestCase):
         self.assertTrue(filter.file_included("drivers/example/selected.c"))
         self.assertFalse(filter.file_included("drivers/example/excluded.c"))
 
+    def test_copy_rebuilds_cache_tree_and_shares_makefiles(self) -> None:
+        original = self.make_filter(
+            {
+                "base": {
+                    "drivers/Makefile": "obj-y += example/\n",
+                    "drivers/example/Makefile": "obj-y += selected.o\n",
+                }
+            }
+        )
+        self.assertTrue(original.file_included("drivers/example/selected.c"))
+        original.delegated.add("drivers/delegated")
+
+        copied = ConfigFilter.copy(original)
+
+        original_parent = original.kbuild_cache["drivers"]
+        original_child = original.kbuild_cache["drivers/example"]
+        copied_parent = copied.kbuild_cache["drivers"]
+        copied_child = copied.kbuild_cache["drivers/example"]
+
+        self.assertIsNot(copied_parent, original_parent)
+        self.assertIsNot(copied_child, original_child)
+        self.assertIs(copied_parent.makefile, original_parent.makefile)
+        self.assertIs(copied_child.makefile, original_child.makefile)
+        self.assertIs(copied_child.parent, copied_parent)
+        self.assertIs(copied_parent.children["drivers/example"], copied_child)
+        self.assertIsNot(copied.delegated, original.delegated)
+        self.assertEqual(copied.delegated, original.delegated)
+
+        copied._update_existing_kbuild_makefile(
+            "drivers/example",
+            copied_child.cache_type,
+            "obj-y += replacement.o\n",
+        )
+        copied.delegated.add("drivers/copied-only")
+
+        self.assertTrue(original.file_included("drivers/example/selected.c"))
+        self.assertFalse(original.file_included("drivers/example/replacement.c"))
+        self.assertFalse(copied.file_included("drivers/example/selected.c"))
+        self.assertTrue(copied.file_included("drivers/example/replacement.c"))
+        self.assertNotIn("drivers/copied-only", original.delegated)
+
     def test_updates_cached_makefile_contents(self) -> None:
         filter = self.make_filter(
             {
@@ -410,7 +451,7 @@ class ConfigFilterTests(unittest.TestCase):
             make_diff(
                 "drivers/example/Kbuild",
                 DiffFileType.RENAME,
-                old_path="drivers/example/Makefile",
+                old_file="drivers/example/Makefile",
             ),
             "next",
         )

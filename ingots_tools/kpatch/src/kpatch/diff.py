@@ -280,36 +280,6 @@ class DiffFile:
     chunks: list[DiffChunk]
 
     @property
-    def path(self) -> str:
-        """Compatibility alias for the target file path."""
-
-        return self.file
-
-    @property
-    def old_path(self) -> str | None:
-        """Compatibility view of the pre-change path."""
-
-        if self.change_type is DiffFileType.NEW:
-            return None
-        if self.change_type in (DiffFileType.RENAME, DiffFileType.COPY):
-            return self.old_file
-        return self.file
-
-    @property
-    def new_path(self) -> str | None:
-        """Compatibility view of the post-change path."""
-
-        if self.change_type is DiffFileType.DELETE:
-            return None
-        return self.file
-
-    @property
-    def kind(self) -> DiffFileType:
-        """Short alias for :attr:`change_type`."""
-
-        return self.change_type
-
-    @property
     def mode_changed(self) -> bool:
         """Whether both modes are known and differ."""
 
@@ -494,8 +464,8 @@ class Diff:
     def diff_similarity(self, other: Self) -> float:
         """Compare corresponding files after combining all of their hunks."""
 
-        self_files = {file.path: file for file in self.files}
-        other_files = {file.path: file for file in other.files}
+        self_files = {file.file: file for file in self.files}
+        other_files = {file.file: file for file in other.files}
         if len(self_files) != len(self.files) or len(other_files) != len(other.files):
             return 0.0
         if set(self_files) != set(other_files):

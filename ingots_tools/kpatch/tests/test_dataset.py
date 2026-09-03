@@ -71,7 +71,8 @@ class DatasetGitCommitTests(unittest.TestCase):
             datetime(2014, 6, 3, 12, 27, 7, tzinfo=UTC),
         )
         self.assertEqual(commit.committer_date, commit.author_date)
-        self.assertEqual(commit.parents, ())
+        self.assertEqual(len(commit.parents), 1)
+        self.assertEqual(commit.parent.commit_id if commit.parent else None, "")
         self.assertEqual(
             commit.message,
             "Fix the bug\n\nFix the bug in the subsystem.\n\n"

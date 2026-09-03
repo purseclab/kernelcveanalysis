@@ -6,7 +6,7 @@ import typer
 
 from .dataset import load_git_commits
 from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db
-from .filter import FileFilter
+from .filter import FileFilter, filter_commit_time_range
 from .visualization import show_commit_sunburst
 
 app = typer.Typer()
@@ -38,6 +38,18 @@ def visualize():
     dataset = load_git_commits(dedup=True)
     result = show_commit_sunburst(dataset)
     print(f"Visualization saved to `{result}`")
+
+@app.command("filter", help="Filter commits for promising lpe commits.")
+def filter(
+    repo: Annotated[Path, typer.Option(help="Path to linux git repo.")],
+    db: Annotated[Path, typer.Option(help="Path to sqlite database to extract commits to.")],
+    config: Annotated[Path, typer.Option(help="Kernel config file to filter with.")],
+    start: Annotated[str, typer.Option(help="Start date for filtering commits. (mm-dd-yyyy format)")],
+    end: Annotated[str, typer.Option(help="End date for filtering commits. (mm-dd-yyyy format)")],
+):
+    start_date = parse_time(start)
+    end_date = parse_time(end)
+    filter_commit_time_range(GitRepo(repo), GitDb(db), config, start_date, end_date)
 
 @app.command("test", help="Temporary function for testing.")
 def run():

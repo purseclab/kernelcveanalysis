@@ -4,8 +4,8 @@ from typing import Self
 import posixpath
 import re
 
-from .git import GitRepo
-from .diff import Diff, DiffFileType
+from ..git import GitRepo
+from ..diff import Diff, DiffFileType
 
 class ConfigValue(StrEnum):
     ENABLED = "y"
@@ -375,6 +375,42 @@ class ConfigFilter:
         self.base_commit = base_commit
         self.kbuild_cache = {}
         self.delegated = set()
+
+    @classmethod
+    def copy(cls, other: Self) -> Self:
+        # config, repo, etc don't need to be copied, only cache details
+        out = cls(other.repo, other.config, other.base_commit)
+
+        # copy kbuild cache
+        out.kbuild_cache = {
+            path: KbuildCacheEntry(
+                path=entry.path,
+                parent=None,
+                cache_type=entry.cache_type,
+                makefile=entry.makefile,
+                enabled=entry.enabled,
+                children={},
+            )
+            for path, entry in other.kbuild_cache.items()
+        }
+
+        # Rebuild links using copied entries so the two cache trees can be
+        # mutated independently. KbuildMakefile is immutable during normal
+        # cache use, so it is intentionally shared.
+        for path, entry in other.kbuild_cache.items():
+            copied_entry = out.kbuild_cache[path]
+            if entry.parent is not None:
+                copied_entry.parent = out.kbuild_cache[entry.parent.path]
+            copied_entry.children = {
+                child_path: out.kbuild_cache[child_path]
+                for child_path in entry.children
+            }
+
+
+        # copy delegated
+        out.delegated = set(other.delegated)
+
+        return out
 
     def _kbuild_cache_add(self, parent: KbuildCacheEntry | None, folder: str, cache_type: CacheEntryType, makefile: KbuildMakefile) -> KbuildCacheEntry:
         if makefile.folder != folder:

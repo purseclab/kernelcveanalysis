@@ -2,12 +2,14 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import sqlite3
 from typing import Iterable, Iterator
 
 from kpatch.git import (
     LOG_FIELD_SEPARATOR,
     LOG_MESSAGE_END,
     LOG_RECORD_START,
+    CommitParent,
     GitCommit,
     GitDb,
     GitRepo,
@@ -87,23 +89,117 @@ class GitRepoTests(unittest.TestCase):
                 "Merge topic\n",
             )
         )
-        record = LOG_RECORD_START + metadata + LOG_MESSAGE_END
+        first_diff = b"diff --git a/first b/first\n"
+        second_diff = b"diff --git a/second b/second\n"
+        records = [
+            LOG_RECORD_START + metadata + LOG_MESSAGE_END + first_diff,
+            LOG_RECORD_START + metadata + LOG_MESSAGE_END + second_diff,
+        ]
 
         class StubGitRepo(GitRepo):
             args: list[str]
 
             def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
                 self.args = args
-                yield record
+                yield from records
 
         repo = StubGitRepo(Path("unused"))
         commit = repo.commits_between(include_merges=True)[0]
 
         self.assertNotIn("--no-merges", repo.args)
+        self.assertIn("--diff-merges=separate", repo.args)
         self.assertTrue(commit.is_merge)
+        self.assertEqual(commit.parent, commit.parents[0])
+        self.assertEqual(commit.diff_str, first_diff.decode())
+        self.assertEqual(commit.parents[1].diff_str, second_diff.decode())
 
         repo.commits_between()
         self.assertIn("--no-merges", repo.args)
+
+    def test_aligns_omitted_empty_merge_parent_diffs(self) -> None:
+        metadata = LOG_FIELD_SEPARATOR.join(
+            value.encode()
+            for value in (
+                "a" * 40,
+                "Alice Example",
+                "alice@example.com",
+                "2024-01-01T01:00:00+00:00",
+                "2024-01-01T02:00:00+00:00",
+                f"{'b' * 40} {'c' * 40}",
+                "Trivial merge\n",
+            )
+        )
+        nonempty_diff = "diff --git a/file b/file\n"
+        record = (
+            LOG_RECORD_START
+            + metadata
+            + LOG_MESSAGE_END
+            + nonempty_diff.encode()
+        )
+
+        for empty_parent_index in (0, 1):
+            with self.subTest(empty_parent_index=empty_parent_index):
+                class StubGitRepo(GitRepo):
+                    def _iter_git_records(
+                        self,
+                        args: list[str],
+                    ) -> Iterator[bytes]:
+                        yield record
+
+                    def _empty_parent_indexes(
+                        self,
+                        commit_id: str,
+                        parent_ids: tuple[str, ...],
+                    ) -> set[int]:
+                        return {empty_parent_index}
+
+                commit = StubGitRepo(Path("unused")).commits_between(
+                    include_merges=True
+                )[0]
+
+                self.assertEqual(
+                    commit.parents[empty_parent_index].diff_str,
+                    "",
+                )
+                self.assertEqual(
+                    commit.parents[1 - empty_parent_index].diff_str,
+                    nonempty_diff,
+                )
+
+    def test_handles_merge_identical_to_every_parent(self) -> None:
+        metadata = LOG_FIELD_SEPARATOR.join(
+            value.encode()
+            for value in (
+                "a" * 40,
+                "Alice Example",
+                "alice@example.com",
+                "2024-01-01T01:00:00+00:00",
+                "2024-01-01T02:00:00+00:00",
+                f"{'b' * 40} {'c' * 40}",
+                "Empty merge\n",
+            )
+        )
+        record = LOG_RECORD_START + metadata + LOG_MESSAGE_END
+
+        class StubGitRepo(GitRepo):
+            def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
+                yield record
+
+            def _empty_parent_indexes(
+                self,
+                commit_id: str,
+                parent_ids: tuple[str, ...],
+            ) -> set[int]:
+                return {0, 1}
+
+        commit = StubGitRepo(Path("unused")).commits_between(
+            include_merges=True
+        )[0]
+
+        self.assertEqual(
+            [parent.diff_str for parent in commit.parents],
+            ["", ""],
+        )
 
 
 class GitDbTests(unittest.TestCase):
@@ -116,9 +212,8 @@ class GitDbTests(unittest.TestCase):
             author_email="alice@example.com",
             author_date=start + timedelta(hours=1),
             committer_date=start + timedelta(hours=2),
-            parents=("parent",),
+            parents=(CommitParent("parent", "diff --git a/old b/old\n"),),
             message="Older commit\n",
-            diff_str="diff --git a/old b/old\n",
         )
         newer = GitCommit(
             commit_id="newer",
@@ -126,9 +221,8 @@ class GitDbTests(unittest.TestCase):
             author_email="bob@example.com",
             author_date=start + timedelta(hours=3),
             committer_date=datetime(2024, 1, 2, 1, tzinfo=UTC),
-            parents=(),
+            parents=(CommitParent("", "diff --git a/new b/new\n"),),
             message="Newer commit\n",
-            diff_str="diff --git a/new b/new\n",
         )
         at_end = GitCommit(
             commit_id="at-end",
@@ -138,7 +232,6 @@ class GitDbTests(unittest.TestCase):
             committer_date=end,
             parents=(),
             message="Boundary commit\n",
-            diff_str="",
         )
         merge = GitCommit(
             commit_id="merge",
@@ -146,10 +239,11 @@ class GitDbTests(unittest.TestCase):
             author_email="dave@example.com",
             author_date=start + timedelta(hours=4),
             committer_date=start + timedelta(hours=5),
-            parents=("parent-1", "parent-2"),
+            parents=(
+                CommitParent("parent-1", "first-parent diff\n"),
+                CommitParent("parent-2", "second-parent diff\n"),
+            ),
             message="Merge commit\n",
-            diff_str="",
-            is_merge=True,
         )
 
         with tempfile.TemporaryDirectory() as directory:
@@ -178,9 +272,8 @@ class GitDbTests(unittest.TestCase):
             author_email="alice@example.com",
             author_date=date,
             committer_date=date,
-            parents=(),
+            parents=(CommitParent("parent", "original diff\n"),),
             message="Original\n",
-            diff_str="original diff\n",
         )
         updated = GitCommit(
             commit_id=commit.commit_id,
@@ -188,9 +281,8 @@ class GitDbTests(unittest.TestCase):
             author_email=commit.author_email,
             author_date=commit.author_date,
             committer_date=commit.committer_date,
-            parents=commit.parents,
+            parents=(CommitParent("parent", "updated diff\n"),),
             message="Updated\n",
-            diff_str="updated diff\n",
         )
 
         with tempfile.TemporaryDirectory() as directory:
@@ -199,6 +291,17 @@ class GitDbTests(unittest.TestCase):
             db.store_commits([updated])
 
             self.assertEqual(db.commits_between(date, date + timedelta(days=1)), [updated])
+
+            with sqlite3.connect(db.db) as connection:
+                parent_rows = connection.execute(
+                    """
+                    SELECT parent_index, parent_commit_id, diff
+                    FROM commit_parents
+                    WHERE commit_id = ?
+                    """,
+                    (commit.commit_id,),
+                ).fetchall()
+            self.assertEqual(parent_rows, [(0, "parent", "updated diff\n")])
 
     def test_queries_require_timezone_aware_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -213,19 +316,20 @@ class ExtractToDbTests(unittest.TestCase):
         start = datetime(2024, 1, 1, tzinfo=UTC)
         end = start + timedelta(days=1)
         commits = [
-            GitCommit("at-start", "", "", start, start, (), "", ""),
+            GitCommit("at-start", "", "", start, start, (), ""),
             GitCommit(
                 "merge",
                 "",
                 "",
                 start,
                 start + timedelta(hours=1),
-                ("parent-1", "parent-2"),
+                (
+                    CommitParent("parent-1", "first diff"),
+                    CommitParent("parent-2", "second diff"),
+                ),
                 "",
-                "",
-                is_merge=True,
             ),
-            GitCommit("at-end", "", "", end, end, (), "", ""),
+            GitCommit("at-end", "", "", end, end, (), ""),
         ]
         repo = FakeRepo(commits)
         db = FakeDb()
