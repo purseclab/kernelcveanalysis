@@ -480,6 +480,17 @@ class ConfigFilter:
         else:
             return entry
 
+    def get(self, file: str) -> ConfigValue | None:
+        if posixpath.dirname(file) == "":
+            return None
+
+        parent = posixpath.dirname(file)
+        cache_entry = self._kbuild_cache_get(parent)
+        if cache_entry is None or not cache_entry.enabled:
+            return None
+
+        return cache_entry.makefile.get(file)
+
     def _path_included(self, path: str) -> bool:
         # folder in root dir always excluded
         if posixpath.dirname(path) == "":

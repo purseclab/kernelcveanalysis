@@ -90,117 +90,27 @@ class GitRepoTests(unittest.TestCase):
             )
         )
         first_diff = b"diff --git a/first b/first\n"
-        second_diff = b"diff --git a/second b/second\n"
-        records = [
-            LOG_RECORD_START + metadata + LOG_MESSAGE_END + first_diff,
-            LOG_RECORD_START + metadata + LOG_MESSAGE_END + second_diff,
-        ]
+        record = LOG_RECORD_START + metadata + LOG_MESSAGE_END + first_diff
 
         class StubGitRepo(GitRepo):
             args: list[str]
 
             def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
                 self.args = args
-                yield from records
+                yield record
 
         repo = StubGitRepo(Path("unused"))
         commit = repo.commits_between(include_merges=True)[0]
 
         self.assertNotIn("--no-merges", repo.args)
-        self.assertIn("--diff-merges=separate", repo.args)
+        self.assertIn("--diff-merges=first-parent", repo.args)
         self.assertTrue(commit.is_merge)
         self.assertEqual(commit.parent, commit.parents[0])
         self.assertEqual(commit.diff_str, first_diff.decode())
-        self.assertEqual(commit.parents[1].diff_str, second_diff.decode())
+        self.assertEqual(commit.parents[1].diff_str, "")
 
         repo.commits_between()
         self.assertIn("--no-merges", repo.args)
-
-    def test_aligns_omitted_empty_merge_parent_diffs(self) -> None:
-        metadata = LOG_FIELD_SEPARATOR.join(
-            value.encode()
-            for value in (
-                "a" * 40,
-                "Alice Example",
-                "alice@example.com",
-                "2024-01-01T01:00:00+00:00",
-                "2024-01-01T02:00:00+00:00",
-                f"{'b' * 40} {'c' * 40}",
-                "Trivial merge\n",
-            )
-        )
-        nonempty_diff = "diff --git a/file b/file\n"
-        record = (
-            LOG_RECORD_START
-            + metadata
-            + LOG_MESSAGE_END
-            + nonempty_diff.encode()
-        )
-
-        for empty_parent_index in (0, 1):
-            with self.subTest(empty_parent_index=empty_parent_index):
-                class StubGitRepo(GitRepo):
-                    def _iter_git_records(
-                        self,
-                        args: list[str],
-                    ) -> Iterator[bytes]:
-                        yield record
-
-                    def _empty_parent_indexes(
-                        self,
-                        commit_id: str,
-                        parent_ids: tuple[str, ...],
-                    ) -> set[int]:
-                        return {empty_parent_index}
-
-                commit = StubGitRepo(Path("unused")).commits_between(
-                    include_merges=True
-                )[0]
-
-                self.assertEqual(
-                    commit.parents[empty_parent_index].diff_str,
-                    "",
-                )
-                self.assertEqual(
-                    commit.parents[1 - empty_parent_index].diff_str,
-                    nonempty_diff,
-                )
-
-    def test_handles_merge_identical_to_every_parent(self) -> None:
-        metadata = LOG_FIELD_SEPARATOR.join(
-            value.encode()
-            for value in (
-                "a" * 40,
-                "Alice Example",
-                "alice@example.com",
-                "2024-01-01T01:00:00+00:00",
-                "2024-01-01T02:00:00+00:00",
-                f"{'b' * 40} {'c' * 40}",
-                "Empty merge\n",
-            )
-        )
-        record = LOG_RECORD_START + metadata + LOG_MESSAGE_END
-
-        class StubGitRepo(GitRepo):
-            def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
-                yield record
-
-            def _empty_parent_indexes(
-                self,
-                commit_id: str,
-                parent_ids: tuple[str, ...],
-            ) -> set[int]:
-                return {0, 1}
-
-        commit = StubGitRepo(Path("unused")).commits_between(
-            include_merges=True
-        )[0]
-
-        self.assertEqual(
-            [parent.diff_str for parent in commit.parents],
-            ["", ""],
-        )
-
 
 class GitDbTests(unittest.TestCase):
     def test_stores_and_queries_commits(self) -> None:
@@ -241,7 +151,7 @@ class GitDbTests(unittest.TestCase):
             committer_date=start + timedelta(hours=5),
             parents=(
                 CommitParent("parent-1", "first-parent diff\n"),
-                CommitParent("parent-2", "second-parent diff\n"),
+                CommitParent("parent-2", ""),
             ),
             message="Merge commit\n",
         )
@@ -325,7 +235,7 @@ class ExtractToDbTests(unittest.TestCase):
                 start + timedelta(hours=1),
                 (
                     CommitParent("parent-1", "first diff"),
-                    CommitParent("parent-2", "second diff"),
+                    CommitParent("parent-2", ""),
                 ),
                 "",
             ),

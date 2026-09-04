@@ -216,57 +216,22 @@ def _parse_git_log_record(record: bytes) -> _GitLogRecord:
     )
 
 
-def _git_commit_from_records(
-    records: list[_GitLogRecord],
-    empty_parent_indexes: set[int] | None = None,
-) -> GitCommit:
-    first = records[0]
-    if any(
-        record.commit_id != first.commit_id
-        or record.parent_ids != first.parent_ids
-        for record in records[1:]
-    ):
-        raise ValueError("Mismatched per-parent Git log records")
-
-    empty_parent_indexes = empty_parent_indexes or set()
-    if any(
-        index < 0 or index >= len(first.parent_ids)
-        for index in empty_parent_indexes
-    ):
-        raise ValueError("Empty parent index is out of range")
-
-    expected_records = len(first.parent_ids) - len(empty_parent_indexes)
-    diff_records = records
-    if expected_records == 0 and len(records) == 1 and not records[0].diff_str:
-        # Git still emits one metadata record when every parent comparison is
-        # empty, even though that record does not represent a parent diff.
-        diff_records = []
-
-    if first.parent_ids and len(diff_records) != expected_records:
-        raise ValueError(
-            f"Expected one diff per parent for {first.commit_id}, "
-            f"got {len(diff_records)} diffs and {len(empty_parent_indexes)} "
-            f"empty parents for {len(first.parent_ids)} parents"
+def _git_commit_from_record(record: _GitLogRecord) -> GitCommit:
+    parents = tuple(
+        CommitParent(
+            commit_id=parent_id,
+            diff_str=record.diff_str if parent_index == 0 else "",
         )
-
-    parents: list[CommitParent] = []
-    record_index = 0
-    for parent_index, parent_id in enumerate(first.parent_ids):
-        if parent_index in empty_parent_indexes:
-            diff_str = ""
-        else:
-            diff_str = diff_records[record_index].diff_str
-            record_index += 1
-        parents.append(CommitParent(commit_id=parent_id, diff_str=diff_str))
-
+        for parent_index, parent_id in enumerate(record.parent_ids)
+    )
     return GitCommit(
-        commit_id=first.commit_id,
-        author_name=first.author_name,
-        author_email=first.author_email,
-        author_date=first.author_date,
-        committer_date=first.committer_date,
-        parents=tuple(parents),
-        message=first.message,
+        commit_id=record.commit_id,
+        author_name=record.author_name,
+        author_email=record.author_email,
+        author_date=record.author_date,
+        committer_date=record.committer_date,
+        parents=parents,
+        message=record.message,
     )
 
 
@@ -277,38 +242,19 @@ class GitRepo(GitStore):
         self.repo = repo
 
     def _run_git(self, args: list[str]) -> bytes:
-        return subprocess.check_output(
+        return subprocess.run(
             ["git", "-C", str(self.repo)] + args,
+            check=True,
             text=False,
-        )
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ).stdout
 
     def checkout(self, commit: str):
         _ = self._run_git(["checkout", commit])
 
     def read_file(self, commit: str, path: str) -> bytes:
         return self._run_git(["show", f"{commit}:{path}"])
-
-    def _empty_parent_indexes(
-        self,
-        commit_id: str,
-        parent_ids: tuple[str, ...],
-    ) -> set[int]:
-        tree_ids = self._run_git(
-            [
-                "rev-parse",
-                f"{commit_id}^{{tree}}",
-                *(f"{parent_id}^{{tree}}" for parent_id in parent_ids),
-            ]
-        ).decode("ascii").splitlines()
-        if len(tree_ids) != len(parent_ids) + 1:
-            raise ValueError(f"Unable to resolve parent trees for {commit_id}")
-
-        commit_tree = tree_ids[0]
-        return {
-            index
-            for index, parent_tree in enumerate(tree_ids[1:])
-            if parent_tree == commit_tree
-        }
 
     def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
         command = ["git", "-C", str(self.repo)] + args
@@ -393,9 +339,9 @@ class GitRepo(GitStore):
         if not include_merges:
             args.append("--no-merges")
         else:
-            # Emit one ordinary patch per parent, in parent order. Git repeats
-            # the commit record for each parent of a merge.
-            args.append("--diff-merges=separate")
+            # Only the first-parent patch is needed to advance a state derived
+            # from that parent. Later parent edges retain IDs but no patch.
+            args.append("--diff-merges=first-parent")
         args.extend([
             f"--format={GIT_LOG_FORMAT}",
             "--patch",
@@ -405,22 +351,8 @@ class GitRepo(GitStore):
             "--binary",
         ])
 
-        parsed_records = (
-            _parse_git_log_record(record) for record in self._iter_git_records(args)
-        )
-        for _, grouped_records in groupby(
-            parsed_records,
-            key=lambda record: record.commit_id,
-        ):
-            records = list(grouped_records)
-            first = records[0]
-            empty_parent_indexes = None
-            if len(records) < len(first.parent_ids):
-                empty_parent_indexes = self._empty_parent_indexes(
-                    first.commit_id,
-                    first.parent_ids,
-                )
-            commit = _git_commit_from_records(records, empty_parent_indexes)
+        for record in self._iter_git_records(args):
+            commit = _git_commit_from_record(_parse_git_log_record(record))
             if start is not None and commit.committer_date < start:
                 continue
             if end is not None and commit.committer_date >= end:
@@ -714,7 +646,9 @@ def _path_for_db_name(db_name: str) -> Path:
 def save_commits_to_db(db_name: str, commits: list[GitCommit]):
     """Stores commits into a database in db folder."""
 
-    _ = GitDb(_path_for_db_name(db_name)).store_commits(commits)
+    save_path = _path_for_db_name(db_name)
+    _ = GitDb(save_path).store_commits(commits)
+    print(f"Saved {len(commits)} commits to sqlite database `{save_path}`")
 
 
 def load_commits_from_db(db_name: str) -> list[GitCommit]:
