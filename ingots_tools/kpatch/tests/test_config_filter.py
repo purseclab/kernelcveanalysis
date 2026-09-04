@@ -1,5 +1,7 @@
 import unittest
 
+from kexploit_utils import Architecture
+
 from kpatch.filter.config_filter import (
     ConfigFilter,
     ConfigValue,
@@ -73,6 +75,29 @@ class KernelConfigTests(unittest.TestCase):
         )
         self.assertNotIn("CONFIG_UNKNOWN", config.values)
         self.assertNotIn("NOT_A_CONFIG", config.values)
+
+    def test_parses_shared_architecture_type(self) -> None:
+        self.assertIs(
+            KernelConfig("CONFIG_X86_32=y").architecture,
+            Architecture.X86,
+        )
+        self.assertIs(
+            KernelConfig("CONFIG_X86_64=y").architecture,
+            Architecture.AMD64,
+        )
+        self.assertIs(
+            KernelConfig("CONFIG_ARM=y").architecture,
+            Architecture.ARM,
+        )
+        self.assertIs(
+            KernelConfig("CONFIG_ARM64=y").architecture,
+            Architecture.AARCH64,
+        )
+        self.assertIsNone(KernelConfig("").architecture)
+
+    def test_rejects_multiple_architectures(self) -> None:
+        with self.assertRaises(ValueError):
+            KernelConfig("CONFIG_X86_64=y\nCONFIG_ARM64=y")
 
 
 class KbuildMakefileTests(unittest.TestCase):
@@ -246,6 +271,30 @@ class KbuildMakefileTests(unittest.TestCase):
         )
         self.assertIsNone(makefile.get("child/direct.c"))
 
+    def test_subst_function_can_select_a_builtin_directory(self) -> None:
+        makefile = self.parse(
+            "obj-$(subst m,y,$(CONFIG_DRIVER)) += host/",
+            "CONFIG_DRIVER=m",
+        )
+
+        self.assertEqual(
+            makefile.get("drivers/example/host"),
+            ConfigValue.ENABLED,
+        )
+
+    def test_root_relative_expansion_is_not_joined_to_current_folder(self) -> None:
+        makefile = KbuildMakefile(
+            "obj-y += $(srctree)/shared/source.o",
+            KernelConfig(""),
+            "drivers/example",
+            variables={"srctree": ""},
+        )
+
+        self.assertEqual(
+            makefile.get("shared/source.c"),
+            ConfigValue.ENABLED,
+        )
+
 
 class ConfigFilterTests(unittest.TestCase):
     def make_filter(
@@ -272,6 +321,94 @@ class ConfigFilterTests(unittest.TestCase):
         self.assertTrue(filter.file_included("drivers/example/selected.c"))
         self.assertFalse(filter.file_included("drivers/example/excluded.c"))
 
+    def test_root_kbuild_selects_only_configured_architecture(self) -> None:
+        filter = ConfigFilter(
+            MemoryGitRepo(
+                {
+                    "base": {
+                        "Kbuild": "obj-y += arch/$(SRCARCH)/ drivers/\n",
+                        "Makefile": "obj-y += arch/x86/\n",
+                        "arch/arm64/Kbuild": "obj-y += kernel/\n",
+                        "arch/arm64/kernel/Makefile": "obj-y += selected.o\n",
+                        "arch/x86/Kbuild": "obj-y += kernel/\n",
+                        "arch/x86/kernel/Makefile": "obj-y += excluded.o\n",
+                        "drivers/Makefile": "obj-y += common.o\n",
+                    }
+                }
+            ),
+            KernelConfig("CONFIG_ARM64=y"),
+            "base",
+        )
+
+        self.assertTrue(filter.file_included("arch/arm64/kernel/selected.c"))
+        self.assertFalse(filter.file_included("arch/x86/kernel/excluded.c"))
+        self.assertTrue(filter.file_included("drivers/common.c"))
+
+    def test_architecture_makefile_contributes_global_directories(self) -> None:
+        filter = ConfigFilter(
+            MemoryGitRepo(
+                {
+                    "base": {
+                        "Kbuild": "obj-y += arch/$(SRCARCH)/\n",
+                        "arch/arm64/Kbuild": "obj-y += kernel/\n",
+                        "arch/arm64/Makefile": (
+                            "libs-y := arch/arm64/lib/ $(libs-y)\n"
+                        ),
+                        "arch/arm64/lib/Makefile": "lib-y += insn.o\n",
+                    }
+                }
+            ),
+            KernelConfig("CONFIG_ARM64=y"),
+            "base",
+        )
+
+        self.assertTrue(filter.file_included("arch/arm64/lib/insn.c"))
+
+    def test_kbuild_include_contributes_to_composite_object(self) -> None:
+        filter = self.make_filter(
+            {
+                "base": {
+                    "drivers/Makefile": "obj-y += example/\n",
+                    "drivers/example/Kbuild": (
+                        "obj-y += combined.o\n"
+                        "combined-y += local.o\n"
+                        "include $(src)/objects.mk\n"
+                    ),
+                    "drivers/example/objects.mk": (
+                        "combined-y += included.o\n"
+                    ),
+                }
+            }
+        )
+
+        self.assertTrue(filter.file_included("drivers/example/local.c"))
+        self.assertTrue(filter.file_included("drivers/example/included.c"))
+
+    def test_architecture_include_can_own_files_in_another_directory(self) -> None:
+        filter = ConfigFilter(
+            MemoryGitRepo(
+                {
+                    "base": {
+                        "Kbuild": "obj-y += arch/$(SRCARCH)/ virt/\n",
+                        "arch/arm64/Kbuild": "obj-$(CONFIG_KVM) += kvm/\n",
+                        "arch/arm64/kvm/Makefile": (
+                            "include $(srctree)/virt/kvm/Makefile.kvm\n"
+                            "obj-$(CONFIG_KVM) += kvm.o\n"
+                        ),
+                        "virt/Makefile": "obj-y += lib/\n",
+                        "virt/kvm/Makefile.kvm": (
+                            "KVM ?= ../../../virt/kvm\n"
+                            "kvm-y := $(KVM)/kvm_main.o $(KVM)/eventfd.o\n"
+                        ),
+                    }
+                }
+            ),
+            KernelConfig("CONFIG_ARM64=y\nCONFIG_KVM=y"),
+            "base",
+        )
+
+        self.assertTrue(filter.file_included("virt/kvm/eventfd.c"))
+
     def test_copy_rebuilds_cache_tree_and_shares_makefiles(self) -> None:
         original = self.make_filter(
             {
@@ -293,17 +430,20 @@ class ConfigFilterTests(unittest.TestCase):
 
         self.assertIsNot(copied_parent, original_parent)
         self.assertIsNot(copied_child, original_child)
-        self.assertIs(copied_parent.makefile, original_parent.makefile)
-        self.assertIs(copied_child.makefile, original_child.makefile)
+        self.assertIs(copied_parent.rules, original_parent.rules)
+        self.assertIs(copied_child.rules, original_child.rules)
         self.assertIs(copied_child.parent, copied_parent)
         self.assertIs(copied_parent.children["drivers/example"], copied_child)
         self.assertIsNot(copied.delegated, original.delegated)
         self.assertEqual(copied.delegated, original.delegated)
 
-        copied._update_existing_kbuild_makefile(
-            "drivers/example",
-            copied_child.cache_type,
-            "obj-y += replacement.o\n",
+        copied.repo.commits["next"] = {
+            "drivers/Makefile": "obj-y += example/\n",
+            "drivers/example/Makefile": "obj-y += replacement.o\n",
+        }
+        copied.update_filter_state(
+            make_diff("drivers/example/Makefile", DiffFileType.DEFAULT),
+            "next",
         )
         copied.delegated.add("drivers/copied-only")
 
@@ -312,6 +452,37 @@ class ConfigFilterTests(unittest.TestCase):
         self.assertFalse(copied.file_included("drivers/example/selected.c"))
         self.assertTrue(copied.file_included("drivers/example/replacement.c"))
         self.assertNotIn("drivers/copied-only", original.delegated)
+
+    def test_update_to_included_fragment_invalidates_cached_rules(self) -> None:
+        filter = self.make_filter(
+            {
+                "base": {
+                    "drivers/Makefile": "obj-y += example/\n",
+                    "drivers/example/Kbuild": (
+                        "obj-y += combined.o\n"
+                        "include $(src)/objects.mk\n"
+                    ),
+                    "drivers/example/objects.mk": "combined-y += before.o\n",
+                },
+                "next": {
+                    "drivers/Makefile": "obj-y += example/\n",
+                    "drivers/example/Kbuild": (
+                        "obj-y += combined.o\n"
+                        "include $(src)/objects.mk\n"
+                    ),
+                    "drivers/example/objects.mk": "combined-y += after.o\n",
+                },
+            }
+        )
+        self.assertTrue(filter.file_included("drivers/example/before.c"))
+
+        filter.update_filter_state(
+            make_diff("drivers/example/objects.mk", DiffFileType.DEFAULT),
+            "next",
+        )
+
+        self.assertFalse(filter.file_included("drivers/example/before.c"))
+        self.assertTrue(filter.file_included("drivers/example/after.c"))
 
     def test_updates_cached_makefile_contents(self) -> None:
         filter = self.make_filter(
@@ -384,7 +555,7 @@ class ConfigFilterTests(unittest.TestCase):
         self.assertTrue(filter.file_included("drivers/example/preferred.c"))
         self.assertFalse(filter.file_included("drivers/example/fallback.c"))
 
-    def test_new_makefile_replaces_delegation(self) -> None:
+    def test_new_makefile_keeps_parent_owned_direct_object(self) -> None:
         filter = self.make_filter(
             {
                 "base": {
@@ -407,7 +578,7 @@ class ConfigFilterTests(unittest.TestCase):
             "next",
         )
 
-        self.assertFalse(filter.file_included("drivers/example/direct.c"))
+        self.assertTrue(filter.file_included("drivers/example/direct.c"))
         self.assertTrue(filter.file_included("drivers/example/local.c"))
 
     def test_parent_update_disables_cached_child(self) -> None:
