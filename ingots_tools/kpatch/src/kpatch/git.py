@@ -447,55 +447,73 @@ class GitDb(GitStore):
         finally:
             connection.close()
 
+    @staticmethod
+    def _store_commits(
+        connection: sqlite3.Connection,
+        commits: Iterable[GitCommit],
+    ) -> int:
+        stored = 0
+        for commit in commits:
+            _ = connection.execute(
+                _UPSERT_COMMIT_SQL,
+                (
+                    commit.commit_id,
+                    commit.author_name,
+                    commit.author_email,
+                    commit.author_date.isoformat(),
+                    commit.committer_date.isoformat(),
+                    _timestamp(commit.author_date),
+                    _timestamp(commit.committer_date),
+                    commit.message,
+                    commit.is_merge,
+                ),
+            )
+            _ = connection.execute(
+                "DELETE FROM commit_parents WHERE commit_id = ?",
+                (commit.commit_id,),
+            )
+            _ = connection.executemany(
+                """
+                INSERT INTO commit_parents (
+                    commit_id,
+                    parent_index,
+                    parent_commit_id,
+                    diff
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    (
+                        commit.commit_id,
+                        parent_index,
+                        parent.commit_id,
+                        parent.diff_str,
+                    )
+                    for parent_index, parent in enumerate(commit.parents)
+                ),
+            )
+            stored += 1
+        return stored
+
     def store_commits(self, commits: Iterable[GitCommit]) -> int:
         """Insert an iterable of commits without materializing it in memory."""
 
-        stored = 0
         connection = self._connect()
         try:
             with connection:
-                for commit in commits:
-                    _ = connection.execute(
-                        _UPSERT_COMMIT_SQL,
-                        (
-                            commit.commit_id,
-                            commit.author_name,
-                            commit.author_email,
-                            commit.author_date.isoformat(),
-                            commit.committer_date.isoformat(),
-                            _timestamp(commit.author_date),
-                            _timestamp(commit.committer_date),
-                            commit.message,
-                            commit.is_merge,
-                        ),
-                    )
-                    _ = connection.execute(
-                        "DELETE FROM commit_parents WHERE commit_id = ?",
-                        (commit.commit_id,),
-                    )
-                    _ = connection.executemany(
-                        """
-                        INSERT INTO commit_parents (
-                            commit_id,
-                            parent_index,
-                            parent_commit_id,
-                            diff
-                        ) VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            (
-                                commit.commit_id,
-                                parent_index,
-                                parent.commit_id,
-                                parent.diff_str,
-                            )
-                            for parent_index, parent in enumerate(commit.parents)
-                        ),
-                    )
-                    stored += 1
+                return self._store_commits(connection, commits)
         finally:
             connection.close()
-        return stored
+
+    def replace_commits(self, commits: Iterable[GitCommit]) -> int:
+        """Atomically replace every commit currently stored in this database."""
+
+        connection = self._connect()
+        try:
+            with connection:
+                _ = connection.execute("DELETE FROM commits")
+                return self._store_commits(connection, commits)
+        finally:
+            connection.close()
 
     @override
     def commits_between(
@@ -644,10 +662,10 @@ def _path_for_db_name(db_name: str) -> Path:
     return db_folder / f"{db_name}.sqlite"
 
 def save_commits_to_db(db_name: str, commits: list[GitCommit]):
-    """Stores commits into a database in db folder."""
+    """Replace a database in the db folder with the supplied commits."""
 
     save_path = _path_for_db_name(db_name)
-    _ = GitDb(save_path).store_commits(commits)
+    _ = GitDb(save_path).replace_commits(commits)
     print(f"Saved {len(commits)} commits to sqlite database `{save_path}`")
 
 

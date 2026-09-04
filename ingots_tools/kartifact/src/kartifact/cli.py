@@ -64,10 +64,43 @@ def _run(ctx: typer.Context, operation: Callable[[], ReturnT]) -> ReturnT:
         raise typer.Exit(code=1) from exc
 
 
+def _format_type_help(*, creatable_only: bool = False) -> str:
+    types = sorted(
+        d.type_name
+        for d in default_registry
+        if not creatable_only or d.supports_create
+    )
+    label = "creatable" if creatable_only else "available"
+    return f"Registered artifact type ({label}: {', '.join(types)})."
+
+
+def _complete_artifact_types(incomplete: str = "") -> list[str]:
+    return [
+        d.type_name
+        for d in default_registry
+        if d.type_name.startswith(incomplete)
+    ]
+
+
+def _complete_creatable_types(incomplete: str = "") -> list[str]:
+    return [
+        d.type_name
+        for d in default_registry
+        if d.supports_create and d.type_name.startswith(incomplete)
+    ]
+
+
 @app.command("create")
 def create_template(
     ctx: typer.Context,
-    artifact_type: Annotated[str, typer.Argument(help="Registered artifact type.")],
+    artifact_type: Annotated[
+        str,
+        typer.Argument(
+            metavar="TYPE",
+            help=_format_type_help(creatable_only=True),
+            autocompletion=_complete_creatable_types,
+        ),
+    ],
     folder: Annotated[Path, typer.Argument(help="Missing or empty destination folder.")],
     name: Annotated[str, typer.Option("--name", help="Filesystem-safe artifact name.")],
 ) -> None:
@@ -132,7 +165,14 @@ def import_kernel(
 @app.command("list")
 def list_artifacts(
     ctx: typer.Context,
-    artifact_type: Annotated[str, typer.Argument(help="Registered artifact type.")],
+    artifact_type: Annotated[
+        str,
+        typer.Argument(
+            metavar="TYPE",
+            help=_format_type_help(creatable_only=False),
+            autocompletion=_complete_artifact_types,
+        ),
+    ],
     include_shadowed: Annotated[
         bool,
         typer.Option("--include-shadowed", help="Include superseded revisions."),

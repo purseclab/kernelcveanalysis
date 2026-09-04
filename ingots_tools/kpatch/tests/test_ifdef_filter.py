@@ -221,6 +221,20 @@ class IfdefFilterUnitTests(unittest.TestCase):
         self.assertIn(3, active)
         self.assertIn(4, active)
 
+    def test_unknown_condition_keeps_every_possible_branch(self) -> None:
+        code = (
+            "#if arch_specific_predicate()\n"
+            "int maybe_true;\n"
+            "#else\n"
+            "int maybe_false;\n"
+            "#endif\n"
+        )
+
+        active = get_active_lines(code, self.config)
+
+        self.assertIn(2, active)
+        self.assertIn(4, active)
+
 
 class DiffTouchesActiveCodeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -319,6 +333,59 @@ class DiffTouchesActiveCodeTests(unittest.TestCase):
             )
         )
 
+    def test_active_code_check_can_be_limited_to_one_diff_side(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "c0:drivers/foo.c": (
+                    "#ifdef CONFIG_DISABLED\n"
+                    "int value = 1;\n"
+                    "#endif\n"
+                ),
+                "c1:drivers/foo.c": "int value = 2;\n",
+            }
+        )
+        diff_file = DiffFile(
+            file="drivers/foo.c",
+            old_file=None,
+            old_mode=None,
+            new_mode=None,
+            change_type=DiffFileType.DEFAULT,
+            binary=False,
+            header_lines=[],
+            chunks=[
+                DiffChunk(
+                    header="@@ -2 +1 @@",
+                    lines=["-int value = 1;", "+int value = 2;"],
+                    old_start=2,
+                    old_count=1,
+                    new_start=1,
+                    new_count=1,
+                    section=None,
+                )
+            ],
+        )
+
+        self.assertFalse(
+            diff_file_touches_active_code(
+                repo,
+                "c0",
+                "c1",
+                diff_file,
+                self.config,
+                check_new=False,
+            )
+        )
+        self.assertTrue(
+            diff_file_touches_active_code(
+                repo,
+                "c0",
+                "c1",
+                diff_file,
+                self.config,
+                check_old=False,
+            )
+        )
+
     def test_filter_commits_excludes_disabled_ifdef_commit(self) -> None:
         makefile = "obj-y += foo.o\n"
         old_foo = (
@@ -387,6 +454,126 @@ class DiffTouchesActiveCodeTests(unittest.TestCase):
 
         res2 = filter_commits(repo, self.config, [c0, c2], show_progress=False)
         self.assertEqual([c.commit_id for c in res2], ["c2"])
+
+    def test_filter_commits_checks_deleted_source_against_parent_build(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "c0:drivers/Makefile": "obj-y += removed.o\n",
+                "c0:drivers/removed.c": "int removed;\n",
+            }
+        )
+        patch = (
+            "diff --git a/drivers/Makefile b/drivers/Makefile\n"
+            "deleted file mode 100644\n"
+            "--- a/drivers/Makefile\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-obj-y += removed.o\n"
+            "diff --git a/drivers/removed.c b/drivers/removed.c\n"
+            "deleted file mode 100644\n"
+            "--- a/drivers/removed.c\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-int removed;\n"
+        )
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        root = GitCommit("c0", "", "", date, date, (), "")
+        removal = GitCommit(
+            "c1",
+            "",
+            "",
+            date,
+            date,
+            (CommitParent("c0", patch),),
+            "",
+        )
+
+        result = filter_commits(
+            repo,
+            self.config,
+            [root, removal],
+            show_progress=False,
+        )
+
+        self.assertEqual([commit.commit_id for commit in result], ["c1"])
+
+    def test_filter_commits_retains_pure_rename_of_built_source(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "c0:drivers/Makefile": "obj-y += original.o\n",
+                "c0:drivers/original.c": "int value;\n",
+                "c1:drivers/Makefile": "obj-y += renamed.o\n",
+                "c1:drivers/renamed.c": "int value;\n",
+            }
+        )
+        patch = (
+            "diff --git a/drivers/Makefile b/drivers/Makefile\n"
+            "--- a/drivers/Makefile\n"
+            "+++ b/drivers/Makefile\n"
+            "@@ -1 +1 @@\n"
+            "-obj-y += original.o\n"
+            "+obj-y += renamed.o\n"
+            "diff --git a/drivers/original.c b/drivers/renamed.c\n"
+            "similarity index 100%\n"
+            "rename from drivers/original.c\n"
+            "rename to drivers/renamed.c\n"
+        )
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        root = GitCommit("c0", "", "", date, date, (), "")
+        rename = GitCommit(
+            "c1",
+            "",
+            "",
+            date,
+            date,
+            (CommitParent("c0", patch),),
+            "",
+        )
+
+        result = filter_commits(
+            repo,
+            self.config,
+            [root, rename],
+            show_progress=False,
+        )
+
+        self.assertEqual([commit.commit_id for commit in result], ["c1"])
+
+    def test_filter_commits_does_not_treat_copy_source_as_modified(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "drivers/Makefile": "obj-y += original.o\n",
+                "c0:drivers/original.c": "int value;\n",
+                "c1:drivers/original.c": "int value;\n",
+                "c1:drivers/copy.c": "int value;\n",
+            }
+        )
+        patch = (
+            "diff --git a/drivers/original.c b/drivers/copy.c\n"
+            "similarity index 100%\n"
+            "copy from drivers/original.c\n"
+            "copy to drivers/copy.c\n"
+        )
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        root = GitCommit("c0", "", "", date, date, (), "")
+        copy = GitCommit(
+            "c1",
+            "",
+            "",
+            date,
+            date,
+            (CommitParent("c0", patch),),
+            "",
+        )
+
+        result = filter_commits(
+            repo,
+            self.config,
+            [root, copy],
+            show_progress=False,
+        )
+
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":

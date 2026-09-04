@@ -5,9 +5,11 @@ from kexploit_utils import Architecture
 from kpatch.filter.config_filter import (
     ConfigFilter,
     ConfigValue,
+    KbuildDirectory,
     KbuildMakefile,
     KernelConfig,
 )
+from kpatch.filter.source_filter import SourceIncludeIndex
 from kpatch.diff import Diff, DiffFile, DiffFileType
 from kpatch.git import GitRepo
 
@@ -282,6 +284,93 @@ class KbuildMakefileTests(unittest.TestCase):
             ConfigValue.ENABLED,
         )
 
+    def test_if_function_can_force_a_builtin_object(self) -> None:
+        makefile = self.parse(
+            "obj-$(if $(CONFIG_DRIVER),y) += hooks.o",
+            "CONFIG_DRIVER=m",
+        )
+
+        self.assertEqual(
+            makefile.get("drivers/example/hooks.c"),
+            ConfigValue.ENABLED,
+        )
+
+    def test_filter_function_can_select_conditional_components(self) -> None:
+        makefile = self.parse(
+            """
+            obj-y += controller.o
+            controller-y := core.o
+            ifneq ($(filter y,$(CONFIG_HOST) $(CONFIG_DUAL_ROLE)),)
+\tcontroller-y += host.o
+            endif
+            ifneq ($(filter y,$(CONFIG_GADGET) $(CONFIG_DUAL_ROLE)),)
+\tcontroller-y += gadget.o
+            endif
+            """,
+            "CONFIG_DUAL_ROLE=y",
+        )
+
+        self.assertEqual(
+            makefile.get("drivers/example/host.c"), ConfigValue.ENABLED
+        )
+        self.assertEqual(
+            makefile.get("drivers/example/gadget.c"), ConfigValue.ENABLED
+        )
+
+    def test_explicit_and_pattern_dependencies_resolve_custom_objects(self) -> None:
+        folder = "arch/arm64/kvm/hyp/nvhe"
+        makefile = KbuildMakefile(
+            """
+            hyp-obj-y := timer-sr.o ../shared.o
+            hyp-obj := $(patsubst %.o,%.nvhe.o,$(hyp-obj-y))
+            obj-y := kvm_nvhe.o
+            $(obj)/kvm_nvhe.o: $(addprefix $(obj)/,$(hyp-obj)) FORCE
+            $(obj)/%.nvhe.o: $(src)/%.c FORCE
+            """,
+            KernelConfig(""),
+            folder,
+            variables={"obj": folder, "src": folder},
+        )
+
+        self.assertEqual(
+            makefile.get(f"{folder}/timer-sr.c"), ConfigValue.ENABLED
+        )
+        self.assertEqual(
+            makefile.get("arch/arm64/kvm/hyp/shared.c"),
+            ConfigValue.ENABLED,
+        )
+        self.assertIsNone(makefile.get(f"{folder}/kvm_nvhe.c"))
+
+    def test_non_build_prerequisites_preserve_implicit_object_source(self) -> None:
+        makefile = self.parse(
+            """
+            obj-y += direct.o
+            $(obj)/direct.o: FORCE include/linux/generated.h
+            """
+        )
+
+        self.assertEqual(
+            makefile.get("drivers/example/direct.c"), ConfigValue.ENABLED
+        )
+
+    def test_recipe_and_define_bodies_are_not_parsed_as_kbuild_rules(self) -> None:
+        makefile = self.parse(
+            """
+            obj-y += selected.o
+            define commands
+            obj-y += macro-only.o
+            endef
+            target:
+\tobj-y = recipe-only.o
+            """
+        )
+
+        self.assertEqual(
+            makefile.get("drivers/example/selected.c"), ConfigValue.ENABLED
+        )
+        self.assertIsNone(makefile.get("drivers/example/macro-only.c"))
+        self.assertIsNone(makefile.get("drivers/example/recipe-only.c"))
+
     def test_root_relative_expansion_is_not_joined_to_current_folder(self) -> None:
         makefile = KbuildMakefile(
             "obj-y += $(srctree)/shared/source.o",
@@ -320,6 +409,44 @@ class ConfigFilterTests(unittest.TestCase):
 
         self.assertTrue(filter.file_included("drivers/example/selected.c"))
         self.assertFalse(filter.file_included("drivers/example/excluded.c"))
+
+    def test_relative_makefile_include_is_resolved_from_its_folder(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "base": {
+                    "tools/testing/Makefile": (
+                        "top_srcdir := ../..\n"
+                        "include $(top_srcdir)/scripts/objects.mk\n"
+                        "obj-y += direct.o\n"
+                    ),
+                    "scripts/objects.mk": "obj-y += included.o\n",
+                }
+            }
+        )
+
+        rules = KbuildDirectory(
+            repo,
+            "base",
+            KernelConfig(""),
+            "tools/testing",
+        )
+
+        self.assertTrue(rules.includes("tools/testing/direct.c"))
+        self.assertTrue(rules.includes("tools/testing/included.c"))
+
+    def test_module_directory_mode_is_inherited_by_builtin_child_objects(self) -> None:
+        filter = self.make_filter(
+            {
+                "base": {
+                    "drivers/Makefile": "obj-m += example/\n",
+                    "drivers/example/Makefile": "obj-y += selected.o\n",
+                }
+            }
+        )
+
+        self.assertEqual(
+            filter.get("drivers/example/selected.c"), ConfigValue.MODULE
+        )
 
     def test_root_kbuild_selects_only_configured_architecture(self) -> None:
         filter = ConfigFilter(
@@ -363,6 +490,179 @@ class ConfigFilterTests(unittest.TestCase):
         )
 
         self.assertTrue(filter.file_included("arch/arm64/lib/insn.c"))
+
+    def test_root_global_lists_retain_generic_library(self) -> None:
+        filter = ConfigFilter(
+            MemoryGitRepo(
+                {
+                    "base": {
+                        "Kbuild": "obj-y += arch/$(SRCARCH)/ $(ARCH_LIB)\n",
+                        "Makefile": "libs-y := lib/\n",
+                        "arch/arm64/Kbuild": "obj-y += kernel/\n",
+                        "arch/arm64/Makefile": (
+                            "libs-y := arch/arm64/lib/ $(libs-y)\n"
+                        ),
+                        "lib/Makefile": "lib-y += generic.o\n",
+                    }
+                }
+            ),
+            KernelConfig("CONFIG_ARM64=y"),
+            "base",
+        )
+
+        self.assertTrue(filter.file_included("lib/generic.c"))
+
+    def test_source_and_header_includes_inherit_built_source_mode(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "base": {
+                    "drivers/Makefile": "obj-m += wrapper.o\n",
+                    "drivers/wrapper.c": (
+                        '#include "implementation.c"\n'
+                        '#include "local.h"\n'
+                    ),
+                    "drivers/local.h": "#include <linux/shared.h>\n",
+                    "drivers/implementation.c": "int implementation;\n",
+                    "include/linux/shared.h": "struct shared;\n",
+                }
+            }
+        )
+        index = SourceIncludeIndex(
+            "arm64",
+            (
+                "drivers/wrapper.c",
+                "drivers/implementation.c",
+                "drivers/local.h",
+                "include/linux/shared.h",
+            ),
+        )
+        index.add_line("drivers/wrapper.c", '#include "implementation.c"')
+        index.add_line("drivers/wrapper.c", '#include "local.h"')
+        index.add_line("drivers/local.h", "#include <linux/shared.h>")
+        filter = ConfigFilter(repo, KernelConfig("CONFIG_ARM64=y"), "base", index)
+
+        self.assertEqual(
+            filter.get("drivers/implementation.c"), ConfigValue.MODULE
+        )
+        self.assertEqual(filter.get("drivers/local.h"), ConfigValue.MODULE)
+        self.assertEqual(
+            filter.get("include/linux/shared.h"), ConfigValue.MODULE
+        )
+        self.assertTrue(filter.file_included("include/linux/shared.h"))
+
+    def test_parent_generated_target_enables_child_sources(self) -> None:
+        filter = self.make_filter(
+            {
+                "base": {
+                    "drivers/Makefile": (
+                        "obj-y += wrapper.o\n"
+                        "$(obj)/wrapper.o: $(obj)/child/image.so\n"
+                    ),
+                    "drivers/child/Makefile": (
+                        "objects := code.o\n"
+                        "objects := $(addprefix $(obj)/,$(objects))\n"
+                        "$(obj)/image.so: $(objects) $(obj)/image.lds\n"
+                        "$(objects): %.o: %.c FORCE\n"
+                    ),
+                    "drivers/child/code.c": "int code;\n",
+                    "drivers/child/image.lds.S": "SECTIONS {}\n",
+                }
+            }
+        )
+
+        self.assertTrue(filter.file_included("drivers/child/code.c"))
+        self.assertTrue(filter.file_included("drivers/child/image.lds.S"))
+
+    def test_generated_goal_crosses_intermediate_directory_without_makefile(self) -> None:
+        filter = self.make_filter(
+            {
+                "base": {
+                    "drivers/Makefile": (
+                        "obj-y += wrapper.o\n"
+                        "$(obj)/wrapper.o: "
+                        "$(obj)/intermediate/child/image.so\n"
+                    ),
+                    "drivers/intermediate/child/Makefile": (
+                        "$(obj)/image.so: $(obj)/code.o\n"
+                    ),
+                }
+            }
+        )
+
+        self.assertEqual(
+            filter.get("drivers/intermediate/child/code.c"),
+            ConfigValue.ENABLED,
+        )
+
+    def test_inactive_source_include_does_not_enable_file(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "base": {
+                    "drivers/Makefile": "obj-y += wrapper.o\n",
+                    "drivers/wrapper.c": (
+                        "#ifdef CONFIG_DISABLED\n"
+                        '#include "hidden.c"\n'
+                        "#endif\n"
+                    ),
+                    "drivers/hidden.c": "int hidden;\n",
+                }
+            }
+        )
+        index = SourceIncludeIndex(
+            "arm64", ("drivers/wrapper.c", "drivers/hidden.c")
+        )
+        index.add_line("drivers/wrapper.c", '#include "hidden.c"')
+        filter = ConfigFilter(repo, KernelConfig("CONFIG_ARM64=y"), "base", index)
+
+        self.assertFalse(filter.file_included("drivers/hidden.c"))
+
+    def test_source_change_invalidates_only_dependent_include_results(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "base": {
+                    "drivers/Makefile": "obj-y += wrapper.o\n",
+                    "drivers/wrapper.c": '#include "before.c"\n',
+                    "drivers/before.c": "int before;\n",
+                    "drivers/after.c": "int after;\n",
+                },
+                "next": {
+                    "drivers/Makefile": "obj-y += wrapper.o\n",
+                    "drivers/wrapper.c": '#include "after.c"\n',
+                    "drivers/before.c": "int before;\n",
+                    "drivers/after.c": "int after;\n",
+                },
+            }
+        )
+        index = SourceIncludeIndex(
+            "arm64",
+            ("drivers/wrapper.c", "drivers/before.c", "drivers/after.c"),
+        )
+        index.add_line("drivers/wrapper.c", '#include "before.c"')
+        index.add_line("drivers/wrapper.c", '#include "after.c"')
+        filter = ConfigFilter(repo, KernelConfig("CONFIG_ARM64=y"), "base", index)
+        self.assertTrue(filter.file_included("drivers/before.c"))
+        self.assertFalse(filter.file_included("drivers/after.c"))
+
+        filter.update_filter_state(
+            make_diff("drivers/wrapper.c", DiffFileType.DEFAULT),
+            "next",
+        )
+
+        self.assertFalse(filter.file_included("drivers/before.c"))
+        self.assertTrue(filter.file_included("drivers/after.c"))
+
+    def test_source_index_reports_transitive_dependent_targets(self) -> None:
+        index = SourceIncludeIndex(
+            "arm64",
+            ("wrapper.c", "middle.h", "target.h"),
+        )
+        index.add_line("wrapper.c", '#include "middle.h"')
+        index.add_line("middle.h", '#include "target.h"')
+
+        self.assertEqual(
+            index.dependent_targets(("wrapper.c",)),
+            frozenset(("middle.h", "target.h")),
+        )
 
     def test_kbuild_include_contributes_to_composite_object(self) -> None:
         filter = self.make_filter(

@@ -213,6 +213,33 @@ class GitDbTests(unittest.TestCase):
                 ).fetchall()
             self.assertEqual(parent_rows, [(0, "parent", "updated diff\n")])
 
+    def test_replace_commits_removes_rows_from_previous_filter_run(self) -> None:
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        stale = GitCommit("stale", "", "", date, date, (), "")
+        replacement = GitCommit(
+            "replacement",
+            "",
+            "",
+            date,
+            date,
+            (CommitParent("parent", "replacement diff\n"),),
+            "",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = GitDb(Path(directory) / "commits.sqlite")
+            db.store_commits([stale])
+
+            stored = db.replace_commits([replacement])
+
+            self.assertEqual(stored, 1)
+            self.assertEqual(db.commits_between(), [replacement])
+            with sqlite3.connect(db.db) as connection:
+                parent_rows = connection.execute(
+                    "SELECT commit_id FROM commit_parents"
+                ).fetchall()
+            self.assertEqual(parent_rows, [("replacement",)])
+
     def test_queries_require_timezone_aware_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             db = GitDb(Path(directory) / "commits.sqlite")

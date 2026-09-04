@@ -1,4 +1,5 @@
 import ast
+from collections.abc import Callable
 from dataclasses import dataclass
 import operator as op
 import re
@@ -96,12 +97,17 @@ def _eval_ast(node: ast.AST) -> int:
             left = right
         return 1
     elif isinstance(node, ast.Name):
-        return 1 if node.id == "True" else 0
+        if node.id in ("True", "False"):
+            return 1 if node.id == "True" else 0
+        raise ValueError(f"Unknown identifier: {node.id}")
     raise ValueError(f"Unsupported AST node: {type(node)}")
 
 
-def evaluate_ifdef(symbol: str, config: KernelConfig, is_module: bool = False) -> bool:
-    """Evaluate an `#ifdef <symbol>` directive."""
+def _symbol_defined(
+    symbol: str,
+    config: KernelConfig,
+    is_module: bool,
+) -> bool | None:
     symbol = symbol.strip()
     if symbol.endswith("_MODULE") and symbol[:-7].startswith("CONFIG_"):
         return config.get(symbol[:-7]) == ConfigValue.MODULE
@@ -123,39 +129,55 @@ def evaluate_ifdef(symbol: str, config: KernelConfig, is_module: bool = False) -
     if symbol == "MODULE":
         return is_module
 
-    # Conservative fallback for unknown non-config symbols (e.g. DEBUG, architecture symbols)
-    return True
+    architecture_symbols = {
+        "__i386__": "CONFIG_X86_32",
+        "__x86_64__": "CONFIG_X86_64",
+        "__arm__": "CONFIG_ARM",
+        "__aarch64__": "CONFIG_ARM64",
+    }
+    if symbol in architecture_symbols:
+        if not config.srcarch:
+            return None
+        return config.get(architecture_symbols[symbol]) is ConfigValue.ENABLED
+
+    return None
+
+
+def _evaluate_ifdef(
+    symbol: str,
+    config: KernelConfig,
+    is_module: bool = False,
+) -> bool | None:
+    return _symbol_defined(symbol, config, is_module)
+
+
+def evaluate_ifdef(symbol: str, config: KernelConfig, is_module: bool = False) -> bool:
+    """Evaluate ``#ifdef``, conservatively accepting unknown symbols."""
+
+    return _evaluate_ifdef(symbol, config, is_module) is not False
+
+
+def _evaluate_ifndef(
+    symbol: str,
+    config: KernelConfig,
+    is_module: bool = False,
+) -> bool | None:
+    result = _symbol_defined(symbol, config, is_module)
+    return None if result is None else not result
 
 
 def evaluate_ifndef(symbol: str, config: KernelConfig, is_module: bool = False) -> bool:
-    """Evaluate an `#ifndef <symbol>` directive."""
-    symbol = symbol.strip()
-    if symbol.endswith("_MODULE") and symbol[:-7].startswith("CONFIG_"):
-        return config.get(symbol[:-7]) != ConfigValue.MODULE
+    """Evaluate ``#ifndef``, conservatively accepting unknown symbols."""
 
-    if symbol.startswith("CONFIG_"):
-        val = config.get(symbol)
-        if val == ConfigValue.ENABLED:
-            return False
-        if val == ConfigValue.MODULE:
-            return True
-        raw = config.get_raw(symbol)
-        return not bool(raw)
-
-    if symbol == "__KERNEL__":
-        return False
-    if symbol in ("__cplusplus",):
-        return True
-    if symbol == "MODULE":
-        return not is_module
-
-    # For unknown non-config symbols (such as header guards _LINUX_FOO_H or __DEBUG):
-    # We cannot prove they are defined, so evaluate to True so the header/code is included.
-    return True
+    return _evaluate_ifndef(symbol, config, is_module) is not False
 
 
-def evaluate_condition(expr: str, config: KernelConfig, is_module: bool = False) -> bool:
-    """Evaluate a C preprocessor `#if` or `#elif` expression under a given `KernelConfig`."""
+def _evaluate_condition(
+    expr: str,
+    config: KernelConfig,
+    is_module: bool = False,
+) -> bool | None:
+    """Evaluate an expression, returning ``None`` when it is not understood."""
     expr = expr.strip()
     if not expr:
         return True
@@ -214,8 +236,10 @@ def evaluate_condition(expr: str, config: KernelConfig, is_module: bool = False)
             return "0"
         if sym == "MODULE":
             return "1" if is_module else "0"
-        # Unknown non-config symbol: treat conservatively as 1 (defined)
-        return "1"
+        known = _symbol_defined(sym, config, is_module)
+        if known is None:
+            return "__KPATCH_UNKNOWN_SYMBOL"
+        return "1" if known else "0"
 
     expr = re.sub(r"\bdefined\s*\(\s*([A-Za-z0-9_]+)\s*\)|\bdefined\s+([A-Za-z0-9_]+)", _repl_defined, expr)
 
@@ -250,13 +274,19 @@ def evaluate_condition(expr: str, config: KernelConfig, is_module: bool = False)
         parsed = ast.parse(expr, mode="eval")
         return bool(_eval_ast(parsed))
     except Exception:
-        # Conservative fallback: treat as True if expression could not be evaluated
-        return True
+        return None
+
+
+def evaluate_condition(expr: str, config: KernelConfig, is_module: bool = False) -> bool:
+    """Evaluate ``#if``, conservatively accepting unknown expressions."""
+
+    return _evaluate_condition(expr, config, is_module) is not False
 
 
 @dataclass(slots=True)
 class _Conditional:
     parent_active: bool
+    # True only when a previous branch is known to have been selected.
     branch_taken: bool
     active: bool
 
@@ -271,8 +301,12 @@ def get_active_lines(content: str, config: KernelConfig, is_module: bool = False
     if total_lines == 0:
         return set()
 
-    # Fast path: if no CONFIG_ and no explicit #if 0 / __cplusplus directives, all lines are active
-    if "CONFIG_" not in content and "#if 0" not in content and "__cplusplus" not in content:
+    # Most source files have no conditional directives at all.
+    if re.search(
+        r"^\s*#\s*(?:if|ifdef|ifndef|elif|else|endif)\b",
+        content,
+        re.MULTILINE,
+    ) is None:
         return set(range(1, total_lines + 1))
 
     active_lines: set[int] = set()
@@ -334,17 +368,17 @@ def get_active_lines(content: str, config: KernelConfig, is_module: bool = False
 
         if directive in ("if", "ifdef", "ifndef"):
             if directive == "ifdef":
-                result = evaluate_ifdef(rest, config, is_module) if parent_active else False
+                result = _evaluate_ifdef(rest, config, is_module) if parent_active else False
             elif directive == "ifndef":
-                result = evaluate_ifndef(rest, config, is_module) if parent_active else False
+                result = _evaluate_ifndef(rest, config, is_module) if parent_active else False
             else:  # if
-                result = evaluate_condition(rest, config, is_module) if parent_active else False
+                result = _evaluate_condition(rest, config, is_module) if parent_active else False
 
             stack.append(
                 _Conditional(
                     parent_active=parent_active,
-                    branch_taken=result,
-                    active=parent_active and result,
+                    branch_taken=result is True,
+                    active=parent_active and result is not False,
                 )
             )
             # Directive lines are active if their enclosing parent scope was active
@@ -355,12 +389,16 @@ def get_active_lines(content: str, config: KernelConfig, is_module: bool = False
             if stack:
                 frame = stack[-1]
                 if frame.parent_active and not frame.branch_taken:
-                    result = evaluate_condition(rest, config, is_module)
+                    result = _evaluate_condition(rest, config, is_module)
                 else:
                     result = False
 
-                frame.active = frame.parent_active and not frame.branch_taken and result
-                frame.branch_taken = frame.branch_taken or result
+                frame.active = (
+                    frame.parent_active
+                    and not frame.branch_taken
+                    and result is not False
+                )
+                frame.branch_taken = frame.branch_taken or result is True
                 if frame.parent_active:
                     active_lines.update(directive_line_numbers)
             elif parent_active:
@@ -394,16 +432,28 @@ def diff_file_touches_active_code(
     diff_file: DiffFile,
     config: KernelConfig,
     is_module: bool = False,
+    check_old: bool = True,
+    check_new: bool = True,
+    read_file: Callable[[str, str], bytes] | None = None,
 ) -> bool:
     """Determine whether any changed line in `diff_file` touches an active portion of the file."""
+    read = read_file or repo.read_file
     if not diff_file.chunks:
+        if diff_file.change_type is DiffFileType.NEW:
+            return check_new
+        if diff_file.change_type is DiffFileType.DELETE:
+            return check_old
+        if diff_file.change_type is DiffFileType.RENAME:
+            return check_old or check_new
+        if diff_file.change_type is DiffFileType.COPY:
+            return check_new
         return False
 
     # For non-C files, we treat any change as active if the file is built
     if not is_c_source_file(diff_file.file) and (
         diff_file.old_file is None or not is_c_source_file(diff_file.old_file)
     ):
-        return True
+        return check_old or check_new
 
     old_touched: list[int] = []
     new_touched: list[int] = []
@@ -423,10 +473,10 @@ def diff_file_touches_active_code(
                 new_line += 1
 
     if diff_file.change_type == DiffFileType.NEW:
-        if not new_touched:
+        if not check_new or not new_touched:
             return False
         try:
-            new_bytes = repo.read_file(current_commit, diff_file.file)
+            new_bytes = read(current_commit, diff_file.file)
             new_active = get_active_lines(
                 new_bytes.decode("utf-8", errors="replace"), config, is_module
             )
@@ -435,13 +485,13 @@ def diff_file_touches_active_code(
             return True
 
     if diff_file.change_type == DiffFileType.DELETE:
-        if not old_touched:
+        if not check_old or not old_touched:
             return False
         if parent_commit is None:
             return True
         try:
             old_path = diff_file.old_file or diff_file.file
-            old_bytes = repo.read_file(parent_commit, old_path)
+            old_bytes = read(parent_commit, old_path)
             old_active = get_active_lines(
                 old_bytes.decode("utf-8", errors="replace"), config, is_module
             )
@@ -453,9 +503,9 @@ def diff_file_touches_active_code(
     if not new_touched and not old_touched:
         return False
 
-    if new_touched:
+    if check_new and new_touched:
         try:
-            new_bytes = repo.read_file(current_commit, diff_file.file)
+            new_bytes = read(current_commit, diff_file.file)
             new_active = get_active_lines(
                 new_bytes.decode("utf-8", errors="replace"), config, is_module
             )
@@ -464,12 +514,12 @@ def diff_file_touches_active_code(
         except Exception:
             return True
 
-    if old_touched:
+    if check_old and old_touched:
         if parent_commit is None:
             return True
         try:
             old_path = diff_file.old_file or diff_file.file
-            old_bytes = repo.read_file(parent_commit, old_path)
+            old_bytes = read(parent_commit, old_path)
             old_active = get_active_lines(
                 old_bytes.decode("utf-8", errors="replace"), config, is_module
             )
