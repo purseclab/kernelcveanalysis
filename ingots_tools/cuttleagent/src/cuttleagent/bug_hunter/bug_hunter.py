@@ -4,7 +4,7 @@ from pathlib import Path
 from secrets import token_hex
 
 from kexploit_agent import KexploitAgent, Model
-from kexploit_agent.agents.kexploit_agent import DockerSandboxProvider, MountInfo
+from ksandbox import DockerSandboxProvider, MountInfo
 from kexploit_utils import DockerTag
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage
@@ -56,7 +56,7 @@ class BugHunter:
             "sandbox not started, can't create bug hunter agent"
         )
         return KexploitAgent(
-            model=self.model.create_model(),
+            model=self.model,
             tools=self.tools,
             system_prompt=BUG_HUNTER_PROMPT,
             name=name,

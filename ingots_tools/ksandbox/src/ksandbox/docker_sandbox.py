@@ -1129,6 +1129,7 @@ class DockerSandboxProvider:
                 user=f"{os.getuid()}:{os.getgid()}",
                 cap_drop=["ALL"],
                 security_opt=[],
+                extra_hosts={"host.docker.internal": "host-gateway"},
                 volumes=volumes,
                 working_dir="/",
             )

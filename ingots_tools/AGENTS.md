@@ -2,6 +2,18 @@
 
 **Ingots Tools** is a research toolkit designed for Linux and Android kernel exploit analysis, adaptation, and synthesis. It is a monorepo managed by `uv` containing several interconnected Python packages and tools.
 
+## Style Guide (IMPORTANT)
+
+*   **Avoid `Any`**: Always concretely type variables, arguments, and return values. Avoid `Any` unless interfacing with an un-typed third-party API where it is strictly unavoidable.
+*   **Avoid overly permissive types & union sprawl**: Do not write methods or functions that accept broad unions of disparate types (e.g. `str | Model`, `dict | Config | None`). Enforce precise, concrete types at call sites rather than writing polymorphic handlers that parse or convert arbitrary inputs internally.
+*   **Avoid unnecessary runtime inspection**: Avoid unneeded `isinstance`, `hasattr`, or type-checking logic in business code. Rely on static type annotations and concrete interfaces instead of defensive runtime branching.
+*   **Prefer typed data models over ad hoc structures**:
+    *   Use `@dataclass` types for internal structured data and Pydantic models for validated config, persistence, and API request/response objects.
+    *   Avoid passing around untyped `dict`s, raw JSON-shaped objects, or positional `tuple`s when the data has a stable schema.
+*   **Favor explicit field names and type annotations at module boundaries**:
+    *   New interfaces should make expected shapes obvious from the type signature rather than relying on implicit key conventions.
+*   **Incremental migration**: When replacing legacy loose structures, migrate incrementally toward typed wrappers instead of adding more untyped or loosely-typed call paths.
+
 ## Workspace Overview
 
 The project is organized as a `uv` workspace with the following members:
@@ -27,8 +39,8 @@ The project is organized as a `uv` workspace with the following members:
 *   **Purpose:** DeepAgents integration for exploit-analysis agents.
 *   **Key Features:**
     *   **Agent Integration:** Integration with `deepagents` for creating autonomous exploit analysis agents, including automatic system prompt injection of sandbox mount information.
-    *   **Sandbox Adapter:** Uses `ksandbox` as the reusable sandbox backend while preserving existing `kexploit_agent` sandbox imports.
-*   **Usage:** `uv run kagent view-log <history.jsons>`
+    *   **Sandbox Adapter:** Uses `ksandbox` as the reusable sandbox backend across agent harnesses.
+*   **Usage:** `uv run kagent view-log <history.jsons>`, `uv run kagent web` (live web viewer), or `uv run kagent codex "prompt"` (test codex agent)
 
 ### 3a. `ksandbox` (Tool: `ksandbox`)
 *   **Purpose:** Reusable Docker sandbox package for command and file operations through a Unix-socket daemon.
@@ -121,15 +133,6 @@ The project uses `uv` for dependency management.
 *   **Language:** Python 3.12+ (some modules require 3.13+).
 *   **Dependency Management:** `uv sync` to install dependencies for all workspace members.
 *   **Type Checking:** Use `uv run mypy <package_name>` from the workspace root while developing to check package-local type errors (for example, `uv run mypy kexploit`).
-
-## Style Guide
-
-*   Prefer typed data models over ad hoc structures.
-    *   Use `@dataclass` types for internal structured data and Pydantic models for validated config, persistence, and API request/response objects.
-    *   Avoid passing around untyped `dict`s, raw JSON-shaped objects, or positional `tuple`s when the data has a stable schema.
-*   Favor explicit field names and type annotations at module boundaries.
-    *   New interfaces should make expected shapes obvious from the type signature rather than relying on implicit key conventions.
-*   When replacing legacy loose structures, prefer incremental migration toward typed wrappers instead of adding more untyped call paths.
 
 ## Directory Structure
 
