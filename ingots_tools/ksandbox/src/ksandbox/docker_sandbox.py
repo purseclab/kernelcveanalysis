@@ -11,10 +11,10 @@ import tempfile
 import time
 import uuid
 from collections import deque
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Optional, Self, Sequence
+from typing import Iterator, Literal, Optional, Self, Sequence
 
 import docker  # type: ignore
 from kexploit_utils import ksandbox_dir # type: ignore[attr-defined]
@@ -620,6 +620,90 @@ def _spawn_request(
     return SpawnRequest(argv=values, cwd=cwd, env=env)
 
 
+class ProcessStdinWriter:
+    """Thread-safe writer adapting stdin for SandboxProcess."""
+
+    def __init__(self, process: "SandboxProcess") -> None:
+        self._process = process
+        self._lock = threading.Lock()
+
+    def write(self, data: str | bytes) -> int:
+        encoded = data.encode("utf-8") if isinstance(data, str) else data
+        with self._lock:
+            self._process.stdin_write(encoded)
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        with suppress(Exception):
+            with self._lock:
+                self._process.close_stdin()
+
+
+class ProcessStreamReader:
+    """Buffered stream reader adapting stdout or stderr for SandboxProcess."""
+
+    def __init__(
+        self,
+        process: "SandboxProcess",
+        stream_name: Literal["stdout", "stderr"],
+    ) -> None:
+        self._process = process
+        self._stream_name = stream_name
+        self._buffer = bytearray()
+        self._closed = False
+
+    def readline(self) -> str:
+        while not self._closed:
+            newline_idx = self._buffer.find(b"\n")
+            if newline_idx != -1:
+                line = bytes(self._buffer[: newline_idx + 1])
+                del self._buffer[: newline_idx + 1]
+                return line.decode("utf-8", errors="replace")
+
+            try:
+                if self._stream_name == "stdout":
+                    chunk = self._process.read_stdout(timeout_secs=0.2)
+                else:
+                    chunk = self._process.read_stderr(timeout_secs=0.2)
+            except TimeoutError:
+                continue
+            except (RuntimeError, OSError):
+                break
+
+            if not chunk:
+                self._closed = True
+                break
+            self._buffer.extend(chunk)
+
+        if self._buffer:
+            remaining = bytes(self._buffer)
+            self._buffer.clear()
+            return remaining.decode("utf-8", errors="replace")
+        return ""
+
+    def read(self) -> str:
+        parts: list[str] = []
+        while True:
+            line = self.readline()
+            if not line:
+                break
+            parts.append(line)
+        return "".join(parts)
+
+    def __iter__(self) -> Iterator[str]:
+        while True:
+            line = self.readline()
+            if not line:
+                break
+            yield line
+
+    def close(self) -> None:
+        self._closed = True
+
+
 class SandboxProcess:
     """A single interactive command connected to the sandbox daemon."""
 
@@ -638,6 +722,9 @@ class SandboxProcess:
         ] = {}
         self._closed = False
         self._reader = conn.makefile("rb")
+        self.stdin = ProcessStdinWriter(self)
+        self.stdout = ProcessStreamReader(self, "stdout")
+        self.stderr = ProcessStreamReader(self, "stderr")
         self._reader_thread = threading.Thread(
             target=self._read_events,
             name="ksandbox-process-reader",
@@ -776,7 +863,12 @@ class SandboxProcess:
             self._stderr.clear()
             return data
 
+    def terminate(self) -> bool:
+        return self.kill()
+
     def kill(self, *, timeout_secs: float | None = None) -> bool:
+        self.stdout.close()
+        self.stderr.close()
         with self._condition:
             if self._exit_code is not None:
                 return False
@@ -792,6 +884,13 @@ class SandboxProcess:
         assert isinstance(response, KillResponse)
         return response.delivered
 
+    def poll(self) -> int | None:
+        return self._exit_code
+
+    @property
+    def returncode(self) -> int | None:
+        return self._exit_code
+
     def wait_finish(self, *, timeout_secs: float | None = None) -> int:
         self._wait_for(lambda: self._exit_code is not None, timeout_secs)
         assert self._exit_code is not None
@@ -799,9 +898,21 @@ class SandboxProcess:
         self.close()
         return exit_code
 
-    wait = wait_finish
+    def wait(
+        self, timeout: float | None = None, *, timeout_secs: float | None = None
+    ) -> int:
+        effective_timeout = timeout if timeout is not None else timeout_secs
+        if self._exit_code is not None:
+            return self._exit_code
+        try:
+            return self.wait_finish(timeout_secs=effective_timeout)
+        except Exception:
+            return self._exit_code if self._exit_code is not None else 0
 
     def close(self) -> None:
+        self.stdin.close()
+        self.stdout.close()
+        self.stderr.close()
         with self._send_lock:
             if self._closed:
                 return

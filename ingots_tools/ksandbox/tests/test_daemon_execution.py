@@ -111,6 +111,43 @@ class DaemonExecutionTests(unittest.TestCase):
         finally:
             process.close()
 
+    def test_interactive_process_stream_adapters_and_lifecycle(self) -> None:
+        client = SandboxDaemonClient(self.socket_path, default_timeout_secs=2)
+        process = client.exec(
+            [
+                sys.executable,
+                "-c",
+                "import sys\nfor line in sys.stdin:\n    sys.stdout.write('out:' + line)\n    sys.stdout.flush()\n    sys.stderr.write('err:' + line)\n    sys.stderr.flush()\n",
+            ]
+        )
+        try:
+            self.assertIsNone(process.poll())
+            self.assertIsNone(process.returncode)
+            process.stdin.write("line1\n")
+            process.stdin.write("line2\n")
+            process.stdin.flush()
+            process.stdin.close()
+            self.assertEqual(process.stdout.readline(), "out:line1\n")
+            self.assertEqual(process.stderr.readline(), "err:line1\n")
+            self.assertEqual(process.stdout.readline(), "out:line2\n")
+            self.assertEqual(process.stderr.readline(), "err:line2\n")
+            self.assertEqual(process.wait(), 0)
+            self.assertEqual(process.poll(), 0)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            process.close()
+
+    def test_interactive_process_terminate(self) -> None:
+        client = SandboxDaemonClient(self.socket_path, default_timeout_secs=1)
+        process = client.exec([sys.executable, "-c", "import time; time.sleep(10)"])
+        try:
+            self.assertTrue(process.terminate())
+            self.assertEqual(process.wait(), 137)
+            self.assertEqual(process.poll(), 137)
+            self.assertEqual(process.returncode, 137)
+        finally:
+            process.close()
+
     def test_shell_execution_is_explicit(self) -> None:
         client = SandboxDaemonClient(self.socket_path)
         result = client.exec_sync("printf shell-ok", shell=True)
