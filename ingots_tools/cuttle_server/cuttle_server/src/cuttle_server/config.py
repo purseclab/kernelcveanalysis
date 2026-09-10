@@ -12,15 +12,13 @@ class ConfigError(ValueError):
     pass
 
 
-DEFAULT_INSTANCE_RUNTIME_ROOT = Path("/tmp/cvd")
-
-
 class ServerConfigFile(BaseModel):
     server_host: str = Field(default="127.0.0.1", min_length=1)
     server_port: int = Field(default=8000, ge=1, le=65535)
     auth_token: str = Field(min_length=1)
     admin_user_id: str = Field(min_length=1)
     database_path: Path
+    instance_runtime_root: Path = Field(default=Path("/tmp/cvd"))
     instance_timeout_sec: int = Field(default=600, ge=0)
     cvd_start_timeout_sec: int = Field(default=120, ge=1)
     reconcile_interval_sec: int = Field(default=30, ge=1)
@@ -121,7 +119,7 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
         auth_token=main_config.auth_token,
         admin_user_id=main_config.admin_user_id,
         database_path=main_config.database_path,
-        instance_runtime_root=DEFAULT_INSTANCE_RUNTIME_ROOT,
+        instance_runtime_root=main_config.instance_runtime_root,
         instance_timeout_sec=(
             None
             if main_config.instance_timeout_sec == 0
