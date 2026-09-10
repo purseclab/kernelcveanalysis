@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import shutil
+import socket
 import sys
 import tempfile
 import time
@@ -9,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from ksandbox.daemon_protocol import SOCKET_NAME
-from ksandbox.docker_sandbox import SandboxDaemonClient
+from ksandbox.docker_sandbox import SandboxDaemonClient, _PortForwarder
 
 
 class DaemonExecutionTests(unittest.TestCase):
@@ -233,6 +234,123 @@ class DaemonExecutionTests(unittest.TestCase):
         self.assertIn(str(txt_file), glob_paths)
         self.assertIn(str(hidden_file), glob_paths)
 
+    def test_port_forwarding_lifecycle(self) -> None:
+        import threading
+
+        client = SandboxDaemonClient(self.socket_path)
+        runtime_dir = Path(self.tempdir.name)
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        host_port = server.getsockname()[1]
+
+        def handle_server() -> None:
+            try:
+                conn, _ = server.accept()
+                data = conn.recv(1024)
+                conn.sendall(b"echo:" + data)
+                conn.close()
+            except Exception:
+                pass
+            finally:
+                server.close()
+
+        server_thread = threading.Thread(target=handle_server, daemon=True)
+        server_thread.start()
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            guest_port = probe.getsockname()[1]
+
+        socket_name = "test_forward.sock"
+        forwarder = _PortForwarder(runtime_dir / socket_name, host_port=host_port)
+        forwarder.start()
+        try:
+            client.forward_port(guest_port, socket_name)
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_client:
+                test_client.settimeout(3.0)
+                test_client.connect(("127.0.0.1", guest_port))
+                test_client.sendall(b"ping")
+                response = test_client.recv(1024)
+                self.assertEqual(response, b"echo:ping")
+
+            client.unforward_port(guest_port)
+            with self.assertRaises(RuntimeError):
+                client.unforward_port(guest_port)
+        finally:
+            forwarder.stop()
+            server_thread.join(timeout=1.0)
+
+    def test_port_forwarding_custom_loopback_addr(self) -> None:
+        import threading
+
+        client = SandboxDaemonClient(self.socket_path)
+        runtime_dir = Path(self.tempdir.name)
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        host_port = server.getsockname()[1]
+
+        def handle_server() -> None:
+            try:
+                conn, _ = server.accept()
+                data = conn.recv(1024)
+                conn.sendall(b"echo2:" + data)
+                conn.close()
+            except Exception:
+                pass
+            finally:
+                server.close()
+
+        server_thread = threading.Thread(target=handle_server, daemon=True)
+        server_thread.start()
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.2", 0))
+            guest_port = probe.getsockname()[1]
+
+        socket_name = "test_forward_loopback.sock"
+        forwarder = _PortForwarder(runtime_dir / socket_name, host_port=host_port)
+        forwarder.start()
+        try:
+            client.forward_port(guest_port, socket_name, guest_addr="127.0.0.2")
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as test_client:
+                test_client.settimeout(3.0)
+                test_client.connect(("127.0.0.2", guest_port))
+                test_client.sendall(b"ping2")
+                response = test_client.recv(1024)
+                self.assertEqual(response, b"echo2:ping2")
+
+            client.unforward_port(guest_port, guest_addr="127.0.0.2")
+        finally:
+            forwarder.stop()
+            server_thread.join(timeout=1.0)
+
+    def test_port_forwarding_rejects_non_loopback(self) -> None:
+        client = SandboxDaemonClient(self.socket_path)
+        with self.assertRaises(RuntimeError) as ctx:
+            client.forward_port(8080, "fake.sock", guest_addr="192.168.1.1")
+        self.assertIn("must be a loopback address", str(ctx.exception))
+
+    def test_port_forwarding_duplicate_raises(self) -> None:
+        client = SandboxDaemonClient(self.socket_path)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            guest_port = probe.getsockname()[1]
+
+        client.forward_port(guest_port, "dup.sock")
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                client.forward_port(guest_port, "dup.sock")
+            self.assertIn("already being forwarded", str(ctx.exception))
+        finally:
+            client.unforward_port(guest_port)
+
 
 if __name__ == "__main__":
     unittest.main()
+

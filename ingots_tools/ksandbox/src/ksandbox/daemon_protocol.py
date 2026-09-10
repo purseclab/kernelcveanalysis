@@ -205,6 +205,31 @@ class GlobResponse(ProtocolMessage):
     error: str | None = None
 
 
+class ForwardPortRequest(ProtocolMessage):
+    type: Literal["forward_port"] = "forward_port"
+    guest_port: int
+    guest_addr: str = "127.0.0.1"
+    socket_name: str
+
+
+class ForwardPortResponse(ProtocolMessage):
+    type: Literal["forward_port_response"] = "forward_port_response"
+    status: Literal["ok", "error"]
+    error: str | None = None
+
+
+class UnforwardPortRequest(ProtocolMessage):
+    type: Literal["unforward_port"] = "unforward_port"
+    guest_port: int
+    guest_addr: str = "127.0.0.1"
+
+
+class UnforwardPortResponse(ProtocolMessage):
+    type: Literal["unforward_port_response"] = "unforward_port_response"
+    status: Literal["ok", "error"]
+    error: str | None = None
+
+
 DaemonRequest = Annotated[
     HealthRequest
     | SpawnRequest
@@ -216,7 +241,9 @@ DaemonRequest = Annotated[
     | EditFileRequest
     | ListDirectoryRequest
     | GrepRequest
-    | GlobRequest,
+    | GlobRequest
+    | ForwardPortRequest
+    | UnforwardPortRequest,
     Field(discriminator="type"),
 ]
 DaemonResponse = Annotated[
@@ -233,7 +260,9 @@ DaemonResponse = Annotated[
     | EditFileResponse
     | ListDirectoryResponse
     | GrepResponse
-    | GlobResponse,
+    | GlobResponse
+    | ForwardPortResponse
+    | UnforwardPortResponse,
     Field(discriminator="type"),
 ]
 

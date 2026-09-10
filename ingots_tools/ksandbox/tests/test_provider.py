@@ -39,7 +39,7 @@ class DockerSandboxProviderTests(unittest.TestCase):
         self.client.containers.create.return_value = container
 
         with tempfile.TemporaryDirectory() as tempdir, patch(
-            "ksandbox.docker_sandbox._persistent_runtime_root", return_value=Path(tempdir)
+            "ksandbox.docker_sandbox._runtime_root", return_value=Path(tempdir)
         ), patch(
             "ksandbox.docker_sandbox.ensure_tool_bundle",
             return_value=Path(tempdir) / "shared-tools",
@@ -95,7 +95,7 @@ class DockerSandboxProviderTests(unittest.TestCase):
         self.client.containers.get.return_value = container
 
         with tempfile.TemporaryDirectory() as tempdir, patch(
-            "ksandbox.docker_sandbox._persistent_runtime_root", return_value=Path(tempdir)
+            "ksandbox.docker_sandbox._runtime_root", return_value=Path(tempdir)
         ), patch(
             "ksandbox.docker_sandbox.ensure_tool_bundle",
             return_value=Path(tempdir) / "shared-tools",

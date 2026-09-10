@@ -30,6 +30,8 @@ from .daemon_protocol import (
     ErrorEvent,
     ExitEvent,
     FileOperationError,
+    ForwardPortRequest,
+    ForwardPortResponse,
     GlobRequest,
     GlobResponse,
     GrepRequest,
@@ -47,6 +49,8 @@ from .daemon_protocol import (
     SpawnRequest,
     StdinRequest,
     StdinResponse,
+    UnforwardPortRequest,
+    UnforwardPortResponse,
     WriteFileRequest,
     WriteFileResponse,
     decode_chunk,
@@ -63,12 +67,21 @@ HOST_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "ksandbox"
 DEFAULT_TIMEOUT_SECS = 60
 HEALTHCHECK_TIMEOUT_SECS = 10.0
 DAEMON_IN_CONTAINER = f"{TOOLS_DIR_IN_CONTAINER}/ksandbox-daemon"
+DEFAULT_EXTRA_HOSTS: dict[str, str] = {
+    "host.docker.internal": "host-gateway",
+    "api.openai.com": "127.0.0.1",
+    "api.anthropic.com": "127.0.0.1",
+    "generativelanguage.googleapis.com": "127.0.0.1",
+}
 
 logger = get_logger(__name__)
 
 
-def _persistent_runtime_root() -> Path:
-    return ksandbox_dir() / "runtimes"
+def _runtime_root() -> Path:
+    return HOST_RUNTIME_ROOT / "runtimes"
+
+
+_persistent_runtime_root = _runtime_root
 
 
 @dataclass
@@ -221,6 +234,7 @@ class _StoredSandbox:
     name: str
     mounts: list[MountInfo]
     mount_hashes: list[bytes]
+    allow_internet: bool = True
 
 
 class _SandboxStore:
@@ -259,7 +273,8 @@ class _SandboxStore:
                     runtime_dir TEXT NOT NULL,
                     image TEXT NOT NULL,
                     created TEXT NOT NULL,
-                    name TEXT NOT NULL
+                    name TEXT NOT NULL,
+                    allow_internet INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS sandbox_mounts (
                     docker_id TEXT NOT NULL REFERENCES sandboxes(docker_id) ON DELETE CASCADE,
@@ -273,11 +288,18 @@ class _SandboxStore:
                 );
                 """
             )
+            cursor = connection.execute("PRAGMA table_info(sandboxes)")
+            columns = {row["name"] for row in cursor.fetchall()}
+            if "allow_internet" not in columns:
+                connection.execute(
+                    "ALTER TABLE sandboxes ADD COLUMN allow_internet INTEGER NOT NULL DEFAULT 1"
+                )
 
     @staticmethod
     def _from_rows(
         sandbox_row: sqlite3.Row, mount_rows: list[sqlite3.Row]
     ) -> _StoredSandbox:
+        allow_internet = bool(sandbox_row["allow_internet"]) if "allow_internet" in sandbox_row.keys() else True
         return _StoredSandbox(
             id=sandbox_row["docker_id"],
             state=sandbox_row["state"],
@@ -285,6 +307,7 @@ class _SandboxStore:
             image=sandbox_row["image"],
             created=sandbox_row["created"],
             name=sandbox_row["name"],
+            allow_internet=allow_internet,
             mounts=[
                 MountInfo(
                     src_folder=Path(row["src_folder"]),
@@ -331,8 +354,8 @@ class _SandboxStore:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
-                INSERT INTO sandboxes (docker_id, state, runtime_dir, image, created, name)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO sandboxes (docker_id, state, runtime_dir, image, created, name, allow_internet)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sandbox.id,
@@ -341,6 +364,7 @@ class _SandboxStore:
                     sandbox.image,
                     sandbox.created,
                     sandbox.name,
+                    int(sandbox.allow_internet),
                 ),
             )
             connection.executemany(
@@ -415,6 +439,103 @@ class _SandboxStore:
                     (sandbox_id,),
                 )
             return result.rowcount == 1
+
+
+class _PortForwarder:
+    """Binds a Unix domain socket on the host and proxies bidirectional TCP traffic to a target host/port."""
+
+    def __init__(
+        self,
+        socket_path: Path,
+        host_port: int,
+        target_host: str = "127.0.0.1",
+    ) -> None:
+        self.socket_path = socket_path
+        self.host_port = host_port
+        self.target_host = target_host
+        self._server: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._active_sockets: set[socket.socket] = set()
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        if self.socket_path.exists():
+            self.socket_path.unlink()
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(self.socket_path))
+        os.chmod(self.socket_path, 0o666)
+        self._server.listen(128)
+        self._server.settimeout(0.5)
+
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+
+    def _accept_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                assert self._server is not None
+                client_sock, _ = self._server.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            threading.Thread(target=self._pipe, args=(client_sock,), daemon=True).start()
+
+    def _pipe(self, client_sock: socket.socket) -> None:
+        try:
+            target_sock = socket.create_connection((self.target_host, self.host_port), timeout=10.0)
+            target_sock.settimeout(None)
+        except Exception:
+            client_sock.close()
+            return
+
+        with self._lock:
+            self._active_sockets.add(client_sock)
+            self._active_sockets.add(target_sock)
+
+        def forward(src: socket.socket, dst: socket.socket) -> None:
+            try:
+                while not self._stop_event.is_set():
+                    data = src.recv(65536)
+                    if not data:
+                        break
+                    dst.sendall(data)
+            except Exception:
+                pass
+            finally:
+                with suppress(Exception):
+                    dst.shutdown(socket.SHUT_WR)
+
+        t1 = threading.Thread(target=forward, args=(client_sock, target_sock), daemon=True)
+        t2 = threading.Thread(target=forward, args=(target_sock, client_sock), daemon=True)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        with suppress(Exception):
+            client_sock.close()
+        with suppress(Exception):
+            target_sock.close()
+        with self._lock:
+            self._active_sockets.discard(client_sock)
+            self._active_sockets.discard(target_sock)
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._server:
+            with suppress(Exception):
+                self._server.close()
+        with self._lock:
+            for sock in self._active_sockets:
+                with suppress(Exception):
+                    sock.close()
+            self._active_sockets.clear()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+        with suppress(Exception):
+            if self.socket_path.exists():
+                self.socket_path.unlink()
 
 
 class SandboxDaemonClient:
@@ -599,6 +720,44 @@ class SandboxDaemonClient:
             timed_out=response.timed_out,
             error=response.error,
         )
+
+    def forward_port(
+        self,
+        guest_port: int,
+        socket_name: str,
+        *,
+        guest_addr: str = "127.0.0.1",
+    ) -> None:
+        response = self._round_trip(
+            ForwardPortRequest(
+                guest_port=guest_port,
+                guest_addr=guest_addr,
+                socket_name=socket_name,
+            ),
+            ForwardPortResponse,
+        )
+        if response.status != "ok":
+            raise RuntimeError(
+                response.error or f"Failed to forward port {guest_addr}:{guest_port}"
+            )
+
+    def unforward_port(
+        self,
+        guest_port: int,
+        *,
+        guest_addr: str = "127.0.0.1",
+    ) -> None:
+        response = self._round_trip(
+            UnforwardPortRequest(
+                guest_port=guest_port,
+                guest_addr=guest_addr,
+            ),
+            UnforwardPortResponse,
+        )
+        if response.status != "ok":
+            raise RuntimeError(
+                response.error or f"Failed to unforward port {guest_addr}:{guest_port}"
+            )
 
 
 def _spawn_request(
@@ -955,6 +1114,8 @@ class DockerSandbox:
         self.created = stored.created
         self.name = stored.name
         self.status = stored.state
+        self.allow_internet = stored.allow_internet
+        self._port_forwarders: dict[tuple[str, int], _PortForwarder] = {}
         if container is not None:
             container_status = getattr(container, "status", None)
             if isinstance(container_status, str):
@@ -990,6 +1151,7 @@ class DockerSandbox:
 
         container = self._container()
         try:
+            self.runtime_dir.mkdir(parents=True, exist_ok=True)
             container.start()
             self._provider._wait_for_daemon(self.runtime_dir / SOCKET_NAME)
         except Exception:
@@ -1018,6 +1180,10 @@ class DockerSandbox:
             raise RuntimeError(
                 f"sandbox {self.id} was not started by this DockerSandbox instance"
             )
+
+        for forwarder in list(self._port_forwarders.values()):
+            forwarder.stop()
+        self._port_forwarders.clear()
 
         self._container().stop()
         hash_error: Exception | None = None
@@ -1109,6 +1275,86 @@ class DockerSandbox:
     def glob(self, pattern: str, path: str = "/") -> GlobResult:
         return self.daemon_client.glob(pattern, path)
 
+    def forward_port(
+        self,
+        guest_port: int,
+        host_port: int,
+        *,
+        guest_addr: str = "127.0.0.1",
+        target_host: str = "127.0.0.1",
+    ) -> None:
+        if not self.running:
+            raise RuntimeError("sandbox is not running")
+        key = (guest_addr, guest_port)
+        if key in self._port_forwarders:
+            raise RuntimeError(f"port {guest_addr}:{guest_port} is already forwarded")
+
+        socket_name = f"port_{guest_addr}_{guest_port}.sock"
+        socket_path = self.runtime_dir / socket_name
+
+        forwarder = _PortForwarder(socket_path, host_port=host_port, target_host=target_host)
+        try:
+            forwarder.start()
+            self.daemon_client.forward_port(guest_port, socket_name, guest_addr=guest_addr)
+            self._port_forwarders[key] = forwarder
+        except Exception:
+            forwarder.stop()
+            raise
+
+    def unforward_port(
+        self,
+        guest_port: int,
+        *,
+        guest_addr: str = "127.0.0.1",
+    ) -> None:
+        key = (guest_addr, guest_port)
+        forwarder = self._port_forwarders.pop(key, None)
+        try:
+            if self.running:
+                self.daemon_client.unforward_port(guest_port, guest_addr=guest_addr)
+        finally:
+            if forwarder is not None:
+                forwarder.stop()
+
+    @contextmanager
+    def forward_port_ctx(
+        self,
+        guest_port: int,
+        host_port: int,
+        *,
+        guest_addr: str = "127.0.0.1",
+        target_host: str = "127.0.0.1",
+    ) -> Iterator[None]:
+        self.forward_port(
+            guest_port=guest_port,
+            host_port=host_port,
+            guest_addr=guest_addr,
+            target_host=target_host,
+        )
+        try:
+            yield
+        finally:
+            with suppress(Exception):
+                self.unforward_port(guest_port=guest_port, guest_addr=guest_addr)
+
+    @contextmanager
+    def expose_port(
+        self,
+        host_port: int,
+        *,
+        guest_port: int | None = None,
+        guest_addr: str = "127.0.0.1",
+        target_host: str = "127.0.0.1",
+    ) -> Iterator[tuple[str, int]]:
+        assigned_guest_port = host_port if guest_port is None else guest_port
+        with self.forward_port_ctx(
+            guest_port=assigned_guest_port,
+            host_port=host_port,
+            guest_addr=guest_addr,
+            target_host=target_host,
+        ):
+            yield (guest_addr, assigned_guest_port)
+
 
 _PROVIDER = None
 
@@ -1155,7 +1401,7 @@ class DockerSandboxProvider:
         return sandboxes
 
     def _new_runtime_dir(self) -> Path:
-        runtime_root = _persistent_runtime_root()
+        runtime_root = _runtime_root()
         runtime_root.mkdir(parents=True, exist_ok=True)
         runtime_dir = runtime_root / str(uuid.uuid4())
         runtime_dir.mkdir(parents=True, exist_ok=False)
@@ -1179,7 +1425,13 @@ class DockerSandboxProvider:
         raise RuntimeError(f"sandbox daemon failed to start: {last_error}")
 
     def create(
-        self, image_tag: str, mounts: Optional[Sequence[MountInfo]] = None, *, name: Optional[str] = None
+        self,
+        image_tag: str,
+        mounts: Optional[Sequence[MountInfo]] = None,
+        *,
+        name: Optional[str] = None,
+        allow_internet: bool = True,
+        extra_hosts: Optional[dict[str, str]] = None,
     ) -> DockerSandbox:
         requested_mounts = list(mounts or [])
         if len({mount.name for mount in requested_mounts}) != len(requested_mounts):
@@ -1222,6 +1474,14 @@ class DockerSandboxProvider:
             "mode": "ro",
         }
 
+        extra_container_kwargs: dict[str, str] = {}
+        if not allow_internet:
+            extra_container_kwargs["network_mode"] = "none"
+
+        extra_hosts_map = dict(DEFAULT_EXTRA_HOSTS)
+        if extra_hosts:
+            extra_hosts_map.update(extra_hosts)
+
         container = None
         try:
             container = self.client.containers.create(
@@ -1240,9 +1500,10 @@ class DockerSandboxProvider:
                 user=f"{os.getuid()}:{os.getgid()}",
                 cap_drop=["ALL"],
                 security_opt=[],
-                extra_hosts={"host.docker.internal": "host-gateway"},
+                extra_hosts=extra_hosts_map,
                 volumes=volumes,
                 working_dir="/",
+                **extra_container_kwargs,
             )
             attrs = container.attrs if isinstance(container.attrs, dict) else {}
             container_name = container.name if isinstance(container.name, str) else (name or "")
@@ -1255,6 +1516,7 @@ class DockerSandboxProvider:
                 name=container_name,
                 mounts=mounts,
                 mount_hashes=mount_hashes,
+                allow_internet=allow_internet,
             )
             self._store.create(stored)
         except Exception:
@@ -1267,9 +1529,21 @@ class DockerSandboxProvider:
 
     @contextmanager
     def create_and_run(
-        self, image_tag: str, mounts: Optional[Sequence[MountInfo]] = None, *, name: Optional[str] = None
+        self,
+        image_tag: str,
+        mounts: Optional[Sequence[MountInfo]] = None,
+        *,
+        name: Optional[str] = None,
+        allow_internet: bool = True,
+        extra_hosts: Optional[dict[str, str]] = None,
     ) -> Iterator[DockerSandbox]:
-        sandbox = self.create(image_tag, mounts, name=name)
+        sandbox = self.create(
+            image_tag,
+            mounts,
+            name=name,
+            allow_internet=allow_internet,
+            extra_hosts=extra_hosts,
+        )
         try:
             sandbox.start()
             yield sandbox

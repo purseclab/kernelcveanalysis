@@ -1,13 +1,16 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -74,6 +77,23 @@ enum Request {
         path: String,
         timeout_secs: Option<u64>,
     },
+    #[serde(rename = "forward_port")]
+    ForwardPort {
+        guest_port: u16,
+        #[serde(default = "default_guest_addr")]
+        guest_addr: String,
+        socket_name: String,
+    },
+    #[serde(rename = "unforward_port")]
+    UnforwardPort {
+        guest_port: u16,
+        #[serde(default = "default_guest_addr")]
+        guest_addr: String,
+    },
+}
+
+fn default_guest_addr() -> String {
+    "127.0.0.1".to_owned()
 }
 
 fn default_kill_signal() -> i32 {
@@ -350,7 +370,139 @@ fn run_tool(
     Ok((stdout, stderr, status.code().unwrap_or(1), timed_out))
 }
 
-fn handle_request(mut stream: UnixStream) -> io::Result<()> {
+fn pipe_tcp_and_unix(tcp: std::net::TcpStream, unix: UnixStream) {
+    let _ = tcp.set_nonblocking(false);
+    let _ = unix.set_nonblocking(false);
+
+    let mut tcp_read = match tcp.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut unix_write = match unix.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let t1 = thread::spawn(move || {
+        let _ = io::copy(&mut tcp_read, &mut unix_write);
+        let _ = unix_write.shutdown(std::net::Shutdown::Write);
+    });
+
+    let mut unix_read = unix;
+    let mut tcp_write = tcp;
+    let _ = io::copy(&mut unix_read, &mut tcp_write);
+    let _ = tcp_write.shutdown(std::net::Shutdown::Write);
+    let _ = t1.join();
+}
+
+fn handle_forward_port(
+    mut stream: UnixStream,
+    runtime_dir: &Path,
+    forwarders: &Arc<Mutex<HashMap<(String, u16), Arc<AtomicBool>>>>,
+    guest_addr: String,
+    guest_port: u16,
+    socket_name: String,
+) -> io::Result<()> {
+    if !guest_addr.starts_with("127.") {
+        return send(
+            &mut stream,
+            &json!({
+                "type": "forward_port_response",
+                "status": "error",
+                "error": format!("guest_addr must be a loopback address in 127.0.0.0/8, got {}", guest_addr)
+            }),
+        );
+    }
+    let key = (guest_addr.clone(), guest_port);
+    let mut map = forwarders.lock().expect("mutex poisoned");
+    if map.contains_key(&key) {
+        return send(
+            &mut stream,
+            &json!({
+                "type": "forward_port_response",
+                "status": "error",
+                "error": format!("port {}:{} is already being forwarded", guest_addr, guest_port)
+            }),
+        );
+    }
+
+    let bind_addr = format!("{}:{}", guest_addr, guest_port);
+    let listener = match TcpListener::bind(&bind_addr) {
+        Ok(l) => l,
+        Err(err) => {
+            return send(
+                &mut stream,
+                &json!({
+                    "type": "forward_port_response",
+                    "status": "error",
+                    "error": format!("failed to bind {}: {}", bind_addr, err)
+                }),
+            );
+        }
+    };
+
+    let _ = listener.set_nonblocking(true);
+    let cancel = Arc::new(AtomicBool::new(false));
+    map.insert(key, Arc::clone(&cancel));
+    drop(map);
+
+    let socket_path = runtime_dir.join(socket_name);
+    let thread_cancel = Arc::clone(&cancel);
+    thread::spawn(move || {
+        while !thread_cancel.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((tcp_stream, _)) => {
+                    let socket_path = socket_path.clone();
+                    thread::spawn(move || {
+                        if let Ok(unix_stream) = UnixStream::connect(&socket_path) {
+                            pipe_tcp_and_unix(tcp_stream, unix_stream);
+                        }
+                    });
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    send(
+        &mut stream,
+        &json!({"type": "forward_port_response", "status": "ok"}),
+    )
+}
+
+fn handle_unforward_port(
+    mut stream: UnixStream,
+    forwarders: &Arc<Mutex<HashMap<(String, u16), Arc<AtomicBool>>>>,
+    guest_addr: String,
+    guest_port: u16,
+) -> io::Result<()> {
+    let key = (guest_addr.clone(), guest_port);
+    let mut map = forwarders.lock().expect("mutex poisoned");
+    if let Some(cancel) = map.remove(&key) {
+        cancel.store(true, Ordering::Relaxed);
+        send(
+            &mut stream,
+            &json!({"type": "unforward_port_response", "status": "ok"}),
+        )
+    } else {
+        send(
+            &mut stream,
+            &json!({
+                "type": "unforward_port_response",
+                "status": "error",
+                "error": format!("port {}:{} is not being forwarded", guest_addr, guest_port)
+            }),
+        )
+    }
+}
+
+fn handle_request(
+    mut stream: UnixStream,
+    runtime_dir: &Path,
+    forwarders: &Arc<Mutex<HashMap<(String, u16), Arc<AtomicBool>>>>,
+) -> io::Result<()> {
     let request = {
         let mut line = String::new();
         BufReader::new(stream.try_clone()?).read_line(&mut line)?;
@@ -603,6 +755,22 @@ fn handle_request(mut stream: UnixStream) -> io::Result<()> {
                 ),
             }
         }
+        Request::ForwardPort {
+            guest_port,
+            guest_addr,
+            socket_name,
+        } => handle_forward_port(
+            stream,
+            runtime_dir,
+            forwarders,
+            guest_addr,
+            guest_port,
+            socket_name,
+        ),
+        Request::UnforwardPort {
+            guest_port,
+            guest_addr,
+        } => handle_unforward_port(stream, forwarders, guest_addr, guest_port),
         Request::Stdin { .. } | Request::CloseStdin { .. } | Request::Kill { .. } => send(
             &mut stream,
             &json!({"type":"error", "message":"unsupported request type"}),
@@ -627,11 +795,15 @@ fn main() -> io::Result<()> {
         fs::remove_file(&socket_path)?;
     }
     let listener = UnixListener::bind(&socket_path)?;
+    let runtime_dir = Arc::new(runtime_dir);
+    let forwarders = Arc::new(Mutex::new(HashMap::new()));
     for connection in listener.incoming() {
         match connection {
             Ok(stream) => {
+                let runtime_dir = Arc::clone(&runtime_dir);
+                let forwarders = Arc::clone(&forwarders);
                 thread::spawn(move || {
-                    let _ = handle_request(stream);
+                    let _ = handle_request(stream, &runtime_dir, &forwarders);
                 });
             }
             Err(error) => eprintln!("ksandbox daemon accept failed: {error}"),
@@ -639,3 +811,4 @@ fn main() -> io::Result<()> {
     }
     Ok(())
 }
+
