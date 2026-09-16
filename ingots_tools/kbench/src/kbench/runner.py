@@ -21,6 +21,7 @@ from .api import (
 logger = logging.getLogger(__name__)
 
 def run_challenge(state: GlobalRunState, challenge: Challenge) -> ChallengeResult:
+    logger.info("Challenge '%s': starting setup...", challenge.name)
     solution = state.solutions_folder / challenge.name
     solution.mkdir(parents=True, exist_ok=True)
 
@@ -37,6 +38,7 @@ def run_challenge(state: GlobalRunState, challenge: Challenge) -> ChallengeResul
         challenge.tag,
         challenge.cuttlefish_template,
         [solution_mount],
+        name=challenge.name,
     ) as sandbox:
         adb_host = sandbox.adb_host
         assert adb_host is not None
@@ -52,6 +54,7 @@ def run_challenge(state: GlobalRunState, challenge: Challenge) -> ChallengeResul
             agent_group=state.run_group,
         )
 
+        logger.info("Challenge '%s': running...", challenge.name)
         score = challenge.run(ChallengeInstance(
             solution=solution,
             agent=agent,

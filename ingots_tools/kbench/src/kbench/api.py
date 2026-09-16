@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -9,6 +10,8 @@ from pydantic import BaseModel
 from cuttle_cli import CuttleClient
 from ksandbox import DockerSandboxProvider, DockerSandbox, MountInfo
 from kexploit_agent import BaseAgent, HarnessType, AgentGroup, ModelConfig
+
+logger = logging.getLogger(__name__)
 
 GUEST_ADB_HOST = "cuttlefish"
 GUEST_ADB_PORT = 6000
@@ -107,6 +110,7 @@ class AdbSandbox:
     docker_tag: str
     cuttle_template: str
     mounts: list[MountInfo]
+    name: str | None
 
     adb_host: str | None
     adb_port: int | None
@@ -122,11 +126,13 @@ class AdbSandbox:
         docker_tag: str,
         cuttle_template: str,
         mounts: list[MountInfo],
+        name: str | None = None,
     ):
         self.state = state
         self.docker_tag = docker_tag
         self.cuttle_template = cuttle_template
         self.mounts = mounts
+        self.name = name
 
         self.adb_host = None
         self.adb_port = None
@@ -141,6 +147,8 @@ class AdbSandbox:
         if self._stopped:
             raise RuntimeError("cannot restart a stopped AdbSandbox")
 
+        prefix = f"Challenge '{self.name}': " if self.name else ""
+        logger.info("%sstarting emulator (template: %s)...", prefix, self.cuttle_template)
         # setup cuttlefish vm
         cuttle_result = self.state.cuttle_client.start(
             self.cuttle_template,
@@ -153,6 +161,7 @@ class AdbSandbox:
         self.cuttle_cli_device_id = cuttle_result.instance.instance_id
 
         try:
+            logger.info("%sstarting sandbox (tag: %s)...", prefix, self.docker_tag)
             # setup sandbox
             self.sandbox = self.state.sandbox_provider.create(
                 self.docker_tag,

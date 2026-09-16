@@ -139,7 +139,7 @@ Container object passed to `Challenge.run(instance: ChallengeInstance)`.
 Manages the dual lifecycle of an isolated Docker container and an unmanaged Cuttlefish Android virtual machine, bridging ADB connectivity between them.
 
 ```python
-with AdbSandbox(state, docker_tag, cuttle_template, mounts) as sandbox:
+with AdbSandbox(state, docker_tag, cuttle_template, mounts, name="challenge_name") as sandbox:
     # Cuttlefish VM and Docker container are running and ADB is connected
     ...
 # Both Docker container and Cuttlefish VM are automatically stopped on exit
