@@ -24,6 +24,7 @@ def run_challenge(state: GlobalRunState, challenge: Challenge) -> ChallengeResul
     logger.info("Challenge '%s': starting setup...", challenge.name)
     solution = state.solutions_folder / challenge.name
     solution.mkdir(parents=True, exist_ok=True)
+    model_config = challenge.model_config
 
     solution_mount = MountInfo(
         src_folder=solution,
@@ -39,16 +40,17 @@ def run_challenge(state: GlobalRunState, challenge: Challenge) -> ChallengeResul
         challenge.cuttlefish_template,
         [solution_mount],
         name=challenge.name,
+        extra_hosts={
+            model_config.resolved_api_host: model_config.resolved_guest_addr,
+        },
     ) as sandbox:
-        adb_host = sandbox.adb_host
-        assert adb_host is not None
         docker_sandbox = sandbox.sandbox
         assert docker_sandbox is not None
 
-        system_prompt = challenge.system_prompt(adb_host)
+        system_prompt = challenge.system_prompt(sandbox.container_adb_host)
         agent = challenge.harness.create_agent(
             f"{challenge.name}_agent",
-            challenge.model_config,
+            model_config,
             system_prompt,
             docker_sandbox,
             agent_group=state.run_group,

@@ -5,7 +5,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, SerializeAsAny, computed_field
 
 from cuttle_cli import CuttleClient
 from ksandbox import DockerSandboxProvider, DockerSandbox, MountInfo
@@ -18,6 +18,7 @@ GUEST_ADB_PORT = 6000
 
 # score contains additional properties which can be serialized using basemodel
 class Score(BaseModel, ABC):
+    @computed_field  # type: ignore[prop-decorator]
     @property
     @abstractmethod
     def score(self) -> float:
@@ -85,7 +86,7 @@ class BenchmarkRun:
     output_folder: Path
 
 class ChallengeResult(BaseModel):
-    score: Score
+    score: SerializeAsAny[Score]
     runtime: float
 
 class BenchmarkResult(BaseModel):
@@ -93,8 +94,8 @@ class BenchmarkResult(BaseModel):
     total_runtime: float
 
     # map from challenge to scores
-    scores: dict[str, Score]
-    results: dict[str, ChallengeResult] = {}
+    scores: dict[str, SerializeAsAny[Score]]
+    results: dict[str, ChallengeResult] = Field(default_factory=dict)
 
 
 @dataclass
@@ -111,6 +112,7 @@ class AdbSandbox:
     cuttle_template: str
     mounts: list[MountInfo]
     name: str | None
+    extra_hosts: dict[str, str]
 
     adb_host: str | None
     adb_port: int | None
@@ -127,12 +129,14 @@ class AdbSandbox:
         cuttle_template: str,
         mounts: list[MountInfo],
         name: str | None = None,
+        extra_hosts: dict[str, str] | None = None,
     ):
         self.state = state
         self.docker_tag = docker_tag
         self.cuttle_template = cuttle_template
         self.mounts = mounts
         self.name = name
+        self.extra_hosts = dict(extra_hosts or {})
 
         self.adb_host = None
         self.adb_port = None
@@ -162,12 +166,14 @@ class AdbSandbox:
 
         try:
             logger.info("%sstarting sandbox (tag: %s)...", prefix, self.docker_tag)
+            extra_hosts = dict(self.extra_hosts)
+            extra_hosts[GUEST_ADB_HOST] = "127.0.0.1"
             # setup sandbox
             self.sandbox = self.state.sandbox_provider.create(
                 self.docker_tag,
                 mounts=self.mounts,
                 allow_internet=False,
-                extra_hosts={GUEST_ADB_HOST: "127.0.0.1"},
+                extra_hosts=extra_hosts,
             )
             _ = self.sandbox.start()
             self.sandbox.forward_port(

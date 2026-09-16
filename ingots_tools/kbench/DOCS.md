@@ -136,10 +136,17 @@ Container object passed to `Challenge.run(instance: ChallengeInstance)`.
 
 ### 4. `AdbSandbox` (Context Manager)
 
-Manages the dual lifecycle of an isolated Docker container and an unmanaged Cuttlefish Android virtual machine, bridging ADB connectivity between them.
+Manages the dual lifecycle of an isolated Docker container and an unmanaged Cuttlefish Android virtual machine, bridging ADB connectivity between them. Optional `extra_hosts` entries map inference API hostnames to their in-container forwarded addresses while the container remains offline.
 
 ```python
-with AdbSandbox(state, docker_tag, cuttle_template, mounts, name="challenge_name") as sandbox:
+with AdbSandbox(
+    state,
+    docker_tag,
+    cuttle_template,
+    mounts,
+    name="challenge_name",
+    extra_hosts={"openrouter.ai": "127.0.0.1"},
+) as sandbox:
     # Cuttlefish VM and Docker container are running and ADB is connected
     ...
 # Both Docker container and Cuttlefish VM are automatically stopped on exit
@@ -152,6 +159,7 @@ with AdbSandbox(state, docker_tag, cuttle_template, mounts, name="challenge_name
 - **`__exit__(...) -> None`**: Calls `self.stop()`.
 - **`restart_cuttlefish() -> None`**: Disconnects ADB, restarts the Cuttlefish VM through the control plane, and reconnects ADB.
 - **`container_adb_host: str`**: Address reachable inside the container (`cuttlefish:6000`).
+- **`extra_hosts`**: Optional hostname-to-address mappings added to the Docker sandbox; the runner automatically maps the challenge model's API host to its configured guest address.
 
 ---
 
@@ -177,14 +185,14 @@ run_config = BenchmarkRun(
 
 #### `ChallengeResult` (Pydantic Model)
 Serialized per challenge to `<solution_folder>/results.json`.
-- **`score: Score`**: The evaluation score object.
+- **`score: Score`**: The concrete evaluation score object, including all subclass fields and the computed numeric `score`.
 - **`runtime: float`**: Wall-clock execution time for the challenge in seconds.
 
 #### `BenchmarkResult` (Pydantic Model)
 Serialized for the entire benchmark run to `<output_folder>/results.json`.
 - **`overall_score: float`**: Mean average score across all challenges (`0.0` to `1.0`).
 - **`total_runtime: float`**: Total wall-clock time for the benchmark run in seconds.
-- **`scores: dict[str, Score]`**: Map of challenge names to their `Score` objects.
+- **`scores: dict[str, Score]`**: Map of challenge names to their concrete `Score` objects; subclass fields are preserved in JSON.
 - **`results: dict[str, ChallengeResult]`**: Map of challenge names to their full `ChallengeResult` objects (including individual runtimes).
 
 ---
