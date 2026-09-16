@@ -4,6 +4,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -15,7 +16,12 @@ from cuttle_types import (
     InstanceState,
     RenewLeaseRequest,
 )
-from cuttle_server.backends import BackendLogs, HostCuttlefishBackend
+from cuttle_server.backends import (
+    BackendLogs,
+    BackendReconcileFailure,
+    HostCuttlefishBackend,
+    LaunchResult,
+)
 from fastapi import HTTPException
 from typer.testing import CliRunner
 
@@ -27,13 +33,12 @@ from cuttle_server.api import (
 )
 from cuttle_server.config import (
     ConfigError,
-    DEFAULT_INSTANCE_RUNTIME_ROOT,
     InstanceTemplate,
     load_settings,
 )
 from cuttle_server.db import InstanceDb
 from cuttle_server.main import app
-from cuttle_server.models import ResolvedLaunchConfig
+from cuttle_server.models import InstanceRecord, ResolvedLaunchConfig, utc_now
 from cuttle_server.server_manager import (
     AuthorizationError,
     CuttlefishServerManager,
@@ -91,7 +96,7 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(settings.base_instance_num, 4)
         self.assertEqual(settings.max_instances, 7)
         self.assertEqual(settings.database_path, (root / "data/cuttlefish.db").resolve())
-        self.assertEqual(settings.instance_runtime_root, DEFAULT_INSTANCE_RUNTIME_ROOT)
+        self.assertEqual(settings.instance_runtime_root, Path("/tmp/cvd"))
         template = settings.templates["phone"]
         self.assertEqual(template.cpus, 4)
         self.assertEqual(template.runtime_root, install_dir.resolve())
@@ -473,6 +478,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         assert record is not None
         self.assertEqual(record.config.backend, CuttlefishBackendKind.HOST)
         self.assertIsNone(record.config.docker_image)
+        self.assertFalse(record.config.unmanaged)
         self.assertIsNone(record.backend_runtime_id)
 
 
@@ -812,46 +818,48 @@ class FakeBackend:
         self.kind = kind
         self.start_calls: list[str] = []
         self.stop_calls: list[str] = []
+        self.start_error: RuntimeError | None = None
+        self.stop_error: RuntimeError | None = None
 
-    def build_start_command(self, record):
+    def build_start_command(self, record: InstanceRecord) -> list[str]:
         return ["launch", record.instance_id]
 
-    def start_instance(self, record):
+    def start_instance(self, record: InstanceRecord) -> LaunchResult:
         self.start_calls.append(record.instance_id)
+        if self.start_error is not None:
+            raise self.start_error
         record.runtime_dir.mkdir(parents=True, exist_ok=True)
         (record.runtime_dir / "cvd-start.log").write_text("started\n")
-        return type(
-            "LaunchResult",
-            (),
-            {
-                "launch_command": self.build_start_command(record),
-                "adb_port": 6520 + record.instance_num - 1,
-                "adb_serial": None,
-                "webrtc_port": None,
-                "backend_runtime_id": (
-                    "docker-runtime"
-                    if self.kind == CuttlefishBackendKind.DOCKER
-                    else None
-                ),
-            },
-        )()
-
-    def stop_instance(self, record):
-        self.stop_calls.append(record.instance_id)
-        record.runtime_dir.mkdir(parents=True, exist_ok=True)
-        (record.runtime_dir / "cvd-stop.log").write_text("stopped\n")
-
-    def read_logs(self, record):
-        return BackendLogs(
-            start_log=(record.runtime_dir / "cvd-start.log").read_text(),
-            stop_log=(
-                (record.runtime_dir / "cvd-stop.log").read_text()
-                if (record.runtime_dir / "cvd-stop.log").exists()
-                else ""
+        return LaunchResult(
+            launch_command=self.build_start_command(record),
+            adb_port=6520 + record.instance_num - 1,
+            adb_serial=None,
+            webrtc_port=None,
+            backend_runtime_id=(
+                "docker-runtime"
+                if self.kind == CuttlefishBackendKind.DOCKER
+                else None
             ),
         )
 
-    def reconcile(self, records):
+    def stop_instance(self, record: InstanceRecord) -> None:
+        self.stop_calls.append(record.instance_id)
+        if self.stop_error is not None:
+            raise self.stop_error
+        record.runtime_dir.mkdir(parents=True, exist_ok=True)
+        (record.runtime_dir / "cvd-stop.log").write_text("stopped\n")
+
+    def read_logs(self, record: InstanceRecord) -> BackendLogs:
+        start_log_path = record.runtime_dir / "cvd-start.log"
+        stop_log_path = record.runtime_dir / "cvd-stop.log"
+        return BackendLogs(
+            start_log=start_log_path.read_text() if start_log_path.exists() else "",
+            stop_log=stop_log_path.read_text() if stop_log_path.exists() else "",
+        )
+
+    def reconcile(
+        self, records: Sequence[InstanceRecord]
+    ) -> list[BackendReconcileFailure]:
         del records
         return []
 
@@ -926,6 +934,7 @@ class ServerManagerTests(unittest.TestCase):
         self.assertEqual(created.instance_name, created.instance_id)
         self.assertEqual(created.adb_port, 6520)
         self.assertTrue(created.load_apps)
+        self.assertFalse(created.unmanaged)
         self.assertEqual(created.command_mode, CvdCommandMode.CVD)
         record = self.db.get(created.instance_id)
         assert record is not None
@@ -1132,6 +1141,168 @@ class ServerManagerTests(unittest.TestCase):
 
         self.assertEqual(stopped.state, InstanceState.STOPPED)
         self.assertFalse(created.runtime_dir.exists())
+
+    def test_restart_preserves_identity_config_and_adb_port_and_resets_lease(self):
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(
+                template_name="phone",
+                instance_name="demo",
+                overrides={
+                    "cpus": 6,
+                    "selinux": False,
+                    "load_apps": True,
+                    "unmanaged": True,
+                },
+            ),
+        ).instance
+        original_record = self.db.get(created.instance_id)
+        assert original_record is not None
+        original_config = original_record.config.model_copy(deep=True)
+        original_record.expires_at = utc_now() + timedelta(seconds=1)
+        self.db.upsert(original_record)
+
+        restarted = self.manager.restart_instance_by_name(
+            "alice",
+            is_admin=False,
+            instance_name="demo",
+        )
+
+        restarted_record = self.db.get(created.instance_id)
+        assert restarted_record is not None
+        self.assertEqual(restarted.state, InstanceState.ACTIVE)
+        self.assertEqual(restarted.instance_id, created.instance_id)
+        self.assertEqual(restarted.instance_name, created.instance_name)
+        self.assertEqual(restarted.instance_num, created.instance_num)
+        self.assertEqual(restarted.runtime_dir, created.runtime_dir)
+        self.assertEqual(restarted.adb_port, created.adb_port)
+        self.assertTrue(restarted.unmanaged)
+        self.assertEqual(restarted_record.config, original_config)
+        self.assertIsNotNone(restarted.expires_at)
+        assert restarted.expires_at is not None
+        self.assertGreater(restarted.expires_at, utc_now() + timedelta(seconds=30))
+        self.assertEqual(
+            self.backend.start_calls,
+            [created.instance_id, created.instance_id],
+        )
+        self.assertEqual(self.backend.stop_calls, [created.instance_id])
+        self.assertEqual(
+            self.app_loader.loaded_instance_ids,
+            [created.instance_id, created.instance_id],
+        )
+
+    def test_restart_uses_instance_id_as_effective_name(self):
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone"),
+        ).instance
+
+        restarted = self.manager.restart_instance_by_name(
+            "alice",
+            is_admin=False,
+            instance_name=created.instance_id,
+        )
+
+        self.assertEqual(restarted.instance_id, created.instance_id)
+        self.assertEqual(restarted.state, InstanceState.ACTIVE)
+
+    def test_restart_rejects_non_active_instance(self):
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="demo"),
+        ).instance
+        self.manager.stop_instance(
+            "alice",
+            is_admin=False,
+            instance_id=created.instance_id,
+        )
+
+        with self.assertRaisesRegex(InstanceError, "is not active"):
+            self.manager.restart_instance_by_name(
+                "alice",
+                is_admin=False,
+                instance_name="demo",
+            )
+
+        self.assertEqual(self.backend.start_calls, [created.instance_id])
+
+    def test_restart_continues_after_stop_failure_and_preserves_warning(self):
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="demo"),
+        ).instance
+        self.backend.stop_error = RuntimeError("old runtime did not stop cleanly")
+
+        restarted = self.manager.restart_instance_by_name(
+            "alice",
+            is_admin=False,
+            instance_name="demo",
+        )
+        logs = self.manager.get_instance_logs(
+            "alice",
+            is_admin=False,
+            instance_id=created.instance_id,
+        )
+
+        self.assertEqual(restarted.state, InstanceState.ACTIVE)
+        self.assertEqual(
+            self.backend.start_calls,
+            [created.instance_id, created.instance_id],
+        )
+        self.assertIn("restart stop warning", logs.stop_log)
+        self.assertIn("old runtime did not stop cleanly", logs.stop_log)
+
+    def test_restart_attempts_start_after_stop_failure_and_reports_both_logs(self):
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="demo"),
+        ).instance
+        self.backend.stop_error = RuntimeError("stop failed")
+        self.backend.start_error = RuntimeError("port remains in use")
+
+        with self.assertRaisesRegex(InstanceError, "port remains in use"):
+            self.manager.restart_instance_by_name(
+                "alice",
+                is_admin=False,
+                instance_name="demo",
+            )
+
+        record = self.db.get(created.instance_id)
+        assert record is not None
+        logs = self.manager.get_instance_logs(
+            "alice",
+            is_admin=False,
+            instance_id=created.instance_id,
+        )
+        self.assertEqual(record.state, InstanceState.CRASHED)
+        self.assertEqual(
+            self.backend.start_calls,
+            [created.instance_id, created.instance_id],
+        )
+        self.assertIn("restart stop warning: stop failed", logs.stop_log)
+        self.assertIn("port remains in use", record.failure_reason or "")
+
+    def test_restart_runtime_cleanup_failure_prevents_start(self):
+        created = self.manager.create_instance(
+            "alice",
+            CreateInstanceRequest(template_name="phone", instance_name="demo"),
+        ).instance
+
+        with patch(
+            "cuttle_server.server_manager.shutil.rmtree",
+            side_effect=OSError("permission denied"),
+        ):
+            with self.assertRaisesRegex(InstanceError, "cleanup failed"):
+                self.manager.restart_instance_by_name(
+                    "alice",
+                    is_admin=False,
+                    instance_name="demo",
+                )
+
+        record = self.db.get(created.instance_id)
+        assert record is not None
+        self.assertEqual(record.state, InstanceState.CRASHED)
+        self.assertEqual(self.backend.start_calls, [created.instance_id])
 
     def test_stop_and_expire_remove_runtime_dirs(self):
         created = self.manager.create_instance(

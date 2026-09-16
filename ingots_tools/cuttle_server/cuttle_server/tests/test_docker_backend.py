@@ -156,6 +156,64 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
         self.assertEqual(result.backend_runtime_id, "container-id")
         wait_for_adb.assert_called_once_with(container, "127.0.0.1", 49152)
 
+    def test_start_reuses_persisted_adb_port_for_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_record(Path(tmp))
+            record.adb_port = 49152
+            container = Mock()
+            container.id = "container-id"
+            container.attrs = {
+                "NetworkSettings": {
+                    "Ports": {
+                        f"{CONTAINER_ADB_PORT}/tcp": [{"HostPort": "49152"}]
+                    }
+                }
+            }
+            client = Mock()
+            client.containers.create.return_value = container
+            backend = DockerCuttlefishBackend(
+                server_host="0.0.0.0",
+                client=client,
+            )
+
+            with patch.object(
+                backend,
+                "_available_devices",
+                return_value=["devices"],
+            ), patch.object(backend, "_wait_for_adb_listener"):
+                result = backend.start_instance(record)
+
+        self.assertEqual(
+            client.containers.create.call_args.kwargs["ports"],
+            {f"{CONTAINER_ADB_PORT}/tcp": ("0.0.0.0", 49152)},
+        )
+        self.assertEqual(result.adb_port, 49152)
+
+    def test_restart_port_binding_failure_does_not_fall_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_record(Path(tmp))
+            record.adb_port = 49152
+            client = Mock()
+            client.containers.create.side_effect = RuntimeError("port is allocated")
+            backend = DockerCuttlefishBackend(
+                server_host="0.0.0.0",
+                client=client,
+            )
+
+            with patch.object(
+                backend,
+                "_available_devices",
+                return_value=["devices"],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "port is allocated"):
+                    backend.start_instance(record)
+
+        self.assertEqual(client.containers.create.call_count, 1)
+        self.assertEqual(
+            client.containers.create.call_args.kwargs["ports"],
+            {f"{CONTAINER_ADB_PORT}/tcp": ("0.0.0.0", 49152)},
+        )
+
     def test_stop_force_removes_after_graceful_stop_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             record = make_record(Path(tmp), state=InstanceState.ACTIVE)

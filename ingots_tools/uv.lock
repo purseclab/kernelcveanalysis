@@ -15,6 +15,7 @@ members = [
     "cuttleagent",
     "ingots-tools",
     "kartifact",
+    "kbench",
     "kdebug",
     "kexploit",
     "kexploit-agent",
@@ -1041,6 +1042,7 @@ dependencies = [
     { name = "cuttle-types" },
     { name = "cuttleagent" },
     { name = "kartifact" },
+    { name = "kbench" },
     { name = "kdebug" },
     { name = "kexploit" },
     { name = "kexploit-agent" },
@@ -1061,6 +1063,7 @@ requires-dist = [
     { name = "cuttle-types", editable = "cuttle_server/cuttle_types" },
     { name = "cuttleagent", editable = "cuttleagent" },
     { name = "kartifact", editable = "kartifact" },
+    { name = "kbench", editable = "kbench" },
     { name = "kdebug", editable = "kdebug" },
     { name = "kexploit", editable = "kexploit" },
     { name = "kexploit-agent", editable = "kexploit_agent" },
@@ -1270,6 +1273,29 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
     { name = "tomli-w", specifier = ">=1.2.0" },
+    { name = "typer", specifier = ">=0.21.1" },
+]
+
+[[package]]
+name = "kbench"
+version = "0.1.0"
+source = { editable = "kbench" }
+dependencies = [
+    { name = "cuttle-cli" },
+    { name = "kexploit-agent" },
+    { name = "kexploit-utils" },
+    { name = "ksandbox" },
+    { name = "pydantic" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cuttle-cli", editable = "cuttle_server/cuttle_cli" },
+    { name = "kexploit-agent", editable = "kexploit_agent" },
+    { name = "kexploit-utils", editable = "kexploit_utils" },
+    { name = "ksandbox", editable = "ksandbox" },
+    { name = "pydantic", specifier = ">=2.12.5" },
     { name = "typer", specifier = ">=0.21.1" },
 ]
 

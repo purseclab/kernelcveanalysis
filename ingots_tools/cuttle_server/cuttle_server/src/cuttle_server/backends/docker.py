@@ -124,7 +124,7 @@ class DockerCuttlefishBackend:
                 security_opt=["seccomp=unconfined"],
                 network_mode="bridge",
                 ports={
-                    f"{CONTAINER_ADB_PORT}/tcp": (bind_host, None),
+                    f"{CONTAINER_ADB_PORT}/tcp": (bind_host, record.adb_port),
                 },
                 labels={
                     MANAGED_LABEL: "true",
@@ -138,6 +138,11 @@ class DockerCuttlefishBackend:
             container.start()
             container.reload()
             host_port = self._published_adb_port(container)
+            if record.adb_port is not None and host_port != record.adb_port:
+                raise RuntimeError(
+                    f"Docker published ADB port {host_port}, expected "
+                    f"{record.adb_port}"
+                )
             connect_host = self._connect_host(bind_host)
             self._wait_for_adb_listener(container, connect_host, host_port)
             return LaunchResult(

@@ -120,6 +120,7 @@ Implemented endpoints:
 - `POST /v1/instances/{instance_id}/renew`
 - `POST /v1/instances/{instance_id}/stop`
 - `POST /v1/instances/by-name/{instance_name}/stop`
+- `POST /v1/instances/by-name/{instance_name}/restart`
 - `GET /v1/templates`
 - `GET /v1/templates/{template_name}`
 - `POST /v1/admin/reconcile`
@@ -140,7 +141,8 @@ Create request shape:
   "overrides": {
     "cpus": 6,
     "selinux": false,
-    "load_apps": false
+    "load_apps": false,
+    "unmanaged": true
   }
 }
 ```
@@ -153,7 +155,9 @@ Notes:
 - Explicit names are unique per user among non-terminal instances.
 - Instance views include `adb_port` once the launch succeeds. Clients should connect to `<same-host-as-http-server>:<adb_port>`.
 - `overrides.load_apps` defaults to `true`. Set it to `false` to skip template APK installation for that instance.
+- `overrides.unmanaged` defaults to `false`. When true, clients persist the endpoint for external ADB forwarding and exclude it from local daemon connect/disconnect management, including after restart.
 - `POST /v1/instances?async_start=true` returns after recording the instance in `starting` state and completes launch in the background.
+- `POST /v1/instances/by-name/{instance_name}/restart?async_start=true` stops an active instance, records it in `starting` state, and completes its relaunch in the background.
 
 ## Runtime Behavior
 
@@ -166,12 +170,14 @@ Notes:
 - The server also sets `ANDROID_HOST_OUT=<runtime_root>` and `ANDROID_PRODUCT_OUT=<runtime_root>` so older `cvd start` selector logic can resolve the template installation.
 - Host instances publish an ADB TCP port derived from their logical instance number.
 - Docker instances always use port `6520` internally. Docker assigns a unique host port bound to the configured `server_host`; clients reuse the same hostname they used for the HTTP API and only vary the returned port.
+- Restart preserves the instance id, effective name, resolved launch configuration, logical instance number, and ADB port, and resets the lease using the configured default timeout. Docker explicitly rebinds the previous host port.
 - `max_instances` still means the number of instances managed by the server, not the highest raw Cuttlefish instance number.
 - When `load_apps` is enabled and the template has apps, the server connects to the instance over server-local ADB, waits for boot completion, installs each `.apk` directly or unpacks and installs `.xapk`/`.apkm` bundles in template order, then disconnects before marking the instance `ACTIVE`.
 - The server runs a background task on startup that periodically reconciles and stops expired instances, and it also performs one reconciliation pass immediately during startup.
 - If automatic expiration is disabled globally, new instances are created without an `expires_at` deadline until a client explicitly renews them with a timeout.
 - After a successful explicit stop or expiration cleanup, the runtime directory is removed.
 - If stop or cleanup fails, the instance record is updated with `failure_reason` and the runtime directory is left in place for inspection.
+- During restart only, a backend stop failure is retained in `cvd-stop.log` as a warning and startup is still attempted. Runtime-directory cleanup failure remains fatal.
 - If startup or app loading fails, the instance is stopped and left in `crashed` state with its failure reason and runtime logs preserved. Explicitly stopping the crashed instance removes its runtime directory.
 
 Current `command_mode = "cvd"` start command shape:

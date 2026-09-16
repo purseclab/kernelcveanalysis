@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 import threading
 import uuid
@@ -34,6 +35,9 @@ from .models import (
     template_view_from_template,
     utc_now,
 )
+
+LOGGER = logging.getLogger(__name__)
+RESTART_STOP_WARNING_PREFIX = "restart stop warning: "
 
 
 class InstanceError(Exception):
@@ -262,6 +266,72 @@ class CuttlefishServerManager:
         record = self._get_record_by_name(user_id, is_admin, instance_name)
         return self.stop_instance(user_id, is_admin, record.instance_id)
 
+    def restart_instance_by_name(
+        self,
+        user_id: str,
+        is_admin: bool,
+        instance_name: str,
+        *,
+        start_async: bool = False,
+    ) -> InstanceView:
+        with self.lock:
+            record = self._get_record_by_name(user_id, is_admin, instance_name)
+            if record.state != InstanceState.ACTIVE:
+                raise InstanceError(
+                    f"instance {record.effective_instance_name} is not active"
+                )
+            if record.adb_port is None:
+                raise InstanceError(
+                    f"instance {record.effective_instance_name} has no ADB port"
+                )
+
+            record.state = InstanceState.STOPPING
+            self.db.upsert(record)
+
+            stop_warning: str | None = None
+            try:
+                self._backend_for(record).stop_instance(record)
+            except Exception as exc:
+                stop_warning = f"{RESTART_STOP_WARNING_PREFIX}{exc}"
+
+            try:
+                if record.runtime_dir.exists():
+                    shutil.rmtree(record.runtime_dir)
+            except Exception as exc:
+                detail = f"restart runtime dir cleanup failed: {exc}"
+                if stop_warning is not None:
+                    detail = f"{stop_warning}; {detail}"
+                record.state = InstanceState.CRASHED
+                record.failure_reason = detail
+                self.db.upsert(record)
+                raise InstanceError(detail) from exc
+
+            record.state = InstanceState.STARTING
+            record.launch_command = self._build_launch_command(record)
+            record.adb_serial = None
+            record.webrtc_port = None
+            record.backend_runtime_id = None
+            record.expires_at = self._resolve_expiration_deadline(
+                self.settings.instance_timeout_sec
+            )
+            record.failure_reason = None
+            self.db.upsert(record)
+
+            if stop_warning is not None:
+                self._write_restart_stop_warning(record, stop_warning)
+
+        if start_async:
+            thread = threading.Thread(
+                target=self._complete_instance_start_in_background,
+                args=(record,),
+                daemon=True,
+            )
+            thread.start()
+            return instance_view_from_record(record)
+
+        self._complete_instance_start(record)
+        return instance_view_from_record(record)
+
     def list_instances(self, user_id: str, is_admin: bool) -> InstanceListResponse:
         owner_id = None if is_admin else user_id
         return InstanceListResponse(
@@ -320,6 +390,20 @@ class CuttlefishServerManager:
             record.failure_reason = f"runtime dir cleanup failed: {exc}"
             return
         record.state = state
+
+    @staticmethod
+    def _write_restart_stop_warning(record: InstanceRecord, warning: str) -> None:
+        try:
+            record.runtime_dir.mkdir(parents=True, exist_ok=True)
+            (record.runtime_dir / "cvd-stop.log").write_text(
+                f"{warning}\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            LOGGER.exception(
+                "failed to persist restart stop warning for instance %s",
+                record.instance_id,
+            )
 
     def _fail_startup(self, record: InstanceRecord, failure_reason: str) -> None:
         record.state = InstanceState.CRASHED
@@ -479,6 +563,7 @@ class CuttlefishServerManager:
                 if request.overrides.load_apps is not None
                 else True
             ),
+            unmanaged=request.overrides.unmanaged,
             command_mode=template.command_mode,
             backend=template.backend,
             docker_image=template.docker_image,

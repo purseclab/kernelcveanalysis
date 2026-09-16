@@ -1,0 +1,23 @@
+[project]
+name = "kbench"
+version = "0.1.0"
+description = "Library for creating android exploitation benchmark taps."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "typer>=0.21.1",
+    "kexploit_utils",
+    "ksandbox",
+    "kexploit_agent",
+    "cuttle_cli",
+    "pydantic>=2.12.5",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+kexploit_utils = { workspace = true }
+ksandbox = { workspace = true }
+kexploit_agent = { workspace = true }
+cuttle_cli = { workspace = true }

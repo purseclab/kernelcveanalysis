@@ -31,6 +31,7 @@ class ResolvedLaunchConfig(BaseModel):
     initrd_path: Path | None
     apps: list[Path] = Field(default_factory=list)
     load_apps: bool = True
+    unmanaged: bool = False
     command_mode: CvdCommandMode = CvdCommandMode.CVD
     backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
     docker_image: str | None = None
@@ -90,6 +91,7 @@ def instance_view_from_record(record: InstanceRecord) -> InstanceView:
         initrd_path=record.config.initrd_path,
         apps=record.config.apps,
         load_apps=record.config.load_apps,
+        unmanaged=record.config.unmanaged,
         command_mode=record.config.command_mode,
         backend=record.config.backend,
         docker_image=record.config.docker_image,

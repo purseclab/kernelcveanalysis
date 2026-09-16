@@ -11,6 +11,7 @@ class LaunchOverrides(BaseModel):
     cpus: int | None = Field(default=None, ge=1, le=64)
     selinux: bool | None = None
     load_apps: bool | None = None
+    unmanaged: bool = False
 
 
 class CreateInstanceRequest(BaseModel):
@@ -55,6 +56,7 @@ class InstanceView(BaseModel):
     initrd_path: Path | None
     apps: list[Path]
     load_apps: bool
+    unmanaged: bool = False
     command_mode: CvdCommandMode = CvdCommandMode.CVD
     backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
     docker_image: str | None = None

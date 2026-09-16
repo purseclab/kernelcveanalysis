@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
-from libadb import AdbClient  # type: ignore[attr-defined]
+from libadb import AdbClient  # type: ignore[attr-defined, import-untyped]
 
 from .models import InstanceRecord
 

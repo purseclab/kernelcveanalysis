@@ -10,6 +10,7 @@ Use this skill when the task is to operate a running `cuttle_server` environment
 ## Rules
 
 - Do not use `--server-host`, `--server-port`, `--auth-token`, or `--user-id` to override any configured settings.
+- Do not use `--unmanaged` unless the user explicitly requests an externally managed or forwarded ADB connection.
 - Assume the CLI is already configured. If it fails because configuration or auth is missing, stop and report that instead of inventing overrides.
 - Prefer the narrowest action that satisfies the task. Avoid `stop --stop-all` unless the user clearly asked for it.
 
@@ -50,6 +51,7 @@ cuttle-cli start <template-name> --cpus <count>
 cuttle-cli start <template-name> --selinux true
 cuttle-cli start <template-name> --selinux false
 cuttle-cli start <template-name> --no-load-apps
+cuttle-cli start <template-name> --unmanaged
 ```
 
 Guidance:
@@ -57,6 +59,9 @@ Guidance:
 - Use `--name` when the user wants a stable human-readable instance name.
 - Use `--cpus` and `--selinux` only when the user asked for those overrides.
 - Use `--no-load-apps` when the task should avoid template APK auto-loading.
+- Use `--unmanaged` only when explicitly requested. It prevents the local daemon
+  from connecting or disconnecting that instance's ADB endpoint and persists
+  across restart.
 - Success output includes the effective instance name, instance id, state, and `adb=<host:port>` when available.
 
 ### Stop instances
@@ -80,9 +85,29 @@ Guidance:
 - Prefer stopping a single named instance.
 - If an instance was launched without a custom name, its effective stop target is its instance id.
 
+### Restart an instance
+
+Restart one active instance by effective name:
+
+```bash
+cuttle-cli restart <instance-name>
+```
+
+Guidance:
+
+- If an instance was launched without a custom name, use its instance id.
+- Restart preserves the instance id, resolved launch settings, and ADB target,
+  and resets the lease to the server default.
+- A failure while stopping the old runtime is reported as a warning, but the
+  server still attempts startup. A startup failure remains fatal.
+- For managed instances, the client issues a fresh `adb connect` to the
+  unchanged target after a successful restart. Unmanaged instances remain
+  untouched.
+
 ## Daemon behavior
 
-`cuttle-cli start`, `cuttle-cli list`, and `cuttle-cli stop` automatically ensure the managed daemon is running.
+`cuttle-cli start`, `cuttle-cli restart`, `cuttle-cli list`, and `cuttle-cli stop`
+automatically ensure the managed daemon is running.
 
 Use explicit daemon commands only when the task is about daemon state or ADB sync behavior:
 
@@ -103,5 +128,5 @@ Guidance:
 
 1. If the template or target instance is unknown, inspect with `templates list`, `templates show`, or `list`.
 2. Run the smallest command that accomplishes the task.
-3. Read stdout and return the important fields: template name, instance name, instance id, state, and ADB target when present.
+3. Read stdout and return the important fields: template name, instance name, instance id, state, ADB target, and any restart stop warning when present.
 4. If `cuttle-cli` reports missing config/auth or another CLI error, surface that error plainly and stop.

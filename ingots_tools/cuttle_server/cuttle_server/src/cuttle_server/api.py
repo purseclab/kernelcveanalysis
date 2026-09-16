@@ -2,7 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from cuttle_types import (
     CreateInstanceRequest,
@@ -39,6 +39,10 @@ LOGGER = logging.getLogger(__name__)
 class RequestIdentity:
     user_id: str
     is_admin: bool
+
+
+class ExpiredInstanceReconciler(Protocol):
+    def reconcile_expired_instances(self) -> None: ...
 
 
 def validate_authorization_header(
@@ -78,7 +82,7 @@ def build_request_identity(
 
 
 async def reconcile_expired_instances_periodically(
-    server_manager: CuttlefishServerManager,
+    server_manager: ExpiredInstanceReconciler,
     interval_sec: float,
     stop_event: asyncio.Event,
 ) -> None:
@@ -273,6 +277,43 @@ def create_app(settings: CuttlefishSettings) -> FastAPI:
                 identity.user_id,
                 identity.is_admin,
                 instance_name,
+            )
+        except NotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            ) from exc
+        except AuthorizationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+            ) from exc
+        except InstanceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+    @app.post(
+        "/v1/instances/by-name/{instance_name}/restart",
+        response_model=InstanceView,
+    )
+    def restart_instance_by_name(
+        instance_name: str,
+        identity: Annotated[RequestIdentity, Depends(require_identity)],
+        async_start: Annotated[
+            bool,
+            Query(
+                description=(
+                    "Return after stopping and recording the instance in starting "
+                    "state, then complete startup in the background."
+                )
+            ),
+        ] = False,
+    ) -> InstanceView:
+        try:
+            return server_manager.restart_instance_by_name(
+                identity.user_id,
+                identity.is_admin,
+                instance_name,
+                start_async=async_start,
             )
         except NotFoundError as exc:
             raise HTTPException(

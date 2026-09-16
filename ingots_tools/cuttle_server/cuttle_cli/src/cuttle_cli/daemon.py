@@ -12,8 +12,8 @@ from pathlib import Path
 from cuttle_types import InstanceState, InstanceView
 from pydantic import BaseModel, Field
 
-from .client import CliError, CuttleApiClient
 from .config import CliSettings, default_state_dir
+from .transport import CliError, CuttleApiClient
 
 DAEMON_POLL_INTERVAL_SEC = 5.0
 
@@ -177,13 +177,18 @@ def sync_managed_daemon_once(settings: CliSettings) -> list[str]:
 
 
 def sync_managed_daemon_once_with_client(client: CuttleApiClient) -> list[str]:
-    desired_endpoints = sorted(_desired_endpoints(client.list_instances().instances, client))
+    instances = client.list_instances().instances
+    desired_endpoints = sorted(_desired_endpoints(instances, client))
+    unmanaged_endpoints = _unmanaged_endpoints(instances, client)
     current_endpoints = _load_owned_endpoints()
 
     desired_set = set(desired_endpoints)
     current_set = set(current_endpoints)
 
     for endpoint in sorted(current_set - desired_set):
+        if endpoint in unmanaged_endpoints:
+            current_set.remove(endpoint)
+            continue
         if _run_adb_command("disconnect", endpoint):
             current_set.remove(endpoint)
 
@@ -196,6 +201,16 @@ def sync_managed_daemon_once_with_client(client: CuttleApiClient) -> list[str]:
     return updated_endpoints
 
 
+def refresh_adb_connection(endpoint: str) -> None:
+    result = _run_adb_command_result("connect", endpoint)
+    if result.returncode == 0:
+        return
+    detail = result.stderr.strip() or result.stdout.strip()
+    if not detail:
+        detail = f"adb exited with status {result.returncode}"
+    raise CliError(f"failed to refresh ADB connection to {endpoint}: {detail}")
+
+
 def render_daemon_identity(metadata: DaemonMetadata) -> str:
     return f"{metadata.user_id}@{metadata.server_host}:{metadata.server_port}"
 
@@ -206,6 +221,8 @@ def _desired_endpoints(
 ) -> set[str]:
     desired: set[str] = set()
     for instance in instances:
+        if instance.unmanaged:
+            continue
         if instance.state not in {
             InstanceState.STARTING,
             InstanceState.ACTIVE,
@@ -216,6 +233,18 @@ def _desired_endpoints(
         if target is not None:
             desired.add(target)
     return desired
+
+
+def _unmanaged_endpoints(
+    instances: list[InstanceView],
+    client: CuttleApiClient,
+) -> set[str]:
+    return {
+        target
+        for instance in instances
+        if instance.unmanaged
+        if (target := client.adb_target(instance)) is not None
+    }
 
 
 def _metadata_from_settings(settings: CliSettings) -> DaemonMetadata:
@@ -269,13 +298,18 @@ def _disconnect_owned_endpoints(
 
 
 def _run_adb_command(action: str, endpoint: str) -> bool:
-    result = subprocess.run(
+    return _run_adb_command_result(action, endpoint).returncode == 0
+
+
+def _run_adb_command_result(
+    action: str, endpoint: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         ["adb", action, endpoint],
         check=False,
         capture_output=True,
         text=True,
     )
-    return result.returncode == 0
 
 
 def _pid_is_running(pid: int) -> bool:

@@ -1,31 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import sys
-import time
+from dataclasses import dataclass
+from typing import Never
 
 import typer
-from cuttle_types import (
-    CreateInstanceRequest,
-    InstanceLogsView,
-    InstanceState,
-    InstanceView,
-    LaunchOverrides,
-    TemplateSummary,
-)
+from cuttle_types import InstanceLogsView, TemplateSummary
 from typing_extensions import Annotated
 
-from .client import CliError, CuttleApiClient
-from .config import CliConfigError, CliSettings, load_cli_settings
-from .daemon import (
-    ensure_managed_daemon_running,
-    get_daemon_status,
-    render_daemon_identity,
-    run_daemon_forever,
-    start_managed_daemon,
-    stop_managed_daemon,
-    sync_managed_daemon_once,
-)
+from .client import CliError, CuttleClient, StopManyResult
+from .config import CliConfigError
+from .daemon import render_daemon_identity
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 templates_app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -33,15 +18,10 @@ daemon_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(templates_app, name="templates")
 app.add_typer(daemon_app, name="daemon")
 
-VISIBLE_INSTANCE_STATES = frozenset(
-    {InstanceState.STARTING, InstanceState.ACTIVE, InstanceState.STOPPING}
-)
-
 
 @dataclass
 class AppState:
-    client: CuttleApiClient
-    settings: CliSettings
+    client: CuttleClient
 
 
 @app.callback()
@@ -63,7 +43,7 @@ def main_callback(
     if ctx.resilient_parsing or any(arg in {"--help", "-h"} for arg in sys.argv[1:]):
         return
     try:
-        settings = load_cli_settings(
+        client = CuttleClient.from_config(
             server_host=server_host,
             server_port=server_port,
             auth_token=auth_token,
@@ -73,7 +53,7 @@ def main_callback(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    ctx.obj = AppState(client=CuttleApiClient.from_settings(settings), settings=settings)
+    ctx.obj = AppState(client=client)
 
 
 @app.command()
@@ -102,51 +82,79 @@ def start(
             help="Whether to auto-install template apps during startup.",
         ),
     ] = None,
+    unmanaged: Annotated[
+        bool,
+        typer.Option(
+            "--unmanaged",
+            help="Do not manage this instance's ADB connection with the local daemon.",
+        ),
+    ] = False,
 ) -> None:
-    state = _state_from_ctx(ctx)
-    _ensure_daemon_running_or_exit(state.settings)
-    client = state.client
+    client = _client_from_ctx(ctx)
     try:
-        response = client.start_instance(
-            CreateInstanceRequest(
-                template_name=template_name,
-                instance_name=name,
-                overrides=LaunchOverrides(
-                    cpus=cpus,
-                    selinux=selinux,
-                    load_apps=load_apps,
-                ),
-            ),
-            async_start=True,
+        result = client._start_with_progress(
+            template_name,
+            name=name,
+            cpus=cpus,
+            selinux=selinux,
+            load_apps=load_apps,
+            unmanaged=unmanaged,
+            on_log_chunk=_echo_log_chunk,
         )
-        instance = response.instance
-        printed_log_chars = 0
-        while instance.state == InstanceState.STARTING:
-            logs = client.get_instance_logs(instance.instance_id)
-            printed_log_chars = _echo_new_log_text(
-                logs.start_log,
-                printed_log_chars,
-            )
-            instance = client.get_instance(instance.instance_id)
-            if instance.state == InstanceState.STARTING:
-                time.sleep(1)
-        logs = client.get_instance_logs(instance.instance_id)
-        _echo_new_log_text(logs.start_log, printed_log_chars)
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+        _exit_with_error(exc)
 
-    if instance.state == InstanceState.CRASHED:
-        _echo_cuttlefish_diagnostic_logs(logs)
-        detail = instance.failure_reason or "startup failed"
-        typer.echo(f"failed to start {instance.instance_name}: {detail}", err=True)
+    if not result.is_active:
+        _echo_cuttlefish_diagnostic_logs(result.logs)
+        detail = result.instance.failure_reason or "startup failed"
+        typer.echo(
+            f"failed to start {result.instance.instance_name}: {detail}",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
-    adb_target = client.adb_target(instance) or "-"
     typer.echo(
-        f"started {instance.instance_name} ({instance.instance_id}) "
-        f"template={instance.template_name} state={instance.state.value} "
-        f"adb={adb_target}"
+        f"started {result.instance.instance_name} ({result.instance.instance_id}) "
+        f"template={result.instance.template_name} state={result.instance.state.value} "
+        f"adb={result.adb_target or '-'}"
+    )
+
+
+@app.command()
+def restart(
+    ctx: typer.Context,
+    instance_name: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Effective instance name to restart. Unnamed instances use their "
+                "instance id."
+            )
+        ),
+    ],
+) -> None:
+    try:
+        result = _client_from_ctx(ctx)._restart_with_progress(
+            instance_name,
+            on_log_chunk=_echo_log_chunk,
+        )
+    except CliError as exc:
+        _exit_with_error(exc)
+
+    _echo_restart_stop_warning(result.logs)
+    if not result.is_active:
+        _echo_cuttlefish_diagnostic_logs(result.logs)
+        detail = result.instance.failure_reason or "startup failed"
+        typer.echo(
+            f"failed to restart {result.instance.instance_name}: {detail}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"restarted {result.instance.instance_name} ({result.instance.instance_id}) "
+        f"template={result.instance.template_name} state={result.instance.state.value} "
+        f"adb={result.adb_target or '-'}"
     )
 
 
@@ -155,13 +163,10 @@ def show_logs(
     ctx: typer.Context,
     instance: Annotated[str, typer.Argument(help="Instance id or name.")],
 ) -> None:
-    client = _client_from_ctx(ctx)
     try:
-        logs = _get_logs_by_id_or_name(client, instance)
+        logs = _client_from_ctx(ctx).logs(instance)
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-
+        _exit_with_error(exc)
     _echo_logs_view(logs)
 
 
@@ -177,24 +182,11 @@ def list_instances(
         ),
     ] = False,
 ) -> None:
-    state = _state_from_ctx(ctx)
-    _ensure_daemon_running_or_exit(state.settings)
-    client = state.client
+    client = _client_from_ctx(ctx)
     try:
-        response = client.list_instances()
+        instances = client.list_instances(include_terminal=all_instances)
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-
-    instances = (
-        response.instances
-        if all_instances
-        else [
-            instance
-            for instance in response.instances
-            if _is_default_list_state(instance)
-        ]
-    )
+        _exit_with_error(exc)
 
     if not instances:
         typer.echo("No instances.")
@@ -252,9 +244,6 @@ def stop(
         ),
     ] = None,
 ) -> None:
-    state = _state_from_ctx(ctx)
-    _ensure_daemon_running_or_exit(state.settings)
-    client = state.client
     if sum(bool(value) for value in (instance_name, stop_all, stop_all_user)) != 1:
         typer.echo(
             "specify exactly one of INSTANCE_NAME, --stop-all, or --stop-all-user",
@@ -262,13 +251,12 @@ def stop(
         )
         raise typer.Exit(code=1)
 
+    client = _client_from_ctx(ctx)
     if instance_name is not None:
         try:
-            instance = client.stop_instance_by_name(instance_name)
+            instance = client.stop(instance_name)
         except CliError as exc:
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(code=1) from exc
-
+            _exit_with_error(exc)
         typer.echo(
             f"stopped {instance.instance_name} ({instance.instance_id}) "
             f"state={instance.state.value}"
@@ -276,124 +264,78 @@ def stop(
         return
 
     try:
-        visible_instances = client.list_instances().instances
-    except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-
-    instances_to_stop = [
-        instance
-        for instance in visible_instances
-        if _is_default_list_state(instance)
-        and (stop_all or instance.owner_id == stop_all_user)
-    ]
-    if not instances_to_stop:
-        typer.echo("No matching running instances.")
-        return
-
-    failure = False
-    for instance in instances_to_stop:
-        try:
-            stopped = client.stop_instance(instance.instance_id)
-        except CliError as exc:
-            typer.echo(
-                f"failed to stop {instance.instance_name} ({instance.instance_id}): {exc}",
-                err=True,
-            )
-            failure = True
-            continue
-
-        typer.echo(
-            f"stopped {stopped.instance_name} ({stopped.instance_id}) "
-            f"owner={stopped.owner_id} state={stopped.state.value}"
+        result = (
+            client.stop_all()
+            if stop_all
+            else client.stop_all_user(_required_user_id(stop_all_user))
         )
-
-    if failure:
-        raise typer.Exit(code=1)
-
-
-def _format_columns(values: tuple[str, ...], widths: list[int]) -> str:
-    padded = [value.ljust(width) for value, width in zip(values[:-1], widths[:-1])]
-    padded.append(values[-1])
-    return "  ".join(padded)
-
-
-def _is_default_list_state(instance: InstanceView) -> bool:
-    return instance.state in VISIBLE_INSTANCE_STATES
+    except CliError as exc:
+        _exit_with_error(exc)
+    _render_stop_many(result)
 
 
 @daemon_app.command("start")
 def start_daemon(ctx: typer.Context) -> None:
-    state = _state_from_ctx(ctx)
     try:
-        start_managed_daemon(state.settings)
+        _client_from_ctx(ctx).daemon_start()
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+        _exit_with_error(exc)
     typer.echo("daemon started")
 
 
 @daemon_app.command("stop")
-def stop_daemon() -> None:
+def stop_daemon(ctx: typer.Context) -> None:
     try:
-        stopped = stop_managed_daemon()
+        stopped = _client_from_ctx(ctx).daemon_stop()
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+        _exit_with_error(exc)
     typer.echo("daemon stopped" if stopped else "daemon was not running")
 
 
 @daemon_app.command("status")
-def daemon_status() -> None:
-    status = get_daemon_status()
+def daemon_status(ctx: typer.Context) -> None:
+    status = _client_from_ctx(ctx).daemon_status()
     if status.running and status.metadata is not None:
-        typer.echo(f"running\tpid={status.metadata.pid}\t{render_daemon_identity(status.metadata)}")
+        typer.echo(
+            f"running\tpid={status.metadata.pid}\t{render_daemon_identity(status.metadata)}"
+        )
         return
     if status.stale and status.metadata is not None:
-        typer.echo(f"stale\tpid={status.metadata.pid}\t{render_daemon_identity(status.metadata)}")
+        typer.echo(
+            f"stale\tpid={status.metadata.pid}\t{render_daemon_identity(status.metadata)}"
+        )
         return
     typer.echo("stopped")
 
 
 @daemon_app.command("sync")
 def sync_daemon(ctx: typer.Context) -> None:
-    state = _state_from_ctx(ctx)
-    status = get_daemon_status()
-    if status.running:
-        typer.echo("daemon is already running; stop it before manual sync", err=True)
-        raise typer.Exit(code=1)
     try:
-        endpoints = sync_managed_daemon_once(state.settings)
+        endpoints = _client_from_ctx(ctx).daemon_sync()
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+        _exit_with_error(exc)
     typer.echo(f"synced {len(endpoints)} endpoints")
 
 
 @daemon_app.command("run-internal", hidden=True)
 def run_internal_daemon(ctx: typer.Context) -> None:
-    state = _state_from_ctx(ctx)
     try:
-        run_daemon_forever(state.settings)
+        _client_from_ctx(ctx)._run_daemon_forever()
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+        _exit_with_error(exc)
 
 
 @templates_app.command(name="list")
 def list_templates(ctx: typer.Context) -> None:
-    client = _client_from_ctx(ctx)
     try:
-        response = client.list_templates()
+        templates = _client_from_ctx(ctx).list_templates()
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+        _exit_with_error(exc)
 
-    if not response.templates:
+    if not templates:
         typer.echo("No templates.")
         return
-
-    for template in response.templates:
+    for template in templates:
         _echo_template_summary(template)
 
 
@@ -402,12 +344,10 @@ def show_template(
     ctx: typer.Context,
     template_name: Annotated[str, typer.Argument(help="Template name to inspect.")],
 ) -> None:
-    client = _client_from_ctx(ctx)
     try:
-        template = client.get_template(template_name)
+        template = _client_from_ctx(ctx).show_template(template_name)
     except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+        _exit_with_error(exc)
 
     typer.echo(f"name: {template.template_name}")
     typer.echo(f"backend: {template.backend.value}")
@@ -426,6 +366,31 @@ def show_template(
         typer.echo("apps: []")
 
 
+def _render_stop_many(result: StopManyResult) -> None:
+    if not result.stopped and not result.failures:
+        typer.echo("No matching running instances.")
+        return
+    for instance in result.stopped:
+        typer.echo(
+            f"stopped {instance.instance_name} ({instance.instance_id}) "
+            f"owner={instance.owner_id} state={instance.state.value}"
+        )
+    for failure in result.failures:
+        typer.echo(
+            f"failed to stop {failure.instance.instance_name} "
+            f"({failure.instance.instance_id}): {failure.error_message}",
+            err=True,
+        )
+    if not result.is_successful:
+        raise typer.Exit(code=1)
+
+
+def _format_columns(values: tuple[str, ...], widths: list[int]) -> str:
+    padded = [value.ljust(width) for value, width in zip(values[:-1], widths[:-1])]
+    padded.append(values[-1])
+    return "  ".join(padded)
+
+
 def _echo_template_summary(template: TemplateSummary) -> None:
     typer.echo(
         f"{template.template_name}\tcpus={template.cpus}\tselinux={template.selinux}"
@@ -434,32 +399,19 @@ def _echo_template_summary(template: TemplateSummary) -> None:
     )
 
 
-def _echo_new_log_text(log_text: str, offset: int) -> int:
-    if len(log_text) <= offset:
-        return offset
-    typer.echo(log_text[offset:], nl=False)
-    return len(log_text)
+def _echo_log_chunk(log_chunk: str) -> None:
+    typer.echo(log_chunk, nl=False)
 
 
-def _get_logs_by_id_or_name(client: CuttleApiClient, identifier: str) -> InstanceLogsView:
-    first_error: CliError | None = None
-    try:
-        return client.get_instance_logs(identifier)
-    except CliError as exc:
-        first_error = exc
-
-    response = client.list_instances()
-    matches = [
-        instance
-        for instance in response.instances
-        if instance.instance_id == identifier or instance.instance_name == identifier
-    ]
-    if len(matches) == 1:
-        return client.get_instance_logs(matches[0].instance_id)
-    if len(matches) > 1:
-        raise CliError(f"multiple visible instances match {identifier!r}")
-    assert first_error is not None
-    raise first_error
+def _echo_restart_stop_warning(logs: InstanceLogsView) -> None:
+    if not logs.stop_log.startswith("restart stop warning:"):
+        return
+    typer.echo("== restart stop warning ==", err=True)
+    typer.echo(
+        logs.stop_log,
+        nl=not logs.stop_log.endswith("\n"),
+        err=True,
+    )
 
 
 def _echo_logs_view(logs: InstanceLogsView) -> None:
@@ -501,23 +453,22 @@ def _echo_cuttlefish_diagnostic_logs(logs: InstanceLogsView) -> None:
         typer.echo(contents, nl=not contents.endswith("\n"))
 
 
-def _client_from_ctx(ctx: typer.Context) -> CuttleApiClient:
-    return _state_from_ctx(ctx).client
-
-
-def _state_from_ctx(ctx: typer.Context) -> AppState:
+def _client_from_ctx(ctx: typer.Context) -> CuttleClient:
     state = ctx.obj
     if not isinstance(state, AppState):
         raise RuntimeError("CLI client has not been initialized")
-    return state
+    return state.client
 
 
-def _ensure_daemon_running_or_exit(settings: CliSettings) -> None:
-    try:
-        ensure_managed_daemon_running(settings)
-    except CliError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+def _required_user_id(user_id: str | None) -> str:
+    if user_id is None:
+        raise RuntimeError("stop-all-user mode requires a user id")
+    return user_id
+
+
+def _exit_with_error(error: CliError) -> Never:
+    typer.echo(str(error), err=True)
+    raise typer.Exit(code=1) from error
 
 
 def main() -> None:
