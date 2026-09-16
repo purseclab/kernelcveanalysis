@@ -179,7 +179,7 @@ class AdbSandbox:
             self.sandbox.forward_port(
                 target_host=self.adb_host,
                 host_port=self.adb_port,
-                guest_addr=GUEST_ADB_HOST,
+                guest_addr="127.0.0.1",
                 guest_port=GUEST_ADB_PORT,
             )
             self._run_adb(["connect", self.container_adb_host])

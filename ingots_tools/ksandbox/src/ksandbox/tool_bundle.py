@@ -20,6 +20,14 @@ TOOL_NAMES = ("ksandbox-daemon", "rg", "fd")
 logger = get_logger(__name__)
 
 
+def tool_bundle_source_root() -> Path:
+    packaged = Path(__file__).resolve().parent / "_tool_bundle"
+    if packaged.is_dir():
+        return packaged
+    # Editable workspace installs keep build inputs at the project root.
+    return Path(__file__).resolve().parents[2]
+
+
 def tool_cache_root() -> Path:
     xdg_cache = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
@@ -27,7 +35,7 @@ def tool_cache_root() -> Path:
 
 
 def tool_bundle_version() -> str:
-    package_root = Path(__file__).resolve().parents[2]
+    package_root = tool_bundle_source_root()
     digest = hashlib.sha256()
     sources = [
         package_root / "tool-bundle.Dockerfile",
@@ -80,7 +88,7 @@ def _extract_bundle(archive: bytes, destination: Path) -> None:
 
 
 def _build_bundle(client) -> Path:
-    package_root = Path(__file__).resolve().parents[2]
+    package_root = tool_bundle_source_root()
     bundle_image = f"ksandbox-tools:{tool_bundle_version()}"
     logger.info("Building static ksandbox tool bundle image %s", bundle_image)
     image, _ = client.images.build(

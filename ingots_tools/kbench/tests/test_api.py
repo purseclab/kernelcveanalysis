@@ -83,7 +83,7 @@ def test_adb_sandbox_merges_inference_and_adb_host_mappings() -> None:
     docker_sandbox.forward_port.assert_called_once_with(
         target_host="adb.internal",
         host_port=6520,
-        guest_addr="cuttlefish",
+        guest_addr="127.0.0.1",
         guest_port=6000,
     )
     cuttle_client.stop.assert_called_once_with("instance-1")
