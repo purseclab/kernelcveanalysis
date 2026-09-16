@@ -1286,6 +1286,7 @@ dependencies = [
     { name = "kexploit-utils" },
     { name = "ksandbox" },
     { name = "pydantic" },
+    { name = "tqdm" },
     { name = "typer" },
 ]
 
@@ -1296,6 +1297,7 @@ requires-dist = [
     { name = "kexploit-utils", editable = "kexploit_utils" },
     { name = "ksandbox", editable = "ksandbox" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "tqdm", specifier = ">=4.67.0" },
     { name = "typer", specifier = ">=0.21.1" },
 ]
 

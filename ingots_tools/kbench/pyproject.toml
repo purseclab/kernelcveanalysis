@@ -11,6 +11,7 @@ dependencies = [
     "kexploit_agent",
     "cuttle_cli",
     "pydantic>=2.12.5",
+    "tqdm>=4.67.0",
 ]
 
 [tool.uv]

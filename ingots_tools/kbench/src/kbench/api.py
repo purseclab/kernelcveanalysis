@@ -77,15 +77,21 @@ class ChallengeInstance:
 class BenchmarkRun:
     name: str
     # how manny instances to run in parallel, none for no cap
-    num_instances: int
+    num_instances: int | None
     challenges: list[Challenge]
     output_folder: Path
 
+class ChallengeResult(BaseModel):
+    score: Score
+    runtime: float
+
 class BenchmarkResult(BaseModel):
     overall_score: float
+    total_runtime: float
 
     # map from challenge to scores
     scores: dict[str, Score]
+    results: dict[str, ChallengeResult] = {}
 
 
 @dataclass
