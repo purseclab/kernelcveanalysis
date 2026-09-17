@@ -36,6 +36,10 @@ class StubChallenge(Challenge):
         return "challenge6"
 
     @property
+    def internet_enabled(self) -> bool:
+        return True
+
+    @property
     def model_config(self) -> ModelConfig:
         return ModelConfig(model=Model.DEEPSEEK_V4_1_FLASH)
 
@@ -87,6 +91,7 @@ def test_run_challenge_uses_container_hosts_for_adb_and_inference(
         "challenge6",
         sandbox_cls.call_args.args[3],
         name="stub",
+        internet_enabled=True,
         extra_hosts={"openrouter.ai": "127.0.0.1"},
     )
     create_agent.assert_called_once_with(

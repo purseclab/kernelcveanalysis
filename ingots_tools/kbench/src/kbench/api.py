@@ -46,6 +46,12 @@ class Challenge(ABC):
 
     @property
     @abstractmethod
+    def internet_enabled(self) -> bool:
+        """Whether the challenge sandbox may access the Internet."""
+        ...
+
+    @property
+    @abstractmethod
     def model_config(self) -> ModelConfig:
         """Model used for eval."""
         ...
@@ -112,6 +118,7 @@ class AdbSandbox:
     cuttle_template: str
     mounts: list[MountInfo]
     name: str | None
+    internet_enabled: bool
     extra_hosts: dict[str, str]
 
     adb_host: str | None
@@ -129,6 +136,7 @@ class AdbSandbox:
         cuttle_template: str,
         mounts: list[MountInfo],
         name: str | None = None,
+        internet_enabled: bool = False,
         extra_hosts: dict[str, str] | None = None,
     ):
         self.state = state
@@ -136,6 +144,7 @@ class AdbSandbox:
         self.cuttle_template = cuttle_template
         self.mounts = mounts
         self.name = name
+        self.internet_enabled = internet_enabled
         self.extra_hosts = dict(extra_hosts or {})
 
         self.adb_host = None
@@ -172,7 +181,7 @@ class AdbSandbox:
             self.sandbox = self.state.sandbox_provider.create(
                 self.docker_tag,
                 mounts=self.mounts,
-                allow_internet=False,
+                allow_internet=self.internet_enabled,
                 extra_hosts=extra_hosts,
             )
             _ = self.sandbox.start()

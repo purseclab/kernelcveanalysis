@@ -75,6 +75,11 @@ class MyChallenge(Challenge):
         return "aosp-kernel-6.1"
 
     @property
+    def internet_enabled(self) -> bool:
+        """Whether the challenge sandbox may access the Internet."""
+        return False
+
+    @property
     def model_config(self) -> ModelConfig:
         """Model configuration used for evaluation."""
         return ModelConfig(model="claude-3-5-sonnet-20241022")
@@ -136,7 +141,7 @@ Container object passed to `Challenge.run(instance: ChallengeInstance)`.
 
 ### 4. `AdbSandbox` (Context Manager)
 
-Manages the dual lifecycle of an isolated Docker container and an unmanaged Cuttlefish Android virtual machine, bridging ADB connectivity between them. Optional `extra_hosts` entries map inference API hostnames to their in-container forwarded addresses while the container remains offline.
+Manages the dual lifecycle of an isolated Docker container and an unmanaged Cuttlefish Android virtual machine, bridging ADB connectivity between them. Optional `extra_hosts` entries map inference API hostnames to their in-container forwarded addresses. Internet access is disabled by default and can be enabled explicitly.
 
 ```python
 with AdbSandbox(
@@ -145,6 +150,7 @@ with AdbSandbox(
     cuttle_template,
     mounts,
     name="challenge_name",
+    internet_enabled=False,
     extra_hosts={"openrouter.ai": "127.0.0.1"},
 ) as sandbox:
     # Cuttlefish VM and Docker container are running and ADB is connected
@@ -159,6 +165,7 @@ with AdbSandbox(
 - **`__exit__(...) -> None`**: Calls `self.stop()`.
 - **`restart_cuttlefish() -> None`**: Disconnects ADB, restarts the Cuttlefish VM through the control plane, and reconnects ADB.
 - **`container_adb_host: str`**: Address reachable inside the container (`cuttlefish:6000`).
+- **`internet_enabled`**: Whether the Docker challenge sandbox receives normal network access. Defaults to `False`.
 - **`extra_hosts`**: Optional hostname-to-address mappings added to the Docker sandbox; the runner automatically maps the challenge model's API host to its configured guest address.
 
 ---

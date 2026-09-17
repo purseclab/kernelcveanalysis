@@ -66,6 +66,7 @@ def test_adb_sandbox_merges_inference_and_adb_host_mappings() -> None:
         "android-bench:test",
         "challenge6",
         [],
+        internet_enabled=True,
         extra_hosts={"openrouter.ai": "127.0.0.1"},
     )
     with sandbox:
@@ -74,7 +75,7 @@ def test_adb_sandbox_merges_inference_and_adb_host_mappings() -> None:
     provider.create.assert_called_once_with(
         "android-bench:test",
         mounts=[],
-        allow_internet=False,
+        allow_internet=True,
         extra_hosts={
             "openrouter.ai": "127.0.0.1",
             "cuttlefish": "127.0.0.1",

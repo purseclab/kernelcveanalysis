@@ -40,6 +40,7 @@ def run_challenge(state: GlobalRunState, challenge: Challenge) -> ChallengeResul
         challenge.cuttlefish_template,
         [solution_mount],
         name=challenge.name,
+        internet_enabled=challenge.internet_enabled,
         extra_hosts={
             model_config.resolved_api_host: model_config.resolved_guest_addr,
         },
