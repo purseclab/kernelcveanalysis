@@ -115,6 +115,57 @@ all running Cuttlefish instances before restarting
 `cuttlefish-host-resources`, because doing so destroys and recreates the shared
 TAP and bridge devices.
 
+#### Reprovisioning TAP Interfaces
+
+First coordinate with all server users and stop every managed and manually
+launched Cuttlefish instance. `cuttle-cli list` only shows instances visible to
+the configured user, so an administrator must also account for instances owned
+by other users:
+
+```sh
+cuttle-cli list
+cuttle-cli stop INSTANCE_NAME
+```
+
+After all instances have stopped, prevent new launches while the shared network
+resources are being replaced:
+
+```sh
+sudo systemctl stop cuttle-server
+```
+
+Set `num_cvd_accounts` in `/etc/default/cuttlefish-host-resources` to at least
+`base_instance_num + max_instances`, then restart the resource service:
+
+```sh
+sudoedit /etc/default/cuttlefish-host-resources
+sudo systemctl restart cuttlefish-host-resources.service
+sudo systemctl status --no-pager cuttlefish-host-resources.service
+```
+
+Verify the number of interfaces created for each TAP type. The following counts
+should each equal `num_cvd_accounts`:
+
+```sh
+for prefix in cvd-etap cvd-mtap cvd-wtap cvd-wifiap; do
+    printf '%s: ' "$prefix"
+    ip tuntap show | awk -F: -v prefix="$prefix" \
+        '$1 ~ "^" prefix "-" { count++ } END { print count + 0 }'
+done
+```
+
+Finally, restart the control plane and confirm it is healthy:
+
+```sh
+sudo systemctl start cuttle-server
+sudo systemctl status --no-pager cuttle-server
+```
+
+The first resource restart after increasing `num_cvd_accounts` may log errors
+while deleting higher-numbered interfaces that did not previously exist. Check
+the final service status and interface counts before restarting the control
+plane.
+
 ### Template Config
 
 Each `templates/*.toml` file defines one launch template:
