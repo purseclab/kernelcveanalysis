@@ -8,7 +8,8 @@ set -- \
     "kexploit" \
     "object_db" \
     "kpatch" \
-    "kartifact"
+    "kartifact" \
+    "kexploit_agent"
 
 for package in "$@"
 do
