@@ -37,7 +37,7 @@ class StubChallenge(Challenge):
 
     @property
     def model_config(self) -> ModelConfig:
-        return ModelConfig(Model.DEEPSEEK_V4_1_FLASH)
+        return ModelConfig(model=Model.DEEPSEEK_V4_1_FLASH)
 
     @property
     def harness(self) -> HarnessType:
