@@ -8,7 +8,7 @@ from .api import (
     GlobalRunState,
     Score,
 )
-from .runner import run, run_benchmark, run_challenge
+from .runner import run, run_benchmark, run_challenge, run_challenges
 
 __all__ = [
     "AdbSandbox",
@@ -22,4 +22,5 @@ __all__ = [
     "run",
     "run_benchmark",
     "run_challenge",
+    "run_challenges",
 ]

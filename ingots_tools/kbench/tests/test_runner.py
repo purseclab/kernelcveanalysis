@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from kbench import Challenge, ChallengeInstance, Score
+import pytest
 from kbench.api import GlobalRunState
-from kbench.runner import run_challenge
-from kexploit_agent import HarnessType, Model, ModelConfig
+from kbench.runner import run_challenge, run_challenges
+
+from kbench import AdbSandbox, Challenge, ChallengeInstance, ChallengeResult, Score
+from kexploit_agent import AgentGroup, BaseAgent, HarnessType, Model, ModelConfig
 
 
 class StubScore(Score):
@@ -102,3 +105,53 @@ def test_run_challenge_uses_container_hosts_for_adb_and_inference(
         agent_group=state.run_group,
     )
     assert challenge.received_instance is not None
+
+
+def test_run_challenges_cleans_resources_before_joining_interrupted_workers(
+    tmp_path: Path,
+) -> None:
+    state = GlobalRunState(
+        sandbox_provider=MagicMock(),
+        cuttle_client=MagicMock(),
+        run_group=AgentGroup("run"),
+        grader_group=AgentGroup("graders"),
+        solutions_folder=tmp_path,
+    )
+    registered = threading.Event()
+    released = threading.Event()
+    agent = MagicMock(spec=BaseAgent)
+    agent.close.side_effect = released.set
+    sandbox = MagicMock(spec=AdbSandbox)
+    challenge = StubChallenge()
+
+    def blocked_runner(
+        worker_state: GlobalRunState,
+        worker_challenge: Challenge,
+    ) -> ChallengeResult:
+        worker_state.register_agent(agent)
+        worker_state.register_sandbox(sandbox)
+        registered.set()
+        assert released.wait(timeout=2)
+        return ChallengeResult(score=StubScore(passed=True), runtime=0.1)
+
+    def interrupting_as_completed(
+        futures: dict[object, object],
+    ) -> list[object]:
+        assert futures
+        assert registered.wait(timeout=2)
+        raise KeyboardInterrupt
+
+    with (
+        patch("kbench.runner.as_completed", side_effect=interrupting_as_completed),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        run_challenges(
+            state,
+            [challenge],
+            run_name="interrupt test",
+            num_instances=1,
+            challenge_runner=blocked_runner,
+        )
+
+    agent.close.assert_called()
+    sandbox.stop.assert_called()

@@ -159,8 +159,8 @@ with AdbSandbox(
 ```
 
 #### Lifecycle Methods & Properties
-- **`start() -> Self`**: Starts the Cuttlefish VM via `CuttleClient`, starts the Docker sandbox container, forwards guest port `6000` to the Cuttlefish ADB port, and issues `adb connect`. Cleans up the VM if container initialization fails.
-- **`stop() -> None`**: Idempotently stops the container port forwarders, container instance, and Cuttlefish VM.
+- **`start() -> Self`**: Starts a uniquely named Cuttlefish VM via `CuttleClient`, starts the Docker sandbox container, forwards guest port `6000` to the Cuttlefish ADB port, and issues `adb connect`. Partial startup is registered for cleanup and catches interrupts as well as ordinary exceptions.
+- **`stop() -> None`**: Idempotently stops the container port forwarders, container instance, and Cuttlefish VM. Docker and Cuttlefish cleanup are both attempted when either one fails, and a failed cleanup remains retryable.
 - **`__enter__() -> Self`**: Calls and returns `self.start()`.
 - **`__exit__(...) -> None`**: Calls `self.stop()`.
 - **`restart_cuttlefish() -> None`**: Disconnects ADB, restarts the Cuttlefish VM through the control plane, and reconnects ADB.
@@ -213,12 +213,13 @@ Executes the benchmark suite:
 1. Creates the run's `output_folder`.
 2. Initializes `GlobalRunState` (Docker sandbox provider, Cuttlefish client, agent groups).
 3. Distributes challenge execution across worker threads up to `run.num_instances`.
-4. Renders a `tqdm` progress bar as challenges complete.
-5. Logs completion events (`Challenge '<name>' finished in <runtime>s with score: <score>`).
-6. Saves `<solution_folder>/results.json` for each challenge.
-7. Aggregates results, computes average score and total runtime.
-8. Writes `<output_folder>/results.json`.
-9. Returns the final `BenchmarkResult`.
+4. Tracks live agents and sandboxes so an interrupt or worker failure closes agents and stops Docker/Cuttlefish resources before joining worker threads.
+5. Renders a `tqdm` progress bar as challenges complete.
+6. Logs completion events (`Challenge '<name>' finished in <runtime>s with score: <score>`).
+7. Saves `<solution_folder>/results.json` for each challenge.
+8. Aggregates results, computes average score and total runtime.
+9. Writes `<output_folder>/results.json`.
+10. Returns the final `BenchmarkResult`.
 
 ### `run_challenge(state: GlobalRunState, challenge: Challenge) -> ChallengeResult`
 Executes a single challenge within an `AdbSandbox`, measures execution runtime, records results, and returns `ChallengeResult`.

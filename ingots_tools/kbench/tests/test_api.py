@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import MagicMock
 
-from kbench import AdbSandbox, BenchmarkResult, ChallengeResult, Score
+import pytest
 from kbench.api import GlobalRunState
+
+from kbench import AdbSandbox, BenchmarkResult, ChallengeResult, Score
+from kexploit_agent import AgentGroup
 
 
 class DetailedScore(Score):
@@ -16,6 +18,11 @@ class DetailedScore(Score):
     @property
     def score(self) -> float:
         return 1.0 if self.passed else 0.0
+
+
+class _InterruptingSandbox(AdbSandbox):
+    def _after_adb_connect(self) -> None:
+        raise KeyboardInterrupt
 
 
 def test_concrete_score_fields_are_preserved_in_result_json() -> None:
@@ -53,12 +60,12 @@ def test_adb_sandbox_merges_inference_and_adb_host_mappings() -> None:
         adb_target="adb.internal:6520",
         instance=SimpleNamespace(instance_id="instance-1"),
     )
-    state = cast(
-        GlobalRunState,
-        SimpleNamespace(
-            sandbox_provider=provider,
-            cuttle_client=cuttle_client,
-        ),
+    state = GlobalRunState(
+        sandbox_provider=provider,
+        cuttle_client=cuttle_client,
+        run_group=AgentGroup("test run"),
+        grader_group=AgentGroup("test graders"),
+        solutions_folder=Path("/tmp/kbench-test"),
     )
 
     sandbox = AdbSandbox(
@@ -87,4 +94,42 @@ def test_adb_sandbox_merges_inference_and_adb_host_mappings() -> None:
         guest_addr="127.0.0.1",
         guest_port=6000,
     )
+    cuttle_client.start.assert_called_once_with(
+        "challenge6",
+        name=sandbox.cuttle_cli_instance_name,
+        load_apps=True,
+        unmanaged=True,
+    )
     cuttle_client.stop.assert_called_once_with("instance-1")
+
+
+def test_adb_sandbox_cleans_up_when_startup_is_interrupted() -> None:
+    docker_sandbox = MagicMock()
+    docker_sandbox.running = True
+    provider = MagicMock()
+    provider.create.return_value = docker_sandbox
+    cuttle_client = MagicMock()
+    cuttle_client.start.return_value = SimpleNamespace(
+        adb_target="adb.internal:6520",
+        instance=SimpleNamespace(instance_id="instance-1"),
+    )
+    state = GlobalRunState(
+        sandbox_provider=provider,
+        cuttle_client=cuttle_client,
+        run_group=AgentGroup("test run"),
+        grader_group=AgentGroup("test graders"),
+        solutions_folder=Path("/tmp/kbench-test"),
+    )
+    sandbox = _InterruptingSandbox(
+        state,
+        "android-bench:test",
+        "challenge6",
+        [],
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        sandbox.start()
+
+    docker_sandbox.stop.assert_called_once_with()
+    cuttle_client.stop.assert_called_once_with("instance-1")
+    assert sandbox._stopped
