@@ -15,6 +15,13 @@ from .base import BackendLogs, BackendReconcileFailure, LaunchResult
 
 LOGGER = logging.getLogger(__name__)
 
+HOST_TAP_INTERFACE_PREFIXES = (
+    "cvd-etap",
+    "cvd-mtap",
+    "cvd-wtap",
+    "cvd-wifiap",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CuttlefishLogPaths:
@@ -30,10 +37,18 @@ class HostCuttlefishBackend:
 
     kind = CuttlefishBackendKind.HOST
 
-    def __init__(self, *, start_timeout_sec: int = 120) -> None:
+    def __init__(
+        self,
+        *,
+        start_timeout_sec: int = 120,
+        sys_class_net_dir: Path = Path("/sys/class/net"),
+    ) -> None:
         self.start_timeout_sec = start_timeout_sec
+        self.sys_class_net_dir = sys_class_net_dir
 
     def start_instance(self, record: InstanceRecord) -> LaunchResult:
+        self._validate_tap_interfaces(record.instance_num)
+
         runtime_dir = record.runtime_dir
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
@@ -89,6 +104,26 @@ class HostCuttlefishBackend:
 
     def _build_start_command(self, record: InstanceRecord) -> list[str]:
         return self.build_start_command(record)
+
+    def _validate_tap_interfaces(self, instance_num: int) -> None:
+        suffix = f"{instance_num:02d}"
+        required_names = [
+            f"{prefix}-{suffix}" for prefix in HOST_TAP_INTERFACE_PREFIXES
+        ]
+        missing_names = [
+            name
+            for name in required_names
+            if not (self.sys_class_net_dir / name).exists()
+        ]
+        if not missing_names:
+            return
+
+        missing = ", ".join(missing_names)
+        raise RuntimeError(
+            "host networking is not provisioned for Cuttlefish instance "
+            f"{instance_num}; missing TAP interfaces: {missing}. Ensure "
+            "num_cvd_accounts is at least base_instance_num + max_instances"
+        )
 
     def read_logs(self, record: InstanceRecord) -> BackendLogs:
         paths = self.log_paths(record)

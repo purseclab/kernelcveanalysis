@@ -79,6 +79,42 @@ docker_image = "cuttlefish-host:latest"
 - `base_instance_num` reserves the first `N` Cuttlefish instance numbers for manually launched devices. When set to `N`, the server allocates from `N + 1` through `N + max_instances`.
 - `docker_image` is the default prebuilt image for Docker-backed templates. Run `./setup.sh` to build the provided default image; the server itself does not build or pull images automatically.
 
+### Host TAP Capacity
+
+Host-backed Cuttlefish instances use TAP interfaces provisioned by the host's
+`cuttlefish-host-resources` service. On Debian-based installations, the number
+of interface sets is normally controlled by `num_cvd_accounts` in
+`/etc/default/cuttlefish-host-resources`; when unset, the packaged service
+commonly defaults to 10. Each usable instance number needs its corresponding
+`cvd-etap-NN`, `cvd-mtap-NN`, `cvd-wtap-NN`, and `cvd-wifiap-NN` interfaces.
+
+The highest instance number managed by the server is
+`base_instance_num + max_instances`, so `num_cvd_accounts` must be at least that
+large. For example, this server configuration allocates instance numbers 5
+through 20 and therefore requires at least 20 host interface sets:
+
+```toml
+# cuttle_server.toml
+base_instance_num = 4
+max_instances = 16
+```
+
+```sh
+# /etc/default/cuttlefish-host-resources
+num_cvd_accounts=20
+```
+
+If the required TAP interfaces are absent, Cuttlefish can still appear to boot
+while logging errors such as `Unable to connect to cvd-mtap-13 tap interface`.
+The guest then has no corresponding network interface; on phone images this can
+also cause repeated cellular setup attempts and eventual Android system-service
+failure.
+
+Changing `num_cvd_accounts` requires reprovisioning the host resources. Drain
+all running Cuttlefish instances before restarting
+`cuttlefish-host-resources`, because doing so destroys and recreates the shared
+TAP and bridge devices.
+
 ### Template Config
 
 Each `templates/*.toml` file defines one launch template:

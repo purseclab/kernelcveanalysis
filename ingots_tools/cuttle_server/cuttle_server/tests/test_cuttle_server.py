@@ -550,10 +550,19 @@ class ApiBackgroundTaskTests(unittest.TestCase):
 
 
 class HostCuttlefishBackendTests(unittest.TestCase):
+    @staticmethod
+    def _create_tap_interfaces(sys_class_net_dir: Path, instance_num: int) -> None:
+        suffix = f"{instance_num:02d}"
+        for prefix in ("cvd-etap", "cvd-mtap", "cvd-wtap", "cvd-wifiap"):
+            (sys_class_net_dir / f"{prefix}-{suffix}").mkdir(parents=True)
+
     def test_start_and_stop_use_instance_runtime_dir_and_android_host_env(self):
-        cli = HostCuttlefishBackend()
         with tempfile.TemporaryDirectory() as tmp:
-            runtime_dir = Path(tmp) / "runtime"
+            root = Path(tmp)
+            sys_class_net_dir = root / "sys-class-net"
+            self._create_tap_interfaces(sys_class_net_dir, 3)
+            cli = HostCuttlefishBackend(sys_class_net_dir=sys_class_net_dir)
+            runtime_dir = root / "runtime"
             config = ResolvedLaunchConfig(
                 template_name="phone",
                 cpus=4,
@@ -609,9 +618,12 @@ class HostCuttlefishBackendTests(unittest.TestCase):
         self.assertEqual(stop_call.args[0], ["/cf/bin/cvd", "stop"])
 
     def test_legacy_mode_uses_launch_and_stop_cvd_binaries(self):
-        cli = HostCuttlefishBackend()
         with tempfile.TemporaryDirectory() as tmp:
-            runtime_dir = Path(tmp) / "runtime"
+            root = Path(tmp)
+            sys_class_net_dir = root / "sys-class-net"
+            self._create_tap_interfaces(sys_class_net_dir, 3)
+            cli = HostCuttlefishBackend(sys_class_net_dir=sys_class_net_dir)
+            runtime_dir = root / "runtime"
             config = ResolvedLaunchConfig(
                 template_name="phone",
                 cpus=4,
@@ -709,9 +721,12 @@ class HostCuttlefishBackendTests(unittest.TestCase):
         self.assertIn("--initramfs_path=/initrd", initrd_only_command)
 
     def test_failed_start_logs_stdout_and_stderr(self):
-        cli = HostCuttlefishBackend()
         with tempfile.TemporaryDirectory() as tmp:
-            runtime_dir = Path(tmp) / "runtime"
+            root = Path(tmp)
+            sys_class_net_dir = root / "sys-class-net"
+            self._create_tap_interfaces(sys_class_net_dir, 3)
+            cli = HostCuttlefishBackend(sys_class_net_dir=sys_class_net_dir)
+            runtime_dir = root / "runtime"
             config = ResolvedLaunchConfig(
                 template_name="phone",
                 cpus=4,
@@ -752,9 +767,15 @@ class HostCuttlefishBackendTests(unittest.TestCase):
         self.assertIn("launch stdout", str(exc_info.exception))
 
     def test_start_timeout_reports_log_tail(self):
-        cli = HostCuttlefishBackend(start_timeout_sec=5)
         with tempfile.TemporaryDirectory() as tmp:
-            runtime_dir = Path(tmp) / "runtime"
+            root = Path(tmp)
+            sys_class_net_dir = root / "sys-class-net"
+            self._create_tap_interfaces(sys_class_net_dir, 3)
+            cli = HostCuttlefishBackend(
+                start_timeout_sec=5,
+                sys_class_net_dir=sys_class_net_dir,
+            )
+            runtime_dir = root / "runtime"
             config = ResolvedLaunchConfig(
                 template_name="phone",
                 cpus=4,
@@ -785,6 +806,42 @@ class HostCuttlefishBackendTests(unittest.TestCase):
 
         self.assertIn("timed out after 5s", str(exc_info.exception))
         self.assertIn("still booting", str(exc_info.exception))
+
+    def test_start_rejects_missing_tap_interfaces_before_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sys_class_net_dir = root / "sys-class-net"
+            self._create_tap_interfaces(sys_class_net_dir, 13)
+            (sys_class_net_dir / "cvd-mtap-13").rmdir()
+            (sys_class_net_dir / "cvd-wifiap-13").rmdir()
+            cli = HostCuttlefishBackend(sys_class_net_dir=sys_class_net_dir)
+            runtime_dir = root / "runtime"
+            config = ResolvedLaunchConfig(
+                template_name="phone",
+                cpus=4,
+                selinux=True,
+                runtime_root=Path("/cf"),
+                kernel_path=None,
+                initrd_path=None,
+                apps=[],
+                cvd_binary=Path("/cf/bin/cvd"),
+            )
+            record = type("Record", (), {})()
+            record.instance_num = 13
+            record.runtime_dir = runtime_dir
+            record.config = config
+
+            with patch("cuttle_server.backends.host.subprocess.run") as run:
+                with self.assertRaises(RuntimeError) as exc_info:
+                    cli.start_instance(record)
+
+            error = str(exc_info.exception)
+            self.assertIn("Cuttlefish instance 13", error)
+            self.assertIn("cvd-mtap-13", error)
+            self.assertIn("cvd-wifiap-13", error)
+            self.assertIn("num_cvd_accounts", error)
+            self.assertFalse(runtime_dir.exists())
+            run.assert_not_called()
 
     def test_read_logs_includes_internal_cuttlefish_logs(self):
         cli = HostCuttlefishBackend()
