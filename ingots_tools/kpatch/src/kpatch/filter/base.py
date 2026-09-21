@@ -155,13 +155,18 @@ class CommitFilter(ABC):
                 progress.advance(task)
         return filtered
 
-    @abstractmethod
     def filter_mutable_commit(
         self,
         commit: FilteredCommit,
         context: FilterContext,
     ) -> FilteredCommit | None:
-        pass
+        """Filter or modify a single mutable commit view.
+
+        Defaults to returning the commit unchanged (identity function). Subclasses
+        that filter commits individually override this method. Subclasses that
+        filter collections as a whole override filter_mutable_commits instead.
+        """
+        return commit
 
 
 class FilterPipeline:

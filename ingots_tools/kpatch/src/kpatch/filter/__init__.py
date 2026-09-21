@@ -10,6 +10,7 @@ from .base import (
 )
 from .config import ConfigFilter
 from .config_filter import ConfigValue, KernelConfig
+from .count_filter import CountFilter
 from .file_filter import FileFilter
 from .ifdef_filter import (
     IfdefFilter,
@@ -17,6 +18,14 @@ from .ifdef_filter import (
     get_active_lines,
 )
 from .merge_filter import MergeCommitFilter
+from .whitespace import (
+    CToken,
+    CTokenKind,
+    SourceNoopFilter,
+    WhitespaceFilter,
+    WhitespaceFilterStats,
+    tokenize_c_source,
+)
 from ..git import (
     GitCommit,
     GitDb,
@@ -41,6 +50,7 @@ def filter_commits(
             MergeCommitFilter(),
             ConfigFilter(kernel_config),
             IfdefFilter(kernel_config),
+            WhitespaceFilter(),
         ]
     ).filter_commits(
         all_commits,
@@ -75,6 +85,7 @@ def filter_commit_time_range(
                 MergeCommitFilter(),
                 ConfigFilter(kernel_config),
                 IfdefFilter(kernel_config),
+                WhitespaceFilter(),
             ]
         ).filter_commits(
             all_commits,
@@ -82,7 +93,12 @@ def filter_commit_time_range(
             show_progress=show_progress,
         )
     else:
-        filtered_commits = MergeCommitFilter().filter_commits(
+        filtered_commits = FilterPipeline(
+            [
+                MergeCommitFilter(),
+                WhitespaceFilter(),
+            ]
+        ).filter_commits(
             all_commits,
             context,
             show_progress=show_progress,
@@ -96,9 +112,12 @@ def filter_commit_time_range(
 
 
 __all__ = [
+    "CToken",
+    "CTokenKind",
     "CommitFilter",
     "ConfigFilter",
     "ConfigValue",
+    "CountFilter",
     "FileBuildModes",
     "FileFilter",
     "FilterContext",
@@ -107,8 +126,12 @@ __all__ = [
     "IfdefFilter",
     "KernelConfig",
     "MergeCommitFilter",
+    "SourceNoopFilter",
+    "WhitespaceFilter",
+    "WhitespaceFilterStats",
     "diff_file_touches_active_code",
     "filter_commits",
     "filter_commit_time_range",
     "get_active_lines",
+    "tokenize_c_source",
 ]

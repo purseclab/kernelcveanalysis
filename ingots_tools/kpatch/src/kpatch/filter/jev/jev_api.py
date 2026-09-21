@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Sequence, TypeAlias
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 
 # ---------------------------------------------------------------------------
@@ -13,7 +13,8 @@ import requests
 class NoulQuestion:
     name: str
     instructions: str
-    criteria: Mapping[str, str] | None = None
+    true_criteria: str | None = None
+    false_criteria: str | None = None
     type: Literal["noul"] = "noul"
 
 
@@ -101,7 +102,16 @@ def jev(
             "instructions": q.instructions,
         }
 
-        if q.criteria is not None:
+        if isinstance(q, NoulQuestion):
+            criteria = {}
+
+            if q.true_criteria is not None:
+                criteria["true"] = q.true_criteria
+            if q.false_criteria is not None:
+                criteria["false"] = q.false_criteria
+
+            wire["criteria"] = criteria
+        else:
             wire["criteria"] = q.criteria
 
         wire_questions[q.name] = wire

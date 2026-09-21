@@ -7,7 +7,7 @@ import typer
 
 from .dataset import load_git_commits
 from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db, load_commits_from_db
-from .filter import FileFilter, FilterContext, filter_commit_time_range
+from .filter import FileFilter, FilterContext, WhitespaceFilter, filter_commit_time_range
 from .visualization import show_commit_sunburst
 
 app = typer.Typer()
@@ -62,6 +62,27 @@ def filter(
     start_date = parse_time(start)
     end_date = parse_time(end)
     filter_commit_time_range(GitRepo(repo), GitDb(db), dest, config, start_date, end_date)
+
+@app.command("filter-noop", help="Filter commits that only modify comments, formatting, or whitespace.")
+def filter_noop(
+    repo: Annotated[Path, typer.Option(help="Path to linux git repo.")],
+    db: Annotated[Path, typer.Option(help="Path to sqlite database with input commits.")],
+    dest: Annotated[str, typer.Option(help="Destination database name to save filtered commits to.")],
+    strict: Annotated[bool, typer.Option(help="Retain all newline tokens strictly (do not ignore non-directive newlines).")] = False,
+):
+    git_repo = GitRepo(repo)
+    git_db = GitDb(db)
+    commits = git_db.commits_between()
+    print(f"Loaded {len(commits)} commits from {db}")
+    whitespace_filter = WhitespaceFilter(ignore_non_directive_newlines=not strict)
+    context = FilterContext(git_repo)
+    filtered = whitespace_filter.filter_commits(commits, context, show_progress=True)
+    stats = whitespace_filter.stats()
+    print(f"Processed: {stats.processed_commits} commits")
+    print(f"Pruned no-op files: {stats.pruned_files}")
+    print(f"Eliminated no-op commits: {stats.eliminated_commits}")
+    print(f"Retained commits: {len(filtered)}")
+    save_commits_to_db(dest, filtered)
 
 @app.command("test", help="Temporary function for testing.")
 def run():

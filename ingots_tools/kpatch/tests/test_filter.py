@@ -574,6 +574,18 @@ class FilterCommitsTests(unittest.TestCase):
         )
         self.assertEqual(len(module_result), 1)
 
+    def test_default_filter_mutable_commit_is_identity(self) -> None:
+        class _BatchOnlyFilter(CommitFilter):
+            name = "Batch only filter"
+
+        commit = self.make_commit("c1", None, ["drivers/foo.c"])
+        mutable_commit = FilteredCommit.from_commit(commit)
+        context = FilterContext(MemoryGitRepo({}))
+
+        f = _BatchOnlyFilter()
+        result = f.filter_mutable_commit(mutable_commit, context)
+        self.assertIs(result, mutable_commit)
+
 
 if __name__ == "__main__":
     unittest.main()
