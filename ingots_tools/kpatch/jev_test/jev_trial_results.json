@@ -1,0 +1,730 @@
+{
+  "model": "~typesafe/jev-latest",
+  "threshold": 0.5,
+  "questions": {
+    "is_vuln": {
+      "type": "noul",
+      "instructions": "Does this code contain a security vulnerability under the API, attacker-control, and concurrency assumptions stated in its comments?",
+      "criteria": {
+        "true": "A plausibly exploitable security bug is present",
+        "false": "No security-relevant bug is present"
+      }
+    },
+    "primary_issue": {
+      "type": "choice",
+      "instructions": "What is the primary root-cause category of the security assessment?",
+      "criteria": {
+        "memory_safety": "A bounds error directly violates memory safety",
+        "lifetime_or_race": "A concurrency, object lifetime, double-fetch, or general time-of-check/time-of-use flaw exists",
+        "integer_error": "Integer conversion or arithmetic creates a security issue",
+        "injection": "Untrusted data alters command, shell, or format interpretation",
+        "authorization": "Authorization is checked against the wrong principal or object",
+        "path_resolution": "Path traversal, symlink handling, or path-resolution timing creates a security issue",
+        "information_disclosure": "Uninitialized or unintended data can be disclosed",
+        "none": "No security-relevant bug is present"
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "case_01",
+      "file": "case_01.c",
+      "pair": "double_fetch",
+      "expected_vulnerable": true,
+      "expected_issue": "lifetime_or_race",
+      "rationale": "The length is validated in one copy_from_user operation and fetched again before the copy; another thread can increase the second value and overflow dst.",
+      "vulnerability_score": 0.86,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 0.96,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.86
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "memory_safety": 0.03,
+            "authorization": 0,
+            "information_disclosure": 0,
+            "lifetime_or_race": 0.97,
+            "path_resolution": 0,
+            "injection": 0,
+            "integer_error": 0,
+            "none": 0
+          },
+          "confidence": 0.96
+        }
+      }
+    },
+    {
+      "id": "case_02",
+      "file": "case_02.c",
+      "pair": "double_fetch",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "The request is copied once into a local snapshot, and the same validated length controls the later copy.",
+      "vulnerability_score": 0.62,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 0.9,
+      "binary_correct": false,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.62
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "integer_error": 0,
+            "authorization": 0,
+            "none": 0.05,
+            "information_disclosure": 0,
+            "lifetime_or_race": 0.92,
+            "injection": 0,
+            "memory_safety": 0.03,
+            "path_resolution": 0
+          },
+          "confidence": 0.9
+        }
+      }
+    },
+    {
+      "id": "case_03",
+      "file": "case_03.c",
+      "pair": "async_lifetime",
+      "expected_vulnerable": true,
+      "expected_issue": "lifetime_or_race",
+      "rationale": "The queued job stores a connection pointer without retaining a reference, so the caller's put can free it before the worker dereferences it.",
+      "vulnerability_score": 0.71,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 0.98,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.71
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "lifetime_or_race": 0.98,
+            "integer_error": 0,
+            "information_disclosure": 0,
+            "none": 0.01,
+            "path_resolution": 0,
+            "injection": 0,
+            "memory_safety": 0.01,
+            "authorization": 0
+          },
+          "confidence": 0.98
+        }
+      }
+    },
+    {
+      "id": "case_04",
+      "file": "case_04.c",
+      "pair": "async_lifetime",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "A reference is acquired before the pointer is queued and released only after the worker's last use.",
+      "vulnerability_score": 0.58,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 0.93,
+      "binary_correct": false,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.58
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "integer_error": 0,
+            "none": 0.05,
+            "authorization": 0,
+            "memory_safety": 0.01,
+            "lifetime_or_race": 0.94,
+            "information_disclosure": 0,
+            "path_resolution": 0,
+            "injection": 0
+          },
+          "confidence": 0.93
+        }
+      }
+    },
+    {
+      "id": "case_05",
+      "file": "case_05.c",
+      "pair": "integer_allocation",
+      "expected_vulnerable": true,
+      "expected_issue": "integer_error",
+      "rationale": "The allocation size is truncated to 32 bits while the initialization loop still writes count full elements.",
+      "vulnerability_score": 0.69,
+      "predicted_vulnerable": true,
+      "predicted_issue": "integer_error",
+      "issue_confidence": 0.75,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.69
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "integer_error",
+          "probabilities": {
+            "information_disclosure": 0,
+            "lifetime_or_race": 0,
+            "memory_safety": 0.14,
+            "integer_error": 0.79,
+            "authorization": 0,
+            "none": 0.07,
+            "injection": 0,
+            "path_resolution": 0
+          },
+          "confidence": 0.75
+        }
+      }
+    },
+    {
+      "id": "case_06",
+      "file": "case_06.c",
+      "pair": "integer_allocation",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "The code bounds count before multiplication and uses the checked size_t result consistently for allocation and initialization.",
+      "vulnerability_score": 0.37,
+      "predicted_vulnerable": false,
+      "predicted_issue": "integer_error",
+      "issue_confidence": 0.34,
+      "binary_correct": true,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.37
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "integer_error",
+          "probabilities": {
+            "injection": 0,
+            "path_resolution": 0,
+            "none": 0.41,
+            "integer_error": 0.42,
+            "information_disclosure": 0.01,
+            "authorization": 0,
+            "lifetime_or_race": 0.01,
+            "memory_safety": 0.15
+          },
+          "confidence": 0.34
+        }
+      }
+    },
+    {
+      "id": "case_07",
+      "file": "case_07.c",
+      "pair": "format_string",
+      "expected_vulnerable": true,
+      "expected_issue": "injection",
+      "rationale": "An attacker-controlled string is passed as syslog's format argument, enabling format directives such as percent-n.",
+      "vulnerability_score": 0.73,
+      "predicted_vulnerable": true,
+      "predicted_issue": "injection",
+      "issue_confidence": 0.77,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.73
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "injection",
+          "probabilities": {
+            "injection": 0.81,
+            "none": 0.12,
+            "path_resolution": 0,
+            "integer_error": 0,
+            "information_disclosure": 0.01,
+            "authorization": 0,
+            "lifetime_or_race": 0,
+            "memory_safety": 0.06
+          },
+          "confidence": 0.77
+        }
+      }
+    },
+    {
+      "id": "case_08",
+      "file": "case_08.c",
+      "pair": "format_string",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "The format string is constant and the attacker-controlled message is supplied only as data for percent-s.",
+      "vulnerability_score": 0.59,
+      "predicted_vulnerable": true,
+      "predicted_issue": "injection",
+      "issue_confidence": 0.38,
+      "binary_correct": false,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.59
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "injection",
+          "probabilities": {
+            "none": 0.26,
+            "memory_safety": 0.12,
+            "integer_error": 0,
+            "lifetime_or_race": 0,
+            "authorization": 0.01,
+            "injection": 0.46,
+            "information_disclosure": 0.15,
+            "path_resolution": 0
+          },
+          "confidence": 0.38
+        }
+      }
+    },
+    {
+      "id": "case_09",
+      "file": "case_09.c",
+      "pair": "object_authorization",
+      "expected_vulnerable": true,
+      "expected_issue": "authorization",
+      "rationale": "Authorization is performed against attacker-supplied owner and tenant fields rather than the resource selected by resource_id.",
+      "vulnerability_score": 0.81,
+      "predicted_vulnerable": true,
+      "predicted_issue": "authorization",
+      "issue_confidence": 0.89,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.81
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "authorization",
+          "probabilities": {
+            "path_resolution": 0,
+            "integer_error": 0,
+            "authorization": 0.91,
+            "injection": 0,
+            "none": 0,
+            "memory_safety": 0,
+            "lifetime_or_race": 0.09,
+            "information_disclosure": 0
+          },
+          "confidence": 0.89
+        }
+      }
+    },
+    {
+      "id": "case_10",
+      "file": "case_10.c",
+      "pair": "object_authorization",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "The resource is loaded first and authorization is evaluated against its trusted owner and tenant metadata.",
+      "vulnerability_score": 0.55,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 0.3,
+      "binary_correct": false,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.55
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "information_disclosure": 0,
+            "authorization": 0.32,
+            "injection": 0,
+            "integer_error": 0,
+            "none": 0.2,
+            "path_resolution": 0,
+            "memory_safety": 0.08,
+            "lifetime_or_race": 0.4
+          },
+          "confidence": 0.3
+        }
+      }
+    },
+    {
+      "id": "case_11",
+      "file": "case_11.c",
+      "pair": "path_open",
+      "expected_vulnerable": true,
+      "expected_issue": "path_resolution",
+      "rationale": "The code validates a realpath result but later opens the original pathname, permitting a symlink swap between check and use.",
+      "vulnerability_score": 0.82,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 0.52,
+      "binary_correct": true,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.82
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "lifetime_or_race": 0.59,
+            "information_disclosure": 0,
+            "none": 0.02,
+            "memory_safety": 0,
+            "authorization": 0,
+            "injection": 0,
+            "integer_error": 0,
+            "path_resolution": 0.39
+          },
+          "confidence": 0.52
+        }
+      }
+    },
+    {
+      "id": "case_12",
+      "file": "case_12.c",
+      "pair": "path_open",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "openat2 resolves the path relative to an already-open root and atomically rejects escapes, symlinks, and magic links.",
+      "vulnerability_score": 0.48,
+      "predicted_vulnerable": false,
+      "predicted_issue": "path_resolution",
+      "issue_confidence": 0.62,
+      "binary_correct": true,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.48
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "path_resolution",
+          "probabilities": {
+            "path_resolution": 0.67,
+            "integer_error": 0,
+            "authorization": 0.01,
+            "injection": 0,
+            "information_disclosure": 0,
+            "memory_safety": 0,
+            "lifetime_or_race": 0.01,
+            "none": 0.31
+          },
+          "confidence": 0.62
+        }
+      }
+    },
+    {
+      "id": "case_13",
+      "file": "case_13.c",
+      "pair": "struct_padding",
+      "expected_vulnerable": true,
+      "expected_issue": "information_disclosure",
+      "rationale": "Member assignment leaves alignment padding uninitialized, and copying the whole structure discloses those stack bytes.",
+      "vulnerability_score": 0.54,
+      "predicted_vulnerable": true,
+      "predicted_issue": "information_disclosure",
+      "issue_confidence": 0.25,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.54
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "information_disclosure",
+          "probabilities": {
+            "none": 0.2,
+            "memory_safety": 0.14,
+            "injection": 0,
+            "path_resolution": 0,
+            "information_disclosure": 0.34,
+            "integer_error": 0.01,
+            "lifetime_or_race": 0.3,
+            "authorization": 0.01
+          },
+          "confidence": 0.25
+        }
+      }
+    },
+    {
+      "id": "case_14",
+      "file": "case_14.c",
+      "pair": "struct_padding",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "Zero-initializing the complete structure before member assignment initializes both fields and padding.",
+      "vulnerability_score": 0.51,
+      "predicted_vulnerable": true,
+      "predicted_issue": "information_disclosure",
+      "issue_confidence": 0.29,
+      "binary_correct": false,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.51
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "information_disclosure",
+          "probabilities": {
+            "path_resolution": 0,
+            "none": 0.23,
+            "authorization": 0.01,
+            "lifetime_or_race": 0.23,
+            "memory_safety": 0.14,
+            "integer_error": 0.01,
+            "injection": 0,
+            "information_disclosure": 0.38
+          },
+          "confidence": 0.29
+        }
+      }
+    },
+    {
+      "id": "case_15",
+      "file": "case_15.c",
+      "pair": "lookup_lifetime",
+      "expected_vulnerable": true,
+      "expected_issue": "lifetime_or_race",
+      "rationale": "A table entry pointer is used after the table lock is released without a reference, while removal may concurrently free it.",
+      "vulnerability_score": 0.85,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 1.0,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.85
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "integer_error": 0,
+            "none": 0,
+            "information_disclosure": 0,
+            "lifetime_or_race": 1,
+            "injection": 0,
+            "path_resolution": 0,
+            "authorization": 0,
+            "memory_safety": 0
+          },
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "case_16",
+      "file": "case_16.c",
+      "pair": "lookup_lifetime",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "The lookup acquires a reference while holding the table lock, keeping the object alive until the final put.",
+      "vulnerability_score": 0.66,
+      "predicted_vulnerable": true,
+      "predicted_issue": "lifetime_or_race",
+      "issue_confidence": 0.96,
+      "binary_correct": false,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.66
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "lifetime_or_race",
+          "probabilities": {
+            "path_resolution": 0,
+            "none": 0.02,
+            "lifetime_or_race": 0.98,
+            "memory_safety": 0,
+            "information_disclosure": 0,
+            "injection": 0,
+            "integer_error": 0,
+            "authorization": 0
+          },
+          "confidence": 0.96
+        }
+      }
+    },
+    {
+      "id": "case_17",
+      "file": "case_17.c",
+      "pair": "process_launch",
+      "expected_vulnerable": true,
+      "expected_issue": "injection",
+      "rationale": "An attacker-controlled image name is concatenated into a shell command and interpreted by sh -c.",
+      "vulnerability_score": 0.95,
+      "predicted_vulnerable": true,
+      "predicted_issue": "injection",
+      "issue_confidence": 1.0,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "injection",
+          "probabilities": {
+            "lifetime_or_race": 0,
+            "memory_safety": 0,
+            "integer_error": 0,
+            "none": 0,
+            "path_resolution": 0,
+            "information_disclosure": 0,
+            "injection": 1,
+            "authorization": 0
+          },
+          "confidence": 1
+        }
+      }
+    },
+    {
+      "id": "case_18",
+      "file": "case_18.c",
+      "pair": "process_launch",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "posix_spawn uses an absolute executable path, a controlled environment, an option terminator, and one argv element for the image without shell interpretation.",
+      "vulnerability_score": 0.66,
+      "predicted_vulnerable": true,
+      "predicted_issue": "injection",
+      "issue_confidence": 0.59,
+      "binary_correct": false,
+      "issue_correct": false,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.66
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "injection",
+          "probabilities": {
+            "memory_safety": 0,
+            "authorization": 0,
+            "information_disclosure": 0.01,
+            "path_resolution": 0.05,
+            "injection": 0.65,
+            "lifetime_or_race": 0,
+            "none": 0.29,
+            "integer_error": 0
+          },
+          "confidence": 0.59
+        }
+      }
+    },
+    {
+      "id": "case_19",
+      "file": "case_19.c",
+      "pair": "length_parser",
+      "expected_vulnerable": true,
+      "expected_issue": "memory_safety",
+      "rationale": "The allocation reserves payload_len bytes, then writes a terminator one byte beyond the allocation.",
+      "vulnerability_score": 0.47,
+      "predicted_vulnerable": false,
+      "predicted_issue": "memory_safety",
+      "issue_confidence": 0.29,
+      "binary_correct": false,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.47
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "memory_safety",
+          "probabilities": {
+            "none": 0.33,
+            "memory_safety": 0.38,
+            "injection": 0,
+            "path_resolution": 0,
+            "information_disclosure": 0.05,
+            "integer_error": 0.23,
+            "lifetime_or_race": 0.01,
+            "authorization": 0
+          },
+          "confidence": 0.29
+        }
+      }
+    },
+    {
+      "id": "case_20",
+      "file": "case_20.c",
+      "pair": "length_parser",
+      "expected_vulnerable": false,
+      "expected_issue": "none",
+      "rationale": "The code checks packet bounds and SIZE_MAX, allocates payload_len plus one, and places the terminator within that allocation.",
+      "vulnerability_score": 0.39,
+      "predicted_vulnerable": false,
+      "predicted_issue": "none",
+      "issue_confidence": 0.32,
+      "binary_correct": true,
+      "issue_correct": true,
+      "raw_answers": {
+        "is_vuln": {
+          "type": "noul",
+          "noul": 0.39
+        },
+        "primary_issue": {
+          "type": "choice",
+          "choice": "none",
+          "probabilities": {
+            "integer_error": 0.27,
+            "information_disclosure": 0.02,
+            "authorization": 0,
+            "path_resolution": 0,
+            "lifetime_or_race": 0.01,
+            "memory_safety": 0.3,
+            "none": 0.4,
+            "injection": 0
+          },
+          "confidence": 0.32
+        }
+      }
+    }
+  ]
+}

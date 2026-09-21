@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from itertools import groupby
 from pathlib import Path
 import sqlite3
@@ -33,6 +34,14 @@ _LOG_RECORD_START_BYTES = LOG_RECORD_START
 _LOG_MESSAGE_END_BYTES = LOG_MESSAGE_END
 _LOG_FIELD_SEPARATOR_BYTES = LOG_FIELD_SEPARATOR
 _GIT_TIMESTAMP_RESOLUTION = timedelta(seconds=1)
+
+
+class HistoryKind(StrEnum):
+    COMPLETE = "complete"
+    SPARSE = "sparse"
+    UNKNOWN = "unknown"
+
+
 _UPSERT_COMMIT_SQL = """
     INSERT INTO commits (
         commit_id,
@@ -379,7 +388,8 @@ class GitDb(GitStore):
     def __init__(self, db: Path):
         self.db = Path(db)
         self.db.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        existed = self.db.exists() and self.db.stat().st_size > 0
+        self._initialize(existed)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db)
@@ -387,7 +397,7 @@ class GitDb(GitStore):
         _ = connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
-    def _initialize(self) -> None:
+    def _initialize(self, existed: bool) -> None:
         connection = self._connect()
         try:
             with connection:
@@ -399,6 +409,19 @@ class GitDb(GitStore):
                     raise RuntimeError(
                         "Legacy commit database schema detected; regenerate "
                         "the database to store per-parent diffs"
+                    )
+
+                metadata_exists = connection.execute(
+                    """
+                    SELECT 1
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'database_metadata'
+                    """
+                ).fetchone()
+                if existed and existing_columns and metadata_exists is None:
+                    raise RuntimeError(
+                        "Commit database is missing database_metadata; "
+                        "classify its history before opening it"
                     )
 
                 _ = connection.execute(
@@ -433,6 +456,22 @@ class GitDb(GitStore):
 
                 _ = connection.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS database_metadata (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    )
+                    """
+                )
+                _ = connection.execute(
+                    """
+                    INSERT OR IGNORE INTO database_metadata (key, value)
+                    VALUES ('history_kind', ?)
+                    """,
+                    (HistoryKind.UNKNOWN,),
+                )
+
+                _ = connection.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS commits_committer_timestamp_idx
                     ON commits (committer_timestamp)
                     """
@@ -446,6 +485,40 @@ class GitDb(GitStore):
                 )
         finally:
             connection.close()
+
+    @property
+    def history_kind(self) -> HistoryKind:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT value FROM database_metadata
+                WHERE key = 'history_kind'
+                """
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            raise RuntimeError("Commit database has no history_kind metadata")
+        try:
+            return HistoryKind(row["value"])
+        except ValueError as error:
+            raise RuntimeError(
+                f"Unknown commit history kind: {row['value']!r}"
+            ) from error
+
+    @staticmethod
+    def _set_history_kind(
+        connection: sqlite3.Connection,
+        history_kind: HistoryKind,
+    ) -> None:
+        _ = connection.execute(
+            """
+            UPDATE database_metadata SET value = ?
+            WHERE key = 'history_kind'
+            """,
+            (history_kind,),
+        )
 
     @staticmethod
     def _store_commits(
@@ -494,24 +567,38 @@ class GitDb(GitStore):
             stored += 1
         return stored
 
-    def store_commits(self, commits: Iterable[GitCommit]) -> int:
+    def store_commits(
+        self,
+        commits: Iterable[GitCommit],
+        history_kind: HistoryKind | None = None,
+    ) -> int:
         """Insert an iterable of commits without materializing it in memory."""
 
         connection = self._connect()
         try:
             with connection:
-                return self._store_commits(connection, commits)
+                stored = self._store_commits(connection, commits)
+                if history_kind is not None:
+                    self._set_history_kind(connection, history_kind)
+                return stored
         finally:
             connection.close()
 
-    def replace_commits(self, commits: Iterable[GitCommit]) -> int:
+    def replace_commits(
+        self,
+        commits: Iterable[GitCommit],
+        history_kind: HistoryKind | None = None,
+    ) -> int:
         """Atomically replace every commit currently stored in this database."""
 
         connection = self._connect()
         try:
             with connection:
                 _ = connection.execute("DELETE FROM commits")
-                return self._store_commits(connection, commits)
+                stored = self._store_commits(connection, commits)
+                if history_kind is not None:
+                    self._set_history_kind(connection, history_kind)
+                return stored
         finally:
             connection.close()
 
@@ -653,7 +740,10 @@ def extract_to_db(
 ) -> int:
     """Stream repository commits directly into the SQLite store."""
 
-    return db.store_commits(repo.iter_commits_between(start, end, include_merges=True))
+    commits = repo.iter_commits_between(start, end, include_merges=True)
+    if isinstance(db, GitDb):
+        return db.store_commits(commits, HistoryKind.COMPLETE)
+    return db.store_commits(commits)
 
 
 def _path_for_db_name(db_name: str) -> Path:
@@ -665,7 +755,7 @@ def save_commits_to_db(db_name: str, commits: list[GitCommit]):
     """Replace a database in the db folder with the supplied commits."""
 
     save_path = _path_for_db_name(db_name)
-    _ = GitDb(save_path).replace_commits(commits)
+    _ = GitDb(save_path).replace_commits(commits, HistoryKind.SPARSE)
     print(f"Saved {len(commits)} commits to sqlite database `{save_path}`")
 
 

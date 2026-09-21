@@ -14,6 +14,7 @@ from kpatch.git import (
     GitDb,
     GitRepo,
     GitStore,
+    HistoryKind,
     extract_to_db,
 )
 
@@ -113,6 +114,50 @@ class GitRepoTests(unittest.TestCase):
         self.assertIn("--no-merges", repo.args)
 
 class GitDbTests(unittest.TestCase):
+    def test_history_kind_defaults_and_updates_atomically(self) -> None:
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        commit = GitCommit(
+            "commit",
+            "",
+            "",
+            date,
+            date,
+            (CommitParent("parent", ""),),
+            "",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            db = GitDb(Path(directory) / "commits.sqlite")
+            self.assertIs(db.history_kind, HistoryKind.UNKNOWN)
+
+            db.store_commits([commit], HistoryKind.COMPLETE)
+            self.assertIs(db.history_kind, HistoryKind.COMPLETE)
+
+            db.replace_commits([commit], HistoryKind.SPARSE)
+            self.assertIs(db.history_kind, HistoryKind.SPARSE)
+
+    def test_extract_marks_real_database_as_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db = GitDb(Path(directory) / "commits.sqlite")
+
+            extract_to_db(FakeRepo([]), db)
+
+            self.assertIs(db.history_kind, HistoryKind.COMPLETE)
+
+    def test_existing_database_requires_history_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "commits.sqlite"
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute(
+                    "CREATE TABLE commits (commit_id TEXT PRIMARY KEY)"
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            with self.assertRaisesRegex(RuntimeError, "database_metadata"):
+                GitDb(path)
+
     def test_stores_and_queries_commits(self) -> None:
         start = datetime(2024, 1, 1, tzinfo=UTC)
         end = datetime(2024, 1, 2, tzinfo=UTC)

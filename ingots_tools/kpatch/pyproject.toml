@@ -8,6 +8,8 @@ dependencies = [
     "kexploit_utils",
     "plotly>=6.0.0",
     "pydantic>=2.12.5",
+    "python-dotenv>=1.2.2",
+    "requests>=2.32.3",
     "rich>=14.0.0",
     "typer>=0.21.1",
 ]

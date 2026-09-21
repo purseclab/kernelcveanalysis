@@ -131,6 +131,30 @@ Binary files a/image.png and b/image.png differ
         self.assertEqual(binary_change.change_type, DiffFileType.DEFAULT)
         self.assertEqual(binary_change.chunks, [])
 
+    def test_synchronize_text_serializes_mutated_file_list(self) -> None:
+        patch = """diff --git a/first.c b/first.c
+--- a/first.c
++++ b/first.c
+@@ -1 +1 @@
+-old
++new
+diff --git a/second.c b/second.c
+--- a/second.c
++++ b/second.c
+@@ -1 +1 @@
+-before
++after
+"""
+        diff = Diff.parse(patch)
+
+        diff.files = diff.files[1:]
+        diff.synchronize_text()
+
+        self.assertNotIn("first.c", diff.text)
+        self.assertIn("second.c", diff.text)
+        reparsed = Diff.parse(diff.text)
+        self.assertEqual([file.file for file in reparsed.files], ["second.c"])
+
 
 if __name__ == "__main__":
     unittest.main()

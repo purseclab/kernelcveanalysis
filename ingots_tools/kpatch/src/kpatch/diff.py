@@ -461,6 +461,25 @@ class Diff:
 
         return type(self).parse(invert_diff(self.text))
 
+    def render(self) -> str:
+        """Serialize the currently parsed files and chunks as a patch."""
+
+        lines: list[str] = []
+        for diff_file in self.files:
+            lines.extend(diff_file.header_lines)
+            for chunk in diff_file.chunks:
+                lines.append(chunk.header)
+                lines.extend(chunk.lines)
+
+        if not lines:
+            return ""
+        return "\n".join(lines) + "\n"
+
+    def synchronize_text(self) -> None:
+        """Update ``text`` after callers mutate the parsed representation."""
+
+        self.text = self.render()
+
     def diff_similarity(self, other: Self) -> float:
         """Compare corresponding files after combining all of their hunks."""
 

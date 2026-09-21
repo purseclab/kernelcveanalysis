@@ -1,0 +1,162 @@
+[
+  {
+    "id": "case_01",
+    "file": "case_01.c",
+    "expected_vulnerable": true,
+    "expected_issue": "lifetime_or_race",
+    "pair": "double_fetch",
+    "rationale": "The length is validated in one copy_from_user operation and fetched again before the copy; another thread can increase the second value and overflow dst."
+  },
+  {
+    "id": "case_02",
+    "file": "case_02.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "double_fetch",
+    "rationale": "The request is copied once into a local snapshot, and the same validated length controls the later copy."
+  },
+  {
+    "id": "case_03",
+    "file": "case_03.c",
+    "expected_vulnerable": true,
+    "expected_issue": "lifetime_or_race",
+    "pair": "async_lifetime",
+    "rationale": "The queued job stores a connection pointer without retaining a reference, so the caller's put can free it before the worker dereferences it."
+  },
+  {
+    "id": "case_04",
+    "file": "case_04.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "async_lifetime",
+    "rationale": "A reference is acquired before the pointer is queued and released only after the worker's last use."
+  },
+  {
+    "id": "case_05",
+    "file": "case_05.c",
+    "expected_vulnerable": true,
+    "expected_issue": "integer_error",
+    "pair": "integer_allocation",
+    "rationale": "The allocation size is truncated to 32 bits while the initialization loop still writes count full elements."
+  },
+  {
+    "id": "case_06",
+    "file": "case_06.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "integer_allocation",
+    "rationale": "The code bounds count before multiplication and uses the checked size_t result consistently for allocation and initialization."
+  },
+  {
+    "id": "case_07",
+    "file": "case_07.c",
+    "expected_vulnerable": true,
+    "expected_issue": "injection",
+    "pair": "format_string",
+    "rationale": "An attacker-controlled string is passed as syslog's format argument, enabling format directives such as percent-n."
+  },
+  {
+    "id": "case_08",
+    "file": "case_08.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "format_string",
+    "rationale": "The format string is constant and the attacker-controlled message is supplied only as data for percent-s."
+  },
+  {
+    "id": "case_09",
+    "file": "case_09.c",
+    "expected_vulnerable": true,
+    "expected_issue": "authorization",
+    "pair": "object_authorization",
+    "rationale": "Authorization is performed against attacker-supplied owner and tenant fields rather than the resource selected by resource_id."
+  },
+  {
+    "id": "case_10",
+    "file": "case_10.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "object_authorization",
+    "rationale": "The resource is loaded first and authorization is evaluated against its trusted owner and tenant metadata."
+  },
+  {
+    "id": "case_11",
+    "file": "case_11.c",
+    "expected_vulnerable": true,
+    "expected_issue": "path_resolution",
+    "pair": "path_open",
+    "rationale": "The code validates a realpath result but later opens the original pathname, permitting a symlink swap between check and use."
+  },
+  {
+    "id": "case_12",
+    "file": "case_12.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "path_open",
+    "rationale": "openat2 resolves the path relative to an already-open root and atomically rejects escapes, symlinks, and magic links."
+  },
+  {
+    "id": "case_13",
+    "file": "case_13.c",
+    "expected_vulnerable": true,
+    "expected_issue": "information_disclosure",
+    "pair": "struct_padding",
+    "rationale": "Member assignment leaves alignment padding uninitialized, and copying the whole structure discloses those stack bytes."
+  },
+  {
+    "id": "case_14",
+    "file": "case_14.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "struct_padding",
+    "rationale": "Zero-initializing the complete structure before member assignment initializes both fields and padding."
+  },
+  {
+    "id": "case_15",
+    "file": "case_15.c",
+    "expected_vulnerable": true,
+    "expected_issue": "lifetime_or_race",
+    "pair": "lookup_lifetime",
+    "rationale": "A table entry pointer is used after the table lock is released without a reference, while removal may concurrently free it."
+  },
+  {
+    "id": "case_16",
+    "file": "case_16.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "lookup_lifetime",
+    "rationale": "The lookup acquires a reference while holding the table lock, keeping the object alive until the final put."
+  },
+  {
+    "id": "case_17",
+    "file": "case_17.c",
+    "expected_vulnerable": true,
+    "expected_issue": "injection",
+    "pair": "process_launch",
+    "rationale": "An attacker-controlled image name is concatenated into a shell command and interpreted by sh -c."
+  },
+  {
+    "id": "case_18",
+    "file": "case_18.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "process_launch",
+    "rationale": "posix_spawn uses an absolute executable path, a controlled environment, an option terminator, and one argv element for the image without shell interpretation."
+  },
+  {
+    "id": "case_19",
+    "file": "case_19.c",
+    "expected_vulnerable": true,
+    "expected_issue": "memory_safety",
+    "pair": "length_parser",
+    "rationale": "The allocation reserves payload_len bytes, then writes a terminator one byte beyond the allocation."
+  },
+  {
+    "id": "case_20",
+    "file": "case_20.c",
+    "expected_vulnerable": false,
+    "expected_issue": "none",
+    "pair": "length_parser",
+    "rationale": "The code checks packet bounds and SIZE_MAX, allocates payload_len plus one, and places the terminator within that allocation."
+  }
+]

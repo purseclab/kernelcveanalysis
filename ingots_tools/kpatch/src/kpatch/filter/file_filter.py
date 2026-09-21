@@ -1,7 +1,8 @@
 from dataclasses import dataclass
+from typing import ClassVar
 
-from ..git import GitCommit
 from ..diff import DiffFile, DiffFileType
+from .base import CommitFilter, FilterContext, FilteredCommit
 
 
 # this performs the trivial filtering on commits, before any classifiers or model calls
@@ -13,8 +14,10 @@ class FilterStats:
     extensions: dict[str, int]
 
 
-class FileFilter:
+class FileFilter(CommitFilter):
     """Filters systems we are interested in."""
+    name: ClassVar[str] = "Filtering files"
+    requires_complete_history: ClassVar[bool] = False
     # TODO: way to exclude directory trees
     # TODO: maybe will need to recognize versions,
     # and change excluded paths or smthn if file structure changes
@@ -90,8 +93,12 @@ class FileFilter:
         )
         return "\n".join(lines)
 
-    def filter_commit(self, commit: GitCommit) -> bool:
-        """Return whether the commit contains an included file change."""
+    def filter_mutable_commit(
+        self,
+        commit: FilteredCommit,
+        context: FilterContext,
+    ) -> FilteredCommit | None:
+        """Retain only file changes matching the configured paths and types."""
 
         for file_change in commit.diff.files:
             # for now, we filter out big changes creating new files
@@ -102,7 +109,7 @@ class FileFilter:
             #
             # TODO: regression tests might make new file?
             if file_change.change_type != DiffFileType.DEFAULT:
-                return False
+                return None
 
         matching_files = [
             file_change
@@ -110,15 +117,24 @@ class FileFilter:
             if self.matches_file(file_change.file)
         ]
         if not matching_files:
-            return False
+            return None
 
         self._record_matches(matching_files)
         commit.diff.files = matching_files
-        return True
+        return commit
 
-    def filter_commits(self, commits: list[GitCommit]) -> list[GitCommit]:
+    def filter_mutable_commits(
+        self,
+        commits: list[FilteredCommit],
+        context: FilterContext,
+        show_progress: bool = True,
+    ) -> list[FilteredCommit]:
         self._stats = FilterStats(
             paths={path: 0 for path in self.paths},
             extensions={extension: 0 for extension in self.extensions},
         )
-        return [commit for commit in commits if self.filter_commit(commit)]
+        return super().filter_mutable_commits(
+            commits,
+            context,
+            show_progress=show_progress,
+        )

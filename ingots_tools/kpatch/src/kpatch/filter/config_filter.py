@@ -896,7 +896,7 @@ class KbuildCacheEntry:
         return local_mode
 
 
-class ConfigFilter:
+class KbuildState:
     repo: GitRepo
     config: KernelConfig
     base_commit: str
@@ -1259,3 +1259,7 @@ class ConfigFilter:
         ):
             self.delegated.discard(folder)
             self._delete_cache_subtree(folder)
+
+
+# Compatibility name for callers that used the former low-level state class.
+ConfigFilter = KbuildState

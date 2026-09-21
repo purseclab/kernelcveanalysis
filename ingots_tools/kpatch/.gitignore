@@ -1,3 +1,4 @@
 lpe_dataset/.cache
 linux/
 db/
+.env

@@ -2,14 +2,23 @@ from typing import Annotated
 from pathlib import Path
 import random
 
+from dotenv import load_dotenv
 import typer
 
 from .dataset import load_git_commits
 from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db, load_commits_from_db
-from .filter import FileFilter, filter_commit_time_range
+from .filter import FileFilter, FilterContext, filter_commit_time_range
 from .visualization import show_commit_sunburst
 
 app = typer.Typer()
+
+
+@app.callback()
+def load_environment() -> None:
+    """Load environment variables from `.env` in the invocation directory."""
+
+    _ = load_dotenv(Path.cwd() / ".env", override=False)
+
 
 @app.command("extract", help="Extract commits from linux repo into sqlite database.")
 def extract_commits(
@@ -81,7 +90,10 @@ def run():
         print("\n\n\n\n\n")
 
     print(f"Original commits: {len(commits)}")
-    commits_filtered = filter.filter_commits(commits)
+    commits_filtered = filter.filter_commits(
+        commits,
+        FilterContext(GitRepo(Path("linux"))),
+    )
     print(f"Filtered commits: {len(commits_filtered)}")
     print(filter.render_report())
     _ = show_commit_sunburst(commits)
