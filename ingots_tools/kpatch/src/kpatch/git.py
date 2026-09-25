@@ -52,8 +52,9 @@ _UPSERT_COMMIT_SQL = """
         author_timestamp,
         committer_timestamp,
         message,
-        is_merge
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_merge,
+        score
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(commit_id) DO UPDATE SET
         author_name = excluded.author_name,
         author_email = excluded.author_email,
@@ -62,7 +63,8 @@ _UPSERT_COMMIT_SQL = """
         author_timestamp = excluded.author_timestamp,
         committer_timestamp = excluded.committer_timestamp,
         message = excluded.message,
-        is_merge = excluded.is_merge
+        is_merge = excluded.is_merge,
+        score = excluded.score
 """
 
 
@@ -89,6 +91,7 @@ class GitCommit:
     committer_date: datetime
     parents: tuple[CommitParent, ...]
     message: str
+    score: float | None = None
 
     @property
     def parent(self) -> CommitParent | None:
@@ -435,7 +438,8 @@ class GitDb(GitStore):
                         author_timestamp INTEGER NOT NULL,
                         committer_timestamp INTEGER NOT NULL,
                         message TEXT NOT NULL,
-                        is_merge INTEGER NOT NULL DEFAULT 0
+                        is_merge INTEGER NOT NULL DEFAULT 0,
+                        score REAL
                     )
                     """
                 )
@@ -539,6 +543,7 @@ class GitDb(GitStore):
                     _timestamp(commit.committer_date),
                     commit.message,
                     commit.is_merge,
+                    commit.score,
                 ),
             )
             _ = connection.execute(
@@ -635,6 +640,7 @@ class GitDb(GitStore):
                     commits.committer_date,
                     commits.message,
                     commits.is_merge,
+                    commits.score,
                     commit_parents.parent_index,
                     commit_parents.parent_commit_id,
                     commit_parents.diff AS parent_diff
@@ -672,6 +678,7 @@ class GitDb(GitStore):
                 committer_date=datetime.fromisoformat(row["committer_date"]),
                 parents=parents,
                 message=row["message"],
+                score=row["score"],
             )
             if commit.is_merge != bool(row["is_merge"]):
                 raise ValueError(

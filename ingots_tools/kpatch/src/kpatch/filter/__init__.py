@@ -18,6 +18,7 @@ from .ifdef_filter import (
     get_active_lines,
 )
 from .merge_filter import MergeCommitFilter
+from .score_filter import ScoreFilter
 from .whitespace import (
     CToken,
     CTokenKind,
@@ -126,6 +127,7 @@ __all__ = [
     "IfdefFilter",
     "KernelConfig",
     "MergeCommitFilter",
+    "ScoreFilter",
     "SourceNoopFilter",
     "WhitespaceFilter",
     "WhitespaceFilterStats",

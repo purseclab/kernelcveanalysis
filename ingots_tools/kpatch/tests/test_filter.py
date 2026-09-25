@@ -315,6 +315,8 @@ class FilterCommitsTests(unittest.TestCase):
             None,
             ["drivers/keep.c", "drivers/drop.c"],
         )
+        self.assertIsNone(commit.score)
+        commit.score = 0.75
         first_seen: list[int] = []
         second_seen: list[int] = []
         context = FilterContext(MemoryGitRepo({}))
@@ -327,6 +329,7 @@ class FilterCommitsTests(unittest.TestCase):
         ).filter_commits([commit], context, show_progress=False)
 
         self.assertEqual(first_seen, second_seen)
+        self.assertEqual(result[0].score, 0.75)
         self.assertEqual(
             [diff_file.file for diff_file in result[0].diff.files],
             ["drivers/keep.c"],

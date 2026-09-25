@@ -1,9 +1,8 @@
 from typing import ClassVar
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from ..base import CommitFilter, FilterContext, FilteredCommit
-from .extended_diff import build_input_state
-from .jev_api import NoulQuestion, ChoiceQuestion, ScoreQuestion, jev
+from .jev_api import NoulQuestion, NoulResult, jev
 
 @dataclass
 class InputState:
@@ -23,6 +22,8 @@ class JevFilter(CommitFilter):
         commit: FilteredCommit,
         context: FilterContext,
     ) -> FilteredCommit | None:
+        from .extended_diff import build_input_state
+
         state = build_input_state(commit, context, max_context_items=15)
 
         questions = [
@@ -59,9 +60,40 @@ class JevFilter(CommitFilter):
             NoulQuestion(
                 name="uninitialized_variables",
                 instructions="Does this patch fix any issues with uninitialized variables, struct fields, or memory?",
+                true_criteria="The patch initializes data before use or prevents uninitialized data from being read or exposed",
+                false_criteria="The patch does not address an uninitialized-data issue",
+            ),
+            NoulQuestion(
+                name="integer_arithmetic",
+                instructions="Does this patch fix incorrect integer arithmetic, conversion, or overflow that could affect sizes, offsets, or limits?",
+                true_criteria="The patch corrects an arithmetic or conversion error with security-relevant consequences",
+                false_criteria="The patch does not address a security-relevant integer error",
+            ),
+            NoulQuestion(
+                name="information_disclosure",
+                instructions="Does this patch prevent unintended disclosure of kernel or another user's data?",
+                true_criteria="The patch closes a path that could expose data to an unauthorized recipient",
+                false_criteria="The patch does not address unintended data exposure",
+            ),
+            NoulQuestion(
+                name="bugfix_patch",
+                instructions="Does this patch fix an existing defect or incorrect behavior?",
+                true_criteria="The patch corrects a bug in existing behavior",
+                false_criteria="The patch only adds a feature, refactors code, or changes behavior without fixing a defect",
+            ),
+            NoulQuestion(
+                name="security_patch",
+                instructions="Does this patch fix or mitigate a plausible security vulnerability?",
+                true_criteria="The patch corrects a vulnerability or mitigates an exploitable security weakness",
+                false_criteria="The patch is unrelated to a security weakness, even if it fixes an ordinary bug",
             ),
         ]
 
-        return None
+        results = jev(asdict(state), questions)
+        security_result = results["security_patch"]
+        if not isinstance(security_result, NoulResult):
+            raise ValueError("Jev returned a non-noul security_patch answer")
+        commit.original.score = security_result.noul
+        return commit
 
 __all__ = ["InputState", "JevFilter"]
