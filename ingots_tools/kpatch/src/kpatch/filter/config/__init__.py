@@ -27,7 +27,10 @@ class ConfigFilter(CommitFilter):
     """Filter mutable commits through the configured Kbuild graph."""
 
     name: ClassVar[str] = "Filtering kernel configuration"
-    requires_complete_history: ClassVar[bool] = True
+
+    @property
+    def requires_complete_history(self) -> bool:
+        return True
 
     def __init__(self, config: KernelConfig):
         self.config = config

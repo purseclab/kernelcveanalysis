@@ -15,7 +15,6 @@ class InputState:
 
 class JevFilter(CommitFilter):
     name: ClassVar[str] = "Jev Filter"
-    requires_complete_history: ClassVar[bool] = False
 
     def filter_mutable_commit(
         self,

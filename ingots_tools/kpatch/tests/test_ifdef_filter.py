@@ -2,7 +2,7 @@ import unittest
 from datetime import UTC, datetime
 
 from kpatch.diff import Diff, DiffChunk, DiffFile, DiffFileType
-from kpatch.filter import filter_commits
+from filter_helpers import filter_commits
 from kpatch.filter.config_filter import ConfigFilter, ConfigValue, KernelConfig
 from kpatch.filter.ifdef_filter import (
     diff_file_touches_active_code,

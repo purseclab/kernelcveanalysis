@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, cast
 from pathlib import Path
 import random
 
@@ -7,10 +7,12 @@ import typer
 
 from .dataset import load_git_commits
 from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db, load_commits_from_db
-from .filter import FileFilter, FilterContext, WhitespaceFilter, filter_commit_time_range
+from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, JevFilter, CountFilter
 from .visualization import show_commit_sunburst
 
 app = typer.Typer()
+filter_app = typer.Typer()
+app.add_typer(filter_app, name="filter")
 
 
 @app.callback()
@@ -50,76 +52,64 @@ def visualize(
     result = show_commit_sunburst(commits)
     print(f"Visualization saved to `{result}`")
 
-@app.command("filter", help="Filter commits for promising lpe commits.")
-def filter(
+@filter_app.callback()
+def options(
+    ctx: typer.Context,
     repo: Annotated[Path, typer.Option(help="Path to linux git repo.")],
-    db: Annotated[Path, typer.Option(help="Path to sqlite database to extract commits to.")],
+    db: Annotated[str, typer.Option(help="Name of sqlite database to extract commits from.")],
     dest: Annotated[str, typer.Option(help="Destination database name to save filtered commits to.")],
-    start: Annotated[str, typer.Option(help="Start date for filtering commits. (mm-dd-yyyy format)")],
-    end: Annotated[str, typer.Option(help="End date for filtering commits. (mm-dd-yyyy format)")],
+    start: Annotated[str | None, typer.Option(help="Start date for filtering commits. (mm-dd-yyyy format)")] = None,
+    end: Annotated[str | None, typer.Option(help="End date for filtering commits. (mm-dd-yyyy format)")] = None,
+):
+    ctx.obj = RunFilterArgs(
+        repo=GitRepo(repo),
+        db=GitDb.load_name(db),
+        destination_db_name=dest,
+        start_date=None if start is None else parse_time(start),
+        end_date=None if end is None else parse_time(end),
+    )
+
+def get_run_args(ctx: typer.Context) -> RunFilterArgs:
+    return cast(RunFilterArgs, ctx.obj)
+
+def run(ctx: typer.Context, filter: CommitFilter):
+    run_filter(get_run_args(ctx), filter)
+
+@filter_app.command("config", help="Filter commits for promising lpe commits based of code present for a given config.")
+def filter(
+    ctx: typer.Context,
     config: Annotated[Path | None, typer.Option(help="Kernel config file to filter with.")] = None,
 ):
-    start_date = parse_time(start)
-    end_date = parse_time(end)
-    filter_commit_time_range(GitRepo(repo), GitDb(db), dest, config, start_date, end_date)
+    if config is not None:
+        kernel_config = KernelConfig(config.read_text())
+        filter = FilterPipeline(
+            [
+                MergeCommitFilter(),
+                ConfigFilter(kernel_config),
+                IfdefFilter(kernel_config),
+                WhitespaceFilter(),
+            ]
+        )
+    else:
+        filter = FilterPipeline(
+            [
+                MergeCommitFilter(),
+                WhitespaceFilter(),
+            ]
+        )
 
-@app.command("filter-noop", help="Filter commits that only modify comments, formatting, or whitespace.")
-def filter_noop(
-    repo: Annotated[Path, typer.Option(help="Path to linux git repo.")],
-    db: Annotated[Path, typer.Option(help="Path to sqlite database with input commits.")],
-    dest: Annotated[str, typer.Option(help="Destination database name to save filtered commits to.")],
-    strict: Annotated[bool, typer.Option(help="Retain all newline tokens strictly (do not ignore non-directive newlines).")] = False,
+    run(ctx, filter)
+
+@filter_app.command("rank", help="Runs jev ranking on filtered commits.")
+def rank(
+    ctx: typer.Context,
 ):
-    git_repo = GitRepo(repo)
-    git_db = GitDb(db)
-    commits = git_db.commits_between()
-    print(f"Loaded {len(commits)} commits from {db}")
-    whitespace_filter = WhitespaceFilter(ignore_non_directive_newlines=not strict)
-    context = FilterContext(git_repo)
-    filtered = whitespace_filter.filter_commits(commits, context, show_progress=True)
-    stats = whitespace_filter.stats()
-    print(f"Processed: {stats.processed_commits} commits")
-    print(f"Pruned no-op files: {stats.pruned_files}")
-    print(f"Eliminated no-op commits: {stats.eliminated_commits}")
-    print(f"Retained commits: {len(filtered)}")
-    save_commits_to_db(dest, filtered)
+    filter = FilterPipeline([
+        CountFilter(100, seed=67),
+        JevFilter(),
+    ])
 
-@app.command("test", help="Temporary function for testing.")
-def run():
-    # time between 7.1 and 7.2
-    start = parse_time("06-14-2026")
-    end = parse_time("08-16-2026")
-
-    db = GitDb(Path("db/all_commits.sqlite"))
-    commits = db.commits_between(start, end)
-
-    # permissive arm filter
-    # TODO: decide about kconfig, if it should be included
-    filter = FileFilter(
-        ["arch/arm", "arch/arm64", "block", "crypto", "drivers", "fs", "include", "init", "io_uring", "ipc", "kernel", "lib", "mm", "net", "rust", "security", "sound", "virt"],
-        [".c", ".h", ".S"],
-    )
-
-    dataset_commits = load_git_commits()
-    # _dataset_filtered = filter.filter_commits(dataset_commits)
-    # print("Dataset report:")
-    # print(filter.render_report())
-    for commit in random.sample(dataset_commits, k=10):
-        # if commit not in dataset_filtered:
-        #     print("warning: dataset lpe commit missed by filter")
-        print(commit)
-        print("\n\n\n\n\n")
-
-    print(f"Original commits: {len(commits)}")
-    commits_filtered = filter.filter_commits(
-        commits,
-        FilterContext(GitRepo(Path("linux"))),
-    )
-    print(f"Filtered commits: {len(commits_filtered)}")
-    print(filter.render_report())
-    _ = show_commit_sunburst(commits)
-    # analyze_dataset()
-    # git_scan()
+    run(ctx, filter)
 
 def main():
     app()

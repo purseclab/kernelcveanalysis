@@ -15,8 +15,8 @@ from kpatch.filter import (
     IfdefFilter,
     MergeCommitFilter,
     filter_commit_time_range,
-    filter_commits,
 )
+from filter_helpers import filter_commits
 from kpatch.filter.config_filter import KernelConfig
 from kpatch.git import (
     CommitParent,
@@ -264,8 +264,11 @@ class FilterCommitsTests(unittest.TestCase):
 
         self.assertFalse(regular_pipeline.requires_complete_history)
         self.assertTrue(config_pipeline.requires_complete_history)
+        nested_pipeline = FilterPipeline([config_pipeline])
+        self.assertIsInstance(config_pipeline, CommitFilter)
+        self.assertTrue(nested_pipeline.requires_complete_history)
         with self.assertRaisesRegex(ValueError, "complete history"):
-            config_pipeline.filter_commits(
+            nested_pipeline.filter_commits(
                 [],
                 FilterContext(MemoryGitRepo({})),
                 show_progress=False,
@@ -320,10 +323,14 @@ class FilterCommitsTests(unittest.TestCase):
         first_seen: list[int] = []
         second_seen: list[int] = []
         context = FilterContext(MemoryGitRepo({}))
+        inner_pipeline = FilterPipeline(
+            [_KeepNamedFile("drivers/keep.c", first_seen)]
+        )
+        self.assertIsInstance(inner_pipeline, CommitFilter)
 
         result = FilterPipeline(
             [
-                _KeepNamedFile("drivers/keep.c", first_seen),
+                inner_pipeline,
                 _KeepNamedFile("drivers/keep.c", second_seen),
             ]
         ).filter_commits([commit], context, show_progress=False)

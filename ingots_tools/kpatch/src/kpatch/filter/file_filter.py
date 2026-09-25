@@ -17,7 +17,6 @@ class FilterStats:
 class FileFilter(CommitFilter):
     """Filters systems we are interested in."""
     name: ClassVar[str] = "Filtering files"
-    requires_complete_history: ClassVar[bool] = False
     # TODO: way to exclude directory trees
     # TODO: maybe will need to recognize versions,
     # and change excluded paths or smthn if file structure changes

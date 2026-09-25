@@ -11,7 +11,6 @@ class CountFilter(CommitFilter):
     """
 
     name: ClassVar[str] = "Sampling commit count"
-    requires_complete_history: ClassVar[bool] = False
 
     def __init__(self, count: int, seed: int | None = None, *, n: int | None = None):
         selected_count = n if n is not None else count

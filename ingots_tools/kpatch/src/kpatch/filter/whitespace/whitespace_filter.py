@@ -44,7 +44,6 @@ class WhitespaceFilter(CommitFilter):
     """
 
     name: ClassVar[str] = "Filtering whitespace and comments"
-    requires_complete_history: ClassVar[bool] = False
 
     def __init__(self, ignore_non_directive_newlines: bool = True):
         self.ignore_non_directive_newlines = ignore_non_directive_newlines

@@ -665,7 +665,6 @@ class IfdefFilter(CommitFilter):
     """Remove changed lines disabled by C preprocessor conditionals."""
 
     name: ClassVar[str] = "Filtering preprocessor branches"
-    requires_complete_history: ClassVar[bool] = False
 
     def __init__(self, config: KernelConfig):
         self.config = config

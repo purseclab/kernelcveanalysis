@@ -71,7 +71,7 @@ class FilteredCommit:
 class FilterContext:
     repo: GitRepo
     structured_commits: StructuredCommits | None = None
-    commits: tuple[GitCommit, ...] = ()
+    commits: list[GitCommit] = field(default_factory=list)
 
     @classmethod
     def from_db_range(
@@ -95,7 +95,7 @@ class FilterContext:
         return cls(
             repo=gitrepo,
             structured_commits=structured_commits,
-            commits=tuple(commits),
+            commits=commits,
         )
 
 
@@ -112,7 +112,10 @@ def filter_progress(name: str, total: int, show_progress: bool) -> Progress:
 
 class CommitFilter(ABC):
     name: ClassVar[str]
-    requires_complete_history: ClassVar[bool] = False
+
+    @property
+    def requires_complete_history(self) -> bool:
+        return False
 
     def _validate_name(self) -> None:
         if not getattr(self, "name", "").strip():
@@ -169,7 +172,9 @@ class CommitFilter(ABC):
         return commit
 
 
-class FilterPipeline:
+class FilterPipeline(CommitFilter):
+    name: ClassVar[str] = "Filtering commit pipeline"
+
     def __init__(self, filters: list[CommitFilter]):
         self.filters = list(filters)
 
@@ -179,25 +184,6 @@ class FilterPipeline:
             commit_filter.requires_complete_history
             for commit_filter in self.filters
         )
-
-    def filter_commits(
-        self,
-        commits: list[GitCommit],
-        context: FilterContext,
-        show_progress: bool = True,
-    ) -> list[GitCommit]:
-        if self.requires_complete_history and context.structured_commits is None:
-            raise ValueError(
-                "Filter pipeline requires complete history and structured "
-                "commit history"
-            )
-        mutable_commits = [FilteredCommit.from_commit(commit) for commit in commits]
-        filtered = self.filter_mutable_commits(
-            mutable_commits,
-            context,
-            show_progress=show_progress,
-        )
-        return [commit.materialize() for commit in filtered]
 
     def filter_mutable_commits(
         self,

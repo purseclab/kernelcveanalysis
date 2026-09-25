@@ -394,6 +394,10 @@ class GitDb(GitStore):
         existed = self.db.exists() and self.db.stat().st_size > 0
         self._initialize(existed)
 
+    @classmethod
+    def load_name(cls, db_name: str) -> Self:
+        return cls(_path_for_db_name(db_name))
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db)
         connection.row_factory = sqlite3.Row

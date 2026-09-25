@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from .ifdef_filter import (
     diff_file_touches_active_code,
     get_active_lines,
 )
+from .jev import JevFilter
 from .merge_filter import MergeCommitFilter
 from .score_filter import ScoreFilter
 from .whitespace import (
@@ -28,37 +30,44 @@ from .whitespace import (
     tokenize_c_source,
 )
 from ..git import (
-    GitCommit,
     GitDb,
     GitRepo,
-    StructuredCommits,
     save_commits_to_db,
 )
 
+@dataclass
+class RunFilterArgs:
+    repo: GitRepo
+    db: GitDb
+    destination_db_name: str
+    start_date: datetime | None = None
+    end_date: datetime | None = None
 
-def filter_commits(
-    repo: GitRepo,
-    kernel_config: KernelConfig,
-    all_commits: list[GitCommit],
-    show_progress: bool = True,
-) -> list[GitCommit]:
-    """Apply the configured kernel and preprocessor pipeline."""
+def run_filter(
+    args: RunFilterArgs,
+    filter: CommitFilter,
+):
+    context = FilterContext.from_db_range(
+        args.db,
+        args.repo,
+        args.start_date,
+        args.end_date,
+        include_merges=True,
+    )
+    all_commits = context.commits
+    non_merge_count = sum(not commit.is_merge for commit in all_commits)
 
-    structured = StructuredCommits.from_commits(all_commits)
-    context = FilterContext(repo, structured, tuple(all_commits))
-    return FilterPipeline(
-        [
-            MergeCommitFilter(),
-            ConfigFilter(kernel_config),
-            IfdefFilter(kernel_config),
-            WhitespaceFilter(),
-        ]
-    ).filter_commits(
+    filtered_commits = filter.filter_commits(
         all_commits,
         context,
-        show_progress=show_progress,
+        show_progress=True,
     )
 
+    print(f"Original commit count: {len(all_commits)}")
+    print(f"Number of non merge commits: {non_merge_count}")
+    print(f"Filtered commit count: {len(filtered_commits)}")
+
+    save_commits_to_db(args.destination_db_name, filtered_commits)
 
 def filter_commit_time_range(
     repo: GitRepo,
@@ -67,49 +76,26 @@ def filter_commit_time_range(
     kernel_config_path: Path | None,
     start_date: datetime,
     end_date: datetime,
-    show_progress: bool = True,
 ) -> None:
-    context = FilterContext.from_db_range(
-        db,
-        repo,
-        start_date,
-        end_date,
-        include_merges=True,
-    )
-    all_commits = list(context.commits)
-    non_merge_count = sum(not commit.is_merge for commit in all_commits)
-
     if kernel_config_path is not None:
         kernel_config = KernelConfig(kernel_config_path.read_text())
-        filtered_commits = FilterPipeline(
+        filter = FilterPipeline(
             [
                 MergeCommitFilter(),
                 ConfigFilter(kernel_config),
                 IfdefFilter(kernel_config),
                 WhitespaceFilter(),
             ]
-        ).filter_commits(
-            all_commits,
-            context,
-            show_progress=show_progress,
         )
     else:
-        filtered_commits = FilterPipeline(
+        filter = FilterPipeline(
             [
                 MergeCommitFilter(),
                 WhitespaceFilter(),
             ]
-        ).filter_commits(
-            all_commits,
-            context,
-            show_progress=show_progress,
         )
 
-    print(f"Original commit count: {len(all_commits)}")
-    print(f"Number of non merge commits: {non_merge_count}")
-    print(f"Filtered commit count: {len(filtered_commits)}")
-
-    save_commits_to_db(destination_db_name, filtered_commits)
+    run_filter(repo, db, destination_db_name, filter, start_date, end_date)
 
 
 __all__ = [
@@ -125,14 +111,15 @@ __all__ = [
     "FilteredCommit",
     "FilterPipeline",
     "IfdefFilter",
+    "JevFilter",
     "KernelConfig",
     "MergeCommitFilter",
+    "RunFilterArgs",
     "ScoreFilter",
     "SourceNoopFilter",
     "WhitespaceFilter",
     "WhitespaceFilterStats",
     "diff_file_touches_active_code",
-    "filter_commits",
     "filter_commit_time_range",
     "get_active_lines",
     "tokenize_c_source",

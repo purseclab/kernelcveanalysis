@@ -7,7 +7,6 @@ class MergeCommitFilter(CommitFilter):
     """Remove merge commits from the candidate stream."""
 
     name: ClassVar[str] = "Filtering merge commits"
-    requires_complete_history: ClassVar[bool] = False
 
     def filter_mutable_commit(
         self,
