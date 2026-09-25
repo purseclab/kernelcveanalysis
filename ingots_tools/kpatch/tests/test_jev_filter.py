@@ -23,13 +23,20 @@ class JevFilterTests(unittest.TestCase):
             ) as build_state,
             patch(
                 "kpatch.filter.jev.jev_filter.jev",
-                return_value={"security_patch": NoulResult("noul", 0.83)},
+                side_effect=lambda _state, questions: {
+                    question.name: NoulResult(
+                        "noul", 0.83 if question.name == "security_patch" else 0.12
+                    )
+                    for question in questions
+                },
             ) as call_jev,
         ):
             result = JevFilter().filter_mutable_commit(view, context)
 
         self.assertIs(result, view)
         self.assertEqual(commit.score, 0.83)
+        self.assertEqual(commit.ratings["security_patch"], 0.83)
+        self.assertEqual(commit.ratings["bounds_checks"], 0.12)
         build_state.assert_called_once_with(view, context, max_context_items=15)
         sent_state, questions = call_jev.call_args.args
         self.assertEqual(
@@ -50,6 +57,7 @@ class JevFilterTests(unittest.TestCase):
             }
             <= {question.name for question in questions}
         )
+        self.assertEqual(set(commit.ratings), {question.name for question in questions})
 
 
 if __name__ == "__main__":

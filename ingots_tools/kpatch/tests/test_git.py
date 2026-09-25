@@ -77,6 +77,7 @@ class GitRepoTests(unittest.TestCase):
         self.assertEqual(commit.author_name, "Alice Example")
         self.assertEqual(commit.author_email, "alice@example.com")
         self.assertIsNone(commit.score)
+        self.assertEqual(commit.ratings, {})
 
     def test_include_merges_controls_git_log_and_marks_merge_commits(self) -> None:
         metadata = LOG_FIELD_SEPARATOR.join(
@@ -171,6 +172,7 @@ class GitDbTests(unittest.TestCase):
             parents=(CommitParent("parent", "diff --git a/old b/old\n"),),
             message="Older commit\n",
             score=0.75,
+            ratings={"security_patch": 0.75, "bounds_checks": 0.91},
         )
         newer = GitCommit(
             commit_id="newer",
@@ -210,7 +212,12 @@ class GitDbTests(unittest.TestCase):
 
             self.assertEqual(db.commits_between(start, end), [older])
             self.assertEqual(db.commits_between(start, end)[0].score, 0.75)
+            self.assertEqual(
+                db.commits_between(start, end)[0].ratings,
+                {"security_patch": 0.75, "bounds_checks": 0.91},
+            )
             self.assertIsNone(db.commits_between(end)[0].score)
+            self.assertEqual(db.commits_between(end)[0].ratings, {})
             self.assertEqual(
                 db.commits_between(start, end, include_merges=True),
                 [merge, older],
@@ -243,6 +250,7 @@ class GitDbTests(unittest.TestCase):
             parents=(CommitParent("parent", "updated diff\n"),),
             message="Updated\n",
             score=0.5,
+            ratings={"security_patch": 0.5},
         )
 
         with tempfile.TemporaryDirectory() as directory:
@@ -253,8 +261,10 @@ class GitDbTests(unittest.TestCase):
             self.assertEqual(db.commits_between(date, date + timedelta(days=1)), [updated])
 
             updated.score = None
+            updated.ratings = {}
             db.store_commits([updated])
             self.assertIsNone(db.commits_between()[0].score)
+            self.assertEqual(db.commits_between()[0].ratings, {})
 
             with sqlite3.connect(db.db) as connection:
                 parent_rows = connection.execute(

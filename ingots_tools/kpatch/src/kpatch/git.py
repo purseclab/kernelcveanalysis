@@ -1,11 +1,12 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from itertools import groupby
+import json
 from pathlib import Path
 import sqlite3
 import subprocess
-from typing import Self, Iterable, Iterator, Protocol, runtime_checkable, override
+from typing import Self, Iterable, Iterator, Protocol, cast, runtime_checkable, override
 from functools import cached_property
 
 from .diff import Diff
@@ -53,8 +54,9 @@ _UPSERT_COMMIT_SQL = """
         committer_timestamp,
         message,
         is_merge,
-        score
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        score,
+        ratings_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(commit_id) DO UPDATE SET
         author_name = excluded.author_name,
         author_email = excluded.author_email,
@@ -64,7 +66,8 @@ _UPSERT_COMMIT_SQL = """
         committer_timestamp = excluded.committer_timestamp,
         message = excluded.message,
         is_merge = excluded.is_merge,
-        score = excluded.score
+        score = excluded.score,
+        ratings_json = excluded.ratings_json
 """
 
 
@@ -92,6 +95,7 @@ class GitCommit:
     parents: tuple[CommitParent, ...]
     message: str
     score: float | None = None
+    ratings: dict[str, float] = field(default_factory=dict)
 
     @property
     def parent(self) -> CommitParent | None:
@@ -443,7 +447,8 @@ class GitDb(GitStore):
                         committer_timestamp INTEGER NOT NULL,
                         message TEXT NOT NULL,
                         is_merge INTEGER NOT NULL DEFAULT 0,
-                        score REAL
+                        score REAL,
+                        ratings_json TEXT NOT NULL DEFAULT '{}'
                     )
                     """
                 )
@@ -548,6 +553,7 @@ class GitDb(GitStore):
                     commit.message,
                     commit.is_merge,
                     commit.score,
+                    json.dumps(commit.ratings, allow_nan=False),
                 ),
             )
             _ = connection.execute(
@@ -645,6 +651,7 @@ class GitDb(GitStore):
                     commits.message,
                     commits.is_merge,
                     commits.score,
+                    commits.ratings_json,
                     commit_parents.parent_index,
                     commit_parents.parent_commit_id,
                     commit_parents.diff AS parent_diff
@@ -683,6 +690,7 @@ class GitDb(GitStore):
                 parents=parents,
                 message=row["message"],
                 score=row["score"],
+                ratings=cast(dict[str, float], json.loads(row["ratings_json"])),
             )
             if commit.is_merge != bool(row["is_merge"]):
                 raise ValueError(

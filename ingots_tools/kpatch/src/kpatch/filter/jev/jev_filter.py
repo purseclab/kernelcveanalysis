@@ -89,10 +89,15 @@ class JevFilter(CommitFilter):
         ]
 
         results = jev(asdict(state), questions)
-        security_result = results["security_patch"]
-        if not isinstance(security_result, NoulResult):
-            raise ValueError("Jev returned a non-noul security_patch answer")
-        commit.original.score = security_result.noul
+        ratings: dict[str, float] = {}
+        for question in questions:
+            result = results[question.name]
+            if not isinstance(result, NoulResult):
+                raise ValueError(f"Jev returned a non-noul {question.name} answer")
+            ratings[question.name] = result.noul
+
+        commit.original.score = ratings["security_patch"]
+        commit.original.ratings = ratings
         return commit
 
 __all__ = ["InputState", "JevFilter"]
