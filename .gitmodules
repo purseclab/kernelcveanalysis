@@ -1,1 +1,5 @@
 
+[submodule "ingots_tools/kexploit_agent/src/kexploit_agent/plugins/pi_extensions"]
+	path = ingots_tools/kexploit_agent/src/kexploit_agent/plugins/pi_extensions
+	url = https://github.com/Athryx/pi_extensions.git
+	branch = main
