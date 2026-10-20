@@ -10,10 +10,15 @@ from ..base import (
     diff_file_key,
     filter_progress,
 )
-from ..config_filter import ConfigValue, KbuildState, KernelConfig
+from ..config_filter import (
+    ConfigValue,
+    KbuildMakefileCache,
+    KbuildState,
+    KernelConfig,
+)
 from ..repository_file import RepositoryFileReader
 from ..source_filter import SourceIncludeIndex
-from ...diff import DiffFile, DiffFileType
+from ...diff import Diff, DiffFile, DiffFileType
 from ...git import GitCommit, StructuredCommits
 
 
@@ -41,10 +46,36 @@ class ConfigFilter(CommitFilter):
         self._prepared_context: tuple[int, int] | None = None
 
     @staticmethod
-    def _changed_paths(commit: GitCommit) -> set[str]:
+    def _history_diff(commit: GitCommit) -> Diff:
+        """Keep file metadata and changed directives, not entire history patches.
+
+        Kbuild traversal only needs paths and change types. The source include
+        index additionally needs changed include lines; other hunk contents and
+        rendered patch text would just duplicate the immutable source commits.
+        """
+
+        diff = Diff.parse(commit.diff_str)
+        diff.text = ""
+        for diff_file in diff.files:
+            diff_file.header_lines = []
+            directives = []
+            for chunk in diff_file.chunks:
+                chunk.lines = [
+                    line
+                    for line in chunk.lines
+                    if line.startswith(("+", "-"))
+                    and line[1:].lstrip().startswith("#")
+                ]
+                if chunk.lines:
+                    directives.append(chunk)
+            diff_file.chunks = directives
+        return diff
+
+    @staticmethod
+    def _changed_paths(diff: Diff) -> set[str]:
         return {
             path
-            for diff_file in commit.diff.files
+            for diff_file in diff.files
             for path in (diff_file.file, diff_file.old_file)
             if path is not None
         }
@@ -68,8 +99,9 @@ class ConfigFilter(CommitFilter):
         self,
         state: KbuildState,
         commit: GitCommit,
+        diff: Diff,
     ) -> dict[tuple[str | None, str], _FileDecision]:
-        changed_paths = self._changed_paths(commit)
+        changed_paths = self._changed_paths(diff)
         build_description_changed = any(
             posixpath.basename(path).startswith(("Kbuild", "Makefile"))
             or posixpath.splitext(path)[1] in (".mk", ".mak")
@@ -83,7 +115,7 @@ class ConfigFilter(CommitFilter):
 
         old_modes: dict[tuple[str | None, str], ConfigValue | None] = {}
         needs_parent: dict[tuple[str | None, str], bool] = {}
-        for diff_file in commit.diff.files:
+        for diff_file in diff.files:
             key = diff_file_key(diff_file)
             check_parent = self._needs_parent(
                 diff_file,
@@ -98,12 +130,12 @@ class ConfigFilter(CommitFilter):
                 else None
             )
 
-        state.update_filter_state(commit.diff, commit.commit_id)
+        state.update_filter_state(diff, commit.commit_id)
         if commit.is_merge:
             return {}
 
         decisions: dict[tuple[str | None, str], _FileDecision] = {}
-        for diff_file in commit.diff.files:
+        for diff_file in diff.files:
             key = diff_file_key(diff_file)
             new_mode = (
                 None
@@ -129,14 +161,15 @@ class ConfigFilter(CommitFilter):
         self,
         context: FilterContext,
         structured: StructuredCommits,
+        history_diffs: dict[str, Diff],
     ) -> SourceIncludeIndex | None:
-        originals = list(structured.commits.values())
-        if not originals or getattr(context.repo, "repo", None) is None:
+        originals = structured.commits.values()
+        if not structured.commits or getattr(context.repo, "repo", None) is None:
             return None
         source_paths = {
             path
-            for commit in originals
-            for diff_file in commit.diff.files
+            for diff in history_diffs.values()
+            for diff_file in diff.files
             for path in (diff_file.file, diff_file.old_file)
             if path is not None
         }
@@ -150,8 +183,8 @@ class ConfigFilter(CommitFilter):
             self.config.srcarch,
             source_paths,
         )
-        for commit in originals:
-            source_includes.add_diff(commit.diff)
+        for diff in history_diffs.values():
+            source_includes.add_diff(diff)
         return source_includes
 
     @staticmethod
@@ -175,8 +208,19 @@ class ConfigFilter(CommitFilter):
             return
 
         self._decisions = {}
-        source_includes = self._source_includes(context, structured)
+        if not structured.commits:
+            self._prepared_context = context_key
+            return
+
+        history_diffs = {
+            commit_id: self._history_diff(commit)
+            for commit_id, commit in structured.commits.items()
+        }
+        source_includes = self._source_includes(
+            context, structured, history_diffs
+        )
         total = len(structured.commits)
+        makefile_cache = KbuildMakefileCache(self.config)
         with RepositoryFileReader(context.repo) as file_reader:
             stack = [
                 (
@@ -187,6 +231,7 @@ class ConfigFilter(CommitFilter):
                         self._parent_or_self(structured, commit_id),
                         source_includes,
                         file_reader.read_file,
+                        makefile_cache=makefile_cache,
                     ),
                 )
                 for commit_id in structured.root_commits
@@ -200,6 +245,7 @@ class ConfigFilter(CommitFilter):
                         self._decisions[current_id] = self._decide_commit(
                             state,
                             current,
+                            history_diffs[current_id],
                         )
                         progress.advance(task)
 
@@ -219,6 +265,9 @@ class ConfigFilter(CommitFilter):
     ) -> FilteredCommit | None:
         self._prepare(context, show_progress=False)
         decisions = self._decisions.get(commit.original.commit_id, {})
+        if not decisions:
+            return None
+
         retained: list[DiffFile] = []
         modes: dict[tuple[str | None, str], FileBuildModes] = {}
         for diff_file in commit.diff.files:

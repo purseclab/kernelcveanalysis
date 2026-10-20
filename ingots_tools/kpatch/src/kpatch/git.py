@@ -1,12 +1,21 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from itertools import groupby
+from itertools import chain, groupby
 import json
 from pathlib import Path
 import sqlite3
 import subprocess
-from typing import Self, Iterable, Iterator, Protocol, cast, runtime_checkable, override
+from typing import (
+    Generator,
+    Self,
+    Iterable,
+    Iterator,
+    Protocol,
+    cast,
+    runtime_checkable,
+    override,
+)
 from functools import cached_property
 
 from .diff import Diff
@@ -626,6 +635,19 @@ class GitDb(GitStore):
     ) -> list[GitCommit]:
         """Return stored commits in ``[start, end)`` by committer date."""
 
+        return list(self.iter_commits_between(start, end, include_merges))
+
+    def iter_commits_between(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        include_merges: bool = False,
+    ) -> Generator[GitCommit, None, None]:
+        """Yield stored commits without buffering the full query result.
+
+        Close the iterator when stopping early to release its read connection.
+        """
+
         where_clauses: list[str] = []
         parameters: list[int] = []
         if not include_merges:
@@ -665,40 +687,35 @@ class GitDb(GitStore):
                     commit_parents.parent_index
                 """,
                 parameters,
-            ).fetchall()
+            )
+            for _, commit_rows in groupby(rows, key=lambda row: row["commit_id"]):
+                row = next(commit_rows)
+                parents = tuple(
+                    CommitParent(
+                        commit_id=parent_row["parent_commit_id"],
+                        diff_str=parent_row["parent_diff"],
+                    )
+                    for parent_row in chain((row,), commit_rows)
+                    if parent_row["parent_index"] is not None
+                )
+                commit = GitCommit(
+                    commit_id=row["commit_id"],
+                    author_name=row["author_name"],
+                    author_email=row["author_email"],
+                    author_date=datetime.fromisoformat(row["author_date"]),
+                    committer_date=datetime.fromisoformat(row["committer_date"]),
+                    parents=parents,
+                    message=row["message"],
+                    score=row["score"],
+                    ratings=cast(dict[str, float], json.loads(row["ratings_json"])),
+                )
+                if commit.is_merge != bool(row["is_merge"]):
+                    raise ValueError(
+                        f"Stored merge flag does not match parents for {commit.commit_id}"
+                    )
+                yield commit
         finally:
             connection.close()
-
-        commits: list[GitCommit] = []
-        for _, commit_rows_iter in groupby(rows, key=lambda row: row["commit_id"]):
-            commit_rows = list(commit_rows_iter)
-            row = commit_rows[0]
-            parents = tuple(
-                CommitParent(
-                    commit_id=parent_row["parent_commit_id"],
-                    diff_str=parent_row["parent_diff"],
-                )
-                for parent_row in commit_rows
-                if parent_row["parent_index"] is not None
-            )
-            commit = GitCommit(
-                commit_id=row["commit_id"],
-                author_name=row["author_name"],
-                author_email=row["author_email"],
-                author_date=datetime.fromisoformat(row["author_date"]),
-                committer_date=datetime.fromisoformat(row["committer_date"]),
-                parents=parents,
-                message=row["message"],
-                score=row["score"],
-                ratings=cast(dict[str, float], json.loads(row["ratings_json"])),
-            )
-            if commit.is_merge != bool(row["is_merge"]):
-                raise ValueError(
-                    f"Stored merge flag does not match parents for {commit.commit_id}"
-                )
-            commits.append(commit)
-
-        return commits
 
 @dataclass
 class CommitChildren:

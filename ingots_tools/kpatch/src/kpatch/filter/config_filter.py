@@ -1,4 +1,5 @@
-from collections.abc import Callable, Mapping
+from collections import OrderedDict
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 import posixpath
@@ -679,8 +680,80 @@ class KbuildMakefile:
     def directories(self) -> frozenset[str]:
         return frozenset(self._directories)
 
+    @property
+    def included_paths(self) -> frozenset[str]:
+        return frozenset(self._included)
+
     def goals_for(self, folder: str) -> Mapping[str, ConfigValue]:
         return self._external_goals.get(folder, {})
+
+
+@dataclass(frozen=True, slots=True)
+class _MakefileCacheKey:
+    contents: str
+    folder: str
+    variables: tuple[tuple[str, str], ...]
+    goals: tuple[tuple[str, ConfigValue], ...]
+    extra_goals: tuple[tuple[str, ConfigValue], ...]
+
+
+class KbuildMakefileCache:
+    """Bounded, configuration-specific cache of fragment-independent parses.
+
+    The configuration and returned rules must remain unchanged while in use.
+    """
+
+    def __init__(self, config: KernelConfig, max_entries: int = 1024) -> None:
+        if max_entries < 1:
+            raise ValueError("Makefile cache must hold at least one entry")
+        self.config = config
+        self._max_entries = max_entries
+        self._entries: OrderedDict[_MakefileCacheKey, KbuildMakefile] = OrderedDict()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def parse(
+        self,
+        contents: str,
+        folder: str,
+        *,
+        variables: Mapping[str, str],
+        include_reader: Callable[[str], tuple[str, str | None]],
+        source_path: str,
+        goals: tuple[tuple[str, ConfigValue], ...] | None,
+        extra_goals: Mapping[str, ConfigValue] | None,
+    ) -> KbuildMakefile:
+        key = _MakefileCacheKey(
+            contents=contents,
+            folder=folder,
+            variables=tuple(variables.items()),
+            goals=KbuildMakefile._DEFAULT_GOALS if goals is None else goals,
+            extra_goals=tuple((extra_goals or {}).items()),
+        )
+        cached = self._entries.get(key)
+        if cached is not None:
+            self._entries.move_to_end(key)
+            return cached
+
+        makefile = KbuildMakefile(
+            contents,
+            self.config,
+            folder,
+            variables=variables,
+            include_reader=include_reader,
+            source_path=source_path,
+            goals=goals,
+            extra_goals=extra_goals,
+        )
+        if not makefile.included_files:
+            # Parsing is complete. Do not retain this commit's directory or
+            # repository reader through the bound include-reader callback.
+            makefile._include_reader = None
+            self._entries[key] = makefile
+            if len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+        return makefile
 
 
 class KbuildDirectory:
@@ -707,7 +780,13 @@ class KbuildDirectory:
         folder: str,
         extra_goals: Mapping[str, ConfigValue] | None = None,
         read_file: Callable[[str, str], bytes] | None = None,
+        makefile_cache: KbuildMakefileCache | None = None,
     ):
+        if makefile_cache is not None and makefile_cache.config is not config:
+            raise ValueError("Makefile cache belongs to a different kernel config")
+        self._makefile_cache = (
+            makefile_cache if makefile_cache is not None else KbuildMakefileCache(config)
+        )
         self.folder = folder
         self.source_files: set[str] = set()
         self._makefiles: list[KbuildMakefile] = []
@@ -784,6 +863,15 @@ class KbuildDirectory:
                 goals=self._ARCHITECTURE_GOALS,
             )
 
+        # Index target directories rather than every object path. This keeps
+        # cross-directory lookup and branch-copy storage proportional to the
+        # build tree, even when individual Makefiles list many objects.
+        self.target_folders = frozenset(
+            posixpath.dirname(path)
+            for makefile in self._makefiles
+            for path in makefile.included_paths
+        )
+
     @staticmethod
     def _path(folder: str, filename: str) -> str:
         return posixpath.join(folder, filename) if folder else filename
@@ -831,9 +919,8 @@ class KbuildDirectory:
     ) -> None:
         make_variables = self._variables()
         make_variables.update(variables or {})
-        makefile = KbuildMakefile(
+        makefile = self._makefile_cache.parse(
             contents,
-            self._config,
             record_folder,
             variables=make_variables,
             include_reader=self._read_include,
@@ -876,7 +963,7 @@ class KbuildDirectory:
         return goals
 
 
-@dataclass
+@dataclass(slots=True)
 class KbuildCacheEntry:
     path: str
     parent: Self | None
@@ -918,7 +1005,13 @@ class KbuildState:
         base_commit: str,
         source_includes: SourceIncludeIndex | None = None,
         read_file: Callable[[str, str], bytes] | None = None,
+        makefile_cache: KbuildMakefileCache | None = None,
     ):
+        if makefile_cache is not None and makefile_cache.config is not config:
+            raise ValueError("Makefile cache belongs to a different kernel config")
+        self._makefile_cache = (
+            makefile_cache if makefile_cache is not None else KbuildMakefileCache(config)
+        )
         self.repo = repo
         self.config = config
         self.base_commit = base_commit
@@ -926,6 +1019,9 @@ class KbuildState:
         self._read_file = read_file or repo.read_file
         self.kbuild_cache = {}
         self.delegated = set()
+        # Immutable owner sets keep the reverse indices cheap to branch-copy.
+        self._build_file_owners: dict[str, frozenset[str]] = {}
+        self._target_folder_owners: dict[str, frozenset[str]] = {}
         self._architecture_indexed = False
         self._active_includes_cache: dict[
             tuple[str, ConfigValue], frozenset[str]
@@ -941,39 +1037,59 @@ class KbuildState:
             other.base_commit,
             other.source_includes,
             other._read_file,
+            other._makefile_cache,
         )
 
-        # copy kbuild cache
-        out.kbuild_cache = {
-            path: KbuildCacheEntry(
+        # Ancestors are cached before descendants, including after subtree
+        # invalidation. Rebuild independent links in that same insertion order;
+        # the immutable KbuildDirectory rules remain shared between branches.
+        for path, entry in other.kbuild_cache.items():
+            parent = (
+                out.kbuild_cache[entry.parent.path]
+                if entry.parent is not None
+                else None
+            )
+            copied_entry = KbuildCacheEntry(
                 path=entry.path,
-                parent=None,
+                parent=parent,
                 rules=entry.rules,
                 mode=entry.mode,
                 children={},
             )
-            for path, entry in other.kbuild_cache.items()
-        }
+            out.kbuild_cache[path] = copied_entry
+            if parent is not None:
+                parent.children[path] = copied_entry
 
-        # Rebuild links using copied entries so the two cache trees can be
-        # mutated independently. KbuildDirectory is immutable during normal
-        # cache use, so it is intentionally shared.
-        for path, entry in other.kbuild_cache.items():
-            copied_entry = out.kbuild_cache[path]
-            if entry.parent is not None:
-                copied_entry.parent = out.kbuild_cache[entry.parent.path]
-            copied_entry.children = {
-                child_path: out.kbuild_cache[child_path]
-                for child_path in entry.children
-            }
-
-        # copy delegated
+        out._build_file_owners = other._build_file_owners.copy()
+        out._target_folder_owners = other._target_folder_owners.copy()
         out.delegated = set(other.delegated)
         out._architecture_indexed = other._architecture_indexed
         out._active_includes_cache = dict(other._active_includes_cache)
         out._include_value_cache = dict(other._include_value_cache)
 
         return out
+
+    @staticmethod
+    def _add_owners(
+        index: dict[str, frozenset[str]],
+        paths: Iterable[str],
+        folder: str,
+    ) -> None:
+        for path in paths:
+            index[path] = index.get(path, frozenset()) | {folder}
+
+    @staticmethod
+    def _remove_owners(
+        index: dict[str, frozenset[str]],
+        paths: Iterable[str],
+        folder: str,
+    ) -> None:
+        for path in paths:
+            owners = index[path] - {folder}
+            if owners:
+                index[path] = owners
+            else:
+                del index[path]
 
     def _kbuild_cache_add(
         self,
@@ -1001,6 +1117,9 @@ class KbuildState:
         self.kbuild_cache[folder] = entry
         if parent is not None:
             parent.children[folder] = entry
+        self._add_owners(self._build_file_owners, rules.source_files, folder)
+        if entry.enabled:
+            self._add_owners(self._target_folder_owners, rules.target_folders, folder)
 
         return entry
 
@@ -1027,6 +1146,7 @@ class KbuildState:
                     else None
                 ),
                 self._read_file,
+                self._makefile_cache,
             )
             if not rules.exists:
                 if parent_entry is None:
@@ -1072,10 +1192,12 @@ class KbuildState:
         self,
         file: str,
     ) -> ConfigValue | None:
+        folder = posixpath.dirname(file.rstrip("/"))
+        owners = self._target_folder_owners.get(folder, ())
+
         value: ConfigValue | None = None
-        for entry in self.kbuild_cache.values():
-            if not entry.enabled:
-                continue
+        for folder in owners:
+            entry = self.kbuild_cache[folder]
             candidate = entry.resolve(entry.rules.get(file))
             if candidate is not None:
                 value = KbuildMakefile._merge_mode(value, candidate)
@@ -1204,6 +1326,13 @@ class KbuildState:
             return
 
         del self.kbuild_cache[path]
+        self._remove_owners(
+            self._build_file_owners, cache_entry.rules.source_files, path
+        )
+        if cache_entry.enabled:
+            self._remove_owners(
+                self._target_folder_owners, cache_entry.rules.target_folders, path
+            )
 
         if delete_from_parent and cache_entry.parent is not None:
             cache_entry.parent.children.pop(path, None)
@@ -1221,7 +1350,7 @@ class KbuildState:
             return parent
         return None
 
-    def update_filter_state(self, diff: Diff, new_commit: str):
+    def update_filter_state(self, diff: Diff, new_commit: str) -> None:
         """Call for every commit in chain of analyzed commits to keep filter in sync."""
 
         self.base_commit = new_commit
@@ -1231,18 +1360,17 @@ class KbuildState:
             for path in (file.file, file.old_file)
             if path is not None
         }
-        for key in list(self._active_includes_cache):
-            if key[0] in changed_paths:
-                del self._active_includes_cache[key]
+        for path in changed_paths:
+            self._active_includes_cache.pop((path, ConfigValue.ENABLED), None)
+            self._active_includes_cache.pop((path, ConfigValue.MODULE), None)
         affected_folders = {
             folder
             for path in changed_paths
             if (folder := self._build_file_folder(path)) is not None
         }
 
-        for folder, entry in self.kbuild_cache.items():
-            if changed_paths & entry.rules.source_files:
-                affected_folders.add(folder)
+        for path in changed_paths:
+            affected_folders.update(self._build_file_owners.get(path, ()))
 
         if affected_folders:
             self._architecture_indexed = False

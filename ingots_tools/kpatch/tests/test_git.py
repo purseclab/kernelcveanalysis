@@ -1,9 +1,11 @@
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sqlite3
 from typing import Iterable, Iterator
+from unittest.mock import patch
 
 from kpatch.git import (
     LOG_FIELD_SEPARATOR,
@@ -15,6 +17,7 @@ from kpatch.git import (
     GitRepo,
     GitStore,
     HistoryKind,
+    StructuredCommits,
     extract_to_db,
 )
 
@@ -230,6 +233,135 @@ class GitDbTests(unittest.TestCase):
             self.assertEqual(db.commits_between(end=end), [older])
             self.assertEqual(db.commits_between(), [newer, at_end, older])
 
+    def test_iterator_preserves_tied_order_and_all_parent_edges(self) -> None:
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        root = GitCommit("root", "", "", date, date, (), "")
+        branches = [
+            GitCommit(
+                branch,
+                "",
+                "",
+                date,
+                date,
+                (CommitParent("root", f"{branch} patch"),),
+                "",
+            )
+            for branch in ("left", "right", "side")
+        ]
+        merge = GitCommit(
+            "merge",
+            "",
+            "",
+            date,
+            date,
+            tuple(
+                CommitParent(branch.commit_id, f"patch from {branch.commit_id}")
+                for branch in branches
+            ),
+            "",
+        )
+        commits = [root, *branches, merge]
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = GitDb(Path(directory) / "commits.sqlite")
+            db.store_commits(commits)
+
+            loaded = list(db.iter_commits_between(include_merges=True))
+
+            self.assertEqual(loaded, list(reversed(commits)))
+            self.assertEqual(db.commits_between(include_merges=True), loaded)
+            self.assertEqual(
+                list(db.iter_commits_between()),
+                [*reversed(branches), root],
+            )
+            history = StructuredCommits.from_commits(loaded)
+            self.assertEqual(history.root_commits, {"root"})
+            self.assertEqual(history.leaf_commits, {"merge", "right", "side"})
+            self.assertEqual(
+                history.commit_children["root"].primary_children,
+                ["side", "right", "left"],
+            )
+            self.assertEqual(
+                history.commit_children["left"].primary_children, ["merge"]
+            )
+            for branch in ("right", "side"):
+                self.assertEqual(
+                    history.commit_children[branch].secondary_children,
+                    ["merge"],
+                )
+
+    def test_iterator_reads_only_current_commit_and_lookahead(self) -> None:
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        commits = [
+            GitCommit(
+                str(index),
+                "",
+                "",
+                date,
+                date + timedelta(seconds=index),
+                (CommitParent("root", f"patch {index}"),),
+                "",
+            )
+            for index in range(100)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            db = GitDb(Path(directory) / "commits.sqlite")
+            db.store_commits(commits)
+            connection = sqlite3.connect(db.db)
+            rows_read = 0
+
+            def track_row(cursor: sqlite3.Cursor, row: tuple[object, ...]) -> sqlite3.Row:
+                nonlocal rows_read
+                rows_read += 1
+                return sqlite3.Row(cursor, row)
+
+            connection.row_factory = track_row
+            with (
+                patch.object(db, "_connect", return_value=connection) as connect,
+                closing(db.iter_commits_between()) as iterator,
+            ):
+                connect.assert_not_called()
+                self.assertEqual(rows_read, 0)
+                self.assertEqual(next(iterator), commits[-1])
+                self.assertLessEqual(rows_read, len(commits[-1].parents) + 1)
+
+            with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+                connection.execute("SELECT 1")
+
+    def test_iterator_closes_connection_when_exhausted(self) -> None:
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        commit = GitCommit("commit", "", "", date, date, (), "")
+        with tempfile.TemporaryDirectory() as directory:
+            db = GitDb(Path(directory) / "commits.sqlite")
+            for commits in ([], [commit]):
+                with self.subTest(count=len(commits)):
+                    db.replace_commits(commits)
+                    connection = sqlite3.connect(db.db)
+                    connection.row_factory = sqlite3.Row
+                    with patch.object(db, "_connect", return_value=connection):
+                        self.assertEqual(list(db.iter_commits_between()), commits)
+
+                    with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+                        connection.execute("SELECT 1")
+
+    def test_iterator_validates_merge_flag_and_closes_on_error(self) -> None:
+        date = datetime(2024, 1, 1, tzinfo=UTC)
+        commit = GitCommit("commit", "", "", date, date, (), "")
+        with tempfile.TemporaryDirectory() as directory:
+            db = GitDb(Path(directory) / "commits.sqlite")
+            db.store_commits([commit])
+            connection = sqlite3.connect(db.db)
+            connection.row_factory = sqlite3.Row
+            connection.execute("UPDATE commits SET is_merge = 1")
+            connection.commit()
+
+            with patch.object(db, "_connect", return_value=connection):
+                with self.assertRaisesRegex(ValueError, "merge flag"):
+                    next(db.iter_commits_between(include_merges=True))
+
+            with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+                connection.execute("SELECT 1")
+
     def test_storing_a_commit_again_updates_it(self) -> None:
         date = datetime(2024, 1, 1, tzinfo=UTC)
         commit = GitCommit(
@@ -266,7 +398,7 @@ class GitDbTests(unittest.TestCase):
             self.assertIsNone(db.commits_between()[0].score)
             self.assertEqual(db.commits_between()[0].ratings, {})
 
-            with sqlite3.connect(db.db) as connection:
+            with closing(sqlite3.connect(db.db)) as connection:
                 parent_rows = connection.execute(
                     """
                     SELECT parent_index, parent_commit_id, diff
@@ -298,7 +430,7 @@ class GitDbTests(unittest.TestCase):
 
             self.assertEqual(stored, 1)
             self.assertEqual(db.commits_between(), [replacement])
-            with sqlite3.connect(db.db) as connection:
+            with closing(sqlite3.connect(db.db)) as connection:
                 parent_rows = connection.execute(
                     "SELECT commit_id FROM commit_parents"
                 ).fetchall()

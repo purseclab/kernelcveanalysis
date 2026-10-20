@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+import weakref
 
 from kexploit_utils import Architecture
 
@@ -7,6 +9,7 @@ from kpatch.filter.config_filter import (
     ConfigValue,
     KbuildDirectory,
     KbuildMakefile,
+    KbuildMakefileCache,
     KernelConfig,
 )
 from kpatch.filter.source_filter import SourceIncludeIndex
@@ -382,6 +385,163 @@ class KbuildMakefileTests(unittest.TestCase):
         self.assertEqual(
             makefile.get("shared/source.c"),
             ConfigValue.ENABLED,
+        )
+
+
+class KbuildMakefileCacheTests(unittest.TestCase):
+    def parse(
+        self,
+        cache: KbuildMakefileCache,
+        contents: str,
+        folder: str = "drivers",
+        *,
+        variables: dict[str, str] | None = None,
+        goals: tuple[tuple[str, ConfigValue], ...] | None = None,
+        extra_goals: dict[str, ConfigValue] | None = None,
+    ) -> KbuildMakefile:
+        return cache.parse(
+            contents,
+            folder,
+            variables=variables or {},
+            include_reader=lambda path: (path, None),
+            source_path=f"{folder}/Makefile",
+            goals=goals,
+            extra_goals=extra_goals,
+        )
+
+    def test_reuses_pure_parse_across_commits_without_retaining_directory(self) -> None:
+        config = KernelConfig("")
+        cache = KbuildMakefileCache(config)
+        repo = MemoryGitRepo(
+            {
+                "base": {"drivers/Makefile": "obj-y += selected.o\n"},
+                "next": {"drivers/Kbuild": "obj-y += selected.o\n"},
+            }
+        )
+        first = KbuildDirectory(repo, "base", config, "drivers", makefile_cache=cache)
+        second = KbuildDirectory(repo, "next", config, "drivers", makefile_cache=cache)
+
+        self.assertIs(first._makefiles[0], second._makefiles[0])
+        self.assertEqual(first.source_files, {"drivers/Makefile"})
+        self.assertEqual(second.source_files, {"drivers/Kbuild"})
+        self.assertIsNone(first._makefiles[0]._include_reader)
+        first_reference = weakref.ref(first)
+        del first
+        self.assertIsNone(first_reference())
+        self.assertEqual(len(cache), 1)
+
+    def test_key_preserves_every_parse_input(self) -> None:
+        cache = KbuildMakefileCache(KernelConfig(""))
+        contents = "obj-y += $(OBJECT)\n"
+        variables = {"OBJECT": "first.o"}
+        first = self.parse(cache, contents, variables=variables)
+        self.assertIs(first, self.parse(cache, contents, variables=variables))
+
+        changed_variables = self.parse(
+            cache, contents, variables={"OBJECT": "second.o"}
+        )
+        self.assertTrue(changed_variables.includes("drivers/second.c"))
+        self.assertFalse(changed_variables.includes("drivers/first.c"))
+        changed_folder = self.parse(cache, contents, "other", variables=variables)
+        self.assertTrue(changed_folder.includes("other/first.c"))
+        changed_contents = self.parse(cache, "obj-y += other.o\n", variables=variables)
+        self.assertTrue(changed_contents.includes("drivers/other.c"))
+        changed_goals = self.parse(cache, contents, variables=variables, goals=())
+        self.assertFalse(changed_goals.includes("drivers/first.c"))
+        extra = self.parse(
+            cache,
+            contents,
+            variables=variables,
+            extra_goals={"extra.o": ConfigValue.MODULE},
+        )
+        self.assertEqual(extra.get("drivers/extra.c"), ConfigValue.MODULE)
+        self.assertIsNone(first.get("drivers/extra.c"))
+        self.assertEqual(len(cache), 6)
+
+    def test_lru_is_bounded_and_preserves_recently_used_entries(self) -> None:
+        cache = KbuildMakefileCache(KernelConfig(""), max_entries=2)
+        first = self.parse(cache, "obj-y += first.o\n")
+        second = self.parse(cache, "obj-y += second.o\n")
+        self.assertIs(first, self.parse(cache, "obj-y += first.o\n"))
+        self.parse(cache, "obj-y += third.o\n")
+
+        self.assertEqual(len(cache), 2)
+        self.assertIs(first, self.parse(cache, "obj-y += first.o\n"))
+        self.assertIsNot(second, self.parse(cache, "obj-y += second.o\n"))
+        self.assertEqual(len(cache), 2)
+        with self.assertRaises(ValueError):
+            KbuildMakefileCache(KernelConfig(""), max_entries=0)
+
+    def test_fragment_dependent_parses_are_never_cached_even_when_missing(self) -> None:
+        config = KernelConfig("")
+        cache = KbuildMakefileCache(config)
+        files = {"drivers/Makefile": "-include $(src)/objects.mk\n"}
+        repo = MemoryGitRepo(
+            {
+                "missing": files,
+                "before": {**files, "drivers/objects.mk": "obj-y += before.o\n"},
+                "after": {**files, "drivers/objects.mk": "obj-y += after.o\n"},
+            }
+        )
+        missing = KbuildDirectory(
+            repo, "missing", config, "drivers", makefile_cache=cache
+        )
+        before = KbuildDirectory(
+            repo, "before", config, "drivers", makefile_cache=cache
+        )
+        after = KbuildDirectory(repo, "after", config, "drivers", makefile_cache=cache)
+
+        self.assertIsNot(missing._makefiles[0], before._makefiles[0])
+        self.assertIsNot(before._makefiles[0], after._makefiles[0])
+        self.assertEqual(missing._makefiles[0].included_files, {"drivers/objects.mk"})
+        self.assertTrue(before.includes("drivers/before.c"))
+        self.assertFalse(after.includes("drivers/before.c"))
+        self.assertTrue(after.includes("drivers/after.c"))
+        self.assertEqual(len(cache), 0)
+
+    def test_cache_is_bound_to_its_config(self) -> None:
+        enabled = KernelConfig("CONFIG_FEATURE=y")
+        disabled = KernelConfig("")
+        enabled_cache = KbuildMakefileCache(enabled)
+        contents = "obj-$(CONFIG_FEATURE) += feature.o\n"
+        self.assertTrue(
+            self.parse(enabled_cache, contents).includes("drivers/feature.c")
+        )
+        self.assertFalse(
+            self.parse(KbuildMakefileCache(disabled), contents).includes(
+                "drivers/feature.c"
+            )
+        )
+        repo = MemoryGitRepo({"base": {"drivers/Makefile": contents}})
+        with self.assertRaisesRegex(ValueError, "different kernel config"):
+            KbuildDirectory(
+                repo, "base", disabled, "drivers", makefile_cache=enabled_cache
+            )
+        with self.assertRaisesRegex(ValueError, "different kernel config"):
+            ConfigFilter(repo, disabled, "base", makefile_cache=enabled_cache)
+
+    def test_branch_copy_shares_cache_and_reuses_invalidated_pure_parse(self) -> None:
+        files = {"drivers/Makefile": "obj-y += selected.o\n"}
+        original = ConfigFilter(
+            MemoryGitRepo({"base": files, "next": files}), KernelConfig(""), "base"
+        )
+        self.assertTrue(original.file_included("drivers/selected.c"))
+        copied = ConfigFilter.copy(original)
+        self.assertIs(copied._makefile_cache, original._makefile_cache)
+        copied.update_filter_state(
+            make_diff("drivers/Makefile", DiffFileType.DEFAULT), "next"
+        )
+
+        with patch.object(
+            KbuildMakefile, "_parse", side_effect=AssertionError("reparsed")
+        ):
+            self.assertTrue(copied.file_included("drivers/selected.c"))
+        self.assertIsNot(
+            copied.kbuild_cache["drivers"].rules, original.kbuild_cache["drivers"].rules
+        )
+        self.assertIs(
+            copied.kbuild_cache["drivers"].rules._makefiles[0],
+            original.kbuild_cache["drivers"].rules._makefiles[0],
         )
 
 
@@ -928,6 +1088,325 @@ class ConfigFilterTests(unittest.TestCase):
         )
 
         self.assertTrue(filter.file_included("drivers/example/selected.c"))
+
+    def test_shared_fragment_invalidates_all_owners_only(self) -> None:
+        files = {
+            "drivers/Makefile": "obj-y += first/ second/ unrelated/\n",
+            "drivers/first/Makefile": "include scripts/objects.mk\n",
+            "drivers/second/Makefile": "include scripts/objects.mk\n",
+            "drivers/unrelated/Makefile": "obj-y += selected.o\n",
+            "scripts/objects.mk": "obj-y += before.o\n",
+        }
+        filter = self.make_filter(
+            {
+                "base": files,
+                "next": {**files, "scripts/objects.mk": "obj-y += after.o\n"},
+            }
+        )
+        for folder in ("first", "second"):
+            self.assertTrue(filter.file_included(f"drivers/{folder}/before.c"))
+        self.assertTrue(filter.file_included("drivers/unrelated/selected.c"))
+        unrelated = filter.kbuild_cache["drivers/unrelated"]
+
+        filter.update_filter_state(
+            make_diff("scripts/objects.mk", DiffFileType.DEFAULT), "next"
+        )
+
+        for folder in ("first", "second"):
+            self.assertFalse(filter.file_included(f"drivers/{folder}/before.c"))
+            self.assertTrue(filter.file_included(f"drivers/{folder}/after.c"))
+        self.assertIs(filter.kbuild_cache["drivers/unrelated"], unrelated)
+
+    def test_removed_fragment_dependency_keeps_former_owner_cached(self) -> None:
+        files = {
+            "drivers/Makefile": "obj-y += example/\n",
+            "drivers/example/Makefile": "include scripts/objects.mk\n",
+            "scripts/objects.mk": "obj-y += before.o\n",
+        }
+        next_files = {**files, "drivers/example/Makefile": "obj-y += local.o\n"}
+        filter = self.make_filter(
+            {
+                "base": files,
+                "next": next_files,
+                "last": {**next_files, "scripts/objects.mk": "obj-y += after.o\n"},
+            }
+        )
+        self.assertTrue(filter.file_included("drivers/example/before.c"))
+        filter.update_filter_state(
+            make_diff("drivers/example/Makefile", DiffFileType.DEFAULT), "next"
+        )
+        self.assertTrue(filter.file_included("drivers/example/local.c"))
+        entry = filter.kbuild_cache["drivers/example"]
+
+        filter.update_filter_state(
+            make_diff("scripts/objects.mk", DiffFileType.DEFAULT), "last"
+        )
+
+        self.assertIs(filter.kbuild_cache["drivers/example"], entry)
+        self.assertFalse(filter.file_included("drivers/example/after.c"))
+
+    def test_new_optional_fragment_invalidates_its_cached_owner(self) -> None:
+        files = {
+            "drivers/Makefile": "obj-y += example/\n",
+            "drivers/example/Makefile": "-include $(src)/objects.mk\n",
+        }
+        filter = self.make_filter(
+            {
+                "base": files,
+                "next": {
+                    **files,
+                    "drivers/example/objects.mk": "obj-y += selected.o\n",
+                },
+            }
+        )
+        self.assertFalse(filter.file_included("drivers/example/selected.c"))
+
+        filter.update_filter_state(
+            make_diff("drivers/example/objects.mk", DiffFileType.NEW), "next"
+        )
+
+        self.assertTrue(filter.file_included("drivers/example/selected.c"))
+
+    def make_cross_directory_filter(self) -> ConfigFilter:
+        files = {
+            "Kbuild": "obj-y += owners/\n",
+            "owners/Makefile": "obj-y += builtin/ unrelated/\nobj-m += module/\n",
+            "owners/builtin/Makefile": (
+                "obj-y += local.o ../../shared/common.o "
+                "../../shared/direct.c ../../shared/image.lds\n"
+            ),
+            "owners/module/Makefile": "obj-y += local.o ../../shared/common.o\n",
+            "owners/unrelated/Makefile": "obj-y += local.o\n",
+            "owners/disabled/Makefile": "obj-y += ../../shared/disabled.o\n",
+        }
+        filter = self.make_filter(
+            {
+                "base": files,
+                "next": {
+                    **files,
+                    "owners/builtin/Makefile": "obj-y += local.o\n",
+                },
+            }
+        )
+        self.assertEqual(filter.get("owners/module/local.c"), ConfigValue.MODULE)
+        self.assertEqual(filter.get("owners/builtin/local.c"), ConfigValue.ENABLED)
+        self.assertEqual(filter.get("owners/unrelated/local.c"), ConfigValue.ENABLED)
+        self.assertIsNone(filter.get("owners/disabled/local.c"))
+        return filter
+
+    def test_cross_directory_lookup_merges_modes_and_direct_source_paths(self) -> None:
+        filter = self.make_cross_directory_filter()
+
+        self.assertEqual(filter.get("shared/common.c"), ConfigValue.ENABLED)
+        self.assertEqual(filter.get("shared/common.S"), ConfigValue.ENABLED)
+        self.assertEqual(filter.get("shared/direct.c"), ConfigValue.ENABLED)
+        self.assertEqual(filter.get("shared/image.lds.S"), ConfigValue.ENABLED)
+        self.assertIsNone(filter.get("shared/disabled.c"))
+
+    def test_cross_directory_miss_does_not_query_unrelated_cached_rules(self) -> None:
+        filter = self.make_cross_directory_filter()
+        unrelated = filter.kbuild_cache["owners/unrelated"].rules
+
+        with patch.object(
+            unrelated, "get", side_effect=AssertionError("unrelated rule lookup")
+        ):
+            self.assertIsNone(filter.get("shared/missing.c"))
+
+    def test_new_intermediate_makefile_preserves_cached_fallback(self) -> None:
+        files = {
+            "Kbuild": "obj-y += drivers/ drivers/intermediate/\n",
+            "drivers/intermediate/child/Makefile": "obj-y += local.o\n",
+        }
+        filter = self.make_filter(
+            {
+                "base": files,
+                "next": {
+                    **files,
+                    "drivers/intermediate/Makefile": (
+                        "obj-y += child/ child/selected.o\n"
+                    ),
+                },
+            }
+        )
+        self.assertIsNone(filter.get("drivers/intermediate/child/selected.c"))
+        child = filter.kbuild_cache["drivers/intermediate/child"]
+        self.assertEqual(child.parent.path, "")
+
+        filter.update_filter_state(
+            make_diff("drivers/intermediate/Makefile", DiffFileType.NEW), "next"
+        )
+        filter._kbuild_cache_get("drivers/intermediate")
+
+        # The old child still bypasses the newly loaded intermediate node.
+        # Fallback lookup must nevertheless see every cached owner's rules.
+        self.assertIs(filter.kbuild_cache[child.path], child)
+        self.assertEqual(
+            filter.get("drivers/intermediate/child/selected.c"), ConfigValue.ENABLED
+        )
+
+    def test_copied_reverse_indices_remain_independent_after_reload(self) -> None:
+        original = self.make_cross_directory_filter()
+        copied = ConfigFilter.copy(original)
+        copied.update_filter_state(
+            make_diff("owners/builtin/Makefile", DiffFileType.DEFAULT), "next"
+        )
+        self.assertEqual(copied.get("owners/builtin/local.c"), ConfigValue.ENABLED)
+
+        self.assertEqual(original.get("shared/common.c"), ConfigValue.ENABLED)
+        self.assertEqual(copied.get("shared/common.c"), ConfigValue.MODULE)
+        self.assertIsNone(copied.get("shared/direct.c"))
+        self.assertEqual(original.get("shared/direct.c"), ConfigValue.ENABLED)
+
+        # Copy again after removal/reinsertion changed cache insertion order.
+        reloaded_copy = ConfigFilter.copy(copied)
+        parent = reloaded_copy.kbuild_cache["owners"]
+        child = reloaded_copy.kbuild_cache["owners/builtin"]
+        self.assertIs(child.parent, parent)
+        self.assertIs(parent.children[child.path], child)
+        reloaded_copy.update_filter_state(
+            make_diff("owners/module/Makefile", DiffFileType.DEFAULT), "next"
+        )
+        self.assertIsNone(reloaded_copy.get("shared/common.c"))
+        self.assertEqual(copied.get("shared/common.c"), ConfigValue.MODULE)
+        self.assertEqual(original.get("shared/common.c"), ConfigValue.ENABLED)
+
+    def test_architecture_fragment_update_reindexes_cross_directory_rules(self) -> None:
+        files = {
+            "Kbuild": "obj-y += arch/$(SRCARCH)/\n",
+            "arch/arm64/Kbuild": "obj-y += kvm/\n",
+            "arch/arm64/kvm/Makefile": (
+                "include $(srctree)/virt/kvm/objects.mk\n"
+            ),
+            "virt/kvm/objects.mk": "obj-y += ../../../virt/kvm/before.o\n",
+        }
+        filter = ConfigFilter(
+            MemoryGitRepo(
+                {
+                    "base": files,
+                    "next": {
+                        **files,
+                        "virt/kvm/objects.mk": (
+                            "obj-y += ../../../virt/kvm/after.o\n"
+                        ),
+                    },
+                }
+            ),
+            KernelConfig("CONFIG_ARM64=y"),
+            "base",
+        )
+        self.assertTrue(filter.file_included("virt/kvm/before.c"))
+
+        filter.update_filter_state(
+            make_diff("virt/kvm/objects.mk", DiffFileType.DEFAULT), "next"
+        )
+
+        self.assertFalse(filter.file_included("virt/kvm/before.c"))
+        self.assertTrue(filter.file_included("virt/kvm/after.c"))
+
+    def test_architecture_makefile_invalidates_root_and_architecture(self) -> None:
+        files = {
+            "Kbuild": "obj-y += arch/$(SRCARCH)/\n",
+            "arch/arm64/Kbuild": "obj-y += kernel/\n",
+            "arch/arm64/Makefile": "libs-y += arch/arm64/before/\n",
+            "arch/arm64/before/Makefile": "lib-y += selected.o\n",
+            "arch/arm64/after/Makefile": "lib-y += selected.o\n",
+        }
+        filter = ConfigFilter(
+            MemoryGitRepo(
+                {
+                    "base": files,
+                    "next": {
+                        **files,
+                        "arch/arm64/Makefile": "libs-y += arch/arm64/after/\n",
+                    },
+                }
+            ),
+            KernelConfig("CONFIG_ARM64=y"),
+            "base",
+        )
+        self.assertTrue(filter.file_included("arch/arm64/before/selected.c"))
+        self.assertFalse(filter.file_included("arch/arm64/after/selected.c"))
+
+        filter.update_filter_state(
+            make_diff("arch/arm64/Makefile", DiffFileType.DEFAULT), "next"
+        )
+
+        self.assertFalse(filter.file_included("arch/arm64/before/selected.c"))
+        self.assertTrue(filter.file_included("arch/arm64/after/selected.c"))
+
+    def test_source_change_invalidates_transitive_include_results_only(self) -> None:
+        files = {
+            "drivers/Makefile": "obj-y += wrapper.o unrelated.o\n",
+            "drivers/wrapper.c": '#include "before.h"\n',
+            "drivers/before.h": '#include "before_leaf.h"\n',
+            "drivers/after.h": '#include "after_leaf.h"\n',
+            "drivers/unrelated.c": '#include "unchanged.h"\n',
+            "drivers/before_leaf.h": "",
+            "drivers/after_leaf.h": "",
+            "drivers/unchanged.h": "",
+        }
+        next_files = {**files, "drivers/wrapper.c": '#include "after.h"\n'}
+        index = SourceIncludeIndex("", files)
+        for source_files in (files, next_files):
+            for path, contents in source_files.items():
+                for line in contents.splitlines():
+                    index.add_line(path, line)
+        filter = ConfigFilter(
+            MemoryGitRepo({"base": files, "next": next_files}),
+            KernelConfig(""),
+            "base",
+            index,
+        )
+        self.assertTrue(filter.file_included("drivers/before_leaf.h"))
+        self.assertFalse(filter.file_included("drivers/after_leaf.h"))
+        self.assertTrue(filter.file_included("drivers/unchanged.h"))
+        unrelated_key = ("drivers/unrelated.c", ConfigValue.ENABLED)
+        unchanged = filter._active_includes_cache[unrelated_key]
+
+        filter.update_filter_state(
+            make_diff("drivers/wrapper.c", DiffFileType.DEFAULT), "next"
+        )
+
+        self.assertNotIn("drivers/before_leaf.h", filter._include_value_cache)
+        self.assertNotIn("drivers/after_leaf.h", filter._include_value_cache)
+        self.assertIn("drivers/unchanged.h", filter._include_value_cache)
+        self.assertIs(filter._active_includes_cache[unrelated_key], unchanged)
+        self.assertFalse(filter.file_included("drivers/before_leaf.h"))
+        self.assertTrue(filter.file_included("drivers/after_leaf.h"))
+
+    def test_source_rename_invalidates_both_active_include_modes_only(self) -> None:
+        repo = MemoryGitRepo(
+            {
+                "base": {
+                    "old.c": '#include "target.h"\n',
+                    "unrelated.c": '#include "target.h"\n',
+                },
+                "next": {
+                    "new.c": '#include "target.h"\n',
+                    "unrelated.c": '#include "target.h"\n',
+                },
+            }
+        )
+        index = SourceIncludeIndex(
+            "", ("old.c", "new.c", "unrelated.c", "target.h")
+        )
+        filter = ConfigFilter(repo, KernelConfig(""), "base", index)
+        for path in ("old.c", "new.c", "unrelated.c"):
+            for mode in (ConfigValue.ENABLED, ConfigValue.MODULE):
+                filter._active_source_includes(path, mode)
+        unrelated_key = ("unrelated.c", ConfigValue.ENABLED)
+        unchanged = filter._active_includes_cache[unrelated_key]
+
+        filter.update_filter_state(
+            make_diff("new.c", DiffFileType.RENAME, old_file="old.c"), "next"
+        )
+
+        self.assertIs(filter._active_includes_cache[unrelated_key], unchanged)
+        for mode in (ConfigValue.ENABLED, ConfigValue.MODULE):
+            self.assertEqual(filter._active_source_includes("old.c", mode), frozenset())
+            self.assertEqual(
+                filter._active_source_includes("new.c", mode), frozenset(("target.h",))
+            )
 
 
 if __name__ == "__main__":

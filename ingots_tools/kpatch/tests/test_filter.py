@@ -2,6 +2,7 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 import tempfile
+from unittest.mock import patch
 
 from kpatch.filter import (
     CommitFilter,
@@ -17,6 +18,7 @@ from kpatch.filter import (
     filter_commit_time_range,
 )
 from filter_helpers import filter_commits
+from kpatch.diff import Diff
 from kpatch.filter.config_filter import KernelConfig
 from kpatch.git import (
     CommitParent,
@@ -583,6 +585,85 @@ class FilterCommitsTests(unittest.TestCase):
             show_progress=False,
         )
         self.assertEqual(len(module_result), 1)
+
+    def test_mutable_diff_is_lazy_and_does_not_populate_original_cache(self) -> None:
+        commit = self.make_commit("c1", "p0", ["drivers/foo.c"])
+        with patch.object(Diff, "parse", wraps=Diff.parse) as parse:
+            view = FilteredCommit.from_commit(commit)
+            view.synchronize_diff()
+            parse.assert_not_called()
+            self.assertIs(view.diff, view.diff)
+            self.assertEqual(parse.call_count, 1)
+
+        self.assertNotIn("diff", vars(commit.parents[0]))
+        self.assertIn("+new", view.materialize().diff_str)
+
+    def test_mutable_commit_accepts_explicit_diff_and_build_modes(self) -> None:
+        commit = self.make_commit("c1", "p0", ["drivers/foo.c"])
+        diff = Diff.parse(commit.diff_str)
+        modes = {(None, "drivers/foo.c"): FileBuildModes(old="y", new="m")}
+        view = FilteredCommit(commit, diff=diff, build_modes=modes)
+
+        self.assertIs(view.diff, diff)
+        self.assertIs(view.build_modes, modes)
+        self.assertEqual(FilteredCommit.from_commit(commit).build_modes, {})
+
+    def test_config_empty_history_needs_no_repository_commands(self) -> None:
+        context = FilterContext(
+            GitRepo(Path("nonexistent")), StructuredCommits.from_commits([])
+        )
+        result = CommitConfigFilter(KernelConfig("")).filter_commits(
+            [], context, show_progress=False
+        )
+        self.assertEqual(result, [])
+
+    def test_merge_filter_does_not_parse_discarded_patch(self) -> None:
+        regular = self.make_commit("c1", "p0", ["drivers/foo.c"])
+        merge = self.make_commit("merge", "p0", ["drivers/large.c"])
+        merge.parents += (CommitParent("topic", ""),)
+        with patch.object(Diff, "parse", wraps=Diff.parse) as parse:
+            result = MergeCommitFilter().filter_commits(
+                [regular, merge],
+                FilterContext(MemoryGitRepo({})),
+                show_progress=False,
+            )
+
+        self.assertEqual([commit.commit_id for commit in result], ["c1"])
+        self.assertEqual(parse.call_count, 1)
+        self.assertEqual(parse.call_args.args[0], regular.diff_str)
+
+    def test_config_retains_only_compact_history_metadata(self) -> None:
+        commit = self.make_commit("c1", "p0", ["drivers/foo.c"])
+        commit.parents[0].diff_str = commit.diff_str.replace(
+            "-old\n+new",
+            '-# include "old.h"\n-old\n+#include "new.h"\n+new',
+        )
+        history = CommitConfigFilter._history_diff(commit)
+
+        self.assertEqual(history.text, "")
+        self.assertEqual(history.files[0].file, "drivers/foo.c")
+        self.assertEqual(history.files[0].header_lines, [])
+        self.assertEqual(
+            history.files[0].chunks[0].lines,
+            ['-# include "old.h"', '+#include "new.h"'],
+        )
+        self.assertNotIn("diff", vars(commit.parents[0]))
+        self.assertIn("+new", commit.diff_str)
+
+    def test_config_does_not_parse_rejected_mutable_patch(self) -> None:
+        commit = self.make_commit("c1", "p0", ["drivers/unbuilt.c"])
+        context = FilterContext(
+            MemoryGitRepo({"drivers/Makefile": "obj-y += other.o\n"}),
+            StructuredCommits.from_commits([commit]),
+        )
+        with patch.object(Diff, "parse", wraps=Diff.parse) as parse:
+            result = CommitConfigFilter(KernelConfig("")).filter_commits(
+                [commit], context, show_progress=False
+            )
+
+        self.assertEqual(result, [])
+        self.assertEqual(parse.call_count, 1)
+        self.assertNotIn("diff", vars(commit.parents[0]))
 
     def test_default_filter_mutable_commit_is_identity(self) -> None:
         class _BatchOnlyFilter(CommitFilter):

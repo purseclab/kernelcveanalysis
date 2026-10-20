@@ -33,27 +33,50 @@ def diff_file_key(diff_file: DiffFile) -> tuple[str | None, str]:
     return diff_file.old_file, diff_file.file
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class FilteredCommit:
     """A mutable filtering view paired with its immutable source commit."""
 
     original: GitCommit
-    diff: Diff
+    _diff: Diff | None = field(default=None, repr=False)
     build_modes: dict[tuple[str | None, str], FileBuildModes] = field(
         default_factory=dict
     )
 
+    def __init__(
+        self,
+        original: GitCommit,
+        diff: Diff | None = None,
+        build_modes: dict[tuple[str | None, str], FileBuildModes] | None = None,
+    ) -> None:
+        self.original = original
+        self._diff = diff
+        self.build_modes = build_modes if build_modes is not None else {}
+
     @classmethod
     def from_commit(cls, commit: GitCommit) -> "FilteredCommit":
-        return cls(original=commit, diff=Diff.parse(commit.diff_str))
+        return cls(original=commit)
+
+    @property
+    def diff(self) -> Diff:
+        """Parse only when a filter needs the patch, without caching on original."""
+
+        if self._diff is None:
+            self._diff = Diff.parse(self.original.diff_str)
+        return self._diff
+
+    @diff.setter
+    def diff(self, value: Diff) -> None:
+        self._diff = value
 
     def synchronize_diff(self) -> None:
-        self.diff.synchronize_text()
+        if self._diff is not None:
+            self._diff.synchronize_text()
 
     def materialize(self) -> GitCommit:
         """Return an ordinary commit containing the filtered first-parent diff."""
 
-        self.synchronize_diff()
+        self.diff.synchronize_text()
         if not self.original.parents:
             if self.diff.text:
                 raise ValueError("Cannot attach a diff to a parentless commit")

@@ -46,7 +46,9 @@ class RunFilterArgs:
 def run_filter(
     args: RunFilterArgs,
     filter: CommitFilter,
-):
+    *,
+    show_progress: bool = True,
+) -> None:
     context = FilterContext.from_db_range(
         args.db,
         args.repo,
@@ -60,7 +62,7 @@ def run_filter(
     filtered_commits = filter.filter_commits(
         all_commits,
         context,
-        show_progress=True,
+        show_progress=show_progress,
     )
 
     print(f"Original commit count: {len(all_commits)}")
@@ -76,6 +78,8 @@ def filter_commit_time_range(
     kernel_config_path: Path | None,
     start_date: datetime,
     end_date: datetime,
+    *,
+    show_progress: bool = True,
 ) -> None:
     if kernel_config_path is not None:
         kernel_config = KernelConfig(kernel_config_path.read_text())
@@ -95,7 +99,17 @@ def filter_commit_time_range(
             ]
         )
 
-    run_filter(repo, db, destination_db_name, filter, start_date, end_date)
+    run_filter(
+        RunFilterArgs(
+            repo=repo,
+            db=db,
+            destination_db_name=destination_db_name,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+        filter,
+        show_progress=show_progress,
+    )
 
 
 __all__ = [
