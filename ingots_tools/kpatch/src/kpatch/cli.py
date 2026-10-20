@@ -12,6 +12,7 @@ from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db, 
 from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, JevFilter, CountFilter
 from .visualization import show_commit_sunburst
 from .update import update_to_db
+from .add import add_to_db
 
 app = typer.Typer()
 filter_app = typer.Typer()
@@ -36,6 +37,33 @@ def extract_commits(
     end_date = parse_time(end) if end is not None else None
     processed = extract_to_db(GitRepo(repo), GitDb(db), start_date, end_date)
     print(f"stored {processed} commits to database `{str(db)}`.")
+
+@app.command("add", help="Add a date range without duplicates; reject gaps in raw database coverage.")
+def add_commits(
+    repo: Annotated[Path, typer.Option(exists=True, file_okay=False, help="Path to Linux Git checkout (uses current HEAD; no pull).")],
+    db: Annotated[Path, typer.Option(dir_okay=False, help="SQLite database to create or extend.")],
+    start: Annotated[str | None, typer.Option(help="Inclusive UTC start date (mm-dd-yyyy); omitted means all history.")] = None,
+    end: Annotated[str | None, typer.Option(help="Exclusive UTC end date (mm-dd-yyyy); omitted means through HEAD.")] = None,
+    start_at_stored_end: Annotated[bool, typer.Option(help="Use the stored range's end as the start, extending forward.")] = False,
+    end_at_stored_start: Annotated[bool, typer.Option(help="Use the stored range's start as the end, extending backward.")] = False,
+) -> None:
+    try:
+        start_date = parse_time(start) if start is not None else None
+        end_date = parse_time(end) if end is not None else None
+        result = add_to_db(
+            GitRepo(repo), GitDb(db), start_date, end_date,
+            start_at_stored_end=start_at_stored_end,
+            end_at_stored_start=end_at_stored_start,
+        )
+    except (ValueError, RuntimeError, OSError, sqlite3.Error, subprocess.CalledProcessError) as error:
+        typer.echo(f"Add failed: {error}", err=True)
+        raise typer.Exit(1) from error
+
+    typer.echo(f"Added {result.added_commits} commits; {result.total_commits} total in `{db}`.")
+    first = result.start_date.isoformat() if result.start_date is not None else "all history"
+    last = result.end_date.isoformat() if result.end_date is not None else "HEAD"
+    typer.echo(f"Coverage: [{first}, {last}).")
+
 
 @app.command("update", help="Pull Linux and append missing raw commits without re-extracting stored patches.")
 def update_commits(

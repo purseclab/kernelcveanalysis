@@ -25,6 +25,7 @@ class ExtractionBounds(BaseModel):
 
     start_date: AwareDatetime | None
     end_date: AwareDatetime
+    tip_commit: str | None = Field(default=None, pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 def read_extraction_bounds(connection: sqlite3.Connection) -> ExtractionBounds | None:
@@ -41,8 +42,12 @@ def write_extraction_bounds(
     connection: sqlite3.Connection,
     start_date: datetime | None,
     end_date: datetime,
+    *,
+    tip_commit: str | None = None,
 ) -> None:
-    bounds = ExtractionBounds(start_date=start_date, end_date=end_date)
+    bounds = ExtractionBounds(
+        start_date=start_date, end_date=end_date, tip_commit=tip_commit
+    )
     _write_metadata(connection, BOUNDED_EXTRACTION_KEY, bounds.model_dump_json())
 
 

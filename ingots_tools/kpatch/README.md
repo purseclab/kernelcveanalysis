@@ -19,6 +19,61 @@ uncapped history from a chosen UTC start date:
 uv run kpatch extract --repo linux --db db/all_commits.sqlite --start 01-01-2026
 ```
 
+### Add or extend a continuous date range
+
+Use `add` to backfill or extend a raw database without overwriting existing
+commits, patches, scores, or ratings. For example, extend the existing source
+back to January 1, 2024 and include everything through the checkout's HEAD:
+
+```console
+uv run kpatch add --repo linux --db db/all_commits.sqlite --start 01-01-2024
+```
+
+Dates are UTC **committer dates**, in `mm-dd-yyyy` format. Ranges include the
+start and exclude the end. Omitting `--start` means all earlier history;
+omitting `--end` means through HEAD. `add` uses the current checkout and does
+not pull; run `git -C linux pull --ff-only` first if needed.
+
+```console
+# Create a database or add an overlapping/adjacent explicit range:
+uv run kpatch add --repo linux --db db/all_commits.sqlite --start 01-01-2024 --end 01-01-2025
+
+# Add only the earlier date interval, up to the stored coverage boundary:
+uv run kpatch add --repo linux --db db/all_commits.sqlite --start 01-01-2023 --end-at-stored-start
+
+# Extend forward from the stored coverage boundary through HEAD:
+uv run kpatch add --repo linux --db db/all_commits.sqlite --start-at-stored-end
+
+# Extend forward to an exclusive end date:
+uv run kpatch add --repo linux --db db/all_commits.sqlite --start-at-stored-end --end 01-01-2027
+
+# Extend backward through all earlier history:
+uv run kpatch add --repo linux --db db/all_commits.sqlite --end-at-stored-start
+```
+
+- At least one date or stored-boundary flag is required. Each flag conflicts
+  with its corresponding explicit date. Stored-boundary flags require existing
+  commits; for an open coverage endpoint they use the earliest/latest stored
+  committer timestamp instead.
+- New and stored date ranges must overlap or touch. A disjoint range fails
+  without changing rows or coverage metadata. Continuity refers to **requested
+  date coverage**, not whether every day actually contains a commit.
+- Existing nonempty databases must have complete, recorded extraction coverage
+  (from `extract`, `add`, or a synchronized `update`). Sparse/filtered databases
+  and databases with unknown coverage are rejected rather than guessing from
+  their earliest/latest commit timestamps.
+- The combined continuous range is scanned at a pinned HEAD, inserting only
+  missing commit IDs. This also captures late merges within existing coverage;
+  even a contained request can therefore add newly reachable commits elsewhere
+  in that coverage. Existing entries are never rewritten. Divergence from a
+  recorded tip is rejected. Rows and coverage are committed atomically.
+- An open-ended result records the expanded start boundary and synchronization
+  checkpoint, so subsequent `update` commands need no `--start`. A bounded
+  result remains end-capped; extend it through HEAD with `add` before using
+  `update`.
+
+### Incremental updates
+
 Keep that source database current without re-extracting existing patches:
 
 ```console

@@ -395,6 +395,25 @@ class GitRepo(GitStore):
             raise
         return True
 
+    def contains_commits(self, commit_ids: Iterable[str], tip_commit: str) -> bool:
+        """Check stored IDs against a pinned tip without an unbounded argument list."""
+
+        with TemporaryFile() as revisions:
+            for commit_id in commit_ids:
+                _ = revisions.write(f"{commit_id}\n".encode("ascii"))
+            _ = revisions.seek(0)
+            result = subprocess.run(
+                [
+                    "git", "-C", str(self.repo), "rev-list", "--stdin",
+                    "--not", tip_commit, "--max-count=1",
+                ],
+                stdin=revisions,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        return not result.stdout.strip()
+
     def _iter_git_records(
         self,
         args: list[str],
@@ -465,13 +484,17 @@ class GitRepo(GitStore):
         start: datetime | None = None,
         *,
         revisions_file: Path | None = None,
+        end: datetime | None = None,
     ) -> Generator[GitCommit, None, None]:
-        """Stream a pinned revision/range, optionally excluding stdin revisions."""
+        """Stream a pinned revision/range within ``[start, end)``."""
 
         args = ["log", "--full-history", "--diff-merges=first-parent"]
         if start is not None:
             query_start = start - _GIT_TIMESTAMP_RESOLUTION
             args.append(f"--since-as-filter={self._format_git_time(query_start)}")
+        if end is not None:
+            query_end = end + _GIT_TIMESTAMP_RESOLUTION
+            args.append(f"--before={self._format_git_time(query_end)}")
         args.extend([
             f"--format={GIT_LOG_FORMAT}",
             "--patch", "--no-color", "--no-ext-diff", "--full-index", "--binary",
@@ -483,8 +506,11 @@ class GitRepo(GitStore):
         with closing(self._iter_git_records(args, revisions_file)) as records:
             for record in records:
                 commit = _git_commit_from_record(_parse_git_log_record(record))
-                if start is None or commit.committer_date >= start:
-                    yield commit
+                if start is not None and commit.committer_date < start:
+                    continue
+                if end is not None and commit.committer_date >= end:
+                    continue
+                yield commit
 
     @staticmethod
     def _format_git_time(value: datetime) -> str:
@@ -747,6 +773,22 @@ class GitDb(GitStore):
             stored += 1
         return stored
 
+    def _store_missing_commits(
+        self,
+        connection: sqlite3.Connection,
+        commits: Iterable[GitCommit],
+    ) -> int:
+        """Append only absent IDs, preserving existing patches and annotations."""
+
+        added = 0
+        for commit in commits:
+            present = connection.execute(
+                "SELECT 1 FROM commits WHERE commit_id = ?", (commit.commit_id,)
+            ).fetchone()
+            if present is None:
+                added += self._store_commits(connection, (commit,))
+        return added
+
     def store_commits(
         self,
         commits: Iterable[GitCommit],
@@ -1005,10 +1047,7 @@ def extract_to_db(
 
     if isinstance(repo, GitRepo) and isinstance(db, GitDb):
         tip_commit = repo.resolve_head()
-        commits = (
-            repo.iter_commits_from_revision(tip_commit, start)
-            if end is None else repo.iter_commits_between(start, end, include_merges=True)
-        )
+        commits = repo.iter_commits_from_revision(tip_commit, start, end=end)
         with closing(db._connect()) as connection, connection, closing(commits):
             _ = connection.execute("BEGIN IMMEDIATE")
             was_empty = connection.execute("SELECT 1 FROM commits LIMIT 1").fetchone() is None
@@ -1018,7 +1057,7 @@ def extract_to_db(
             stored = db._store_commits(connection, commits)
             db._set_history_kind(connection, HistoryKind.COMPLETE)
             if end is not None:
-                write_extraction_bounds(connection, start, end)
+                write_extraction_bounds(connection, start, end, tip_commit=tip_commit)
             elif was_empty:
                 write_update_state(
                     connection,

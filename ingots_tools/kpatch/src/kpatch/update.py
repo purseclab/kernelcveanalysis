@@ -7,9 +7,9 @@ from pathlib import Path
 import sqlite3
 import subprocess
 from tempfile import NamedTemporaryFile
-from typing import Generator, Iterable, cast
+from typing import Generator, cast
 
-from .git import GitCommit, GitDb, GitRepo, HistoryKind
+from .git import GitDb, GitRepo, HistoryKind
 from .update_state import (
     UpdateState,
     read_extraction_bounds,
@@ -70,21 +70,6 @@ def _bootstrap_revisions(connection: sqlite3.Connection) -> Generator[Path, None
         yield Path(file.name)
 
 
-def _append_missing_commits(
-    db: GitDb,
-    connection: sqlite3.Connection,
-    commits: Iterable[GitCommit],
-) -> int:
-    added = 0
-    for commit in commits:
-        present = connection.execute(
-            "SELECT 1 FROM commits WHERE commit_id = ?", (commit.commit_id,)
-        ).fetchone()
-        if present is None:
-            added += db._store_commits(connection, (commit,))
-    return added
-
-
 def _validate_checkpoint(repo: GitRepo, state: UpdateState, tip_commit: str) -> None:
     try:
         fast_forward = repo.is_ancestor(state.tip_commit, tip_commit)
@@ -118,7 +103,7 @@ def _stream_update(
         commits = resources.enter_context(closing(repo.iter_commits_from_revision(
             revision, start_date, revisions_file=revisions_file,
         )))
-        return _append_missing_commits(db, connection, commits)
+        return db._store_missing_commits(connection, commits)
 
 
 def update_to_db(
