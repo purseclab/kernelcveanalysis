@@ -1,3 +1,4 @@
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +9,7 @@ from .base import (
     FilterContext,
     FilteredCommit,
     FilterPipeline,
+    StreamingCommitFilter,
 )
 from .config import ConfigFilter
 from .config_filter import ConfigValue, KernelConfig
@@ -33,6 +35,7 @@ from ..git import (
     GitDb,
     GitRepo,
     save_commits_to_db,
+    _path_for_db_name,
 )
 
 @dataclass
@@ -49,6 +52,11 @@ def run_filter(
     *,
     show_progress: bool = True,
 ) -> None:
+    destination = _path_for_db_name(args.destination_db_name)
+    if args.db.db.resolve() == destination.resolve() or (
+        destination.exists() and args.db.db.samefile(destination)
+    ):
+        raise ValueError("Streaming filtering requires a destination different from the source")
     context = FilterContext.from_db_range(
         args.db,
         args.repo,
@@ -56,20 +64,23 @@ def run_filter(
         args.end_date,
         include_merges=True,
     )
+    if filter.requires_complete_history and context.structured_commits is None:
+        raise ValueError("Filtering requires complete history and structured commit history")
     all_commits = context.commits
     non_merge_count = sum(not commit.is_merge for commit in all_commits)
 
-    filtered_commits = filter.filter_commits(
-        all_commits,
-        context,
-        show_progress=show_progress,
-    )
-
     print(f"Original commit count: {len(all_commits)}")
     print(f"Number of non merge commits: {non_merge_count}")
-    print(f"Filtered commit count: {len(filtered_commits)}")
-
-    save_commits_to_db(args.destination_db_name, filtered_commits)
+    with closing(
+        filter.iter_filter_commits(
+            all_commits,
+            context,
+            show_progress=show_progress,
+            total=len(all_commits),
+        )
+    ) as filtered_commits:
+        filtered_count = save_commits_to_db(args.destination_db_name, filtered_commits)
+    print(f"Filtered commit count: {filtered_count}")
 
 def filter_commit_time_range(
     repo: GitRepo,
@@ -131,6 +142,7 @@ __all__ = [
     "RunFilterArgs",
     "ScoreFilter",
     "SourceNoopFilter",
+    "StreamingCommitFilter",
     "WhitespaceFilter",
     "WhitespaceFilterStats",
     "diff_file_touches_active_code",

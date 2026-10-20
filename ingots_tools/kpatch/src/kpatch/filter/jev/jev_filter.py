@@ -1,7 +1,7 @@
 from typing import ClassVar
 from dataclasses import asdict, dataclass
 
-from ..base import CommitFilter, FilterContext, FilteredCommit
+from ..base import FilterContext, FilteredCommit, StreamingCommitFilter
 from .jev_api import NoulQuestion, NoulResult, jev
 
 @dataclass
@@ -13,7 +13,7 @@ class InputState:
     # functions determined important / close in call chain to patched functions, as additional context
     context_functions: list[str]
 
-class JevFilter(CommitFilter):
+class JevFilter(StreamingCommitFilter):
     name: ClassVar[str] = "Jev Filter"
 
     def filter_mutable_commit(

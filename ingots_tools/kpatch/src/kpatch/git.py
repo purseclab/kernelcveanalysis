@@ -17,6 +17,7 @@ from typing import (
     override,
 )
 from functools import cached_property
+from weakref import finalize
 
 from .diff import Diff
 
@@ -80,19 +81,108 @@ _UPSERT_COMMIT_SQL = """
 """
 
 
-@dataclass
+class _SqlitePatchReader:
+    """One read-only snapshot shared by all of a lazy history's parent edges."""
+
+    __slots__ = ("connection", "_finalizer", "__weakref__")
+
+    def __init__(self, db: Path) -> None:
+        # The last reference can be released by a different thread during GC.
+        connection = sqlite3.connect(
+            f"{db.resolve().as_uri()}?mode=ro",
+            uri=True,
+            check_same_thread=False,
+        )
+        try:
+            connection.row_factory = sqlite3.Row
+            _ = connection.execute("PRAGMA cache_size = -2048")
+            _ = connection.execute("PRAGMA mmap_size = 0")
+            _ = connection.execute("BEGIN")
+        except BaseException:
+            connection.close()
+            raise
+        self.connection = connection
+        self._finalizer = finalize(self, connection.close)
+
+    def close(self) -> None:
+        self._finalizer()
+
+    def read_patch(self, commit_id: str, parent_index: int) -> str:
+        row = self.connection.execute(
+            """
+            SELECT diff FROM commit_parents
+            WHERE commit_id = ? AND parent_index = ?
+            """,
+            (commit_id, parent_index),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(
+                f"Missing stored patch for {commit_id} parent {parent_index}"
+            )
+        return cast(str, row["diff"])
+
+
+@dataclass(frozen=True, slots=True)
+class _SqlitePatchRef:
+    reader: _SqlitePatchReader
+    commit_id: str
+    parent_index: int
+
+    def read(self) -> str:
+        return self.reader.read_patch(self.commit_id, self.parent_index)
+
+
 class CommitParent:
-    """A parent edge and the patch from that parent to its child commit."""
+    """A parent edge with either an eager patch or a disk-backed patch reference."""
+
+    # Keep a dictionary only for explicit callers of the cached ``diff`` property.
+    __slots__ = ("commit_id", "_diff_str", "_patch_ref", "__dict__")
 
     commit_id: str
-    diff_str: str
+    _diff_str: str
+    _patch_ref: _SqlitePatchRef | None
+
+    def __init__(self, commit_id: str, diff_str: str) -> None:
+        self.commit_id = commit_id
+        self._diff_str = diff_str
+        self._patch_ref = None
+
+    @classmethod
+    def _from_patch(cls, commit_id: str, patch_ref: _SqlitePatchRef) -> Self:
+        parent = cls(commit_id, "")
+        parent._patch_ref = patch_ref
+        return parent
+
+    @property
+    def diff_str(self) -> str:
+        """Read the patch on demand without retaining a lazy patch's raw text."""
+
+        if self._patch_ref is not None:
+            return self._patch_ref.read()
+        return self._diff_str
+
+    @diff_str.setter
+    def diff_str(self, value: str) -> None:
+        self._diff_str = value
+        self._patch_ref = None
 
     @cached_property
     def diff(self) -> Diff:
         return Diff.parse(self.diff_str)
 
+    @override
+    def __eq__(self, other: object) -> bool:
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        parent = cast(CommitParent, other)
+        return self.commit_id == parent.commit_id and self.diff_str == parent.diff_str
 
-@dataclass
+    @override
+    def __repr__(self) -> str:
+        return f"CommitParent(commit_id={self.commit_id!r}, diff_str={self.diff_str!r})"
+
+
+@dataclass(slots=True)
 class GitCommit:
     """A commit whose ordered parent edges each carry their own patch."""
 
@@ -613,13 +703,17 @@ class GitDb(GitStore):
         commits: Iterable[GitCommit],
         history_kind: HistoryKind | None = None,
     ) -> int:
-        """Atomically replace every commit currently stored in this database."""
+        """Atomically replace commits after the iterable's initial preparation."""
+
+        iterator = iter(commits)
+        first = next(iterator, None)
+        prepared: Iterable[GitCommit] = chain((first,), iterator) if first is not None else ()
 
         connection = self._connect()
         try:
             with connection:
                 _ = connection.execute("DELETE FROM commits")
-                stored = self._store_commits(connection, commits)
+                stored = self._store_commits(connection, prepared)
                 if history_kind is not None:
                     self._set_history_kind(connection, history_kind)
                 return stored
@@ -648,6 +742,75 @@ class GitDb(GitStore):
         Close the iterator when stopping early to release its read connection.
         """
 
+        connection = self._connect()
+        try:
+            rows = self._select_commit_rows(
+                connection, start, end, include_merges, include_patches=True
+            )
+            for _, commit_rows in groupby(rows, key=lambda row: row["commit_id"]):
+                row = next(commit_rows)
+                parents = tuple(
+                    CommitParent(
+                        commit_id=cast(str, parent_row["parent_commit_id"]),
+                        diff_str=cast(str, parent_row["parent_diff"]),
+                    )
+                    for parent_row in chain((row,), commit_rows)
+                    if parent_row["parent_index"] is not None
+                )
+                yield self._commit_from_row(row, parents)
+        finally:
+            connection.close()
+
+    def load_lazy_commits(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        include_merges: bool = True,
+    ) -> list[GitCommit]:
+        """Load metadata in eager query order, leaving every parent patch on disk.
+
+        Parent edges share one read-only snapshot with a bounded SQLite page
+        cache and no raw-patch cache. The connection closes when the last edge
+        reference is released. Writes to this source database may wait for those
+        references in rollback-journal mode; WAL permits concurrent writers.
+        ``commits_between`` remains eager and independent of this snapshot.
+        """
+
+        reader = _SqlitePatchReader(self.db)
+        try:
+            rows = self._select_commit_rows(
+                reader.connection, start, end, include_merges, include_patches=False
+            )
+            commits: list[GitCommit] = []
+            for _, commit_rows in groupby(rows, key=lambda row: row["commit_id"]):
+                row = next(commit_rows)
+                parents = tuple(
+                    CommitParent._from_patch(
+                        commit_id=cast(str, parent_row["parent_commit_id"]),
+                        patch_ref=_SqlitePatchRef(
+                            reader,
+                            cast(str, row["commit_id"]),
+                            cast(int, parent_row["parent_index"]),
+                        ),
+                    )
+                    for parent_row in chain((row,), commit_rows)
+                    if parent_row["parent_index"] is not None
+                )
+                commits.append(self._commit_from_row(row, parents))
+            return commits
+        except BaseException:
+            reader.close()
+            raise
+
+    @staticmethod
+    def _select_commit_rows(
+        connection: sqlite3.Connection,
+        start: datetime | None,
+        end: datetime | None,
+        include_merges: bool,
+        *,
+        include_patches: bool,
+    ) -> sqlite3.Cursor:
         where_clauses: list[str] = []
         parameters: list[int] = []
         if not include_merges:
@@ -660,62 +823,57 @@ class GitDb(GitStore):
             parameters.append(_timestamp(end))
         where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        connection = self._connect()
-        try:
-            rows = connection.execute(
-                f"""
-                SELECT
-                    commits.commit_id,
-                    commits.author_name,
-                    commits.author_email,
-                    commits.author_date,
-                    commits.committer_date,
-                    commits.message,
-                    commits.is_merge,
-                    commits.score,
-                    commits.ratings_json,
-                    commit_parents.parent_index,
-                    commit_parents.parent_commit_id,
-                    commit_parents.diff AS parent_diff
-                FROM commits
-                LEFT JOIN commit_parents
-                    ON commit_parents.commit_id = commits.commit_id
-                {where_clause}
-                ORDER BY
-                    commits.committer_timestamp DESC,
-                    commits.rowid DESC,
-                    commit_parents.parent_index
-                """,
-                parameters,
+        patch_column = ", commit_parents.diff AS parent_diff" if include_patches else ""
+        return connection.execute(
+            f"""
+            SELECT
+                commits.commit_id,
+                commits.author_name,
+                commits.author_email,
+                commits.author_date,
+                commits.committer_date,
+                commits.message,
+                commits.is_merge,
+                commits.score,
+                commits.ratings_json,
+                commit_parents.parent_index,
+                commit_parents.parent_commit_id
+                {patch_column}
+            FROM commits
+            LEFT JOIN commit_parents
+                ON commit_parents.commit_id = commits.commit_id
+            {where_clause}
+            ORDER BY
+                commits.committer_timestamp DESC,
+                commits.rowid DESC,
+                commit_parents.parent_index
+            """,
+            parameters,
+        )
+
+    @staticmethod
+    def _commit_from_row(
+        row: sqlite3.Row,
+        parents: tuple[CommitParent, ...],
+    ) -> GitCommit:
+        commit = GitCommit(
+            commit_id=cast(str, row["commit_id"]),
+            author_name=cast(str, row["author_name"]),
+            author_email=cast(str, row["author_email"]),
+            author_date=datetime.fromisoformat(cast(str, row["author_date"])),
+            committer_date=datetime.fromisoformat(cast(str, row["committer_date"])),
+            parents=parents,
+            message=cast(str, row["message"]),
+            score=cast(float | None, row["score"]),
+            ratings=cast(
+                dict[str, float], json.loads(cast(str, row["ratings_json"]))
+            ),
+        )
+        if commit.is_merge != bool(row["is_merge"]):
+            raise ValueError(
+                f"Stored merge flag does not match parents for {commit.commit_id}"
             )
-            for _, commit_rows in groupby(rows, key=lambda row: row["commit_id"]):
-                row = next(commit_rows)
-                parents = tuple(
-                    CommitParent(
-                        commit_id=parent_row["parent_commit_id"],
-                        diff_str=parent_row["parent_diff"],
-                    )
-                    for parent_row in chain((row,), commit_rows)
-                    if parent_row["parent_index"] is not None
-                )
-                commit = GitCommit(
-                    commit_id=row["commit_id"],
-                    author_name=row["author_name"],
-                    author_email=row["author_email"],
-                    author_date=datetime.fromisoformat(row["author_date"]),
-                    committer_date=datetime.fromisoformat(row["committer_date"]),
-                    parents=parents,
-                    message=row["message"],
-                    score=row["score"],
-                    ratings=cast(dict[str, float], json.loads(row["ratings_json"])),
-                )
-                if commit.is_merge != bool(row["is_merge"]):
-                    raise ValueError(
-                        f"Stored merge flag does not match parents for {commit.commit_id}"
-                    )
-                yield commit
-        finally:
-            connection.close()
+        return commit
 
 @dataclass
 class CommitChildren:
@@ -787,12 +945,13 @@ def _path_for_db_name(db_name: str) -> Path:
 
     return db_folder / f"{db_name}.sqlite"
 
-def save_commits_to_db(db_name: str, commits: list[GitCommit]):
-    """Replace a database in the db folder with the supplied commits."""
+def save_commits_to_db(db_name: str, commits: Iterable[GitCommit]) -> int:
+    """Atomically replace a database from an iterable and return its saved count."""
 
     save_path = _path_for_db_name(db_name)
-    _ = GitDb(save_path).replace_commits(commits, HistoryKind.SPARSE)
-    print(f"Saved {len(commits)} commits to sqlite database `{save_path}`")
+    stored = GitDb(save_path).replace_commits(commits, HistoryKind.SPARSE)
+    print(f"Saved {stored} commits to sqlite database `{save_path}`")
+    return stored
 
 
 def load_commits_from_db(db_name: str) -> list[GitCommit]:

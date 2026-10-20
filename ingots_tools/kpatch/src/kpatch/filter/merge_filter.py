@@ -1,9 +1,9 @@
 from typing import ClassVar
 
-from .base import CommitFilter, FilterContext, FilteredCommit
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter
 
 
-class MergeCommitFilter(CommitFilter):
+class MergeCommitFilter(StreamingCommitFilter):
     """Remove merge commits from the candidate stream."""
 
     name: ClassVar[str] = "Filtering merge commits"

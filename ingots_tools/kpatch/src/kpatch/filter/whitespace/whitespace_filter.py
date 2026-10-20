@@ -1,10 +1,14 @@
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 from typing import ClassVar
 
 from .c_lexer import tokenize_c_source
-from ..base import CommitFilter, FilterContext, FilteredCommit
-from ..repository_file import RepositoryFileReader
+from ..base import (
+    FilterContext,
+    FilteredCommit,
+    StreamingCommitFilter,
+    repository_file_reader,
+)
 from ...diff import DiffChunk, DiffFile, DiffFileType
 
 _C_SOURCE_EXTENSIONS = (
@@ -35,7 +39,7 @@ class WhitespaceFilterStats:
     pruned_files: int
 
 
-class WhitespaceFilter(CommitFilter):
+class WhitespaceFilter(StreamingCommitFilter):
     """Filter out changes that only modify comments, formatting, or whitespace.
 
     Diff files whose old and new versions yield identical ISO C preprocessing
@@ -168,19 +172,22 @@ class WhitespaceFilter(CommitFilter):
         commit.diff.files = retained
         return commit
 
-    def filter_mutable_commits(
+    def iter_filter_mutable_commits(
         self,
-        commits: list[FilteredCommit],
+        commits: Iterable[FilteredCommit],
         context: FilterContext,
         show_progress: bool = True,
-    ) -> list[FilteredCommit]:
-        with RepositoryFileReader(context.repo) as reader:
+        *,
+        total: int | None = None,
+    ) -> Generator[FilteredCommit, None, None]:
+        with repository_file_reader(context) as reader:
             self._read_file = reader.read_file
             try:
-                return super().filter_mutable_commits(
+                yield from super().iter_filter_mutable_commits(
                     commits,
                     context,
                     show_progress=show_progress,
+                    total=total,
                 )
             finally:
                 self._read_file = None

@@ -1,18 +1,18 @@
 import ast
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 import operator as op
 import re
 from typing import Any, ClassVar
 
 from .base import (
-    CommitFilter,
     FilterContext,
     FilteredCommit,
+    StreamingCommitFilter,
     diff_file_key,
+    repository_file_reader,
 )
 from .config_filter import ConfigValue, KernelConfig
-from .repository_file import RepositoryFileReader
 from ..diff import DiffChunk, DiffFile, DiffFileType
 from ..git import GitRepo
 
@@ -661,7 +661,7 @@ def _project_header(diff_file: DiffFile, partial_delete: bool) -> list[str]:
     return header
 
 
-class IfdefFilter(CommitFilter):
+class IfdefFilter(StreamingCommitFilter):
     """Remove changed lines disabled by C preprocessor conditionals."""
 
     name: ClassVar[str] = "Filtering preprocessor branches"
@@ -778,19 +778,22 @@ class IfdefFilter(CommitFilter):
         commit.diff.files = retained
         return commit
 
-    def filter_mutable_commits(
+    def iter_filter_mutable_commits(
         self,
-        commits: list[FilteredCommit],
+        commits: Iterable[FilteredCommit],
         context: FilterContext,
         show_progress: bool = True,
-    ) -> list[FilteredCommit]:
-        with RepositoryFileReader(context.repo) as reader:
+        *,
+        total: int | None = None,
+    ) -> Generator[FilteredCommit, None, None]:
+        with repository_file_reader(context) as reader:
             self._read_file = reader.read_file
             try:
-                return super().filter_mutable_commits(
+                yield from super().iter_filter_mutable_commits(
                     commits,
                     context,
                     show_progress=show_progress,
+                    total=total,
                 )
             finally:
                 self._read_file = None

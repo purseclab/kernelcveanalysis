@@ -1,6 +1,7 @@
 """Benchmark filtering without saving results, using at most 93 days."""
 
 import argparse
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 import hashlib
@@ -30,6 +31,7 @@ class BenchmarkResult:
     load_seconds: float
     filter_seconds: float
     peak_rss_mib: float
+    largest_child_rss_mib: float
     output_sha256: str
 
 
@@ -61,23 +63,31 @@ def main() -> None:
             WhitespaceFilter(),
         ]
     )
-    commits = pipeline.filter_commits(
-        context.commits, context, show_progress=False
-    )
+    digest = hashlib.sha256()
+    output_count = 0
+    with closing(
+        pipeline.iter_filter_commits(
+            context.commits,
+            context,
+            show_progress=False,
+            total=len(context.commits),
+        )
+    ) as commits:
+        for commit in commits:
+            digest.update(commit.commit_id.encode())
+            digest.update(commit.diff_str.encode())
+            output_count += 1
     filtered = perf_counter()
 
-    digest = hashlib.sha256()
-    for commit in commits:
-        digest.update(commit.commit_id.encode())
-        digest.update(commit.diff_str.encode())
     result = BenchmarkResult(
         start=start.isoformat(),
         end=end.isoformat(),
         input_commits=len(context.commits),
-        output_commits=len(commits),
+        output_commits=output_count,
         load_seconds=loaded - begin,
         filter_seconds=filtered - loaded,
         peak_rss_mib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
+        largest_child_rss_mib=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024,
         output_sha256=digest.hexdigest(),
     )
     print(json.dumps(asdict(result), indent=2))

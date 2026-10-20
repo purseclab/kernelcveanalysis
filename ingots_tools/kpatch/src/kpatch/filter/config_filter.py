@@ -2,6 +2,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from hashlib import sha256
 import posixpath
 import re
 import subprocess
@@ -983,6 +984,72 @@ class KbuildCacheEntry:
         return local_mode
 
 
+@dataclass(frozen=True, slots=True)
+class _SourceAnalysisKey:
+    source: str
+    mode: ConfigValue
+    contents_sha256: bytes
+
+
+class SourceAnalysisCache:
+    """Bounded source analyses shared across one preparation's branch states.
+
+    The exact configuration and include index must remain unchanged while this
+    cache is in use. Only content digests and immutable targets are retained,
+    never source contents, repository readers, or branch states.
+    """
+
+    def __init__(
+        self,
+        config: KernelConfig,
+        source_includes: SourceIncludeIndex,
+        max_entries: int = 4096,
+    ) -> None:
+        if max_entries < 1:
+            raise ValueError("Source analysis cache must hold at least one entry")
+        self.config = config
+        self.source_includes = source_includes
+        self._max_entries = max_entries
+        self._entries: OrderedDict[_SourceAnalysisKey, frozenset[str]] = OrderedDict()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def analyze(
+        self,
+        source: str,
+        mode: ConfigValue,
+        contents: bytes,
+    ) -> frozenset[str]:
+        key = _SourceAnalysisKey(source, mode, sha256(contents).digest())
+        cached = self._entries.get(key)
+        if cached is not None:
+            self._entries.move_to_end(key)
+            return cached
+
+        # Import lazily because ifdef_filter imports KernelConfig from this
+        # module. Hash raw bytes before the existing replacement decoding.
+        from .ifdef_filter import get_active_lines
+
+        decoded = contents.decode("utf-8", errors="replace")
+        active_lines = get_active_lines(
+            decoded,
+            self.config,
+            is_module=mode is ConfigValue.MODULE,
+        )
+        result = frozenset(
+            target
+            for line_number, line in enumerate(decoded.splitlines(), start=1)
+            if line_number in active_lines
+            if (target := self.source_includes.target_from_line(source, line))
+            is not None
+        )
+        self._entries[key] = result
+        if len(self._entries) > self._max_entries:
+            self._entries.popitem(last=False)
+        return result
+
+
 class KbuildState:
     repo: GitRepo
     config: KernelConfig
@@ -1006,12 +1073,25 @@ class KbuildState:
         source_includes: SourceIncludeIndex | None = None,
         read_file: Callable[[str, str], bytes] | None = None,
         makefile_cache: KbuildMakefileCache | None = None,
+        source_analysis_cache: SourceAnalysisCache | None = None,
     ):
         if makefile_cache is not None and makefile_cache.config is not config:
             raise ValueError("Makefile cache belongs to a different kernel config")
+        if source_analysis_cache is not None:
+            if source_analysis_cache.config is not config:
+                raise ValueError(
+                    "Source analysis cache belongs to a different kernel config"
+                )
+            if source_analysis_cache.source_includes is not source_includes:
+                raise ValueError(
+                    "Source analysis cache belongs to a different source include index"
+                )
         self._makefile_cache = (
             makefile_cache if makefile_cache is not None else KbuildMakefileCache(config)
         )
+        self._source_analysis_cache = source_analysis_cache
+        if self._source_analysis_cache is None and source_includes is not None:
+            self._source_analysis_cache = SourceAnalysisCache(config, source_includes)
         self.repo = repo
         self.config = config
         self.base_commit = base_commit
@@ -1038,6 +1118,7 @@ class KbuildState:
             other.source_includes,
             other._read_file,
             other._makefile_cache,
+            source_analysis_cache=other._source_analysis_cache,
         )
 
         # Ancestors are cached before descendants, including after subtree
@@ -1234,34 +1315,14 @@ class KbuildState:
             return cached
 
         assert self.source_includes is not None
+        assert self._source_analysis_cache is not None
         result: frozenset[str]
         try:
-            contents = self._read_file(self.base_commit, source).decode(
-                "utf-8", errors="replace"
-            )
+            contents = self._read_file(self.base_commit, source)
         except (FileNotFoundError, subprocess.CalledProcessError):
             result = frozenset()
         else:
-            # Import lazily because ifdef_filter imports KernelConfig from this
-            # module.  Candidate edges are validated against the exact commit.
-            from .ifdef_filter import get_active_lines
-
-            active_lines = get_active_lines(
-                contents,
-                self.config,
-                is_module=mode is ConfigValue.MODULE,
-            )
-            result = frozenset(
-                target
-                for line_number, line in enumerate(
-                    contents.splitlines(), start=1
-                )
-                if line_number in active_lines
-                if (
-                    target := self.source_includes.target_from_line(source, line)
-                )
-                is not None
-            )
+            result = self._source_analysis_cache.analyze(source, mode, contents)
 
         self._active_includes_cache[key] = result
         return result

@@ -1,4 +1,6 @@
-from abc import ABC, abstractmethod
+from abc import ABC
+from collections.abc import Generator, Iterable
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import ClassVar
@@ -12,6 +14,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from .repository_file import RepositoryFileReader
 from ..diff import Diff, DiffFile
 from ..git import (
     CommitParent,
@@ -95,6 +98,7 @@ class FilterContext:
     repo: GitRepo
     structured_commits: StructuredCommits | None = None
     commits: list[GitCommit] = field(default_factory=list)
+    file_reader: RepositoryFileReader | None = None
 
     @classmethod
     def from_db_range(
@@ -105,7 +109,7 @@ class FilterContext:
         end: datetime | None = None,
         include_merges: bool = True,
     ) -> "FilterContext":
-        commits = gitdb.commits_between(
+        commits = gitdb.load_lazy_commits(
             start,
             end,
             include_merges=include_merges,
@@ -122,7 +126,21 @@ class FilterContext:
         )
 
 
-def filter_progress(name: str, total: int, show_progress: bool) -> Progress:
+@contextmanager
+def repository_file_reader(
+    context: FilterContext,
+) -> Generator[RepositoryFileReader, None, None]:
+    """Borrow a pipeline's reader, or own one for a standalone filter call."""
+
+    if context.file_reader is not None:
+        yield context.file_reader
+        return
+
+    with RepositoryFileReader(context.repo) as reader:
+        yield reader
+
+
+def filter_progress(name: str, total: int | None, show_progress: bool) -> Progress:
     return Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -150,18 +168,52 @@ class CommitFilter(ABC):
         context: FilterContext,
         show_progress: bool = True,
     ) -> list[GitCommit]:
+        """Collect filtered commits, closing all stages even on failure."""
+
+        with closing(
+            self.iter_filter_commits(
+                commits, context, show_progress=show_progress, total=len(commits)
+            )
+        ) as filtered:
+            return list(filtered)
+
+    def iter_filter_commits(
+        self,
+        commits: Iterable[GitCommit],
+        context: FilterContext,
+        show_progress: bool = True,
+        *,
+        total: int | None = None,
+    ) -> Generator[GitCommit, None, None]:
+        """Filter lazily; callers stopping early must close the generator."""
+
         if self.requires_complete_history and context.structured_commits is None:
             raise ValueError(
                 f"{type(self).__name__} requires complete history and "
                 "structured commit history"
             )
-        mutable_commits = [FilteredCommit.from_commit(commit) for commit in commits]
-        filtered = self.filter_mutable_commits(
-            mutable_commits,
-            context,
-            show_progress=show_progress,
+        mutable_commits = (FilteredCommit.from_commit(commit) for commit in commits)
+        with closing(mutable_commits), closing(
+            self.iter_filter_mutable_commits(
+                mutable_commits, context, show_progress=show_progress, total=total
+            )
+        ) as filtered:
+            for commit in filtered:
+                yield commit.materialize()
+
+    def iter_filter_mutable_commits(
+        self,
+        commits: Iterable[FilteredCommit],
+        context: FilterContext,
+        show_progress: bool = True,
+        *,
+        total: int | None = None,
+    ) -> Generator[FilteredCommit, None, None]:
+        """Preserve collection-wide semantics for existing batch filters."""
+
+        yield from self.filter_mutable_commits(
+            list(commits), context, show_progress=show_progress
         )
-        return [commit.materialize() for commit in filtered]
 
     def filter_mutable_commits(
         self,
@@ -195,7 +247,42 @@ class CommitFilter(ABC):
         return commit
 
 
-class FilterPipeline(CommitFilter):
+class StreamingCommitFilter(CommitFilter):
+    """A filter whose decisions can be made one mutable commit at a time."""
+
+    def filter_mutable_commits(
+        self,
+        commits: list[FilteredCommit],
+        context: FilterContext,
+        show_progress: bool = True,
+    ) -> list[FilteredCommit]:
+        with closing(
+            self.iter_filter_mutable_commits(
+                commits, context, show_progress=show_progress, total=len(commits)
+            )
+        ) as filtered:
+            return list(filtered)
+
+    def iter_filter_mutable_commits(
+        self,
+        commits: Iterable[FilteredCommit],
+        context: FilterContext,
+        show_progress: bool = True,
+        *,
+        total: int | None = None,
+    ) -> Generator[FilteredCommit, None, None]:
+        self._validate_name()
+        with filter_progress(self.name, total, show_progress) as progress:
+            task = progress.add_task(self.name, total=total)
+            for commit in commits:
+                result = self.filter_mutable_commit(commit, context)
+                progress.advance(task)
+                if result is not None:
+                    result.synchronize_diff()
+                    yield result
+
+
+class FilterPipeline(StreamingCommitFilter):
     name: ClassVar[str] = "Filtering commit pipeline"
 
     def __init__(self, filters: list[CommitFilter]):
@@ -208,17 +295,27 @@ class FilterPipeline(CommitFilter):
             for commit_filter in self.filters
         )
 
-    def filter_mutable_commits(
+    def iter_filter_mutable_commits(
         self,
-        commits: list[FilteredCommit],
+        commits: Iterable[FilteredCommit],
         context: FilterContext,
         show_progress: bool = True,
-    ) -> list[FilteredCommit]:
-        filtered = commits
-        for commit_filter in self.filters:
-            filtered = commit_filter.filter_mutable_commits(
-                filtered,
-                context,
-                show_progress=show_progress,
-            )
-        return filtered
+        *,
+        total: int | None = None,
+    ) -> Generator[FilteredCommit, None, None]:
+        self._validate_name()
+        with repository_file_reader(context) as reader, ExitStack() as stack:
+            stage_context = replace(context, file_reader=reader)
+            filtered = commits
+            for commit_filter in self.filters:
+                stage = commit_filter.iter_filter_mutable_commits(
+                    filtered,
+                    stage_context,
+                    show_progress=show_progress,
+                    total=total,
+                )
+                stack.callback(stage.close)
+                filtered = stage
+                # Earlier stages may reject commits, so later totals are unknown.
+                total = None
+            yield from filtered

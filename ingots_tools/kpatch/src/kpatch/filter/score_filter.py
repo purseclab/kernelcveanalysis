@@ -1,9 +1,9 @@
 from typing import ClassVar
 
-from .base import CommitFilter, FilterContext, FilteredCommit
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter
 
 
-class ScoreFilter(CommitFilter):
+class ScoreFilter(StreamingCommitFilter):
     """Keep commits meeting a minimum score, optionally including unscored ones."""
 
     name: ClassVar[str] = "Filtering by score"

@@ -1,8 +1,9 @@
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from typing import ClassVar
 
 from ..diff import DiffFile, DiffFileType
-from .base import CommitFilter, FilterContext, FilteredCommit
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter
 
 
 # this performs the trivial filtering on commits, before any classifiers or model calls
@@ -14,7 +15,7 @@ class FilterStats:
     extensions: dict[str, int]
 
 
-class FileFilter(CommitFilter):
+class FileFilter(StreamingCommitFilter):
     """Filters systems we are interested in."""
     name: ClassVar[str] = "Filtering files"
     # TODO: way to exclude directory trees
@@ -122,18 +123,21 @@ class FileFilter(CommitFilter):
         commit.diff.files = matching_files
         return commit
 
-    def filter_mutable_commits(
+    def iter_filter_mutable_commits(
         self,
-        commits: list[FilteredCommit],
+        commits: Iterable[FilteredCommit],
         context: FilterContext,
         show_progress: bool = True,
-    ) -> list[FilteredCommit]:
+        *,
+        total: int | None = None,
+    ) -> Generator[FilteredCommit, None, None]:
         self._stats = FilterStats(
             paths={path: 0 for path in self.paths},
             extensions={extension: 0 for extension in self.extensions},
         )
-        return super().filter_mutable_commits(
+        yield from super().iter_filter_mutable_commits(
             commits,
             context,
             show_progress=show_progress,
+            total=total,
         )

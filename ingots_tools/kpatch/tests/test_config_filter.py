@@ -1,3 +1,5 @@
+from hashlib import sha256
+import subprocess
 import unittest
 from unittest.mock import patch
 import weakref
@@ -10,8 +12,11 @@ from kpatch.filter.config_filter import (
     KbuildDirectory,
     KbuildMakefile,
     KbuildMakefileCache,
+    KbuildState,
     KernelConfig,
+    SourceAnalysisCache,
 )
+from kpatch.filter.ifdef_filter import get_active_lines
 from kpatch.filter.source_filter import SourceIncludeIndex
 from kpatch.diff import Diff, DiffFile, DiffFileType
 from kpatch.git import GitRepo
@@ -543,6 +548,348 @@ class KbuildMakefileCacheTests(unittest.TestCase):
             copied.kbuild_cache["drivers"].rules._makefiles[0],
             original.kbuild_cache["drivers"].rules._makefiles[0],
         )
+
+
+class SourceAnalysisCacheTests(unittest.TestCase):
+    def test_reuses_analysis_across_roots_without_retaining_states(self) -> None:
+        source = "drivers/wrapper.c"
+        target = "drivers/local.h"
+        files = {source: '#include "local.h"\n'}
+        repo = MemoryGitRepo({"first": files, "second": files})
+        config = KernelConfig("")
+        index = SourceIncludeIndex("", (source, target))
+        cache = SourceAnalysisCache(config, index)
+
+        with (
+            patch(
+                "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
+            ) as evaluate,
+            patch.object(
+                index, "target_from_line", wraps=index.target_from_line
+            ) as resolve,
+            patch.object(repo, "read_file", wraps=repo.read_file) as read_file,
+        ):
+            first = KbuildState(
+                repo, config, "first", index, source_analysis_cache=cache
+            )
+            second = KbuildState(
+                repo, config, "second", index, source_analysis_cache=cache
+            )
+            result = first._active_source_includes(source, ConfigValue.ENABLED)
+            reused = second._active_source_includes(source, ConfigValue.ENABLED)
+            self.assertIs(result, reused)
+            self.assertEqual(result, frozenset((target,)))
+            self.assertEqual(evaluate.call_count, 1)
+            self.assertEqual(resolve.call_count, 1)
+            self.assertEqual(read_file.call_count, 2)
+
+        self.assertEqual(len(cache), 1)
+        reference = weakref.ref(first)
+        del first
+        self.assertIsNone(reference())
+
+    def test_source_path_and_build_mode_are_separate_inputs(self) -> None:
+        contents = (
+            b"#ifdef MODULE\n"
+            b'#include "module.h"\n'
+            b"#else\n"
+            b'#include "builtin.h"\n'
+            b"#endif\n"
+        )
+        index = SourceIncludeIndex(
+            "",
+            (
+                "first/wrapper.c",
+                "first/module.h",
+                "first/builtin.h",
+                "second/wrapper.c",
+                "second/builtin.h",
+            ),
+        )
+        cache = SourceAnalysisCache(KernelConfig(""), index)
+        with patch(
+            "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
+        ) as evaluate:
+            builtin = cache.analyze("first/wrapper.c", ConfigValue.ENABLED, contents)
+            module = cache.analyze("first/wrapper.c", ConfigValue.MODULE, contents)
+            other = cache.analyze("second/wrapper.c", ConfigValue.ENABLED, contents)
+            self.assertIs(
+                builtin, cache.analyze("first/wrapper.c", ConfigValue.ENABLED, contents)
+            )
+
+        self.assertEqual(builtin, frozenset(("first/builtin.h",)))
+        self.assertEqual(module, frozenset(("first/module.h",)))
+        self.assertEqual(other, frozenset(("second/builtin.h",)))
+        self.assertEqual(evaluate.call_count, 3)
+        self.assertEqual(len(cache), 3)
+
+    def test_empty_analyses_are_reused(self) -> None:
+        cache = SourceAnalysisCache(
+            KernelConfig(""), SourceIncludeIndex("", ("source.c", "target.h"))
+        )
+        contents = b'#ifdef CONFIG_DISABLED\n#include "target.h"\n#endif\n'
+        with patch(
+            "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
+        ) as evaluate:
+            first = cache.analyze("source.c", ConfigValue.ENABLED, contents)
+            second = cache.analyze("source.c", ConfigValue.ENABLED, contents)
+
+        self.assertEqual(first, frozenset())
+        self.assertIs(first, second)
+        self.assertEqual(evaluate.call_count, 1)
+        self.assertEqual(len(cache), 1)
+
+    def test_key_hashes_raw_bytes_before_replacement_decoding(self) -> None:
+        cache = SourceAnalysisCache(
+            KernelConfig(""), SourceIncludeIndex("", ("source.c", "target.h"))
+        )
+        first = b'#include "target.h"\n// invalid: \xff\n'
+        second = b'#include "target.h"\n// invalid: \xfe\n'
+        self.assertEqual(
+            first.decode("utf-8", errors="replace"),
+            second.decode("utf-8", errors="replace"),
+        )
+        with patch(
+            "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
+        ) as evaluate:
+            for contents in (first, second, first, second):
+                self.assertEqual(
+                    cache.analyze("source.c", ConfigValue.ENABLED, contents),
+                    frozenset(("target.h",)),
+                )
+
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertEqual(len(cache), 2)
+        self.assertEqual(
+            {key.contents_sha256 for key in cache._entries},
+            {sha256(first).digest(), sha256(second).digest()},
+        )
+
+    def test_cache_is_bound_to_exact_config(self) -> None:
+        source = "drivers/wrapper.c"
+        target = "drivers/feature.h"
+        contents = b'#ifdef CONFIG_FEATURE\n#include "feature.h"\n#endif\n'
+        enabled = KernelConfig("CONFIG_FEATURE=y")
+        disabled = KernelConfig("")
+        index = SourceIncludeIndex("", (source, target))
+        cache = SourceAnalysisCache(enabled, index)
+        self.assertEqual(
+            cache.analyze(source, ConfigValue.ENABLED, contents), frozenset((target,))
+        )
+        self.assertEqual(
+            SourceAnalysisCache(disabled, index).analyze(
+                source, ConfigValue.ENABLED, contents
+            ),
+            frozenset(),
+        )
+        repo = MemoryGitRepo({"base": {source: contents.decode()}})
+        for config in (disabled, KernelConfig("CONFIG_FEATURE=y")):
+            with self.assertRaisesRegex(ValueError, "different kernel config"):
+                KbuildState(
+                    repo, config, "base", index, source_analysis_cache=cache
+                )
+
+    def test_cache_is_bound_to_exact_source_index(self) -> None:
+        source = "drivers/wrapper.c"
+        contents = b'#include "local.h"\n'
+        config = KernelConfig("")
+        paths = (source, "drivers/local.h", "include/local.h")
+        index = SourceIncludeIndex("", paths)
+        other = SourceIncludeIndex("", (source, "include/local.h"))
+        cache = SourceAnalysisCache(config, index)
+        self.assertEqual(
+            cache.analyze(source, ConfigValue.ENABLED, contents),
+            frozenset(("drivers/local.h",)),
+        )
+        self.assertEqual(
+            SourceAnalysisCache(config, other).analyze(
+                source, ConfigValue.ENABLED, contents
+            ),
+            frozenset(("include/local.h",)),
+        )
+        repo = MemoryGitRepo({"base": {source: contents.decode()}})
+        for different_index in (other, SourceIncludeIndex("", paths), None):
+            with self.assertRaisesRegex(ValueError, "different source include index"):
+                KbuildState(
+                    repo,
+                    config,
+                    "base",
+                    different_index,
+                    source_analysis_cache=cache,
+                )
+
+    def test_lru_is_bounded_and_preserves_recent_entries(self) -> None:
+        index = SourceIncludeIndex("", ("source.c", "first.h", "second.h", "third.h"))
+        cache = SourceAnalysisCache(KernelConfig(""), index, max_entries=2)
+        first_contents = b'#include "first.h"\n'
+        second_contents = b'#include "second.h"\n'
+        with patch(
+            "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
+        ) as evaluate:
+            first = cache.analyze("source.c", ConfigValue.ENABLED, first_contents)
+            second = cache.analyze("source.c", ConfigValue.ENABLED, second_contents)
+            self.assertIs(
+                first, cache.analyze("source.c", ConfigValue.ENABLED, first_contents)
+            )
+            cache.analyze("source.c", ConfigValue.ENABLED, b'#include "third.h"\n')
+            self.assertEqual(len(cache), 2)
+            self.assertIs(
+                first, cache.analyze("source.c", ConfigValue.ENABLED, first_contents)
+            )
+            self.assertIsNot(
+                second, cache.analyze("source.c", ConfigValue.ENABLED, second_contents)
+            )
+
+        self.assertEqual(evaluate.call_count, 4)
+        self.assertEqual(len(cache), 2)
+        for max_entries in (0, -1):
+            with self.assertRaises(ValueError):
+                SourceAnalysisCache(KernelConfig(""), index, max_entries=max_entries)
+
+    def test_copy_shares_analysis_but_invalidates_only_local_state(self) -> None:
+        source = "drivers/wrapper.c"
+        files = {
+            "drivers/Makefile": "obj-y += wrapper.o\n",
+            source: '#include "before.h"\n',
+            "drivers/before.h": "",
+            "drivers/after.h": "",
+        }
+        next_files = {**files, source: '#include "after.h"\n'}
+        repo = MemoryGitRepo({"base": files, "next": next_files, "again": files})
+        index = SourceIncludeIndex("", files)
+        for contents in (files[source], next_files[source]):
+            index.add_line(source, contents)
+        original = KbuildState(repo, KernelConfig(""), "base", index)
+
+        with patch(
+            "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
+        ) as evaluate:
+            self.assertTrue(original.file_included("drivers/before.h"))
+            self.assertFalse(original.file_included("drivers/after.h"))
+            before = original._active_includes_cache[(source, ConfigValue.ENABLED)]
+            copied = KbuildState.copy(original)
+            self.assertIs(
+                copied._source_analysis_cache, original._source_analysis_cache
+            )
+            self.assertIsNot(
+                copied._active_includes_cache, original._active_includes_cache
+            )
+            self.assertIsNot(
+                copied._include_value_cache, original._include_value_cache
+            )
+            copied.update_filter_state(make_diff(source, DiffFileType.DEFAULT), "next")
+            self.assertFalse(copied.file_included("drivers/before.h"))
+            self.assertTrue(copied.file_included("drivers/after.h"))
+            self.assertTrue(original.file_included("drivers/before.h"))
+            self.assertFalse(original.file_included("drivers/after.h"))
+            copied.update_filter_state(make_diff(source, DiffFileType.DEFAULT), "again")
+            self.assertTrue(copied.file_included("drivers/before.h"))
+            self.assertFalse(copied.file_included("drivers/after.h"))
+            self.assertIs(
+                copied._active_includes_cache[(source, ConfigValue.ENABLED)], before
+            )
+
+        self.assertEqual(evaluate.call_count, 2)
+        assert original._source_analysis_cache is not None
+        self.assertEqual(len(original._source_analysis_cache), 2)
+
+    def test_missing_reads_are_cached_only_locally(self) -> None:
+        source = "drivers/wrapper.c"
+        target = "drivers/local.h"
+        for error in (
+            FileNotFoundError("missing"),
+            subprocess.CalledProcessError(128, "git"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                repo = MemoryGitRepo({"base": {source: '#include "local.h"\n'}})
+                config = KernelConfig("")
+                index = SourceIncludeIndex("", (source, target))
+                cache = SourceAnalysisCache(config, index)
+                with patch.object(repo, "read_file", side_effect=error) as read_file:
+                    missing = KbuildState(
+                        repo, config, "base", index, source_analysis_cache=cache
+                    )
+                    for _ in range(2):
+                        self.assertEqual(
+                            missing._active_source_includes(source, ConfigValue.ENABLED),
+                            frozenset(),
+                        )
+                    self.assertEqual(read_file.call_count, 1)
+                self.assertEqual(len(cache), 0)
+                present = KbuildState(
+                    repo, config, "base", index, source_analysis_cache=cache
+                )
+                self.assertEqual(
+                    present._active_source_includes(source, ConfigValue.ENABLED),
+                    frozenset((target,)),
+                )
+                self.assertEqual(len(cache), 1)
+
+    def test_unexpected_errors_propagate_without_caching(self) -> None:
+        source = "drivers/wrapper.c"
+        repo = MemoryGitRepo({"base": {source: '#include "local.h"\n'}})
+        index = SourceIncludeIndex("", (source, "drivers/local.h"))
+        state = KbuildState(repo, KernelConfig(""), "base", index)
+        with patch.object(state, "_read_file", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                state._active_source_includes(source, ConfigValue.ENABLED)
+        with patch(
+            "kpatch.filter.ifdef_filter.get_active_lines", side_effect=ValueError("bad")
+        ):
+            with self.assertRaises(ValueError):
+                state._active_source_includes(source, ConfigValue.ENABLED)
+
+        self.assertEqual(state._active_includes_cache, {})
+        assert state._source_analysis_cache is not None
+        self.assertEqual(len(state._source_analysis_cache), 0)
+        self.assertEqual(
+            state._active_source_includes(source, ConfigValue.ENABLED),
+            frozenset(("drivers/local.h",)),
+        )
+
+    def test_unknown_conditions_remain_conservative(self) -> None:
+        index = SourceIncludeIndex("", ("source.c", "first.h", "second.h"))
+        cache = SourceAnalysisCache(KernelConfig(""), index)
+        self.assertEqual(
+            cache.analyze(
+                "source.c",
+                ConfigValue.ENABLED,
+                b'#if UNKNOWN_GUARD\n#include "first.h"\n'
+                b'#else\n#include "second.h"\n#endif\n',
+            ),
+            frozenset(("first.h", "second.h")),
+        )
+
+    def test_repeated_branches_evaluate_once_per_content(self) -> None:
+        source = "drivers/wrapper.c"
+        target = "drivers/local.h"
+        branch_count = 32
+        contents = '#ifdef CONFIG_FEATURE\n#include "local.h"\n#endif\n'
+        commits = {
+            f"branch-{number}": {source: contents} for number in range(branch_count)
+        }
+        repo = MemoryGitRepo(commits)
+        config = KernelConfig("CONFIG_FEATURE=y")
+        index = SourceIncludeIndex("", (source, target))
+        cache = SourceAnalysisCache(config, index)
+        with patch(
+            "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
+        ) as evaluate:
+            for commit in commits:
+                state = KbuildState(
+                    repo, config, commit, index, source_analysis_cache=cache
+                )
+                self.assertEqual(
+                    state._active_source_includes(source, ConfigValue.ENABLED),
+                    frozenset((target,)),
+                )
+            self.assertEqual(evaluate.call_count, 1)
+
+            evaluate.reset_mock()
+            for commit in commits:
+                state = KbuildState(repo, config, commit, index)
+                state._active_source_includes(source, ConfigValue.ENABLED)
+            self.assertEqual(evaluate.call_count, branch_count)
 
 
 class ConfigFilterTests(unittest.TestCase):
