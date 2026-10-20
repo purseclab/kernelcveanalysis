@@ -79,13 +79,17 @@ def run(ctx: typer.Context, filter: CommitFilter):
 def filter(
     ctx: typer.Context,
     config: Annotated[Path | None, typer.Option(help="Kernel config file to filter with.")] = None,
+    workers: Annotated[
+        int,
+        typer.Option(min=1, help="Processes for the Kbuild config phase only; ignored without --config."),
+    ] = 4,
 ):
     if config is not None:
         kernel_config = KernelConfig(config.read_text())
         filter = FilterPipeline(
             [
                 MergeCommitFilter(),
-                ConfigFilter(kernel_config),
+                ConfigFilter(kernel_config, workers=workers),
                 IfdefFilter(kernel_config),
                 WhitespaceFilter(),
             ]

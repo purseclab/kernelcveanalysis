@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from kpatch.diff import Diff
 from kpatch.filter.source_filter import (
     SourceIncludeIndex,
@@ -234,6 +236,119 @@ class SourceIncludeIndexTests(unittest.TestCase):
         self.assertEqual(index.dependent_targets(("wrapper.c",)), frozenset(paths[1:]))
         self.assertEqual(index.transitive_targets(("unknown.c",)), frozenset(("unknown.c",)))
         self.assertEqual(index.transitive_targets(()), frozenset())
+
+
+class SourceIncludeSnapshotTests(unittest.TestCase):
+    def test_snapshot_preserves_resolution_aliases_edges_and_untracked_sources(self) -> None:
+        index = SourceIncludeIndex("arm64", (
+            "drivers/wrapper.c", "drivers/local.h", "drivers/entry.S",
+            "arch/arm64/include/shared.h", "include/shared.h",
+            "arch/x86/include/shared.h", "include/unused.h", "unused.c",
+        ))
+        index.add_line("drivers/wrapper.c", '#include "local.h"')
+        index.add_line("drivers/local.h", "#include <shared.h>")
+        index.add_line("drivers/entry.S", '#include "local.h"')
+        index.add_line("untracked.inc", "#include <shared.h>")
+        index.add_diff(Diff.parse(
+            "diff --git a/drivers/wrapper.c b/drivers/renamed.c\n"
+            "similarity index 100%\nrename from drivers/wrapper.c\nrename to drivers/renamed.c\n"
+            "diff --git a/untracked.inc b/alias.inc\n"
+            "similarity index 100%\nrename from untracked.inc\nrename to alias.inc\n"
+        ))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "includes.json"
+            index.write_snapshot(path)
+            with patch("kpatch.filter.source_filter._iter_git_output", side_effect=AssertionError("Git must not run")):
+                restored = SourceIncludeIndex.read_snapshot(path)
+
+        self.assertEqual(restored.srcarch, index.srcarch)
+        self.assertEqual(restored._tracked_paths, index._tracked_paths)
+        self.assertNotIn("untracked.inc", restored._tracked_paths)
+        self.assertNotIn("alias.inc", restored._tracked_paths)
+        self.assertEqual(restored._targets, index._targets)
+        for target in index._tracked_paths:
+            self.assertEqual(restored.includers(target), index.includers(target))
+        for source in (*index._tracked_paths, "untracked.inc", "alias.inc", "unknown.c"):
+            self.assertEqual(restored.transitive_targets((source,)), index.transitive_targets((source,)))
+            self.assertEqual(restored.dependent_targets((source,)), index.dependent_targets((source,)))
+            for line in ('#include "local.h"', "#include <shared.h>", "#include <unused.h>"):
+                self.assertEqual(restored.target_from_line(source, line), index.target_from_line(source, line))
+        for candidate in (index, restored):
+            candidate.srcarch = "x86"
+        self.assertEqual(restored.target_from_line("unknown.c", "#include <shared.h>"),
+                         index.target_from_line("unknown.c", "#include <shared.h>"))
+
+    def test_restored_edges_share_vocabulary_strings(self) -> None:
+        index = SourceIncludeIndex("arm64", ("include/shared.h", "one.c", "two.c"))
+        for source in ("one.c", "two.c", "untracked.inc"):
+            index.add_line(source, "#include <shared.h>")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "includes.json"
+            index.write_snapshot(path)
+            restored = SourceIncludeIndex.read_snapshot(path)
+
+        target = restored._tracked_paths["include/shared.h"]
+        for source, targets in restored._targets.items():
+            self.assertIs(next(iter(targets)), target)
+            includer = next(path for path in restored.includers(target) if path == source)
+            self.assertIs(includer, source)
+            if source in restored._tracked_paths:
+                self.assertIs(source, restored._tracked_paths[source])
+
+    def test_empty_edges_and_post_restore_path_additions_preserve_lookup(self) -> None:
+        index = SourceIncludeIndex("arm64", ("include/shared.h", "unused.c"))
+        index.target_from_line("unknown.c", "#include <shared.h>")
+        index.target_from_line("unknown.c", "#include <missing.h>")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "includes.json"
+            index.write_snapshot(path)
+            restored = SourceIncludeIndex.read_snapshot(path)
+
+        self.assertEqual(restored.includers("include/shared.h"), ())
+        self.assertEqual(restored.target_from_line("unknown.c", "#include <shared.h>"), "include/shared.h")
+        restored.add_paths(("arch/arm64/include/shared.h", "include/missing.h"))
+        self.assertEqual(restored.target_from_line("unknown.c", "#include <shared.h>"),
+                         "arch/arm64/include/shared.h")
+        self.assertEqual(restored.target_from_line("unknown.c", "#include <missing.h>"), "include/missing.h")
+
+    def test_empty_index_roundtrips(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "empty.json"
+            SourceIncludeIndex("arm64").write_snapshot(path)
+            restored = SourceIncludeIndex.read_snapshot(path)
+        self.assertEqual(restored.srcarch, "arm64")
+        self.assertEqual(restored._tracked_paths, {})
+        self.assertEqual(restored.transitive_targets(("unknown.c",)), frozenset(("unknown.c",)))
+
+    def test_invalid_snapshot_ids_and_schema_are_rejected(self) -> None:
+        valid = (
+            '{"version":1,"srcarch":"arm64","paths":["include/shared.h","untracked.c"],'
+            '"tracked_path_count":1,"adjacency":[[],[0]]}'
+        )
+        invalid = [
+            valid.replace("[[],[0]]", "[[],[-1]]"),
+            valid.replace("[[],[0]]", "[[],[1]]"),
+            valid.replace("[[],[0]]", "[[],[2]]"),
+            valid.replace("[[],[0]]", '[[],["0"]]'),
+            valid.replace("[[],[0]]", "[[],[true]]"),
+            valid.replace("[[],[0]]", "[[],[0,0]]"),
+            valid.replace("[[],[0]]", "[[0]]"),
+            valid.replace('"tracked_path_count":1', '"tracked_path_count":-1'),
+            valid.replace('"tracked_path_count":1', '"tracked_path_count":3'),
+            valid.replace('"tracked_path_count":1', '"tracked_path_count":true'),
+            valid.replace('"untracked.c"', '"include/shared.h"'),
+            valid.replace('"include/shared.h"', '"include/shared.inc"'),
+            valid.replace('"version":1', '"version":2'),
+            valid[:-1] + ',"unexpected":true}',
+            "not JSON",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.json"
+            for payload in invalid:
+                with self.subTest(payload=payload):
+                    path.write_text(payload, encoding="utf-8")
+                    with self.assertRaises(ValidationError):
+                        SourceIncludeIndex.read_snapshot(path)
 
 
 class RepositorySourceIncludeIndexTests(unittest.TestCase):

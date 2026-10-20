@@ -91,13 +91,16 @@ def filter_commit_time_range(
     end_date: datetime,
     *,
     show_progress: bool = True,
+    workers: int = 1,
 ) -> None:
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
     if kernel_config_path is not None:
         kernel_config = KernelConfig(kernel_config_path.read_text())
         filter = FilterPipeline(
             [
                 MergeCommitFilter(),
-                ConfigFilter(kernel_config),
+                ConfigFilter(kernel_config, workers=workers),
                 IfdefFilter(kernel_config),
                 WhitespaceFilter(),
             ]

@@ -1,8 +1,12 @@
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
+from pathlib import Path
 import posixpath
 import re
 import subprocess
+from typing import Literal, Self
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from ..diff import Diff
 from ..git import GitRepo
@@ -13,6 +17,37 @@ _INCLUDE_RE = re.compile(
     r'^\s*#\s*include\s*(?P<open>[<"])(?P<path>[^>"]+)[>"]'
 )
 _GLOBAL_TARGET_CACHE_SIZE = 4096
+
+
+class _SourceIncludeSnapshot(BaseModel):
+    """Canonical vocabulary; only its tracked prefix participates in lookup."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: Literal[1] = 1
+    srcarch: str
+    paths: list[str]
+    tracked_path_count: int
+    adjacency: list[list[int]]
+
+    @model_validator(mode="after")
+    def validate_graph(self) -> Self:
+        path_count = len(self.paths)
+        if not 0 <= self.tracked_path_count <= path_count:
+            raise ValueError("tracked_path_count is outside the path vocabulary")
+        if len(set(self.paths)) != path_count:
+            raise ValueError("snapshot path vocabulary contains duplicates")
+        if len(self.adjacency) != path_count:
+            raise ValueError("snapshot adjacency must have one row per path")
+        for path_id in range(self.tracked_path_count):
+            if not self.paths[path_id].endswith(_SOURCE_EXTENSIONS):
+                raise ValueError("tracked snapshot path has an unsupported extension")
+        for target_ids in self.adjacency:
+            if any(target_id < 0 or target_id >= self.tracked_path_count for target_id in target_ids):
+                raise ValueError("snapshot target ID is outside the tracked vocabulary")
+            if len(set(target_ids)) != len(target_ids):
+                raise ValueError("snapshot adjacency contains duplicate target IDs")
+        return self
 
 
 def _iter_git_output(
@@ -117,6 +152,46 @@ class SourceIncludeIndex:
                     source.decode("utf-8", errors="replace"),
                     line.decode("utf-8", errors="replace"),
                 )
+        return out
+
+    def _snapshot(self) -> _SourceIncludeSnapshot:
+        paths = list(self._tracked_paths)
+        tracked_path_count = len(paths)
+        path_ids = {path: index for index, path in enumerate(paths)}
+        for source in self._targets:
+            if source not in path_ids:
+                path_ids[source] = len(paths)
+                paths.append(source)
+
+        adjacency: list[list[int]] = [[] for _ in paths]
+        for source, targets in self._targets.items():
+            adjacency[path_ids[source]] = sorted(path_ids[target] for target in targets)
+        return _SourceIncludeSnapshot(
+            srcarch=self.srcarch,
+            paths=paths,
+            tracked_path_count=tracked_path_count,
+            adjacency=adjacency,
+        )
+
+    def write_snapshot(self, path: Path) -> None:
+        """Persist the global index once, without serializing repeated paths."""
+
+        path.write_text(self._snapshot().model_dump_json(), encoding="utf-8")
+
+    @classmethod
+    def read_snapshot(cls, path: Path) -> Self:
+        """Restore validated edges and lookup vocabulary without invoking Git."""
+
+        snapshot = _SourceIncludeSnapshot.model_validate_json(path.read_bytes())
+        out = cls(snapshot.srcarch)
+        paths = snapshot.paths
+        out._tracked_paths = {
+            paths[path_id]: paths[path_id]
+            for path_id in range(snapshot.tracked_path_count)
+        }
+        for source_id, target_ids in enumerate(snapshot.adjacency):
+            for target_id in target_ids:
+                out._add_edge(paths[source_id], paths[target_id])
         return out
 
     def add_paths(self, paths: Iterable[str]) -> None:

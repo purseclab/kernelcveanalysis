@@ -15,19 +15,81 @@ Since kernel requires patch before issuing cve.
 The pipeline loads commit metadata while leaving original patches in SQLite,
 spools compact preparation data and decisions to a temporary database, and
 streams retained patches into the destination. It shares bounded caches of
-Kbuild parses, source include analysis, and Git blob bytes. Complete history
+Kbuild parses, source include analysis, and Git blob bytes. Independent primary
+history roots can run in separate processes. Complete history
 is still traversed; these changes do not add new rejection rules.
 
 Run the non-destructive, one-month benchmark from this directory:
 
 ```console
-uv run python benchmarks/filter_pipeline.py --start 07-01-2026 --end 08-01-2026
+uv run python benchmarks/filter_pipeline.py --workers 4 --start 07-01-2026 --end 08-01-2026
 ```
 
-It reports loading/filtering time, peak Python RSS, the largest child-process
-peak RSS (MiB, on Linux), commit counts, and a SHA-256 of ordered commit IDs
-and reduced patches. It consumes results without collecting them, never saves
-filtered commits, and rejects ranges longer than 93 days.
+It reports worker count, loading/filtering time, Python and largest-child
+peak RSS, sampled whole-process-tree RSS/PSS (MiB, on Linux), commit counts,
+and a SHA-256 of ordered commit IDs and reduced patches. RSS can count shared
+pages repeatedly; PSS apportions shared pages. Tree peaks are sampled (RSS
+0.25s, PSS 1s), not hard bounds. It consumes results without collecting them,
+never saves filtered commits, and rejects ranges longer than 93 days.
+
+### Parallel configuration filtering
+
+The normal configuration CLI defaults to four workers:
+
+```console
+uv run kpatch filter --repo linux --db all_commits --dest filtered \
+  --start 07-01-2026 --end 08-01-2026 config --config kernel.config --workers 4
+```
+
+`--workers 1` selects the serial reference path. The worker count must be
+positive. Only the Kbuild/config history-decision phase is parallel; history
+projection, global include indexing, `#if`/whitespace filtering, and the final
+output writer stay centralized. With no kernel config there is no parallel
+Kbuild phase. The Python `ConfigFilter(config, workers=...)` and
+`filter_commit_time_range(..., workers=...)` APIs default to one worker; use
+an `if __name__ == "__main__":` entry point when spawning from scripts.
+
+- The coordinator prepares the complete selected history and global include
+  index once. A validated compact index snapshot is loaded once per worker.
+- Jobs are whole existing **first-parent root subtrees**, largest first, with
+  at most `2 * workers` outstanding. Intra-root traversal and cached ownership
+  discovery retain serial semantics; secondary merge parents are not state
+  dependencies. This does not split arbitrary date windows or cold-start
+  interior branches.
+- Spawned workers open their own read-only summary reader and reusable Git
+  reader/caches. Only compact headers for the assigned root are loaded—not
+  the full input metadata/messages or lazy parent objects in every worker.
+- Each job writes a closed temporary decision shard. The coordinator streams
+  shard blobs into a separate decisions database, removes merged shards, and
+  applies decisions in original commit order. There are no concurrent writers
+  to the shared history/output databases.
+- Failure or Ctrl-C cancels queued work and requests cancellation between
+  commits; shutdown reaps worker Git children before deleting scratch files.
+  A currently executing commit or initializer must finish before cancellation.
+
+More workers duplicate include indexes, working caches, and Git processes.
+Start with two or four, rather than assuming all logical CPUs will help.
+A single dominant root limits concurrency; one-root inputs use the serial
+path even when more workers were requested. Interior-fork checkpoint
+parallelism and native/Rust acceleration are not implemented.
+
+#### Measured multiprocessing comparison
+
+Separate sequential runs on the same `[2026-07-01, 2026-08-01)` range (10,681
+input commits) with the same configuration and memory sampler:
+
+| Workers | Load + filtering | Speedup | Sampled tree RSS | Sampled tree PSS |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 296.2 s | 1.00× | 1,409.2 MiB | 1,389.0 MiB |
+| 2 | 186.7 s | 1.59× | 1,476.0 MiB | 1,386.5 MiB |
+| 4 | 135.2 s | **2.19×** | 2,626.3 MiB | 1,549.2 MiB |
+
+All three runs retained the same 1,519 commits, with the same ordered output
+SHA-256 shown below. Four workers reduced runtime from about 4m56s to 2m15s;
+whole-tree PSS was about 1.51 GiB. Summed RSS is higher because Git's shared
+file-backed mappings can be counted repeatedly. PSS/RSS are sampled estimates,
+not hard memory limits. Only this one-month range and synthetic/unit fixtures
+were tested; no multi-year runs were performed.
 
 ### First optimization pass
 
@@ -82,8 +144,9 @@ RAM:
   are logarithmic in commit count, rather than proportional to deferred forks.
 - Kbuild parses and content-keyed source analysis are shared across branches
   with 1,024- and 4,096-entry limits. Git blob bytes have a 16 MiB/4,096-entry
-  LRU. One file-reader daemon is shared by streaming stages and recycled after
-  8,192 reads so Git's own object caches do not accumulate for the entire run.
+  LRU per process. Each worker has one file-reader daemon; parent streaming
+  stages share their own reader. Daemons are recycled after 8,192 reads so
+  Git's own object caches do not accumulate for the entire run.
 - The CLI streams commits directly to the destination transaction. It waits
   for the first filtered commit before starting the replacement transaction.
   Early termination/errors close iterators, readers, and scratch storage;

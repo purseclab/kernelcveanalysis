@@ -1,5 +1,6 @@
 import gc
 from datetime import UTC, datetime
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 import sqlite3
 import tracemalloc
@@ -11,7 +12,16 @@ import weakref
 from kpatch.diff import Diff
 from kpatch.filter import FilterContext, FilteredCommit
 from kpatch.filter.config import ConfigFilter, _walk_history
-from kpatch.filter.config.history import ConfigHistoryStore, FileDecision, parse_history_diff
+from kpatch.filter.config.history import (
+    ConfigHistoryReader,
+    ConfigHistoryStore,
+    DecisionShard,
+    FileDecision,
+    HistoryCommit,
+    PrimaryHistory,
+    parse_history_diff,
+)
+from kpatch.filter.config.traversal import walk_history
 from kpatch.filter.config_filter import ConfigValue, KbuildState, KernelConfig
 from kpatch.git import CommitParent, GitCommit, GitRepo, StructuredCommits
 
@@ -110,13 +120,138 @@ class HistoryParserTests(unittest.TestCase):
         self.assertLess(peak, 512 * 1024)
 
 
+class HistoryCommitTests(unittest.TestCase):
+    def test_headers_copy_only_ordered_parent_ids(self) -> None:
+        commit = make_commit("merge", "first")
+        commit.parents += (CommitParent("second", "unused patch"),)
+        header = HistoryCommit.from_commit(commit)
+        self.assertEqual(header, HistoryCommit("merge", ("first", "second")))
+        self.assertEqual(header.parent_id, "first")
+        self.assertTrue(header.is_merge)
+        with self.assertRaises(FrozenInstanceError):
+            header.commit_id = "changed"
+
+        commit.parents = ()
+        root = HistoryCommit.from_commit(commit)
+        self.assertIsNone(root.parent_id)
+        self.assertFalse(root.is_merge)
+
+
+class ConfigHistoryReaderTests(unittest.TestCase):
+    def test_primary_root_graphs_preserve_insertion_and_sibling_order(self) -> None:
+        headers = [
+            HistoryCommit("leaf-z", ("fork",)),
+            HistoryCommit("other", ("outside",)),
+            HistoryCommit("fork", ("root",)),
+            HistoryCommit("merge", ("fork", "other")),
+            HistoryCommit("root", ()),
+            HistoryCommit("sibling", ("root",)),
+            HistoryCommit("side-merge", ("other", "root")),
+        ]
+        sizes = {"root": 5, "fork": 3, "other": 2}
+        with ConfigHistoryStore() as store:
+            for header in headers:
+                store.add_history(header, Diff.parse(""), sizes.get(header.commit_id, 1))
+            store.commit()
+            with ConfigHistoryReader(store.path) as reader:
+                graph = reader.load_root("root")
+                self.assertEqual(list(graph.commits), ["leaf-z", "fork", "merge", "root", "sibling"])
+                self.assertEqual(graph.root_commits, ("root",))
+                self.assertEqual(graph.primary_children, {
+                    "leaf-z": [], "fork": ["leaf-z", "merge"], "merge": [],
+                    "root": ["fork", "sibling"], "sibling": [],
+                })
+                self.assertEqual(graph.subtree_sizes, {
+                    "leaf-z": 1, "fork": 3, "merge": 1, "root": 5, "sibling": 1,
+                })
+                self.assertEqual(reader.load_root("other"), PrimaryHistory(
+                    {"other": headers[1], "side-merge": headers[-1]},
+                    {"other": ["side-merge"], "side-merge": []},
+                    {"other": 2, "side-merge": 1},
+                    ("other",),
+                ))
+                self.assertEqual(reader.load_root("fork").root_commits, ("fork",))
+                for invalid_id in ("missing", "root' OR 1=1 --", ""):
+                    with self.subTest(commit_id=invalid_id), self.assertRaises(KeyError):
+                        reader.load_root(invalid_id)
+
+    def test_deep_primary_chain_loads_without_python_recursion(self) -> None:
+        count = 2500
+        diff = Diff.parse("")
+        with ConfigHistoryStore() as store:
+            # Children deliberately precede their parents in persisted order.
+            for index in reversed(range(count)):
+                parent = f"node-{index - 1}" if index else "outside"
+                store.add_history(HistoryCommit(f"node-{index}", (parent,)), diff, count - index)
+            store.commit()
+            with ConfigHistoryReader(store.path) as reader:
+                graph = reader.load_root("node-0")
+
+        self.assertEqual(len(graph.commits), count)
+        self.assertEqual(next(iter(graph.commits)), f"node-{count - 1}")
+        self.assertEqual(graph.root_commits, ("node-0",))
+        self.assertEqual(graph.subtree_sizes["node-0"], count)
+        self.assertEqual(graph.subtree_sizes[f"node-{count - 1}"], 1)
+        self.assertEqual(graph.primary_children[f"node-{count - 1}"], [])
+        for index in range(count - 1):
+            self.assertEqual(graph.primary_children[f"node-{index}"], [f"node-{index + 1}"])
+        base = KbuildState(MemoryRepo(), KernelConfig(""), "outside")
+        self.assertEqual(
+            [visit.commit_id for visit in walk_history(graph, lambda commit_id: base)],
+            [f"node-{index}" for index in range(count)],
+        )
+
+    def test_reader_is_readonly_bounded_and_independent_from_result_writes(self) -> None:
+        diff = parse_history_diff(make_commit("root", "outside").diff_str)
+        with ConfigHistoryStore() as store:
+            store.add_history(HistoryCommit("root", ("outside",)), diff, 1)
+            store.commit()
+            with ConfigHistoryReader(store.path) as reader:
+                self.assertEqual(reader.get_history("root"), diff)
+                with self.assertRaises(KeyError):
+                    reader.get_history("missing")
+                with self.assertRaises(sqlite3.OperationalError):
+                    reader._connection.execute("DELETE FROM history")
+                self.assertEqual(reader._connection.execute("PRAGMA cache_size").fetchone()[0], -4096)
+                self.assertEqual(reader._connection.execute("PRAGMA mmap_size").fetchone()[0], 0)
+                reader._connection.rollback()
+                reader._connection.execute("BEGIN")
+                reader._connection.execute("SELECT * FROM history").fetchone()
+                store.add_decisions("root", {(None, "kept.c"): FileDecision(None, ConfigValue.ENABLED)})
+                store.commit()
+                self.assertEqual(reader.get_history("root"), diff)
+            reader.close()
+            self.assertTrue(store.path.exists())
+            self.assertTrue(store.decisions_path.exists())
+        self.assertFalse(store.path.parent.exists())
+
+    def test_missing_database_does_not_create_a_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.sqlite"
+            with self.assertRaises(sqlite3.OperationalError):
+                ConfigHistoryReader(path)
+            self.assertFalse(path.exists())
+
+    def test_reader_connection_is_closed_on_collection(self) -> None:
+        with ConfigHistoryStore() as store:
+            store.commit()
+            reader = ConfigHistoryReader(store.path)
+            connection = reader._connection
+            reference = weakref.ref(reader)
+            del reader
+            gc.collect()
+            self.assertIsNone(reference())
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
+
 class ConfigHistoryStoreTests(unittest.TestCase):
     def test_history_roundtrip_and_insertion_order(self) -> None:
-        first = ConfigFilter._history_diff(make_commit("z", "parent"))
+        first = parse_history_diff(make_commit("z", "parent").diff_str)
         second = Diff.parse("")
         with ConfigHistoryStore() as store:
-            store.add_history("z", first)
-            store.add_history("a", second)
+            store.add_history(HistoryCommit("z", ("parent",)), first, 1)
+            store.add_history(HistoryCommit("a", ()), second, 1)
             store.commit()
 
             self.assertEqual(list(store.iter_history()), [first, second])
@@ -148,6 +283,76 @@ class ConfigHistoryStoreTests(unittest.TestCase):
                 store._connection.execute("PRAGMA cache_size").fetchone()[0], -4096
             )
 
+    def test_worker_shards_merge_blobs_and_remove_only_successful_shards(self) -> None:
+        decisions = {
+            (None, "new.c"): FileDecision(None, ConfigValue.ENABLED),
+            ("old.c", "renamed.c"): FileDecision(ConfigValue.MODULE, None),
+        }
+        with ConfigHistoryStore() as store:
+            first = store.path.parent / "first.sqlite"
+            second = store.path.parent / "second.sqlite"
+            for shard_path, commit_id in ((first, "first"), (second, "second")):
+                with DecisionShard(shard_path) as shard:
+                    shard.add_decisions(commit_id, decisions)
+                    shard.add_decisions("empty", {})
+                    shard.commit()
+                shard.close()
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    shard._connection.execute("SELECT 1")
+
+            # Blob merging must not deserialize each worker result in the parent.
+            with patch("kpatch.filter.config.history._DECISIONS_ADAPTER") as adapter:
+                store.merge_decisions(first)
+                store.merge_decisions(second)
+                adapter.validate_json.assert_not_called()
+                adapter.dump_json.assert_not_called()
+            store.commit()
+            self.assertFalse(first.exists())
+            self.assertFalse(second.exists())
+            self.assertEqual(store.get_decisions("first"), decisions)
+            self.assertEqual(store.get_decisions("second"), decisions)
+            self.assertEqual(store.get_decisions("empty"), {})
+            self.assertEqual(store._connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall(), [("history",)])
+            self.assertEqual(store._decisions_connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall(), [("decisions",)])
+
+            duplicate = store.path.parent / "duplicate.sqlite"
+            with DecisionShard(duplicate) as shard:
+                shard.add_decisions("first", decisions)
+                shard.commit()
+            with self.assertRaises(sqlite3.IntegrityError):
+                store.merge_decisions(duplicate)
+            self.assertTrue(duplicate.exists())
+        self.assertFalse(duplicate.parent.exists())
+
+    def test_second_connection_failure_closes_first_and_removes_scratch(self) -> None:
+        connect = sqlite3.connect
+        connections: list[sqlite3.Connection] = []
+        paths: list[Path] = []
+
+        def fail_second(path: Path, *, check_same_thread: bool) -> sqlite3.Connection:
+            paths.append(path)
+            if connections:
+                raise sqlite3.OperationalError("second connection failed")
+            connection = connect(path, check_same_thread=check_same_thread)
+            connections.append(connection)
+            return connection
+
+        with patch("kpatch.filter.config.history.sqlite3.connect", side_effect=fail_second):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "second connection failed"):
+                ConfigHistoryStore()
+        self.assertFalse(paths[0].parent.exists())
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connections[0].execute("SELECT 1")
+
+    def test_history_size_must_be_positive(self) -> None:
+        with ConfigHistoryStore() as store:
+            with self.assertRaises(sqlite3.IntegrityError):
+                store.add_history(HistoryCommit("invalid", ()), Diff.parse(""), 0)
+
     def test_connection_failure_removes_created_scratch_directory(self) -> None:
         paths: list[Path] = []
 
@@ -169,17 +374,22 @@ class ConfigHistoryStoreTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             with ConfigHistoryStore() as store:
                 path = store.path
-                store.add_history("duplicate", Diff.parse(""))
-                store.add_history("duplicate", Diff.parse(""))
+                store.add_history(HistoryCommit("duplicate", ()), Diff.parse(""), 1)
+                store.add_history(HistoryCommit("duplicate", ()), Diff.parse(""), 1)
         self.assertFalse(path.parent.exists())
 
         abandoned = ConfigHistoryStore()
         abandoned_path = abandoned.path
+        history_connection = abandoned._connection
+        decisions_connection = abandoned._decisions_connection
         reference = weakref.ref(abandoned)
         del abandoned
         gc.collect()
         self.assertIsNone(reference())
         self.assertFalse(abandoned_path.parent.exists())
+        for connection in (history_connection, decisions_connection):
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
 
     def test_preparation_failure_and_success_close_stores(self) -> None:
         commit = make_commit("c", "outside")
@@ -227,6 +437,34 @@ class ConfigHistoryStoreTests(unittest.TestCase):
 
 
 class HistoryTraversalTests(unittest.TestCase):
+    def test_equal_size_siblings_keep_original_order_not_dates_or_ids(self) -> None:
+        root = make_commit("root", "outside")
+        children = [
+            make_commit("z-older", "root"),
+            make_commit("a-newer", "root"),
+            make_commit("m-middle", "root"),
+        ]
+        for child, day in zip(children, (2, 4, 3), strict=True):
+            child.committer_date = datetime(2026, 7, day, tzinfo=UTC)
+        structured = StructuredCommits.from_commits([root, *children])
+        config = KernelConfig("")
+
+        def create_state(commit_id: str) -> KbuildState:
+            return KbuildState(MemoryRepo(), config, "outside")
+
+        original_order = [visit.commit_id for visit in _walk_history(structured, create_state)]
+        with ConfigHistoryStore() as store:
+            for commit in structured.commits.values():
+                store.add_history(HistoryCommit.from_commit(commit), Diff.parse(""),
+                                  4 if commit.commit_id == "root" else 1)
+            store.commit()
+            with ConfigHistoryReader(store.path) as reader:
+                history = reader.load_root("root")
+            self.assertEqual(history.primary_children["root"], ["z-older", "a-newer", "m-middle"])
+            restored_order = [visit.commit_id for visit in walk_history(history, create_state)]
+        self.assertEqual(original_order, ["root", "m-middle", "a-newer", "z-older"])
+        self.assertEqual(restored_order, original_order)
+
     def test_wide_fork_copies_only_the_child_about_to_run(self) -> None:
         root = make_commit("root", "outside")
         children = [make_commit(f"child-{index}", "root") for index in range(200)]
