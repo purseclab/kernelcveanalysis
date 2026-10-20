@@ -1,6 +1,8 @@
 from typing import Annotated, cast
 from pathlib import Path
 import random
+import sqlite3
+import subprocess
 
 from dotenv import load_dotenv
 import typer
@@ -9,6 +11,7 @@ from .dataset import load_git_commits
 from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db, load_commits_from_db
 from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, JevFilter, CountFilter
 from .visualization import show_commit_sunburst
+from .update import update_to_db
 
 app = typer.Typer()
 filter_app = typer.Typer()
@@ -33,6 +36,32 @@ def extract_commits(
     end_date = parse_time(end) if end is not None else None
     processed = extract_to_db(GitRepo(repo), GitDb(db), start_date, end_date)
     print(f"stored {processed} commits to database `{str(db)}`.")
+
+@app.command("update", help="Pull Linux and append missing raw commits without re-extracting stored patches.")
+def update_commits(
+    repo: Annotated[Path, typer.Option(exists=True, file_okay=False, help="Path to Linux Git checkout.")],
+    db: Annotated[Path, typer.Option(exists=True, dir_okay=False, help="Existing unfiltered SQLite commit database.")],
+    start: Annotated[
+        str | None,
+        typer.Option(help="Original extraction start date (mm-dd-yyyy); required only for databases without an update checkpoint."),
+    ] = None,
+    pull: Annotated[
+        bool,
+        typer.Option("--pull/--no-pull", help="Fast-forward the checkout from its configured upstream before updating."),
+    ] = True,
+) -> None:
+    try:
+        start_date = parse_time(start) if start is not None else None
+        result = update_to_db(GitRepo(repo), GitDb(db), start_date, pull=pull)
+    except (ValueError, RuntimeError, OSError, sqlite3.Error, subprocess.CalledProcessError) as error:
+        typer.echo(f"Update failed: {error}", err=True)
+        raise typer.Exit(1) from error
+
+    typer.echo(
+        f"Added {result.added_commits} commits; {result.total_commits} total in `{db}`."
+    )
+    typer.echo(f"Synchronized through {result.tip_commit}.")
+
 
 @app.command("gen-dataset", help="Generate dataset of kernel commits, along with other train / test splits.")
 def gen_dataset(

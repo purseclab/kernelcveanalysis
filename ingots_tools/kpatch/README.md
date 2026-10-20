@@ -10,6 +10,43 @@ Many but not all lpe bugs are given a CVE, and we don't really care if CVE delay
 More interesting overall is if you can find commit as soon as it hits some kernel tree, which would enable exploitation irl, and be an issue.
 Since kernel requires patch before issuing cve.
 
+## Linux patch extraction and incremental updates
+
+The raw, pre-filtering database is `db/all_commits.sqlite`. Extract an initial
+uncapped history from a chosen UTC start date:
+
+```console
+uv run kpatch extract --repo linux --db db/all_commits.sqlite --start 01-01-2026
+```
+
+Keep that source database current without re-extracting existing patches:
+
+```console
+uv run kpatch update --repo linux --db db/all_commits.sqlite
+```
+
+`update` fast-forwards the checkout with `git pull --ff-only`, pins the resulting
+HEAD, and atomically appends missing commits and its synchronization checkpoint.
+It does **not** run filtering or update filtered databases. Existing commits,
+patches, scores, and ratings are preserved. Merge commits retain the same
+first-parent-patch / ordered-parent-ID representation as `extract`.
+
+- For a legacy **uncapped** source database without a checkpoint, supply its
+  actual original start date once: append `--start 01-01-2026`. Subsequent
+  updates remember that boundary. Fresh empty-database extractions without
+  `--end` record their checkpoint automatically.
+- `--no-pull` updates from the checkout's current HEAD without network access.
+- Updates use Git reachability, not the newest stored date, so late-merged
+  commits with old or tied timestamps are not missed. Bootstrap exclusions are
+  disk-backed; subsequent runs traverse only changes since the saved tip.
+- Sparse/filtered histories, known end-capped extractions, incompatible start
+  changes, and checkpoint rewinds/divergent histories are rejected. Do not
+  bootstrap an old end-capped dataset as if it were an uncapped source.
+- Git/extraction failures roll back both appended rows and the checkpoint. A
+  successful pull itself is not rolled back if database extraction later fails.
+  Normal database rewrites invalidate the checkpoint instead of risking skipped
+  commits. Keep the Git objects for the saved tip available.
+
 ## Filtering performance
 
 The pipeline loads commit metadata while leaving original patches in SQLite,

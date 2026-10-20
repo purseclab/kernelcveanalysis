@@ -1,3 +1,4 @@
+from contextlib import ExitStack, closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -6,11 +7,11 @@ import json
 from pathlib import Path
 import sqlite3
 import subprocess
+from tempfile import TemporaryFile
 from typing import (
     Generator,
     Self,
     Iterable,
-    Iterator,
     Protocol,
     cast,
     runtime_checkable,
@@ -20,6 +21,12 @@ from functools import cached_property
 from weakref import finalize
 
 from .diff import Diff
+from .update_state import (
+    clear_extraction_bounds,
+    invalidate_update_state,
+    write_extraction_bounds,
+    write_update_state,
+)
 
 GIT_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 LOG_RECORD_START = bytes.fromhex("9a3d71ce04f862b5")
@@ -362,7 +369,7 @@ class GitRepo(GitStore):
             check=True,
             text=False,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         ).stdout
 
     def checkout(self, commit: str):
@@ -371,59 +378,113 @@ class GitRepo(GitStore):
     def read_file(self, commit: str, path: str) -> bytes:
         return self._run_git(["show", f"{commit}:{path}"])
 
-    def _iter_git_records(self, args: list[str]) -> Iterator[bytes]:
-        command = ["git", "-C", str(self.repo)] + args
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        assert process.stdout is not None
-        assert process.stderr is not None
-        pending = bytearray()
-        record_started = False
+    def resolve_head(self) -> str:
+        """Resolve HEAD once so an extraction cannot follow a moving branch."""
+
+        return self._run_git(["rev-parse", "--verify", "HEAD^{commit}"]).decode().strip()
+
+    def pull_ff_only(self) -> None:
+        _ = self._run_git(["pull", "--ff-only", "--no-stat"])
+
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         try:
-            while chunk := process.stdout.read(64 * 1024):
-                pending.extend(chunk)
-                while True:
-                    if not record_started:
-                        record_start = pending.find(_LOG_RECORD_START_BYTES)
-                        if record_start < 0:
-                            keep = len(_LOG_RECORD_START_BYTES) - 1
-                            if keep:
-                                del pending[:-keep]
-                            else:
-                                pending.clear()
+            _ = self._run_git(["merge-base", "--is-ancestor", ancestor, descendant])
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 1:
+                return False
+            raise
+        return True
+
+    def _iter_git_records(
+        self,
+        args: list[str],
+        revisions_file: Path | None = None,
+    ) -> Generator[bytes, None, None]:
+        command = ["git", "-C", str(self.repo)] + args
+        with ExitStack() as resources:
+            revisions = (
+                resources.enter_context(revisions_file.open("rb"))
+                if revisions_file is not None else None
+            )
+            # Disk-backed stderr cannot deadlock a streaming stdout reader.
+            stderr_file = resources.enter_context(TemporaryFile())
+            process = subprocess.Popen(
+                command,
+                stdin=revisions,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+            )
+            assert process.stdout is not None
+            stdout = resources.enter_context(process.stdout)
+            pending = bytearray()
+            record_started = False
+            try:
+                while chunk := stdout.read(64 * 1024):
+                    pending.extend(chunk)
+                    while True:
+                        if not record_started:
+                            record_start = pending.find(_LOG_RECORD_START_BYTES)
+                            if record_start < 0:
+                                keep = len(_LOG_RECORD_START_BYTES) - 1
+                                if keep:
+                                    del pending[:-keep]
+                                else:
+                                    pending.clear()
+                                break
+                            del pending[:record_start]
+                            record_started = True
+
+                        next_record = _find_record_start(
+                            pending,
+                            len(_LOG_RECORD_START_BYTES),
+                        )
+                        if next_record < 0:
                             break
-                        del pending[:record_start]
-                        record_started = True
+                        yield bytes(pending[:next_record])
+                        del pending[:next_record]
 
-                    next_record = _find_record_start(
-                        pending,
-                        len(_LOG_RECORD_START_BYTES),
+                if record_started and pending:
+                    yield bytes(pending)
+
+                return_code = process.wait()
+                if return_code:
+                    _ = stderr_file.seek(0)
+                    raise subprocess.CalledProcessError(
+                        return_code,
+                        command,
+                        stderr=stderr_file.read(),
                     )
-                    if next_record < 0:
-                        break
-                    yield bytes(pending[:next_record])
-                    del pending[:next_record]
-
-            if record_started and pending:
-                yield bytes(pending)
-
-            stderr = process.stderr.read()
-            return_code = process.wait()
-            if return_code:
-                raise subprocess.CalledProcessError(
-                    return_code,
-                    command,
-                    stderr=stderr,
-                )
-        finally:
-            process.stdout.close()
-            process.stderr.close()
-            if process.poll() is None:
-                process.kill()
+            finally:
+                if process.poll() is None:
+                    process.kill()
                 process.wait()
+
+    def iter_commits_from_revision(
+        self,
+        revision: str,
+        start: datetime | None = None,
+        *,
+        revisions_file: Path | None = None,
+    ) -> Generator[GitCommit, None, None]:
+        """Stream a pinned revision/range, optionally excluding stdin revisions."""
+
+        args = ["log", "--full-history", "--diff-merges=first-parent"]
+        if start is not None:
+            query_start = start - _GIT_TIMESTAMP_RESOLUTION
+            args.append(f"--since-as-filter={self._format_git_time(query_start)}")
+        args.extend([
+            f"--format={GIT_LOG_FORMAT}",
+            "--patch", "--no-color", "--no-ext-diff", "--full-index", "--binary",
+        ])
+        if revisions_file is not None:
+            args.append("--stdin")
+        args.extend(["--end-of-options", revision])
+
+        with closing(self._iter_git_records(args, revisions_file)) as records:
+            for record in records:
+                commit = _git_commit_from_record(_parse_git_log_record(record))
+                if start is None or commit.committer_date >= start:
+                    yield commit
 
     @staticmethod
     def _format_git_time(value: datetime) -> str:
@@ -436,7 +497,7 @@ class GitRepo(GitStore):
         start: datetime | None = None,
         end: datetime | None = None,
         include_merges: bool = False,
-    ) -> Iterator[GitCommit]:
+    ) -> Generator[GitCommit, None, None]:
         """Yield commits in ``[start, end)`` with their messages and diffs."""
 
         query_start = start - _GIT_TIMESTAMP_RESOLUTION if start is not None else None
@@ -466,13 +527,14 @@ class GitRepo(GitStore):
             "--binary",
         ])
 
-        for record in self._iter_git_records(args):
-            commit = _git_commit_from_record(_parse_git_log_record(record))
-            if start is not None and commit.committer_date < start:
-                continue
-            if end is not None and commit.committer_date >= end:
-                continue
-            yield commit
+        with closing(self._iter_git_records(args)) as records:
+            for record in records:
+                commit = _git_commit_from_record(_parse_git_log_record(record))
+                if start is not None and commit.committer_date < start:
+                    continue
+                if end is not None and commit.committer_date >= end:
+                    continue
+                yield commit
 
     @override
     def commits_between(
@@ -602,14 +664,18 @@ class GitDb(GitStore):
     def history_kind(self) -> HistoryKind:
         connection = self._connect()
         try:
-            row = connection.execute(
-                """
-                SELECT value FROM database_metadata
-                WHERE key = 'history_kind'
-                """
-            ).fetchone()
+            return self._get_history_kind(connection)
         finally:
             connection.close()
+
+    @staticmethod
+    def _get_history_kind(connection: sqlite3.Connection) -> HistoryKind:
+        row = connection.execute(
+            """
+            SELECT value FROM database_metadata
+            WHERE key = 'history_kind'
+            """
+        ).fetchone()
         if row is None:
             raise RuntimeError("Commit database has no history_kind metadata")
         try:
@@ -691,6 +757,7 @@ class GitDb(GitStore):
         connection = self._connect()
         try:
             with connection:
+                invalidate_update_state(connection)
                 stored = self._store_commits(connection, commits)
                 if history_kind is not None:
                     self._set_history_kind(connection, history_kind)
@@ -712,6 +779,8 @@ class GitDb(GitStore):
         connection = self._connect()
         try:
             with connection:
+                invalidate_update_state(connection)
+                clear_extraction_bounds(connection)
                 _ = connection.execute("DELETE FROM commits")
                 stored = self._store_commits(connection, prepared)
                 if history_kind is not None:
@@ -933,6 +1002,31 @@ def extract_to_db(
     end: datetime | None = None,
 ) -> int:
     """Stream repository commits directly into the SQLite store."""
+
+    if isinstance(repo, GitRepo) and isinstance(db, GitDb):
+        tip_commit = repo.resolve_head()
+        commits = (
+            repo.iter_commits_from_revision(tip_commit, start)
+            if end is None else repo.iter_commits_between(start, end, include_merges=True)
+        )
+        with closing(db._connect()) as connection, connection, closing(commits):
+            _ = connection.execute("BEGIN IMMEDIATE")
+            was_empty = connection.execute("SELECT 1 FROM commits LIMIT 1").fetchone() is None
+            invalidate_update_state(connection)
+            if was_empty:
+                clear_extraction_bounds(connection)
+            stored = db._store_commits(connection, commits)
+            db._set_history_kind(connection, HistoryKind.COMPLETE)
+            if end is not None:
+                write_extraction_bounds(connection, start, end)
+            elif was_empty:
+                write_update_state(
+                    connection,
+                    start_date=start,
+                    tip_commit=tip_commit,
+                    repo_path=str(repo.repo.resolve()),
+                )
+            return stored
 
     commits = repo.iter_commits_between(start, end, include_merges=True)
     if isinstance(db, GitDb):
