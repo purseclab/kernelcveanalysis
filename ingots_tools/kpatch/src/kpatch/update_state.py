@@ -96,7 +96,7 @@ def invalidate_update_state(connection: sqlite3.Connection) -> None:
 
 
 def clear_extraction_bounds(connection: sqlite3.Connection) -> None:
-    """Clear bounds only when replacing the dataset or extracting into an empty DB."""
+    """Clear bounds when replacing data or recording newly verified coverage."""
 
     _ = connection.execute(
         "DELETE FROM database_metadata WHERE key = ?",

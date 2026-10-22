@@ -23,42 +23,8 @@ from kpatch.git import (
     HistoryKind,
     StructuredCommits,
     _SqlitePatchReader,
-    extract_to_db,
     save_commits_to_db,
 )
-
-
-class FakeRepo:
-    def __init__(self, commits: list[GitCommit]):
-        self.commits = commits
-        self.include_merges = False
-
-    def iter_commits_between(
-        self,
-        start: datetime | None = None,
-        end: datetime | None = None,
-        include_merges: bool = False,
-    ) -> Iterator[GitCommit]:
-        self.include_merges = include_merges
-        for commit in self.commits:
-            if commit.is_merge and not include_merges:
-                continue
-            if (start is None or start <= commit.committer_date) and (
-                end is None or commit.committer_date < end
-            ):
-                yield commit
-
-
-class FakeDb:
-    def __init__(self) -> None:
-        self.commits: list[GitCommit] = []
-
-    def store_commits(self, commits: Iterable[GitCommit]) -> int:
-        count = 0
-        for commit in commits:
-            self.commits.append(commit)
-            count += 1
-        return count
 
 
 class GitRepoTests(unittest.TestCase):
@@ -145,14 +111,6 @@ class GitDbTests(unittest.TestCase):
 
             db.replace_commits([commit], HistoryKind.SPARSE)
             self.assertIs(db.history_kind, HistoryKind.SPARSE)
-
-    def test_extract_marks_real_database_as_complete(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            db = GitDb(Path(directory) / "commits.sqlite")
-
-            extract_to_db(FakeRepo([]), db)
-
-            self.assertIs(db.history_kind, HistoryKind.COMPLETE)
 
     def test_existing_database_requires_history_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -816,39 +774,6 @@ class SaveCommitsToDbTests(unittest.TestCase):
             print_saved.assert_not_called()
             self.assertEqual(db.commits_between(), [stale])
             self.assertIs(db.history_kind, HistoryKind.COMPLETE)
-
-
-class ExtractToDbTests(unittest.TestCase):
-    def test_streams_commits_into_db(self) -> None:
-        start = datetime(2024, 1, 1, tzinfo=UTC)
-        end = start + timedelta(days=1)
-        commits = [
-            GitCommit("at-start", "", "", start, start, (), ""),
-            GitCommit(
-                "merge",
-                "",
-                "",
-                start,
-                start + timedelta(hours=1),
-                (
-                    CommitParent("parent-1", "first diff"),
-                    CommitParent("parent-2", ""),
-                ),
-                "",
-            ),
-            GitCommit("at-end", "", "", end, end, (), ""),
-        ]
-        repo = FakeRepo(commits)
-        db = FakeDb()
-
-        processed = extract_to_db(repo, db, start, end)
-
-        self.assertEqual(processed, 2)
-        self.assertEqual(
-            [commit.commit_id for commit in db.commits],
-            ["at-start", "merge"],
-        )
-        self.assertTrue(repo.include_merges)
 
 
 if __name__ == "__main__":

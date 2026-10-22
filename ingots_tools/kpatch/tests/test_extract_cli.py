@@ -9,12 +9,12 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from kpatch.add import AddResult
+from kpatch.extract import ExtractResult
 from kpatch.cli import app
 from kpatch.git import GitDb
 
 
-class AddCliTests(unittest.TestCase):
+class ExtractCliTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -22,11 +22,11 @@ class AddCliTests(unittest.TestCase):
         self.database_path = self.directory / "commits.sqlite"
         self.database_path.touch()
         self.arguments = [
-            "add", "--repo", str(self.directory), "--db", str(self.database_path),
+            "extract", "--repo", str(self.directory), "--db", str(self.database_path),
         ]
         self.start = datetime(2026, 1, 1, tzinfo=UTC)
         self.end = datetime(2026, 2, 1, tzinfo=UTC)
-        self.outcome = AddResult(
+        self.outcome = ExtractResult(
             added_commits=7, total_commits=107,
             start_date=self.start, end_date=self.end, tip_commit="a" * 40,
         )
@@ -34,7 +34,7 @@ class AddCliTests(unittest.TestCase):
     def test_explicit_dates_are_forwarded_and_counts_are_reported(self) -> None:
         with (
             patch("kpatch.cli.GitDb") as database,
-            patch("kpatch.cli.add_to_db", return_value=self.outcome) as add,
+            patch("kpatch.cli.extract_to_db", return_value=self.outcome) as extract,
             patch("kpatch.cli.run_filter") as filter_commits,
         ):
             result = CliRunner().invoke(
@@ -42,43 +42,66 @@ class AddCliTests(unittest.TestCase):
             )
         self.assertEqual(result.exit_code, 0, result.output)
         database.assert_called_once_with(self.database_path)
-        add.assert_called_once()
-        repository, passed_database, start, end = add.call_args.args
+        extract.assert_called_once()
+        repository, passed_database, start, end = extract.call_args.args
         self.assertEqual(repository.repo, self.directory)
         self.assertIs(passed_database, database.return_value)
         self.assertEqual(start, self.start)
         self.assertEqual(end, self.end)
-        self.assertEqual(add.call_args.kwargs, {
+        self.assertEqual(extract.call_args.kwargs, {
             "start_at_stored_end": False, "end_at_stored_start": False,
         })
         filter_commits.assert_not_called()
         self.assertIn("Added 7 commits; 107 total", result.output)
 
+    def test_no_bounds_forwards_none_for_full_history(self) -> None:
+        with (
+            patch("kpatch.cli.GitDb") as database,
+            patch("kpatch.cli.extract_to_db", return_value=self.outcome) as extract,
+        ):
+            result = CliRunner().invoke(app, self.arguments)
+        self.assertEqual(result.exit_code, 0, result.output)
+        repository, passed_database, start, end = extract.call_args.args
+        self.assertEqual(repository.repo, self.directory)
+        self.assertIs(passed_database, database.return_value)
+        self.assertIsNone(start)
+        self.assertIsNone(end)
+        self.assertEqual(extract.call_args.kwargs, {
+            "start_at_stored_end": False, "end_at_stored_start": False,
+        })
+
+    def test_add_is_not_a_command(self) -> None:
+        with patch("kpatch.cli.extract_to_db") as extract:
+            result = CliRunner().invoke(app, ["add", *self.arguments[1:]])
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("No such command", result.output)
+        extract.assert_not_called()
+
     def test_start_at_stored_end_flag_is_forwarded(self) -> None:
         with (
             patch("kpatch.cli.GitDb"),
-            patch("kpatch.cli.add_to_db", return_value=self.outcome) as add,
+            patch("kpatch.cli.extract_to_db", return_value=self.outcome) as extract,
         ):
             result = CliRunner().invoke(
                 app, self.arguments + ["--start-at-stored-end", "--end", "02-01-2026"],
             )
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(add.call_args.args[2:], (None, self.end))
-        self.assertEqual(add.call_args.kwargs, {
+        self.assertEqual(extract.call_args.args[2:], (None, self.end))
+        self.assertEqual(extract.call_args.kwargs, {
             "start_at_stored_end": True, "end_at_stored_start": False,
         })
 
     def test_end_at_stored_start_flag_is_forwarded(self) -> None:
         with (
             patch("kpatch.cli.GitDb"),
-            patch("kpatch.cli.add_to_db", return_value=self.outcome) as add,
+            patch("kpatch.cli.extract_to_db", return_value=self.outcome) as extract,
         ):
             result = CliRunner().invoke(
                 app, self.arguments + ["--start", "01-01-2026", "--end-at-stored-start"],
             )
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(add.call_args.args[2:], (self.start, None))
-        self.assertEqual(add.call_args.kwargs, {
+        self.assertEqual(extract.call_args.args[2:], (self.start, None))
+        self.assertEqual(extract.call_args.kwargs, {
             "start_at_stored_end": False, "end_at_stored_start": True,
         })
 
@@ -87,17 +110,17 @@ class AddCliTests(unittest.TestCase):
             with (
                 self.subTest(option=option),
                 patch("kpatch.cli.GitDb") as database,
-                patch("kpatch.cli.add_to_db") as add,
+                patch("kpatch.cli.extract_to_db") as extract,
             ):
                 result = CliRunner().invoke(app, self.arguments + [option, "not-a-date"])
                 self.assertEqual(result.exit_code, 1)
-                self.assertIn("Add failed", result.output)
+                self.assertIn("Extraction failed", result.output)
                 database.assert_not_called()
-                add.assert_not_called()
+                extract.assert_not_called()
 
     def test_validation_and_operational_failures_have_nonzero_exit(self) -> None:
         failures = [
-            ValueError("A range bound is required"),
+            ValueError("The requested range is disjoint"),
             RuntimeError("Invalid coverage metadata"),
             sqlite3.OperationalError("database is locked"),
             OSError("scratch disk is full"),
@@ -107,13 +130,13 @@ class AddCliTests(unittest.TestCase):
             with (
                 self.subTest(failure=failure),
                 patch("kpatch.cli.GitDb"),
-                patch("kpatch.cli.add_to_db", side_effect=failure),
+                patch("kpatch.cli.extract_to_db", side_effect=failure),
             ):
                 result = CliRunner().invoke(
                     app, self.arguments + ["--start", "01-01-2026"],
                 )
                 self.assertEqual(result.exit_code, 1)
-                self.assertIn("Add failed", result.output)
+                self.assertIn("Extraction failed", result.output)
 
     def test_creates_fresh_database_and_supports_repeat_and_backward_extension(self) -> None:
         repository = self.directory / "repository"
@@ -134,7 +157,7 @@ class AddCliTests(unittest.TestCase):
                 env=environment, check=True,
             )
         database = self.directory / "new.sqlite"
-        arguments = ["add", "--repo", str(repository), "--db", str(database)]
+        arguments = ["extract", "--repo", str(repository), "--db", str(database)]
         first = CliRunner().invoke(
             app, arguments + ["--start", "01-02-2026", "--end", "01-03-2026"],
         )
@@ -152,13 +175,13 @@ class AddCliTests(unittest.TestCase):
         self.assertEqual(len(GitDb(database).commits_between()), 2)
 
     def test_missing_repository_is_rejected(self) -> None:
-        with patch("kpatch.cli.add_to_db") as add:
+        with patch("kpatch.cli.extract_to_db") as extract:
             result = CliRunner().invoke(app, [
-                "add", "--repo", str(self.directory / "missing"),
+                "extract", "--repo", str(self.directory / "missing"),
                 "--db", str(self.database_path), "--start", "01-01-2026",
             ])
         self.assertEqual(result.exit_code, 2)
-        add.assert_not_called()
+        extract.assert_not_called()
 
 
 if __name__ == "__main__":

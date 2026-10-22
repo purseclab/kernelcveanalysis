@@ -12,7 +12,8 @@ from typing import BinaryIO, Generator, Literal
 import unittest
 from unittest.mock import patch
 
-from kpatch.git import GitCommit, GitDb, GitRepo, HistoryKind, extract_to_db
+from kpatch.extract import ExtractResult, extract_to_db
+from kpatch.git import GitCommit, GitDb, GitRepo, HistoryKind
 from kpatch.update import update_to_db
 from kpatch.update_state import (
     UPDATE_STATE_KEY,
@@ -244,8 +245,10 @@ class IncrementalUpdateTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
 
     def test_unbounded_extraction_persists_pinned_provenance(self) -> None:
-        count = extract_to_db(self.repo, self.db, START)
-        self.assertEqual(count, 1)
+        result = extract_to_db(self.repo, self.db, START)
+        self.assertIsInstance(result, ExtractResult)
+        self.assertEqual(result.added_commits, 1)
+        self.assertEqual(result.total_commits, 1)
         state = self.state()
         assert state is not None
         self.assertEqual(state.start_date, START)
@@ -300,20 +303,22 @@ class IncrementalUpdateTests(unittest.TestCase):
         pull.assert_not_called()
         self.assertEqual(self.snapshot(), before)
 
-    def test_nonempty_extraction_preserves_known_bounds(self) -> None:
+    def test_unbounded_extension_promotes_bounds_to_pinned_update_state(self) -> None:
         extract_to_db(self.repo, self.db, START, TIP_DATE + timedelta(days=1))
         with closing(self.db._connect()) as connection:
-            bounds = read_extraction_bounds(connection)
-        extract_to_db(self.repo, self.db, START)
-        self.assertIsNone(self.state())
+            self.assertIsNotNone(read_extraction_bounds(connection))
+        previous_lines = self.stored_lines()
+        result = extract_to_db(self.repo, self.db, START)
+        self.assertEqual(result.added_commits, 0)
+        self.assertEqual(result.total_commits, 1)
+        self.assertEqual(self.stored_lines(), previous_lines)
         with closing(self.db._connect()) as connection:
-            self.assertEqual(read_extraction_bounds(connection), bounds)
-        with (
-            patch.object(self.repo, "pull_ff_only") as pull,
-            self.assertRaisesRegex(ValueError, "capped"),
-        ):
-            update_to_db(self.repo, self.db, START)
-        pull.assert_not_called()
+            self.assertIsNone(read_extraction_bounds(connection))
+        state = self.state()
+        assert state is not None
+        self.assertEqual(state.start_date, START)
+        self.assertEqual(state.tip_commit, self.initial_tip)
+        self.assertEqual(update_to_db(self.repo, self.db, pull=False).added_commits, 0)
 
     def test_empty_unbounded_extraction_can_clear_previous_bounds(self) -> None:
         extract_to_db(self.repo, self.db, START, START + timedelta(days=1))
@@ -326,13 +331,21 @@ class IncrementalUpdateTests(unittest.TestCase):
         self.assertIsNotNone(self.state())
         self.assertEqual(update_to_db(self.repo, self.db, pull=False).added_commits, 0)
 
-    def test_extracting_into_nonempty_database_does_not_claim_new_provenance(self) -> None:
+    def test_contained_reextraction_preserves_scores_and_original_provenance(self) -> None:
         extract_to_db(self.repo, self.db, START)
-        self.assertIsNotNone(self.state())
-        extract_to_db(self.repo, self.db, START + timedelta(days=1))
-        self.assertIsNone(self.state())
-        with self.assertRaisesRegex(ValueError, "provide --start"):
-            update_to_db(self.repo, self.db, pull=False)
+        with closing(self.db._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE commits SET score = ?, ratings_json = ? WHERE commit_id = ?",
+                (0.75, '{ "retained" : 0.75 }', self.initial_tip),
+            )
+        previous_state = self.state()
+        before = self.snapshot()
+        result = extract_to_db(self.repo, self.db, START + timedelta(days=1))
+        self.assertEqual(result.added_commits, 0)
+        self.assertEqual(result.start_date, START)
+        self.assertEqual(self.state(), previous_state)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(update_to_db(self.repo, self.db, pull=False).added_commits, 0)
 
     def test_bounded_marker_and_invalidation_roll_back_with_failed_writes(self) -> None:
         for operation in ("store", "replace"):
@@ -435,6 +448,7 @@ class IncrementalUpdateTests(unittest.TestCase):
     def test_normal_store_and_replace_invalidate_state_atomically(self) -> None:
         for operation in ("store", "replace"):
             with self.subTest(operation=operation):
+                self.db = GitDb(self.directory / f"invalidate-{operation}.sqlite")
                 extract_to_db(self.repo, self.db, START)
                 update_to_db(self.repo, self.db, START, pull=False)
                 self.assertIsNotNone(self.state())

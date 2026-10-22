@@ -8,11 +8,11 @@ from dotenv import load_dotenv
 import typer
 
 from .dataset import load_git_commits
-from .git import GitDb, GitRepo, extract_to_db, parse_time, save_commits_to_db, load_commits_from_db
+from .git import GitDb, GitRepo, parse_time, save_commits_to_db, load_commits_from_db
 from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, JevFilter, CountFilter
 from .visualization import show_commit_sunburst
 from .update import update_to_db
-from .add import add_to_db
+from .extract import extract_to_db
 
 app = typer.Typer()
 filter_app = typer.Typer()
@@ -26,20 +26,8 @@ def load_environment() -> None:
     _ = load_dotenv(Path.cwd() / ".env", override=False)
 
 
-@app.command("extract", help="Extract commits from linux repo into sqlite database.")
+@app.command("extract", help="Create or extend a continuous raw commit range, preserving existing commits.")
 def extract_commits(
-    repo: Annotated[Path, typer.Option(help="Path to linux git repo.")],
-    db: Annotated[Path, typer.Option(help="Path to sqlite database to extract commits to.")],
-    start: Annotated[str | None, typer.Option(help="Start date for extracting commits. (mm-dd-yyyy format)")] = None,
-    end: Annotated[str | None, typer.Option(help="End date for extracting commits. (mm-dd-yyyy format)")] = None,
-):
-    start_date = parse_time(start) if start is not None else None
-    end_date = parse_time(end) if end is not None else None
-    processed = extract_to_db(GitRepo(repo), GitDb(db), start_date, end_date)
-    print(f"stored {processed} commits to database `{str(db)}`.")
-
-@app.command("add", help="Add a date range without duplicates; reject gaps in raw database coverage.")
-def add_commits(
     repo: Annotated[Path, typer.Option(exists=True, file_okay=False, help="Path to Linux Git checkout (uses current HEAD; no pull).")],
     db: Annotated[Path, typer.Option(dir_okay=False, help="SQLite database to create or extend.")],
     start: Annotated[str | None, typer.Option(help="Inclusive UTC start date (mm-dd-yyyy); omitted means all history.")] = None,
@@ -50,13 +38,13 @@ def add_commits(
     try:
         start_date = parse_time(start) if start is not None else None
         end_date = parse_time(end) if end is not None else None
-        result = add_to_db(
+        result = extract_to_db(
             GitRepo(repo), GitDb(db), start_date, end_date,
             start_at_stored_end=start_at_stored_end,
             end_at_stored_start=end_at_stored_start,
         )
     except (ValueError, RuntimeError, OSError, sqlite3.Error, subprocess.CalledProcessError) as error:
-        typer.echo(f"Add failed: {error}", err=True)
+        typer.echo(f"Extraction failed: {error}", err=True)
         raise typer.Exit(1) from error
 
     typer.echo(f"Added {result.added_commits} commits; {result.total_commits} total in `{db}`.")

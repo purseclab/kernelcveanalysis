@@ -24,8 +24,6 @@ from .diff import Diff
 from .update_state import (
     clear_extraction_bounds,
     invalidate_update_state,
-    write_extraction_bounds,
-    write_update_state,
 )
 
 GIT_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
@@ -1033,44 +1031,6 @@ class StructuredCommits:
             root_commits=root_commits,
             leaf_commits=leaf_commits,
         )
-
-
-
-
-def extract_to_db(
-    repo: GitRepo,
-    db: GitDb,
-    start: datetime | None = None,
-    end: datetime | None = None,
-) -> int:
-    """Stream repository commits directly into the SQLite store."""
-
-    if isinstance(repo, GitRepo) and isinstance(db, GitDb):
-        tip_commit = repo.resolve_head()
-        commits = repo.iter_commits_from_revision(tip_commit, start, end=end)
-        with closing(db._connect()) as connection, connection, closing(commits):
-            _ = connection.execute("BEGIN IMMEDIATE")
-            was_empty = connection.execute("SELECT 1 FROM commits LIMIT 1").fetchone() is None
-            invalidate_update_state(connection)
-            if was_empty:
-                clear_extraction_bounds(connection)
-            stored = db._store_commits(connection, commits)
-            db._set_history_kind(connection, HistoryKind.COMPLETE)
-            if end is not None:
-                write_extraction_bounds(connection, start, end, tip_commit=tip_commit)
-            elif was_empty:
-                write_update_state(
-                    connection,
-                    start_date=start,
-                    tip_commit=tip_commit,
-                    repo_path=str(repo.repo.resolve()),
-                )
-            return stored
-
-    commits = repo.iter_commits_between(start, end, include_merges=True)
-    if isinstance(db, GitDb):
-        return db.store_commits(commits, HistoryKind.COMPLETE)
-    return db.store_commits(commits)
 
 
 def _path_for_db_name(db_name: str) -> Path:

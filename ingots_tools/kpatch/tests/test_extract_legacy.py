@@ -5,14 +5,14 @@ import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 
-from kpatch.add import add_to_db
-from kpatch.git import GitDb, GitRepo, extract_to_db
+from kpatch.extract import ExtractResult, extract_to_db
+from kpatch.git import GitDb, GitRepo
 from kpatch.update_state import read_extraction_bounds
 
-from test_add import day, git
+from test_extract import day, git
 
 
-class LegacyBoundedAddTests(unittest.TestCase):
+class LegacyBoundedExtractTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -46,7 +46,8 @@ class LegacyBoundedAddTests(unittest.TestCase):
             return tuple(connection.iterdump())
 
     def test_legacy_bounds_accept_reachable_history_and_upgrade_provenance(self) -> None:
-        result = add_to_db(self.repo, self.db, day(1), day(5))
+        result = extract_to_db(self.repo, self.db, day(1), day(5))
+        self.assertIsInstance(result, ExtractResult)
         self.assertEqual(result.added_commits, 2)
         with closing(self.db._connect()) as connection:
             bounds = read_extraction_bounds(connection)
@@ -57,7 +58,7 @@ class LegacyBoundedAddTests(unittest.TestCase):
         before = self.snapshot()
         git(self.repository, "checkout", "--detach", self.ids[2])
         with self.assertRaisesRegex(ValueError, "diverges"):
-            add_to_db(self.repo, self.db, day(1), day(4))
+            extract_to_db(self.repo, self.db, day(1), day(4))
         self.assertEqual(self.snapshot(), before)
 
     def test_legacy_bounds_reject_divergence_preserving_database(self) -> None:
@@ -65,7 +66,7 @@ class LegacyBoundedAddTests(unittest.TestCase):
         git(self.repository, "checkout", "--detach", self.ids[2])
         git(self.repository, "commit", "--allow-empty", "-q", "-m", "diverged", date=day(4))
         with self.assertRaisesRegex(ValueError, "diverges"):
-            add_to_db(self.repo, self.db, day(1), day(5))
+            extract_to_db(self.repo, self.db, day(1), day(5))
         self.assertEqual(self.snapshot(), before)
 
     def test_legacy_bounds_reject_missing_ids_preserving_database(self) -> None:
@@ -77,7 +78,7 @@ class LegacyBoundedAddTests(unittest.TestCase):
         git(unrelated, "config", "user.email", "other@example.test")
         git(unrelated, "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-q", "-m", "other", date=day(3))
         with self.assertRaises(subprocess.CalledProcessError):
-            add_to_db(GitRepo(unrelated), self.db, day(1), day(5))
+            extract_to_db(GitRepo(unrelated), self.db, day(1), day(5))
         self.assertEqual(self.snapshot(), before)
 
     def test_contains_commits_checks_stdin_ids_as_positive_revisions(self) -> None:

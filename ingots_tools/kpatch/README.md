@@ -12,54 +12,55 @@ Since kernel requires patch before issuing cve.
 
 ## Linux patch extraction and incremental updates
 
-The raw, pre-filtering database is `db/all_commits.sqlite`. Extract an initial
-uncapped history from a chosen UTC start date:
+The raw, pre-filtering database is `db/all_commits.sqlite`. The `extract` command
+creates a database or extends its continuous date range, inserting only missing
+commits and preserving existing patches, scores, and ratings:
 
 ```console
 uv run kpatch extract --repo linux --db db/all_commits.sqlite --start 01-01-2026
 ```
 
-### Add or extend a continuous date range
+### Extract or extend a continuous date range
 
-Use `add` to backfill or extend a raw database without overwriting existing
-commits, patches, scores, or ratings. For example, extend the existing source
-back to January 1, 2024 and include everything through the checkout's HEAD:
+Use the same command to backfill an existing database. For example, extend the
+source back to January 1, 2024 and include everything through the checkout's HEAD:
 
 ```console
-uv run kpatch add --repo linux --db db/all_commits.sqlite --start 01-01-2024
+uv run kpatch extract --repo linux --db db/all_commits.sqlite --start 01-01-2024
 ```
 
 Dates are UTC **committer dates**, in `mm-dd-yyyy` format. Ranges include the
 start and exclude the end. Omitting `--start` means all earlier history;
-omitting `--end` means through HEAD. `add` uses the current checkout and does
-not pull; run `git -C linux pull --ff-only` first if needed.
+omitting `--end` means through HEAD. With neither date, `extract` includes the
+entire history. It uses the current checkout and does not pull; run
+`git -C linux pull --ff-only` first if needed.
 
 ```console
 # Create a database or add an overlapping/adjacent explicit range:
-uv run kpatch add --repo linux --db db/all_commits.sqlite --start 01-01-2024 --end 01-01-2025
+uv run kpatch extract --repo linux --db db/all_commits.sqlite --start 01-01-2024 --end 01-01-2025
 
 # Add only the earlier date interval, up to the stored coverage boundary:
-uv run kpatch add --repo linux --db db/all_commits.sqlite --start 01-01-2023 --end-at-stored-start
+uv run kpatch extract --repo linux --db db/all_commits.sqlite --start 01-01-2023 --end-at-stored-start
 
 # Extend forward from the stored coverage boundary through HEAD:
-uv run kpatch add --repo linux --db db/all_commits.sqlite --start-at-stored-end
+uv run kpatch extract --repo linux --db db/all_commits.sqlite --start-at-stored-end
 
 # Extend forward to an exclusive end date:
-uv run kpatch add --repo linux --db db/all_commits.sqlite --start-at-stored-end --end 01-01-2027
+uv run kpatch extract --repo linux --db db/all_commits.sqlite --start-at-stored-end --end 01-01-2027
 
 # Extend backward through all earlier history:
-uv run kpatch add --repo linux --db db/all_commits.sqlite --end-at-stored-start
+uv run kpatch extract --repo linux --db db/all_commits.sqlite --end-at-stored-start
 ```
 
-- At least one date or stored-boundary flag is required. Each flag conflicts
-  with its corresponding explicit date. Stored-boundary flags require existing
+- Each stored-boundary flag conflicts with its corresponding explicit date.
+  Stored-boundary flags require existing
   commits; for an open coverage endpoint they use the earliest/latest stored
   committer timestamp instead.
 - New and stored date ranges must overlap or touch. A disjoint range fails
   without changing rows or coverage metadata. Continuity refers to **requested
   date coverage**, not whether every day actually contains a commit.
 - Existing nonempty databases must have complete, recorded extraction coverage
-  (from `extract`, `add`, or a synchronized `update`). Sparse/filtered databases
+  (from `extract` or a synchronized `update`). Sparse/filtered databases
   and databases with unknown coverage are rejected rather than guessing from
   their earliest/latest commit timestamps.
 - The combined continuous range is scanned at a pinned HEAD, inserting only
@@ -69,7 +70,7 @@ uv run kpatch add --repo linux --db db/all_commits.sqlite --end-at-stored-start
   recorded tip is rejected. Rows and coverage are committed atomically.
 - An open-ended result records the expanded start boundary and synchronization
   checkpoint, so subsequent `update` commands need no `--start`. A bounded
-  result remains end-capped; extend it through HEAD with `add` before using
+  result remains end-capped; extend it through HEAD with `extract` before using
   `update`.
 
 ### Incremental updates

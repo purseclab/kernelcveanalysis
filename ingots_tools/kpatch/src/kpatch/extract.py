@@ -1,4 +1,4 @@
-"""Atomically extend a complete raw database's continuous date coverage."""
+"""Create or atomically extend a raw database's continuous date coverage."""
 
 from contextlib import closing
 from dataclasses import dataclass
@@ -18,7 +18,7 @@ from .update_state import (
 
 
 @dataclass(frozen=True, slots=True)
-class AddResult:
+class ExtractResult:
     added_commits: int
     total_commits: int
     start_date: datetime | None
@@ -59,7 +59,7 @@ def _load_coverage(
     bounds = read_extraction_bounds(connection)
     state = read_update_state(connection)
     if kind is HistoryKind.SPARSE or (kind is HistoryKind.UNKNOWN and dates.first is not None):
-        raise ValueError("Range additions require a COMPLETE raw commit database")
+        raise ValueError("Extraction requires a COMPLETE raw commit database")
     coverage: _Coverage | None = None
     if bounds is not None:
         coverage = _Coverage(bounds.start_date, bounds.end_date, bounds.tip_commit)
@@ -68,7 +68,7 @@ def _load_coverage(
     elif dates.first is not None:
         raise ValueError(
             "Stored date coverage is unknown; commit timestamps alone cannot prove "
-            "continuous coverage. Use a database created by extract or add."
+            "continuous coverage. Use a database created by extract."
         )
     if coverage is not None and dates.first is not None and dates.last is not None:
         if (
@@ -171,7 +171,7 @@ def _write_coverage(
         )
 
 
-def add_to_db(
+def extract_to_db(
     repo: GitRepo,
     db: GitDb,
     start: datetime | None = None,
@@ -179,17 +179,16 @@ def add_to_db(
     *,
     start_at_stored_end: bool = False,
     end_at_stored_start: bool = False,
-) -> AddResult:
-    """Add ``[start, end)`` from HEAD, rejecting gaps and preserving stored IDs.
+) -> ExtractResult:
+    """Extract ``[start, end)`` from HEAD, rejecting gaps and preserving stored IDs.
 
-    Omitted dates mean all history / through HEAD. Stored-boundary flags use
+    Omitted dates mean all history / through HEAD; omitting both extracts the
+    entire history. Stored-boundary flags use
     recorded coverage endpoints, falling back to commit timestamps for open
     endpoints. The entire union is scanned, so advancing HEAD also picks up
     late merges inside previously covered dates. No pull is performed.
     """
 
-    if start is None and end is None and not start_at_stored_end and not end_at_stored_start:
-        raise ValueError("Specify --start, --end, or a stored-boundary flag")
     if start is not None and start_at_stored_end:
         raise ValueError("--start conflicts with --start-at-stored-end")
     if end is not None and end_at_stored_start:
@@ -212,4 +211,4 @@ def add_to_db(
         db._set_history_kind(connection, HistoryKind.COMPLETE)
         _write_coverage(connection, coverage, tip, repo)
         row = connection.execute("SELECT COUNT(*) FROM commits").fetchone()
-        return AddResult(added, cast(int, row[0]), coverage.start, coverage.end, tip)
+        return ExtractResult(added, cast(int, row[0]), coverage.start, coverage.end, tip)
