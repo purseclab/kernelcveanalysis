@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.purdue.kpoc.verify">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="33" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:debuggable="true" android:label="kpoc verify">
+        <activity
+            android:name=".RunActivity"
+            android:exported="true" />
+    </application>
+</manifest>

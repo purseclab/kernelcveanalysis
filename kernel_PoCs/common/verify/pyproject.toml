@@ -1,0 +1,31 @@
+[project]
+name = "verify-kernel-poc"
+version = "0.1.0"
+description = "Verify kernel_PoCs/common wrapped exploits on Android Cuttlefish"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.21",
+    "cuttle_cli",
+    "cuttle_types",
+]
+
+[project.scripts]
+verify-kernel-poc = "verify_kernel_poc.cli:main"
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+cuttle_cli = { path = "../../../ingots_tools/cuttle_server/cuttle_cli", editable = true }
+cuttle_types = { path = "../../../ingots_tools/cuttle_server/cuttle_types", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+verify_kernel_poc = ["assets/*.apk"]
