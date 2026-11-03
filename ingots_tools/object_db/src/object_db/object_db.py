@@ -1,54 +1,61 @@
+import sqlite3
 from pathlib import Path
-from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, create_engine, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
-from sqlalchemy.types import JSON
+from sqlalchemy import Boolean, ForeignKey, Integer, String, create_engine, select, text
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
-from .btf_types import BtfType as DomainBtfType, BtfTypes
 from .codeql import CodeQlKmallocCallResult
+from .type_graph import TypeGraph, TypeInfo, TypeKind, TypeMember
 
 OBJECT_DB_FILE_NAME = "object_db.sqlite"
+SCHEMA_VERSION = 2
 
 
 class Base(DeclarativeBase):
     pass
 
 
-class DBBtfType(Base):
-    __tablename__ = "btf_types"
+class DBType(Base):
+    __tablename__ = "types"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String)
     name: Mapped[str] = mapped_column(String)
-    type_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    bits_offset: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    nr_bits: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    encoding: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    index_type_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    nr_elems: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    vlen: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    members: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    values_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    fwd_kind: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    ret_type_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    params: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    vars: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    linkage: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    component_idx: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String)
+    size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    alignment: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    referenced_type_id: Mapped[int | None] = mapped_column(
+        ForeignKey("types.id", deferrable=True, initially="DEFERRED"),
+        nullable=True,
+        index=True,
+    )
+    element_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    location: Mapped[str] = mapped_column(String)
+    is_anon: Mapped[bool] = mapped_column(Boolean)
+
+
+class DBTypeMember(Base):
+    __tablename__ = "fields"
+
+    # One owner/index can have several extracted types or layouts across TUs.
+    # Preserve every exported alternative rather than choosing one implicitly.
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    owner_type_id: Mapped[int] = mapped_column(ForeignKey("types.id"))
+    index: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String)
+    type_id: Mapped[int] = mapped_column(ForeignKey("types.id"))
+    byte_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bit_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bitfield_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class DBHeapObject(Base):
     __tablename__ = "objects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    type_id: Mapped[int] = mapped_column(ForeignKey("btf_types.id"))
+    type_id: Mapped[int] = mapped_column(ForeignKey("types.id"), unique=True)
     location: Mapped[str] = mapped_column(String)
     source_code: Mapped[str] = mapped_column(String)
     is_anon: Mapped[bool] = mapped_column(Boolean)
-
-    btf_type: Mapped[DBBtfType] = relationship(foreign_keys=[type_id])
 
 
 class DBKmallocCall(Base):
@@ -57,22 +64,24 @@ class DBKmallocCall(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     call_site: Mapped[str] = mapped_column(String)
     call_type: Mapped[str] = mapped_column(String)
+    type_id: Mapped[int] = mapped_column(ForeignKey("types.id"))
     struct_type: Mapped[str] = mapped_column(String)
     struct_def: Mapped[str] = mapped_column(String)
-    struct_size: Mapped[int] = mapped_column(Integer)
+    struct_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     flags: Mapped[str] = mapped_column(String)
-    alloc_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    alloc_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_flexible: Mapped[bool] = mapped_column(Boolean)
-    kmalloc_cache_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-
-    heap_object_id: Mapped[Optional[int]] = mapped_column(ForeignKey("objects.id"), nullable=True)
-    heap_object: Mapped[Optional[DBHeapObject]] = relationship(foreign_keys=[heap_object_id])
+    kmalloc_cache_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    heap_object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objects.id"), nullable=True
+    )
 
     @classmethod
-    def from_codeql_result(cls, result: CodeQlKmallocCallResult):
+    def from_codeql_result(cls, result: CodeQlKmallocCallResult) -> "DBKmallocCall":
         return cls(
             call_site=str(result.call_site),
             call_type=result.call_type.value,
+            type_id=result.type_id,
             struct_type=result.struct_type,
             struct_def=str(result.struct_def),
             struct_size=result.struct_size,
@@ -84,184 +93,112 @@ class DBKmallocCall(Base):
 
 
 class ObjectDb:
-    def __init__(self, db_path: Path):
-        self.engine = create_engine(f"sqlite:///{db_path}")
-        Base.metadata.create_all(self.engine)
+    def __init__(self, db_path: Path, *, read_only: bool = False):
+        resolved_path = db_path.expanduser().resolve()
+        mode = "ro" if read_only else "rwc"
 
-    def close(self):
+        def connect() -> sqlite3.Connection:
+            connection = sqlite3.connect(
+                f"{resolved_path.as_uri()}?mode={mode}", uri=True
+            )
+            connection.execute("PRAGMA foreign_keys=ON")
+            return connection
+
+        self.engine = create_engine("sqlite://", creator=connect)
+        try:
+            self._initialize(read_only)
+        except Exception:
+            self.close()
+            raise
+
+    def _initialize(self, read_only: bool) -> None:
+        with self.engine.connect() as connection:
+            version = connection.scalar(text("PRAGMA user_version"))
+            tables = connection.scalar(
+                text("SELECT count(*) FROM sqlite_master WHERE type='table'")
+            )
+        if tables and version != SCHEMA_VERSION:
+            raise ValueError(
+                "Unsupported object_db schema. Rebuild this database with objectdb create (CodeQL only)."
+            )
+        if read_only:
+            if not tables:
+                raise ValueError(
+                    "Empty object_db. Rebuild this database with objectdb create."
+                )
+            return
+        Base.metadata.create_all(self.engine)
+        with self.engine.begin() as connection:
+            connection.execute(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
+
+    def close(self) -> None:
         self.engine.dispose()
 
-    def save_kmalloc_call(self, call: DBKmallocCall):
+    def save_type_graph(self, graph: TypeGraph) -> None:
         with Session(self.engine) as session:
-            session.add(call)
+            session.add_all(
+                DBType(**record.model_dump()) for record in graph.types.values()
+            )
+            session.flush()
+            session.add_all(
+                DBTypeMember(**member.model_dump())
+                for type_id in graph.types
+                for member in graph.members_of(type_id)
+            )
+            session.commit()
+
+    def load_type_graph(self) -> TypeGraph:
+        with Session(self.engine) as session:
+            types = [
+                TypeInfo(
+                    id=row.id,
+                    name=row.name,
+                    kind=TypeKind(row.kind),
+                    size=row.size,
+                    alignment=row.alignment,
+                    referenced_type_id=row.referenced_type_id,
+                    element_count=row.element_count,
+                    location=row.location,
+                    is_anon=row.is_anon,
+                )
+                for row in session.scalars(select(DBType).order_by(DBType.id))
+            ]
+            members = [
+                TypeMember(
+                    owner_type_id=row.owner_type_id,
+                    index=row.index,
+                    name=row.name,
+                    type_id=row.type_id,
+                    byte_offset=row.byte_offset,
+                    bit_offset=row.bit_offset,
+                    bitfield_size=row.bitfield_size,
+                )
+                for row in session.scalars(
+                    select(DBTypeMember).order_by(DBTypeMember.index)
+                )
+            ]
+        return TypeGraph(types, members)
+
+    def save_heap_objects(self, objects: list[DBHeapObject]) -> None:
+        with Session(self.engine) as session:
+            session.add_all(objects)
+            session.commit()
+
+    def save_kmalloc_calls(self, calls: list[DBKmallocCall]) -> None:
+        with Session(self.engine) as session:
+            session.add_all(calls)
             session.commit()
 
     def get_all_kmalloc_calls(self) -> list[DBKmallocCall]:
         with Session(self.engine) as session:
-            stmt = select(DBKmallocCall)
-            return list(session.scalars(stmt).all())
+            return list(
+                session.scalars(select(DBKmallocCall).order_by(DBKmallocCall.id))
+            )
 
     def get_all_heap_objects(self) -> list[DBHeapObject]:
         with Session(self.engine) as session:
-            stmt = select(DBHeapObject)
-            return list(session.scalars(stmt).all())
+            return list(session.scalars(select(DBHeapObject).order_by(DBHeapObject.id)))
 
-    def get_heap_object(self, obj_id: int) -> Optional[DBHeapObject]:
+    def get_heap_object(self, obj_id: int) -> DBHeapObject | None:
         with Session(self.engine) as session:
             return session.get(DBHeapObject, obj_id)
-
-    def save_btf_type(self, btf_type: DomainBtfType):
-        db_obj = self._domain_to_db_btf(btf_type)
-        with Session(self.engine) as session:
-            session.merge(db_obj)
-            session.commit()
-
-    def save_btf_types(self, btf_types_list: list[DomainBtfType]):
-        db_objs = [self._domain_to_db_btf(t) for t in btf_types_list]
-        with Session(self.engine) as session:
-            for obj in db_objs:
-                session.merge(obj)
-            session.commit()
-
-    def get_all_btf_types(self, btf_types_ctx: BtfTypes) -> list[DomainBtfType]:
-        with Session(self.engine) as session:
-            stmt = select(DBBtfType)
-            db_objs = session.scalars(stmt).all()
-            return [self._db_to_domain_btf(obj, btf_types_ctx) for obj in db_objs]
-
-    def save_heap_object(self, object: DBHeapObject):
-        with Session(self.engine) as session:
-            session.merge(object)
-            session.commit()
-
-    def save_btf_types_and_heap_objects(self, btf_types: list[DomainBtfType], heap_objects: list[DBHeapObject]):
-        db_btf_objs = [self._domain_to_db_btf(t) for t in btf_types]
-        with Session(self.engine) as session:
-            for btf_obj in db_btf_objs:
-                session.merge(btf_obj)
-            for heap_obj in heap_objects:
-                session.merge(heap_obj)
-            session.commit()
-
-    def load_btf_types(self) -> BtfTypes:
-        ctx = BtfTypes({"types": []})
-        with Session(self.engine) as session:
-            stmt = select(DBBtfType).order_by(DBBtfType.id)
-            db_objs = session.scalars(stmt).all()
-
-        for obj in db_objs:
-            domain_obj = self._db_to_domain_btf(obj, ctx)
-            ctx.types[domain_obj.id] = domain_obj
-            ctx.type_name_map[domain_obj.name] = domain_obj
-
-        return ctx
-
-    def _domain_to_db_btf(self, t: DomainBtfType) -> DBBtfType:
-        from dataclasses import asdict
-
-        from .btf_types import TypeReference
-
-        def get_ref_id(val):
-            if isinstance(val, TypeReference):
-                return val.type_id
-            return val
-
-        def serialize_members(items):
-            if items is None:
-                return None
-            res = []
-            for item in items:
-                d = {
-                    "name": item.name,
-                    "type_id": item.type_id.type_id,
-                    "bits_offset": item.bits_offset,
-                    "bitfield_size": item.bitfield_size,
-                }
-                res.append(d)
-            return res
-
-        def serialize_params(items):
-            if items is None:
-                return None
-            res = []
-            for item in items:
-                d = {
-                    "name": item.name,
-                    "type_id": item.type_id.type_id,
-                }
-                res.append(d)
-            return res
-
-        def serialize_datasec_var(items):
-            if items is None:
-                return None
-            res = []
-            for item in items:
-                d = {
-                    "type_id": item.type_id.type_id,
-                    "offset": item.offset,
-                    "size": item.size,
-                }
-                res.append(d)
-            return res
-
-        def serialize_list(items):
-            if items is None:
-                return None
-            res = []
-            for item in items:
-                d = asdict(item)
-                if hasattr(item, "type_id"):
-                    d["type_id"] = get_ref_id(item.type_id)
-                res.append(d)
-            return res
-
-        return DBBtfType(
-            id=t.id,
-            kind=t.kind,
-            name=t.name,
-            type_id=get_ref_id(getattr(t, "type_id", None)),
-            size=getattr(t, "size", None),
-            bits_offset=getattr(t, "bits_offset", None),
-            nr_bits=getattr(t, "nr_bits", None),
-            encoding=getattr(t, "encoding", None),
-            index_type_id=get_ref_id(getattr(t, "index_type_id", None)),
-            nr_elems=getattr(t, "nr_elems", None),
-            vlen=getattr(t, "vlen", None),
-            fwd_kind=getattr(t, "fwd_kind", None),
-            ret_type_id=get_ref_id(getattr(t, "ret_type_id", None)),
-            linkage=str(getattr(t, "linkage", "")) if hasattr(t, "linkage") else None,
-            component_idx=getattr(t, "component_idx", None),
-            members=serialize_members(getattr(t, "members", None)),
-            values_json=serialize_list(getattr(t, "values", None)),
-            params=serialize_params(getattr(t, "params", None)),
-            vars=serialize_datasec_var(getattr(t, "vars", None)),
-        )
-
-    def _db_to_domain_btf(self, db_obj: DBBtfType, ctx: BtfTypes) -> DomainBtfType:
-        data = {
-            "id": db_obj.id,
-            "kind": db_obj.kind,
-            "name": db_obj.name,
-            "type_id": db_obj.type_id,
-            "size": db_obj.size,
-            "bits_offset": db_obj.bits_offset,
-            "nr_bits": db_obj.nr_bits,
-            "encoding": db_obj.encoding,
-            "index_type_id": db_obj.index_type_id,
-            "nr_elems": db_obj.nr_elems,
-            "vlen": db_obj.vlen,
-            "fwd_kind": db_obj.fwd_kind,
-            "ret_type_id": db_obj.ret_type_id,
-            "linkage": db_obj.linkage,
-            "component_idx": db_obj.component_idx,
-            "members": db_obj.members,
-            "values": db_obj.values_json,
-            "params": db_obj.params,
-            "vars": db_obj.vars,
-        }
-
-        if db_obj.kind == "VAR" and db_obj.linkage and db_obj.linkage.isdigit():
-            data["linkage"] = int(db_obj.linkage)
-
-        return DomainBtfType.from_json(ctx, data)

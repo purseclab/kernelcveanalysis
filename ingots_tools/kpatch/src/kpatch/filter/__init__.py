@@ -20,9 +20,11 @@ from .ifdef_filter import (
     diff_file_touches_active_code,
     get_active_lines,
 )
-from .jev import JevFilter
+from .jev import ClassifierFilter
+from .masking import CodeMask, EditMask, LineRange, MaskReason, SourceSide, SourceVersions
 from .merge_filter import MergeCommitFilter
 from .score_filter import ScoreFilter
+from .source_pruning import DeadCodeFilter, RenameFilter, source_pruning_tail
 from .whitespace import (
     CToken,
     CTokenKind,
@@ -92,9 +94,11 @@ def filter_commit_time_range(
     *,
     show_progress: bool = True,
     workers: int = 1,
+    source_pruning: bool = False,
 ) -> None:
     if workers < 1:
         raise ValueError("workers must be at least 1")
+    kernel_config: KernelConfig | None = None
     if kernel_config_path is not None:
         kernel_config = KernelConfig(kernel_config_path.read_text())
         filter = FilterPipeline(
@@ -113,6 +117,8 @@ def filter_commit_time_range(
             ]
         )
 
+    if source_pruning:
+        filter.filters[-1:] = source_pruning_tail(kernel_config)
     run_filter(
         RunFilterArgs(
             repo=repo,
@@ -127,11 +133,13 @@ def filter_commit_time_range(
 
 
 __all__ = [
+    "CodeMask", "EditMask", "LineRange", "MaskReason", "SourceSide", "SourceVersions",
     "CToken",
     "CTokenKind",
     "CommitFilter",
     "ConfigFilter",
     "ConfigValue",
+    "DeadCodeFilter",
     "CountFilter",
     "FileBuildModes",
     "FileFilter",
@@ -139,10 +147,11 @@ __all__ = [
     "FilteredCommit",
     "FilterPipeline",
     "IfdefFilter",
-    "JevFilter",
+    "ClassifierFilter",
     "KernelConfig",
     "MergeCommitFilter",
     "RunFilterArgs",
+    "RenameFilter",
     "ScoreFilter",
     "SourceNoopFilter",
     "StreamingCommitFilter",

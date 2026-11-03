@@ -13,7 +13,8 @@ from .base import (
     repository_file_reader,
 )
 from .config_filter import ConfigValue, KernelConfig
-from ..diff import DiffChunk, DiffFile, DiffFileType
+from ..diff import DiffFile, DiffFileType
+from .masking import MaskReason, SourceSide, line_ranges, line_macro_locations
 from ..git import GitRepo
 
 C_SOURCE_EXTENSIONS = (
@@ -548,117 +549,13 @@ def _active_lines_for_modes(
     return active
 
 
-def _chunk_header(
-    old_start: int,
-    old_count: int,
-    new_start: int,
-    new_count: int,
-    section: str | None,
-) -> str:
-    suffix = f" {section}" if section else ""
-    return (
-        f"@@ -{old_start},{old_count} +{new_start},{new_count} @@{suffix}"
-    )
-
-
-def _project_chunks(
-    diff_file: DiffFile,
-    old_active: set[int],
-    new_active: set[int],
-) -> tuple[list[DiffChunk], bool]:
-    """Project active changed lines into valid hunks against the old source."""
-
-    projected: list[DiffChunk] = []
-    selected_delta = 0
-    inactive_deletion = False
-
-    for chunk in diff_file.chunks:
-        old_line = chunk.old_start
-        new_line = chunk.new_start
-        delta_before = selected_delta
-        lines: list[str] = []
-        selected_change = False
-        previous_included = False
-
-        for raw_line in chunk.lines:
-            if raw_line.startswith("-"):
-                selected = old_line in old_active
-                if selected:
-                    lines.append(raw_line)
-                    selected_delta -= 1
-                    selected_change = True
-                else:
-                    lines.append(f" {raw_line[1:]}")
-                    inactive_deletion = True
-                old_line += 1
-                previous_included = True
-            elif raw_line.startswith("+"):
-                selected = new_line in new_active
-                if selected:
-                    lines.append(raw_line)
-                    selected_delta += 1
-                    selected_change = True
-                    previous_included = True
-                else:
-                    previous_included = False
-                new_line += 1
-            elif raw_line.startswith(" "):
-                lines.append(raw_line)
-                old_line += 1
-                new_line += 1
-                previous_included = True
-            elif raw_line.startswith("\\") and previous_included:
-                lines.append(raw_line)
-
-        if not selected_change:
-            continue
-
-        old_count = sum(
-            line.startswith((" ", "-")) for line in lines
-        )
-        new_count = sum(
-            line.startswith((" ", "+")) for line in lines
-        )
-        old_start = chunk.old_start
-        new_start = chunk.old_start + delta_before
-        if old_count == 0 and new_count:
-            new_start += 1
-        elif new_count == 0 and old_count:
-            new_start -= 1
-
-        projected.append(
-            DiffChunk(
-                header=_chunk_header(
-                    old_start,
-                    old_count,
-                    max(new_start, 0),
-                    new_count,
-                    chunk.section,
-                ),
-                lines=lines,
-                old_start=old_start,
-                old_count=old_count,
-                new_start=max(new_start, 0),
-                new_count=new_count,
-                section=chunk.section,
-            )
-        )
-
-    return projected, inactive_deletion
-
-
-def _project_header(diff_file: DiffFile, partial_delete: bool) -> list[str]:
-    header: list[str] = []
-    for line in diff_file.header_lines:
-        if line.startswith("index "):
-            continue
-        if partial_delete and line.startswith("deleted file mode "):
-            continue
-        if partial_delete and line.startswith("+++ "):
-            header.append(f"+++ b/{diff_file.file}")
-            continue
-        header.append(line)
-    return header
+@dataclass(frozen=True, slots=True)
+class _SourceActivity:
+    active: set[int]
+    line_count: int
+    whole_inactive: bool = False
+    line_macros: tuple[int, ...] = ()
+    has_counter: bool = False
 
 
 class IfdefFilter(StreamingCommitFilter):
@@ -682,20 +579,25 @@ class IfdefFilter(StreamingCommitFilter):
         commit_id: str | None,
         path: str,
         modes: tuple[bool, ...],
-    ) -> set[int] | None:
+    ) -> _SourceActivity | None:
         if not modes:
-            return set()
+            return _SourceActivity(set(), 0, True)
         if commit_id is None:
             return None
         read_file = self._read_file or context.repo.read_file
         try:
-            content = read_file(commit_id, path).decode(
+            raw = read_file(commit_id, path)
+            content = raw.decode(
                 "utf-8",
                 errors="replace",
             )
         except Exception:
             return None
-        return _active_lines_for_modes(content, self.config, modes)
+        if re.search(r"\r(?!\n)|[\v\f\x1c-\x1e\x85\u2028\u2029]", content):
+            return None
+        locations = line_macro_locations(raw) if b"__LINE__" in raw else ()
+        return _SourceActivity(_active_lines_for_modes(content, self.config, modes), len(content.splitlines()),
+                               line_macros=locations, has_counter=b"__COUNTER__" in raw)
 
     def _filter_file(
         self,
@@ -709,6 +611,8 @@ class IfdefFilter(StreamingCommitFilter):
         ):
             return True
         if diff_file.binary:
+            return True
+        if diff_file.change_type in (DiffFileType.RENAME, DiffFileType.COPY):
             return True
 
         modes = commit.build_modes.get(diff_file_key(diff_file))
@@ -740,43 +644,20 @@ class IfdefFilter(StreamingCommitFilter):
         )
         if old_active is None or new_active is None:
             return True
+        if old_active.line_macros != new_active.line_macros or old_active.has_counter or new_active.has_counter:
+            return True
 
-        projected, inactive_deletion = _project_chunks(
-            diff_file,
-            old_active,
-            new_active,
-        )
-        if not projected:
-            return (
-                diff_file.mode_changed
-                or diff_file.change_type
-                in (DiffFileType.RENAME, DiffFileType.COPY)
-            )
-
-        partial_delete = (
-            diff_file.change_type is DiffFileType.DELETE
-            and inactive_deletion
-        )
-        diff_file.header_lines = _project_header(diff_file, partial_delete)
-        diff_file.chunks = projected
-        if partial_delete:
-            diff_file.change_type = DiffFileType.DEFAULT
+        for side, activity in ((SourceSide.OLD, old_active), (SourceSide.NEW, new_active)):
+            inactive = line_ranges(number for number in range(1, activity.line_count + 1) if number not in activity.active)
+            commit.mask_code(diff_file, side, inactive, MaskReason.IFDEF, whole_file=activity.whole_inactive)
         return True
 
     def filter_mutable_commit(
-        self,
-        commit: FilteredCommit,
-        context: FilterContext,
+        self, commit: FilteredCommit, context: FilterContext,
     ) -> FilteredCommit | None:
-        retained = [
-            diff_file
-            for diff_file in commit.diff.files
-            if self._filter_file(commit, context, diff_file)
-        ]
-        if not retained:
-            return None
-        commit.diff.files = retained
-        return commit
+        for diff_file in commit.diff.files:
+            self._filter_file(commit, context, diff_file)
+        return commit if commit.diff.files else None
 
     def iter_filter_mutable_commits(
         self,

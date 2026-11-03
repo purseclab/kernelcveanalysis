@@ -3,3 +3,4 @@ linux/
 db/
 .env
 vuln_patches/
+benchmarks/

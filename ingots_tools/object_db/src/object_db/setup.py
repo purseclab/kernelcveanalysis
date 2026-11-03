@@ -1,84 +1,59 @@
-import json
-import subprocess
-from typing import Optional
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from .btf_types import BtfStruct, BtfTypes
 from .codeql import CodeqlContext
-from .object_db import DBHeapObject, DBKmallocCall, OBJECT_DB_FILE_NAME, ObjectDb
+from .location import Location
+from .object_db import OBJECT_DB_FILE_NAME, DBHeapObject, DBKmallocCall, ObjectDb
 from .synthesis_metadata import SynthesisMetadata
+from .type_graph import TypeKind
 
 
 def extract_type_info(
     codeql: CodeqlContext,
     object_db: ObjectDb,
     metadata: SynthesisMetadata,
-):
-    raw_json_output = subprocess.check_output(
-        [
-            "bpftool",
-            "btf",
-            "dump",
-            "--json",
-            "file",
-            str(metadata.vmlinux),
-        ]
-    ).decode("utf-8")
-    types = BtfTypes(json.loads(raw_json_output))
-
-    codeql_structs = codeql.get_structs()
-    mapping: dict[tuple[str, tuple[str, ...]], Optional[BtfStruct]] = {}
-
-    ids = list(sorted(types.types.keys()))
-    objects = [obj for type_id in ids if (obj := types.get_type(type_id)) is not None]
-    object_db.save_btf_types(objects)
-
-    for btf_type in types.types.values():
-        if type(btf_type) is not BtfStruct:
-            continue
-
-        members = tuple(member.name for member in btf_type.members)
-        mapping[(btf_type.name, members)] = btf_type
-
-    for struct in codeql_structs:
-        name = "(anon)" if struct.is_anon else struct.struct_name
-        key = (name, tuple(struct.field_names))
-        if key not in mapping:
-            continue
-
-        btf_type = mapping[key]
-        mapping[key] = None
-
-        if btf_type is None:
-            print(f"warning: duplicate btf struct signature for {struct}")
-            continue
-
-        object_db.save_btf_type(btf_type)
-        object_db.save_heap_object(
-            DBHeapObject(
-                id=struct.location.to_db_id(),
-                type_id=btf_type.id,
-                location=str(struct.location),
-                source_code=struct.location.read_source(metadata),
-                is_anon=struct.is_anon,
-            )
+) -> None:
+    graph = codeql.get_type_graph()
+    object_db.save_type_graph(graph)
+    objects = [
+        DBHeapObject(
+            id=record.id,
+            type_id=record.id,
+            location=record.location,
+            source_code=Location.from_str(record.location).read_source(metadata)
+            if record.location
+            else "",
+            is_anon=record.is_anon,
         )
+        for record in graph.types.values()
+        if record.kind in {TypeKind.STRUCT, TypeKind.UNION}
+    ]
+    object_db.save_heap_objects(objects)
 
 
-def extract_kmalloc_calls(object_db: ObjectDb, codeql: CodeqlContext):
-    results = codeql.get_kmalloc_calls()
-    for result in results:
+def extract_kmalloc_calls(object_db: ObjectDb, codeql: CodeqlContext) -> None:
+    object_ids = {obj.type_id: obj.id for obj in object_db.get_all_heap_objects()}
+    calls: list[DBKmallocCall] = []
+    for result in codeql.get_kmalloc_calls():
         call = DBKmallocCall.from_codeql_result(result)
-
-        heap_obj_id = result.struct_def.to_db_id()
-        if object_db.get_heap_object(heap_obj_id):
-            call.heap_object_id = heap_obj_id
-
-        object_db.save_kmalloc_call(call)
+        # The allocation query and type query export the same CodeQL entity IDs.
+        call.heap_object_id = object_ids[result.type_id]
+        calls.append(call)
+    object_db.save_kmalloc_calls(calls)
 
 
-def setup_synthesis_object_db(metadata: SynthesisMetadata):
-    metadata.data_path().mkdir(exist_ok=True)
+def setup_synthesis_object_db(metadata: SynthesisMetadata) -> None:
+    """Replace the database only after all CodeQL queries and imports succeed."""
+    destination = metadata.data_path()
+    destination.mkdir(parents=True, exist_ok=True)
     codeql = CodeqlContext(metadata.codeql_db)
-    object_db = ObjectDb(metadata.data_path() / OBJECT_DB_FILE_NAME)
-    extract_type_info(codeql, object_db, metadata)
-    extract_kmalloc_calls(object_db, codeql)
+    with TemporaryDirectory(prefix=".objectdb-", dir=destination) as temporary_dir:
+        staged_path = Path(temporary_dir) / OBJECT_DB_FILE_NAME
+        object_db = ObjectDb(staged_path)
+        try:
+            extract_type_info(codeql, object_db, metadata)
+            extract_kmalloc_calls(object_db, codeql)
+        finally:
+            object_db.close()
+        os.replace(staged_path, destination / OBJECT_DB_FILE_NAME)

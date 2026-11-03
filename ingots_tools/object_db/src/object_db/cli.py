@@ -1,19 +1,22 @@
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import shutil
-from typing import Annotated, Any, Optional
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated, Any
 
+import typer
 from dotenv import load_dotenv
 from kexploit_utils import synthesis_data_dir
+from pydantic import BaseModel
 from rich.console import Console
 from rich.table import Table
-import typer
 
+from .object_db import ObjectDb
 from .query_api import HeapObject, ObjectSet, load_object_set
 from .setup import setup_synthesis_object_db
 from .synthesis_metadata import SynthesisMetadata
+from .type_graph import TypeInfo
 
 app = typer.Typer(help="Query common information from kexploit synthesis object_db.")
 console = Console()
@@ -23,12 +26,14 @@ OBJECT_DB_PROJECT_DIR = REPO_ROOT / "object_db"
 
 @dataclass
 class AppContext:
-    kernel: Optional[str]
-    db: Optional[Path]
+    kernel: str | None
+    db: Path | None
     json_output: bool
 
 
-def _resolve_db_path(kernel: Optional[str], db: Optional[Path], *, must_exist: bool = True) -> Path:
+def _resolve_db_path(
+    kernel: str | None, db: Path | None, *, must_exist: bool = True
+) -> Path:
     if db is not None:
         db_path = db
     else:
@@ -42,14 +47,14 @@ def _resolve_db_path(kernel: Optional[str], db: Optional[Path], *, must_exist: b
     return db_path
 
 
-def _normalize_cache_name(cache_name: str) -> Optional[str]:
+def _normalize_cache_name(cache_name: str) -> str | None:
     lowered = cache_name.strip().lower()
     if lowered in {"default", "<default>", "none", "null"}:
         return None
     return cache_name
 
 
-def _display_cache_name(cache_name: Optional[str]) -> str:
+def _display_cache_name(cache_name: str | None) -> str:
     return cache_name if cache_name is not None else "<default>"
 
 
@@ -73,13 +78,13 @@ def _script_source_path(output_path: Path) -> str:
     return str(OBJECT_DB_PROJECT_DIR)
 
 
-def _py_literal_path(path: Optional[Path]) -> str:
+def _py_literal_path(path: Path | None) -> str:
     if path is None:
         return "None"
     return repr(str(path.expanduser().resolve()))
 
 
-def _py_literal_str(value: Optional[str]) -> str:
+def _py_literal_str(value: str | None) -> str:
     if value is None:
         return "None"
     return repr(value)
@@ -88,9 +93,9 @@ def _py_literal_str(value: Optional[str]) -> str:
 def _render_script_template(
     output_path: Path,
     *,
-    default_db: Optional[Path] = None,
-    default_kernel: Optional[str] = None,
-    default_kexploit_data_dir: Optional[str] = None,
+    default_db: Path | None = None,
+    default_kernel: str | None = None,
+    default_kexploit_data_dir: str | None = None,
 ) -> str:
     source_path = _script_source_path(output_path)
     return f"""#!/usr/bin/env -S uv run --script
@@ -160,12 +165,17 @@ if __name__ == "__main__":
 def configure(
     ctx: typer.Context,
     kernel: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(help="Kernel name under $KEXPLOIT_DATA_DIR/synthesis/<kernel>/"),
     ] = None,
-    db: Annotated[Optional[Path], typer.Option(help="Direct path to object_db.sqlite")] = None,
+    db: Annotated[
+        Path | None, typer.Option(help="Direct path to object_db.sqlite")
+    ] = None,
     json_output: Annotated[
-        bool, typer.Option("--json", help="Print JSON output instead of human-readable tables.")
+        bool,
+        typer.Option(
+            "--json", help="Print JSON output instead of human-readable tables."
+        ),
     ] = False,
 ):
     ctx.obj = AppContext(kernel=kernel, db=db, json_output=json_output)
@@ -186,17 +196,132 @@ def _get_db_path(ctx: typer.Context) -> Path:
 def _load_objects(ctx: typer.Context) -> tuple[AppContext, Path, ObjectSet]:
     app_ctx = _get_ctx(ctx)
     db_path = _get_db_path(ctx)
-    return app_ctx, db_path, load_object_set(db_path)
+    try:
+        objects = load_object_set(db_path)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    return app_ctx, db_path, objects
 
 
-@app.command(help="Show cache names used for allocations of a specific object id and/or struct name.")
+class TypeSizesResponse(BaseModel):
+    results: list[TypeInfo]
+
+
+@app.command(help="Show the size and alignment of every type with this name.")
+def sizeof(
+    ctx: typer.Context,
+    type_name: Annotated[
+        str, typer.Argument(help="Exact type name, including typedefs.")
+    ],
+) -> None:
+    try:
+        object_db = ObjectDb(_get_db_path(ctx), read_only=True)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    try:
+        records = object_db.load_type_graph().get_by_name(type_name)
+    finally:
+        object_db.close()
+    if not records:
+        raise typer.BadParameter(f"Type {type_name!r} was not found.")
+    if _get_ctx(ctx).json_output:
+        _print_json(TypeSizesResponse(results=records).model_dump(mode="json"))
+        return
+    _print_table(
+        f"Size of {type_name}",
+        ["type_id", "size", "alignment", "location"],
+        [
+            [record.id, record.size, record.alignment, record.location]
+            for record in records
+        ],
+    )
+
+
+class FieldOffsetResult(BaseModel):
+    object_id: int
+    location: str
+    path: str
+    byte_offset: int | None
+    bit_offset: int | None
+    bitfield_size: int | None
+    type_name: str
+
+
+class FieldOffsetsResponse(BaseModel):
+    results: list[FieldOffsetResult]
+
+
+@app.command(
+    help="Resolve an embedded field path, for example 'file.f_pos_lock.wait_list'."
+)
+def field_offset(
+    ctx: typer.Context,
+    path: Annotated[
+        str,
+        typer.Argument(
+            help="Record type followed by a dotted field path; arrays use [index]."
+        ),
+    ],
+) -> None:
+    type_name, separator, member_path = path.partition(".")
+    if not separator or not member_path:
+        raise typer.BadParameter("Expected a path such as 'file.f_pos_lock.wait_list'.")
+    app_ctx, _, objects = _load_objects(ctx)
+    hits = [
+        FieldOffsetResult(
+            object_id=obj.id,
+            location=obj.location,
+            path=field.path,
+            byte_offset=field.byte_offset,
+            bit_offset=field.bit_offset,
+            bitfield_size=field.bitfield_size,
+            type_name=field.type_name,
+        )
+        for obj in objects.get_by_name(type_name)
+        for field in obj.iter_fields()
+        if field.path == member_path
+    ]
+    if not hits:
+        raise typer.BadParameter(f"Field path {path!r} was not found.")
+    if app_ctx.json_output:
+        _print_json(FieldOffsetsResponse(results=hits).model_dump())
+        return
+    _print_table(
+        path,
+        [
+            "object_id",
+            "path",
+            "byte_offset",
+            "bit_offset",
+            "bitfield_size",
+            "type",
+            "location",
+        ],
+        [
+            [
+                hit.object_id,
+                hit.path,
+                hit.byte_offset,
+                hit.bit_offset,
+                hit.bitfield_size,
+                hit.type_name,
+                hit.location,
+            ]
+            for hit in hits
+        ],
+    )
+
+
+@app.command(
+    help="Show cache names used for allocations of a specific object id and/or struct name."
+)
 def cache_for_object(
     ctx: typer.Context,
     object_id: Annotated[
-        Optional[int], typer.Option(help="Heap object id from the objects table.")
+        int | None, typer.Option(help="Heap object id from the objects table.")
     ] = None,
     struct_name: Annotated[
-        Optional[str], typer.Option(help="Struct name from kmalloc_calls.struct_type.")
+        str | None, typer.Option(help="Struct name from kmalloc_calls.struct_type.")
     ] = None,
 ):
     if object_id is None and struct_name is None:
@@ -206,59 +331,96 @@ def cache_for_object(
     counts = objects.cache_counts(object_id=object_id, struct_name=struct_name)
     payload = [
         {"cache_name": _display_cache_name(cache_name), "call_count": call_count}
-        for cache_name, call_count in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        for cache_name, call_count in sorted(
+            counts.items(), key=lambda item: item[1], reverse=True
+        )
     ]
 
     if app_ctx.json_output:
-        _print_json({"selector": {"object_id": object_id, "struct_name": struct_name}, "results": payload})
+        _print_json(
+            {
+                "selector": {"object_id": object_id, "struct_name": struct_name},
+                "results": payload,
+            }
+        )
         return
 
     if not payload:
         console.print("No matching kmalloc calls found.")
         return
 
-    _print_table("Caches For Object", ["cache_name", "call_count"], [[row["cache_name"], row["call_count"]] for row in payload])
+    _print_table(
+        "Caches For Object",
+        ["cache_name", "call_count"],
+        [[row["cache_name"], row["call_count"]] for row in payload],
+    )
 
 
-@app.command(help="List heap objects that have allocations from a specific kmalloc cache.")
+@app.command(
+    help="List heap objects that have allocations from a specific kmalloc cache."
+)
 def objects_for_cache(
     ctx: typer.Context,
-    cache_name: Annotated[str, typer.Argument(help="Cache name. Use 'default' for default cache.")],
+    cache_name: Annotated[
+        str, typer.Argument(help="Cache name. Use 'default' for default cache.")
+    ],
 ):
     app_ctx, _, objects = _load_objects(ctx)
     normalized_cache = _normalize_cache_name(cache_name)
     matching_objects = objects.objects_for_cache(normalized_cache)
+    matching_objects.sort(
+        key=lambda obj: sum(
+            call.uses_cache(normalized_cache) for call in obj.kmalloc_calls
+        ),
+        reverse=True,
+    )
     payload = [
         {
             "object_id": obj.id,
             "type_name": obj.type_name,
             "location": obj.location,
             "is_anon": obj.is_anon,
-            "call_count": sum(1 for call in obj.kmalloc_calls if call.uses_cache(normalized_cache)),
+            "call_count": sum(
+                1 for call in obj.kmalloc_calls if call.uses_cache(normalized_cache)
+            ),
         }
         for obj in matching_objects
     ]
-    payload.sort(key=lambda row: row["call_count"], reverse=True)
 
     if app_ctx.json_output:
-        _print_json({"cache_name": _display_cache_name(normalized_cache), "results": payload})
+        _print_json(
+            {"cache_name": _display_cache_name(normalized_cache), "results": payload}
+        )
         return
 
     if not payload:
-        console.print(f"No objects found for cache {_display_cache_name(normalized_cache)}.")
+        console.print(
+            f"No objects found for cache {_display_cache_name(normalized_cache)}."
+        )
         return
 
     _print_table(
         f"Objects For Cache {_display_cache_name(normalized_cache)}",
         ["object_id", "type_name", "is_anon", "call_count", "location"],
-        [[row["object_id"], row["type_name"], row["is_anon"], row["call_count"], row["location"]] for row in payload],
+        [
+            [
+                row["object_id"],
+                row["type_name"],
+                row["is_anon"],
+                row["call_count"],
+                row["location"],
+            ]
+            for row in payload
+        ],
     )
 
 
 @app.command(help="Show kmalloc callsites linked to an object id.")
 def kmalloc_for_object(
     ctx: typer.Context,
-    object_id: Annotated[int, typer.Argument(help="Heap object id from the objects table.")],
+    object_id: Annotated[
+        int, typer.Argument(help="Heap object id from the objects table.")
+    ],
 ):
     app_ctx, _, objects = _load_objects(ctx)
     payload = [
@@ -273,7 +435,9 @@ def kmalloc_for_object(
             "is_flexible": call.is_flexible,
             "cache_name": _display_cache_name(call.kmalloc_cache_name),
         }
-        for call in sorted(objects.kmalloc_calls_for_object(object_id), key=lambda call: call.id)
+        for call in sorted(
+            objects.kmalloc_calls_for_object(object_id), key=lambda call: call.id
+        )
     ]
 
     if app_ctx.json_output:
@@ -286,8 +450,27 @@ def kmalloc_for_object(
 
     _print_table(
         f"Kmalloc Calls For Object {object_id}",
-        ["id", "call_type", "struct_type", "cache_name", "flags", "alloc_size", "call_site"],
-        [[row["id"], row["call_type"], row["struct_type"], row["cache_name"], row["flags"], row["alloc_size"], row["call_site"]] for row in payload],
+        [
+            "id",
+            "call_type",
+            "struct_type",
+            "cache_name",
+            "flags",
+            "alloc_size",
+            "call_site",
+        ],
+        [
+            [
+                row["id"],
+                row["call_type"],
+                row["struct_type"],
+                row["cache_name"],
+                row["flags"],
+                row["alloc_size"],
+                row["call_site"],
+            ]
+            for row in payload
+        ],
     )
 
 
@@ -303,10 +486,12 @@ def _object_payload(obj: HeapObject) -> dict[str, Any]:
     }
 
 
-@app.command(help="Show details for a heap object and its BTF type metadata.")
+@app.command(help="Show details for a heap object and its CodeQL type metadata.")
 def object(
     ctx: typer.Context,
-    object_id: Annotated[int, typer.Argument(help="Heap object id from the objects table.")],
+    object_id: Annotated[
+        int, typer.Argument(help="Heap object id from the objects table.")
+    ],
 ):
     app_ctx, _, objects = _load_objects(ctx)
     obj = objects.get_by_id(object_id)
@@ -319,7 +504,9 @@ def object(
         _print_json(payload)
         return
 
-    _print_table(f"Object {object_id}", ["field", "value"], [[k, v] for k, v in payload.items()])
+    _print_table(
+        f"Object {object_id}", ["field", "value"], [[k, v] for k, v in payload.items()]
+    )
 
 
 @app.command(help="Show high-level object_db statistics.")
@@ -354,25 +541,51 @@ def stats(ctx: typer.Context):
         ],
     )
     if top_caches:
-        _print_table("Top Caches", ["cache_name", "call_count"], [[row["cache_name"], row["call_count"]] for row in top_caches])
+        _print_table(
+            "Top Caches",
+            ["cache_name", "call_count"],
+            [[row["cache_name"], row["call_count"]] for row in top_caches],
+        )
 
 
-@app.command(help="Create synthesis metadata and object_db.sqlite using the same layout as kexploit.")
+@app.command(
+    help="Create synthesis metadata and object_db.sqlite using the same layout as kexploit."
+)
 def create(
     ctx: typer.Context,
-    kernel: Annotated[str, typer.Option(help="Name of kernel to set up exploit synthesis for")],
-    codeql_db: Annotated[Path, typer.Option(help="Path to codeql database for the kernel")],
-    vmlinux: Annotated[Path, typer.Option(help="Path to vmlinux elf binary with debug info")],
-    linux_src: Annotated[Path, typer.Option(help="Path to linux source code")],
-    compile_commands: Annotated[Path, typer.Option(help="Path to linux compile commands")],
+    kernel: Annotated[
+        str, typer.Option(help="Name of kernel to set up exploit synthesis for")
+    ],
+    codeql_db: Annotated[
+        Path,
+        typer.Option(
+            help="Path to codeql database for the kernel", exists=True, file_okay=False
+        ),
+    ],
+    linux_src: Annotated[
+        Path,
+        typer.Option(help="Path to linux source code", exists=True, file_okay=False),
+    ],
+    compile_commands: Annotated[
+        Path,
+        typer.Option(
+            help="Path to linux compile commands", exists=True, dir_okay=False
+        ),
+    ],
+    vmlinux: Annotated[
+        Path | None,
+        typer.Option(
+            help="Optional kernel binary reference; not used to build object_db."
+        ),
+    ] = None,
 ):
     codeql_db = codeql_db.expanduser().resolve()
-    vmlinux = vmlinux.expanduser().resolve()
+    vmlinux = None if vmlinux is None else vmlinux.expanduser().resolve()
     linux_src = linux_src.expanduser().resolve()
     compile_commands = compile_commands.expanduser().resolve()
 
     synthesis_path = synthesis_data_dir() / kernel
-    synthesis_path.mkdir(exist_ok=True)
+    synthesis_path.mkdir(parents=True, exist_ok=True)
 
     metadata = SynthesisMetadata(
         kernel_name=kernel,
@@ -381,9 +594,10 @@ def create(
         linux_src=linux_src,
         synthesis_data=synthesis_path,
     )
-    shutil.copy(compile_commands, metadata.compile_commands_path())
-    metadata.save()
     setup_synthesis_object_db(metadata)
+    if compile_commands != metadata.compile_commands_path().resolve():
+        shutil.copy(compile_commands, metadata.compile_commands_path())
+    metadata.save()
 
     db_path = _resolve_db_path(kernel=kernel, db=None)
     metadata_path = db_path.parent / "metadata.json"
@@ -400,22 +614,32 @@ def create(
         return
 
     console.print(f"Created synthesis data for {kernel}")
-    _print_table("Created Files", ["field", "value"], [[key, value] for key, value in payload.items()])
+    _print_table(
+        "Created Files",
+        ["field", "value"],
+        [[key, value] for key, value in payload.items()],
+    )
 
 
-@app.command(help="Write a standalone uv script template for scanning object_db with the high-level API.")
+@app.command(
+    help="Write a standalone uv script template for scanning object_db with the high-level API."
+)
 def scaffold_script(
     ctx: typer.Context,
     output: Annotated[Path, typer.Argument(help="Where to write the script template.")],
     default_db: Annotated[
-        Optional[Path],
-        typer.Option(help="Bake a default object_db.sqlite path into the generated script."),
+        Path | None,
+        typer.Option(
+            help="Bake a default object_db.sqlite path into the generated script."
+        ),
     ] = None,
     default_kernel: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(help="Bake a default kernel name into the generated script."),
     ] = None,
-    force: Annotated[bool, typer.Option(help="Overwrite the output file if it already exists.")] = False,
+    force: Annotated[
+        bool, typer.Option(help="Overwrite the output file if it already exists.")
+    ] = False,
 ):
     output_path = output.expanduser().resolve()
     if output_path.exists() and not force:
@@ -424,14 +648,16 @@ def scaffold_script(
     if default_db is not None:
         default_db = default_db.expanduser().resolve()
 
-    default_kexploit_data_dir: Optional[str] = None
+    default_kexploit_data_dir: str | None = None
     if default_kernel is not None:
         default_kexploit_data_dir = os.environ.get("KEXPLOIT_DATA_DIR")
         if default_kexploit_data_dir is None:
             raise typer.BadParameter(
                 "KEXPLOIT_DATA_DIR must be set to bake a default kernel into the generated script."
             )
-        default_kexploit_data_dir = str(Path(default_kexploit_data_dir).expanduser().resolve())
+        default_kexploit_data_dir = str(
+            Path(default_kexploit_data_dir).expanduser().resolve()
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
@@ -475,7 +701,9 @@ def scaffold_script(
         console.print(f"default DB: {payload['default_db']}")
     if payload["default_kernel"] is not None:
         console.print(f"default kernel: {payload['default_kernel']}")
-        console.print(f"default KEXPLOIT_DATA_DIR: {payload['default_kexploit_data_dir']}")
+        console.print(
+            f"default KEXPLOIT_DATA_DIR: {payload['default_kexploit_data_dir']}"
+        )
     console.print(f"Run with DB: {payload['run_with_db']}")
     console.print(f"Run with synthesis dir: {payload['run_with_synthesis_dir']}")
 

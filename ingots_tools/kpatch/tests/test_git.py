@@ -91,6 +91,27 @@ class GitRepoTests(unittest.TestCase):
         self.assertIn("--no-merges", repo.args)
 
 class GitDbTests(unittest.TestCase):
+    def test_read_only_open_does_not_initialize_or_allow_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "commits.sqlite"
+            GitDb(path)
+            with patch.object(GitDb, "_initialize", side_effect=AssertionError("schema write")):
+                database = GitDb(path, read_only=True)
+                self.assertEqual(database.history_kind, HistoryKind.UNKNOWN)
+            connection = database._connect()
+            try:
+                with self.assertRaises(sqlite3.OperationalError):
+                    connection.execute("DELETE FROM commits")
+            finally:
+                connection.close()
+
+    def test_read_only_open_does_not_create_missing_database(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.sqlite"
+            with self.assertRaises(FileNotFoundError):
+                GitDb(path, read_only=True)
+            self.assertFalse(path.exists())
+
     def test_history_kind_defaults_and_updates_atomically(self) -> None:
         date = datetime(2024, 1, 1, tzinfo=UTC)
         commit = GitCommit(

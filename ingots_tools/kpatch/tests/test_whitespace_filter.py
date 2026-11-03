@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
+from difflib import unified_diff
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from kpatch.diff import DiffFileType
 from kpatch.filter import (
@@ -12,6 +14,7 @@ from kpatch.filter import (
     tokenize_c_source,
 )
 from kpatch.git import CommitParent, GitCommit, GitRepo
+from kpatch.filter.whitespace.c_lexer import replace_c_comments
 
 
 class MemoryGitRepo(GitRepo):
@@ -28,6 +31,21 @@ class MemoryGitRepo(GitRepo):
 
 
 class CLexerTests(unittest.TestCase):
+    def test_comment_replacement_preserves_literals_and_angle_headers(self) -> None:
+        sources = [
+            'if (x < y) puts("value> /* old */");\n',
+            '#include <foo/*old*/bar.h>\n',
+            '#/**/include <foo/*old*/bar.h>\n',
+            '#/* directive comment\n */include <foo/*old*/bar.h>\n',
+            'const char *s = "// old";\n',
+        ]
+        for source in sources:
+            with self.subTest(source=source):
+                self.assertNotEqual(
+                    replace_c_comments(source),
+                    replace_c_comments(source.replace("old", "new")),
+                )
+
     def test_comments_between_identifiers(self) -> None:
         tokens = tokenize_c_source("int/*comment*/x;\n")
         self.assertIsNotNone(tokens)
@@ -131,6 +149,21 @@ class CLexerTests(unittest.TestCase):
 
 
 class WhitespaceFilterTests(unittest.TestCase):
+    def filter_source_change(
+        self, old: str, new: str, context_lines: int = 0,
+    ) -> list[GitCommit]:
+        diff = "diff --git a/drivers/foo.c b/drivers/foo.c\n" + "".join(
+            unified_diff(
+                old.splitlines(keepends=True), new.splitlines(keepends=True),
+                fromfile="a/drivers/foo.c", tofile="b/drivers/foo.c", n=context_lines,
+            )
+        )
+        commit = self.make_commit("c1", "p0", diff)
+        repo = MemoryGitRepo({"p0:drivers/foo.c": old, "c1:drivers/foo.c": new})
+        return WhitespaceFilter().filter_commits(
+            [commit], FilterContext(repo), show_progress=False,
+        )
+
     @staticmethod
     def make_commit(
         commit_id: str,
@@ -191,6 +224,92 @@ class WhitespaceFilterTests(unittest.TestCase):
         context = FilterContext(repo)
         result = WhitespaceFilter().filter_commits([commit], context, show_progress=False)
         self.assertEqual(result, [])
+
+    def test_eliminates_comment_edits_without_hunk_opener(self) -> None:
+        # Shapes found in sampled balloon, ext4, and netdevice documentation.
+        bodies = [
+            (" * old explanation\n", " * new explanation\n"),
+            (" * old locking rule\n * keep this rule\n", " * revised locking rule\n * keep this rule\n"),
+            (" * old callback contract\n", " * new callback contract\n"),
+            ("unadorned old prose\n", "unadorned new prose\n"),
+            (" * old\n", " * old\n * inserted documentation\n"),
+            (" * old\n * deleted documentation\n", " * old\n"),
+        ]
+        for old_body, new_body in bodies:
+            with self.subTest(body=old_body, replacement=new_body):
+                old = "/*\n" + old_body + " */\nint value;\n"
+                new = "/*\n" + new_body + " */\nint value;\n"
+                self.assertEqual(self.filter_source_change(old, new), [])
+
+    def test_eliminates_comment_edit_with_only_closer_in_context(self) -> None:
+        old = "/*\n * unchanged\n * old\n */\nint value;\n"
+        new = old.replace(" * old\n", " * new\n")
+        self.assertEqual(self.filter_source_change(old, new, context_lines=1), [])
+
+    def test_recovers_comment_opened_across_spliced_lines(self) -> None:
+        old = "/\\\n*\nold prose\n*/\nint value;\n"
+        new = old.replace("old prose", "new prose")
+        self.assertEqual(self.filter_source_change(old, new), [])
+
+    def test_recovers_comment_with_overlapping_delimiter_text(self) -> None:
+        old = "/*/\nold prose\n*/\nint value;\n"
+        new = old.replace("old prose", "new prose")
+        self.assertEqual(self.filter_source_change(old, new), [])
+
+    def test_preserves_code_change_after_contextless_comment_edit(self) -> None:
+        old = "/*\n * old\n */\n\nint value = 1;\n"
+        new = old.replace(" * old", " * new").replace("value = 1", "value = 2")
+        self.assertEqual(len(self.filter_source_change(old, new)), 1)
+
+    def test_retains_comment_edit_when_complete_source_has_invalid_token(self) -> None:
+        old = '/*\n * old\n */\nconst char *s = "unterminated\n'
+        new = old.replace(" * old", " * new")
+        self.assertEqual(len(self.filter_source_change(old, new)), 1)
+
+    def test_preserves_code_change_in_hunk_starting_inside_comment(self) -> None:
+        old = "/*\n * unchanged\n */\nint value = 1;\n"
+        new = old.replace("value = 1", "value = 2")
+        self.assertEqual(len(self.filter_source_change(old, new, context_lines=2)), 1)
+
+    def test_comment_markers_in_literals_do_not_force_full_tokenization(self) -> None:
+        old = 'const char *marker = "/*";\nint value = 1;\n'
+        new = old.replace("value = 1", "value = 2")
+        with patch(
+            "kpatch.filter.whitespace.whitespace_filter.tokenize_c_source",
+            wraps=tokenize_c_source,
+        ) as tokenize:
+            self.assertEqual(len(self.filter_source_change(old, new)), 1)
+        self.assertTrue(all(call.args[0] not in (old, new) for call in tokenize.call_args_list))
+
+    def test_large_code_change_avoids_full_file_tokenization(self) -> None:
+        old = "/* file header */\n" + "int unchanged;\n" * 10000 + "int value = 1;\n"
+        new = old.replace("value = 1", "value = 2")
+        with patch(
+            "kpatch.filter.whitespace.whitespace_filter.tokenize_c_source",
+            wraps=tokenize_c_source,
+        ) as tokenize:
+            self.assertEqual(len(self.filter_source_change(old, new)), 1)
+        self.assertTrue(all(call.args[0] not in (old, new) for call in tokenize.call_args_list))
+
+    def test_large_code_change_after_comment_context_avoids_full_tokenization(self) -> None:
+        old = "/*\n * header\n */\nint value = 1;\n" + "int unchanged;\n" * 10000
+        new = old.replace("value = 1", "value = 2")
+        with patch(
+            "kpatch.filter.whitespace.whitespace_filter.tokenize_c_source",
+            wraps=tokenize_c_source,
+        ) as tokenize:
+            self.assertEqual(len(self.filter_source_change(old, new, context_lines=2)), 1)
+        self.assertTrue(all(call.args[0] not in (old, new) for call in tokenize.call_args_list))
+
+    def test_large_comment_only_change_avoids_full_file_tokenization(self) -> None:
+        old = "/*\n * old\n */\n" + "int unchanged;\n" * 10000
+        new = old.replace(" * old", " * new")
+        with patch(
+            "kpatch.filter.whitespace.whitespace_filter.tokenize_c_source",
+            wraps=tokenize_c_source,
+        ) as tokenize:
+            self.assertEqual(self.filter_source_change(old, new), [])
+        self.assertTrue(all(call.args[0] not in (old, new) for call in tokenize.call_args_list))
 
     def test_preserves_meaningful_code_changes(self) -> None:
         patch = (

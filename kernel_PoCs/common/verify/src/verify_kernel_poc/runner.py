@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
 from .adb import Adb, AdbError
 from .models import RunPlan, UnsupportedError, VerifyError
@@ -58,7 +58,8 @@ def build_app_intent(plan: RunPlan, *, pump: bool) -> str:
         )
     mode = plan.app_mode or ("jni" if plan.artifact == "jni" else "preload")
     return (
-        f"am start -W -n {shlex.quote(plan.app_package)}/.RunActivity "
+        f"am start -W -n {shlex.quote(plan.app_package)}/"
+        f"{shlex.quote(APP_LOADER_CLASS.rsplit('.', 1)[0] + '.RunActivity')} "
         f"--es lib_path {shlex.quote(plan.app_path)} "
         f"--es apk_path {shlex.quote(plan.app_apk_path)} "
         f"--es mode {shlex.quote(mode)} "
@@ -93,11 +94,17 @@ def run_app_payload(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
+    run_only: bool = False,
 ) -> RunOutcome:
-    if plan.payload.kind == "listening_shell":
-        return run_app_listening_payload(adb, plan, lines=lines, timeout=timeout)
-    if plan.payload.kind == "reverse_shell":
-        return run_app_reverse_payload(adb, plan, lines=lines, timeout=timeout)
+    if not run_only and plan.payload.kind == "listening_shell":
+        return run_app_listening_payload(
+            adb, plan, lines=lines, timeout=timeout, on_output=on_output
+        )
+    if not run_only and plan.payload.kind == "reverse_shell":
+        return run_app_reverse_payload(
+            adb, plan, lines=lines, timeout=timeout, on_output=on_output
+        )
     if plan.app_port is None:
         raise VerifyError("app mode is missing its loopback port")
     intent, launch_output = _launch_app(adb, plan, pump=True)
@@ -109,6 +116,7 @@ def run_app_payload(
         while time.monotonic() < deadline:
             connection: socket.socket | None = None
             try:
+                attempt_started = time.monotonic()
                 connection = socket.create_connection(
                     ("127.0.0.1", local_port), timeout=2.0
                 )
@@ -117,8 +125,11 @@ def run_app_payload(
                         connection,
                         lines=lines,
                         timeout=max(0.1, deadline - time.monotonic()),
+                        on_output=on_output,
                     )
-                if output:
+                if output or (
+                    run_only and time.monotonic() - attempt_started > 0.5
+                ):
                     return RunOutcome(output=output, command=intent, returncode=0)
                 # ADB forward can accept before the guest-side app is listening.
                 last_error = "forwarded connection closed before app output"
@@ -141,6 +152,7 @@ def run_app_listening_payload(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
 ) -> RunOutcome:
     if plan.payload.port is None:
         raise VerifyError("listening shell metadata is missing a port")
@@ -161,6 +173,7 @@ def run_app_listening_payload(
                         connection,
                         lines=lines,
                         timeout=max(0.1, deadline - time.monotonic()),
+                        on_output=on_output,
                     )
                 if output:
                     return RunOutcome(output=output, command=intent, returncode=0)
@@ -184,6 +197,7 @@ def run_app_reverse_payload(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
 ) -> RunOutcome:
     if plan.payload.port is None or plan.payload.ip is None:
         raise VerifyError("reverse shell metadata is missing ip or port")
@@ -219,6 +233,7 @@ def run_app_reverse_payload(
                 connection,
                 lines=lines,
                 timeout=max(0.1, timeout - 0.5),
+                on_output=on_output,
             )
         return RunOutcome(output=output, command=intent, returncode=0)
     finally:
@@ -233,10 +248,13 @@ def run_shell_payload(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
 ) -> RunOutcome:
     run_command = build_run_command(plan)
     command = pipeline_command(run_command, lines)
-    result = adb.run_shell_process(command, timeout=timeout)
+    result = adb.run_shell_process(
+        command, timeout=timeout, on_output=on_output
+    )
     return RunOutcome(
         output=result.output,
         command=command,
@@ -279,6 +297,7 @@ def _socket_exchange(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
 ) -> str:
     script = "\n".join(lines)
     if script and not script.endswith("\n"):
@@ -287,13 +306,9 @@ def _socket_exchange(
         connection.sendall(script.encode())
         # The root-check script ends with `exit`. ADB forwarding can close both
         # directions if the client half-closes before the shell replies.
-    else:
-        # Preserve the EOF signal for callers that supplied no shell script.
-        try:
-            connection.shutdown(socket.SHUT_WR)
-        except OSError:
-            pass
-    return read_until_closed(connection, timeout=timeout)
+    # With no script (run-only), keep the connection open and just stream the
+    # payload's stdout until the caller's timeout.
+    return read_until_closed(connection, timeout=timeout, on_output=on_output)
 
 
 def _exchange_listening(
@@ -302,6 +317,7 @@ def _exchange_listening(
     deadline: float,
     process: subprocess.Popen[str],
     lines: list[str],
+    on_output: Callable[[str], None] | None = None,
 ) -> tuple[str, str]:
     last_error = ""
     while time.monotonic() < deadline:
@@ -313,6 +329,7 @@ def _exchange_listening(
                     connection,
                     lines=lines,
                     timeout=max(0.1, deadline - time.monotonic()),
+                    on_output=on_output,
                 )
                 if output:
                     return output, ""
@@ -330,6 +347,7 @@ def run_listening_payload(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
 ) -> RunOutcome:
     if plan.payload.port is None:
         raise VerifyError("listening shell metadata is missing a port")
@@ -346,6 +364,7 @@ def run_listening_payload(
                 deadline=deadline,
                 process=process,
                 lines=lines,
+                on_output=on_output,
             )
             output, returncode, timed_out = _wait_process(
                 process,
@@ -374,6 +393,7 @@ def run_reverse_payload(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
 ) -> RunOutcome:
     if plan.payload.port is None or plan.payload.ip is None:
         raise VerifyError("reverse shell metadata is missing ip or port")
@@ -413,6 +433,7 @@ def run_reverse_payload(
                     connection,
                     lines=lines,
                     timeout=max(0.1, timeout - 0.5),
+                    on_output=on_output,
                 )
         output, returncode, timed_out = _wait_process(
             process,
@@ -442,11 +463,32 @@ def run_payload(
     *,
     lines: list[str],
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
+    run_only: bool = False,
 ) -> RunOutcome:
     if plan.from_app:
-        return run_app_payload(adb, plan, lines=lines, timeout=timeout)
+        return run_app_payload(
+            adb,
+            plan,
+            lines=lines,
+            timeout=timeout,
+            on_output=on_output,
+            run_only=run_only,
+        )
+    if run_only:
+        # Start the payload and stream its process stdout without trying to
+        # connect to its listening/reverse shell.
+        return run_shell_payload(
+            adb, plan, lines=[], timeout=timeout, on_output=on_output
+        )
     if plan.payload.kind == "listening_shell":
-        return run_listening_payload(adb, plan, lines=lines, timeout=timeout)
+        return run_listening_payload(
+            adb, plan, lines=lines, timeout=timeout, on_output=on_output
+        )
     if plan.payload.kind == "reverse_shell":
-        return run_reverse_payload(adb, plan, lines=lines, timeout=timeout)
-    return run_shell_payload(adb, plan, lines=lines, timeout=timeout)
+        return run_reverse_payload(
+            adb, plan, lines=lines, timeout=timeout, on_output=on_output
+        )
+    return run_shell_payload(
+        adb, plan, lines=lines, timeout=timeout, on_output=on_output
+    )

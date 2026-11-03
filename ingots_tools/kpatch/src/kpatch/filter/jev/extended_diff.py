@@ -8,7 +8,7 @@ from ..repository_file import RepositoryFileReader
 from .c_parser import ItemKind, ItemSpan, parse_c_file
 from .context_resolver import resolve_referenced_context
 from .header_resolver import HeaderResolver
-from .jev_filter import InputState
+from .input_state import InputState
 
 _C_EXTENSIONS: frozenset[str] = frozenset({"c", "h", "cc", "cpp", "cxx", "hpp", "hh"})
 _EXPANDABLE_KINDS: frozenset[ItemKind] = frozenset({

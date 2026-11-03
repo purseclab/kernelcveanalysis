@@ -9,7 +9,9 @@ def _fmt(value: str | None) -> str:
     return value if value else "-"
 
 
-def print_human_result(result: VerificationResult) -> None:
+def print_human_result(
+    result: VerificationResult, *, show_output: bool = True
+) -> None:
     metadata = result.metadata
     if metadata is None:
         metadata_text = "none (using CLI overrides)"
@@ -68,7 +70,7 @@ def print_human_result(result: VerificationResult) -> None:
         typer.echo("command:")
         typer.echo(f"  {result.command}")
 
-    if result.output:
+    if show_output and result.output:
         typer.echo("")
         typer.echo("guest output:")
         output = result.output

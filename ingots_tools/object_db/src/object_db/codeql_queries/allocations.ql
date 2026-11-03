@@ -1,19 +1,15 @@
 /**
- * @name Find interesting objects for kernel heap exploitation
- * @id cpp/kernel-interesting-objects
- * @description Finds interesting objects for kernel heap exploitation
- * @kind problem
- * @precision low
- * @tags security kernel
- * @problem.severity error
+ * @name Object database allocations
+ * @id cpp/objectdb/allocations
+ * @description Exports allocation sites linked directly to CodeQL types.
+ * @kind table
  */
-
 import cpp
 import kernel_utils
+import object_types
 
-from KmallocCall kmalloc_call, Struct s
-where
-  s = kmalloc_call.getStruct() and
-  // TODO: find out why this is included
-  not kmalloc_call.getSizeArg().isAffectedByMacro()
-select kmalloc_call.getLocation(), kmalloc_call, s, s.getLocation(), s.getSize(), kmalloc_call.getFlag(), kmalloc_call.getSize(), kmalloc_call.isFlexible(), kmalloc_call.getCacheName()
+from KmallocCall call, Class allocatedType
+where allocatedType = call.getStruct()
+select sourceLocation(call), call.getTarget().getName(), allocatedType.(ExportType),
+  allocatedType.getName(), sourceLocation(allocatedType), objectTypeSize(allocatedType),
+  call.getFlag(), call.getSize(), call.isFlexible(), call.getCacheName()

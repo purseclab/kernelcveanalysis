@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
 from .models import VerifyError
 
@@ -78,6 +79,7 @@ class Adb:
         *,
         timeout: float,
         stdin_text: str | None = None,
+        on_output: Callable[[str], None] | None = None,
     ) -> ShellResult:
         try:
             process = subprocess.Popen(
@@ -89,15 +91,35 @@ class Adb:
             )
         except FileNotFoundError as exc:
             raise AdbError("adb was not found on PATH") from exc
+
+        chunks: list[str] = []
+
+        def read_output() -> None:
+            assert process.stdout is not None
+            while True:
+                chunk = process.stdout.read(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if on_output is not None:
+                    on_output(chunk)
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
+        if stdin_text is not None and process.stdin is not None:
+            process.stdin.write(stdin_text)
+            process.stdin.close()
+
         timed_out = False
         try:
-            output, _ = process.communicate(input=stdin_text, timeout=timeout)
+            process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
             process.kill()
-            output, _ = process.communicate()
+            process.wait()
+        reader.join(timeout=5.0)
         return ShellResult(
-            output=output or "",
+            output="".join(chunks),
             returncode=process.returncode if process.returncode is not None else -1,
             timed_out=timed_out,
         )

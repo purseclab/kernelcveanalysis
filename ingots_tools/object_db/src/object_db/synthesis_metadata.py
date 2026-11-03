@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Self
+from typing import Self
 
 from pydantic import BaseModel
 
@@ -8,9 +8,9 @@ METADATA_FILE_NAME = "metadata.json"
 
 class SynthesisMetadata(BaseModel):
     kernel_name: str
-    vmlinux: Path
     codeql_db: Path
     linux_src: Path
+    vmlinux: Path | None = None
     synthesis_data: Path | None = None
 
     def data_path(self) -> Path:

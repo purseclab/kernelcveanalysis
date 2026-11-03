@@ -4,6 +4,7 @@ from typing import ClassVar
 
 from ..diff import DiffFile, DiffFileType
 from .base import FilterContext, FilteredCommit, StreamingCommitFilter
+from .masking import MaskReason
 
 
 # this performs the trivial filtering on commits, before any classifiers or model calls
@@ -120,7 +121,9 @@ class FileFilter(StreamingCommitFilter):
             return None
 
         self._record_matches(matching_files)
-        commit.diff.files = matching_files
+        for file_change in commit.diff.files:
+            if not self.matches_file(file_change.file):
+                commit.mask_file(file_change, MaskReason.FILE_SELECTION)
         return commit
 
     def iter_filter_mutable_commits(

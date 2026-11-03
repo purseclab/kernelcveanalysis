@@ -19,14 +19,17 @@ from time import monotonic, perf_counter
 
 from kpatch.filter import (
     ConfigFilter,
+    DeadCodeFilter,
     FilterContext,
     FilterPipeline,
     IfdefFilter,
     KernelConfig,
     MergeCommitFilter,
+    RenameFilter,
     WhitespaceFilter,
 )
 from kpatch.git import GitDb, GitRepo, parse_time
+from kpatch.filter.source_pruning import PruningDecision, source_pruning_tail
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +159,10 @@ class BenchmarkResult:
     peak_tree_rss_mib: float
     peak_tree_pss_mib: float
     output_sha256: str
+    source_pruning: bool = False
+    pruning_decisions: tuple[PruningDecision, ...] = ()
+    reference_scans: int = 0
+    reference_scan_seconds: float = 0.0
 
 
 def _positive_workers(value: str) -> int:
@@ -176,6 +183,11 @@ def main() -> None:
         "--workers", type=_positive_workers, default=4,
         help="Processes for the Kbuild config phase only (default: 4)",
     )
+    parser.add_argument(
+        "--source-pruning", action="store_true",
+        help="Include Tree-sitter rename and zero-reference stages for comparison",
+    )
+    parser.add_argument("--reference-cache", type=Path, help="Override the Git-local reference cache for cold/warm comparisons")
     args = parser.parse_args()
     start, end = parse_time(args.start), parse_time(args.end)
     if not timedelta(0) < end - start <= timedelta(days=93):
@@ -188,7 +200,7 @@ def main() -> None:
     try:
         begin = perf_counter()
         context = FilterContext.from_db_range(
-            GitDb(args.db), GitRepo(args.repo), start, end
+            GitDb(args.db, read_only=True), GitRepo(args.repo), start, end
         )
         loaded = perf_counter()
         config = KernelConfig(args.config.read_text())
@@ -198,8 +210,11 @@ def main() -> None:
                 ConfigFilter(config, workers=args.workers),
                 IfdefFilter(config),
                 WhitespaceFilter(),
-            ]
+            ], reference_cache_path=args.reference_cache,
         )
+        pruning_decisions: list[PruningDecision] = []
+        if args.source_pruning:
+            pipeline.filters[-1:] = source_pruning_tail(config, pruning_decisions.append)
         digest = hashlib.sha256()
         output_count = 0
         with closing(
@@ -231,6 +246,10 @@ def main() -> None:
         peak_tree_rss_mib=sampler.peak_tree_rss_mib,
         peak_tree_pss_mib=sampler.peak_tree_pss_mib,
         output_sha256=digest.hexdigest(),
+        source_pruning=args.source_pruning,
+        pruning_decisions=tuple(pruning_decisions),
+        reference_scans=max((stage.index_stats.repository_scans for stage in pipeline.filters if isinstance(stage, (RenameFilter, DeadCodeFilter)) and stage.index_stats is not None), default=0),
+        reference_scan_seconds=max((stage.index_stats.scan_seconds for stage in pipeline.filters if isinstance(stage, (RenameFilter, DeadCodeFilter)) and stage.index_stats is not None), default=0.0),
     )
     print(json.dumps(asdict(result), indent=2))
 

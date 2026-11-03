@@ -79,14 +79,21 @@ def test_socket_exchange_waits_for_reply_before_closing_write_side() -> None:
 
     thread = threading.Thread(target=serve)
     thread.start()
+    streamed: list[str] = []
     with client:
-        output = _socket_exchange(client, lines=["id", "exit"], timeout=3)
+        output = _socket_exchange(
+            client,
+            lines=["id", "exit"],
+            timeout=3,
+            on_output=streamed.append,
+        )
     thread.join(timeout=3)
 
     assert not thread.is_alive()
     assert received == b"id\nexit\n"
     assert not half_closed_before_reply
     assert "root-only-token" in output
+    assert "".join(streamed) == output
 
 
 def test_listening_payload_drains_output_before_shell_opens(

@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from pathlib import Path
 import posixpath
 import re
@@ -55,7 +55,7 @@ def _iter_git_output(
     args: list[str],
     delimiter: bytes,
     success_codes: tuple[int, ...],
-) -> Iterator[bytes]:
+) -> Generator[bytes, None, None]:
     """Read bounded chunks instead of retaining a tree-wide command output."""
 
     command = ["git", "-C", str(repo.repo), *args]
@@ -63,6 +63,7 @@ def _iter_git_output(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        bufsize=0,
     )
     assert process.stdout is not None
     pending = b""
@@ -82,6 +83,27 @@ def _iter_git_output(
         if process.poll() is None:
             process.kill()
             process.wait()
+
+
+def _iter_git_grep(repo: GitRepo, args: list[str]) -> Generator[bytes, None, None]:
+    """Use PCRE's fast literal alternation when available, with a Git fallback."""
+
+    try:
+        yield from _iter_git_output(repo, args, b"\n", (0, 1))
+    except subprocess.CalledProcessError as error:
+        if "-P" not in args or error.returncode not in (128, 129):
+            raise
+        yield from _iter_git_output(repo, ["-E" if arg == "-P" else arg for arg in args], b"\n", (0, 1))
+
+
+def _covering_literals(names: Iterable[str]) -> list[str]:
+    """Drop redundant substring patterns; callers still check exact words."""
+
+    selected: list[str] = []
+    for name in sorted(names, key=lambda name: (len(name), name)):
+        if not any(part in name for part in selected):
+            selected.append(name)
+    return selected
 
 
 class SourceIncludeIndex:
@@ -109,6 +131,10 @@ class SourceIncludeIndex:
         commit: str,
         srcarch: str,
         extra_paths: Iterable[str] = (),
+        *,
+        reference_names: frozenset[str] = frozenset(),
+        reference_hit: Callable[[str, int, bytes], None] | None = None,
+        prefer_pcre: bool = False,
     ) -> "SourceIncludeIndex":
         tracked_paths = (
             raw_path.decode("utf-8", errors="replace")
@@ -124,34 +150,40 @@ class SourceIncludeIndex:
         out.add_paths(extra_paths)
 
         prefix = f"{commit}:".encode()
-        for raw_row in _iter_git_output(
+        pattern = r'^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]'
+        patterns = ["-e", pattern]
+        matcher = "-P" if prefer_pcre else "-E"
+        extensions = ["*.c", "*.h", "*.S"]
+        if reference_names:
+            # Minimal covering substrings avoid overlapping alternatives.
+            # Exact raw words are checked by the callback.
+            literals = _covering_literals(reference_names)
+            patterns.extend(("-e", "(" + "|".join(re.escape(name) for name in literals) + ")"))
+            extensions.extend(("*.s", "*.rs", "*Makefile*", "*Kbuild*", "*.mk", "*.lds*"))
+        for raw_row in _iter_git_grep(
             repo,
             [
                 "grep",
+                *(["--threads=16"] if prefer_pcre else []),
                 "-n",
+                "-z",
                 "-I",
-                "-E",
-                r'^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]',
+                matcher,
+                *patterns,
                 commit,
                 "--",
-                "*.c",
-                "*.h",
-                "*.S",
+                *extensions,
             ],
-            b"\n",
-            (0, 1),
         ):
-            if not raw_row.startswith(prefix):
+            fields = raw_row.split(b"\0", 2)
+            if len(fields) != 3 or not fields[0].startswith(prefix):
                 continue
-            source, separator, line = raw_row[len(prefix) :].partition(b":")
-            if not separator:
-                continue
-            _, separator, line = line.partition(b":")
-            if separator:
-                out.add_line(
-                    source.decode("utf-8", errors="replace"),
-                    line.decode("utf-8", errors="replace"),
-                )
+            path = fields[0][len(prefix):].decode("utf-8", errors="replace")
+            number, line = fields[1:]
+            if path.endswith(_SOURCE_EXTENSIONS):
+                out.add_line(path, line.decode("utf-8", errors="replace"))
+            if reference_hit is not None:
+                reference_hit(path, int(number), line)
         return out
 
     def _snapshot(self) -> _SourceIncludeSnapshot:

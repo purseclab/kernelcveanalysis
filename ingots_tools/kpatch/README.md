@@ -10,6 +10,25 @@ Many but not all lpe bugs are given a CVE, and we don't really care if CVE delay
 More interesting overall is if you can find commit as soon as it hits some kernel tree, which would enable exploitation irl, and be an issue.
 Since kernel requires patch before issuing cve.
 
+## Future filtering work
+
+See [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md) for sample estimates,
+pruning criteria, and the proposed AST comparison approach.
+
+An experimental subset of rename and unused-definition filtering is now
+available through `filter config --source-pruning`. Reordering, target hardware
+inventory, and general policy reachability remain future work.
+
+- Detect hardware and driver features present on the target device, rather than
+  relying only on enabled kernel configuration symbols. A configured driver can
+  have no matching device; an accessible device can lack a particular feature.
+- Track uses of changed header definitions in active compilation units. An
+  included header currently survives even when its changed inline functions or
+  structure fields are unused, including definitions for disabled subsystems.
+- Detect behavior-preserving renames, reorders, and refactors beyond whitespace
+  and comment equivalence. These change C tokens and require semantic analysis;
+  they should not be rejected merely because their commit messages say cleanup.
+
 ## Linux patch extraction and incremental updates
 
 The raw, pre-filtering database is `db/all_commits.sqlite`. The `extract` command
@@ -105,6 +124,74 @@ first-parent-patch / ordered-parent-ID representation as `extract`.
 
 ## Filtering performance
 
+### Experimental source pruning
+
+Add `--source-pruning` to `filter config` to run configuration, preprocessor
+masking, `DeadCodeFilter`, whitespace cleanup, and finally `RenameFilter`
+after merge filtering. It defaults to off. Start from the raw commit database
+when rerunning the pipeline.
+
+```console
+uv run kpatch filter --repo linux --db all_commits --dest filtered_source --start 08-10-2026 --end 08-12-2026 config --config kernel.config --source-pruning
+```
+
+The rename stage uses Tree-sitter C and complete parent/child token comparison
+to accept consistent identifier substitutions while preserving structure,
+values, and order. It checks references outside the changed files and retains
+exports, changed strings, implicit function-name uses, and opaque macro cases.
+It does not implement order-independent AST comparison.
+
+Stages preserve an immutable original patch and record typed edit masks or
+code masks. Edit masks retain parent text when reconstructing a source;
+code masks blank proven-irrelevant regions, including unchanged lines.
+Rename comparison uses these complete-source views instead of reintroducing
+discarded edits. Rejected candidates publish no new masks. See
+[FILTER_MASKING.md](FILTER_MASKING.md) for the API and invariants.
+
+The unused-definition stage considers changes confined to static functions,
+simple macros, or standalone named structures. It searches for references in
+both revisions, including unchanged consumers, and evaluates configuration and
+preprocessor guards. It can remove a qualifying file from a mixed commit, or
+mask individual unused functions while retaining other changes in the file.
+The partial-function fallback is limited to eight candidates per file;
+macros and types keep their more restrictive grouped checks. Whitespace cleanup
+then removes comment-only remnants before rename detection.
+Address-taking, strings, build metadata, and ambiguous references count as uses.
+Unused-definition analysis retains files larger than 64 KiB to bound parsing
+cost; rename comparison has a 2 MiB file limit. Named nested type definitions
+and enumerators inside structures are retained because their names can escape
+the enclosing definition. Definitions containing preprocessor directives or
+pragmas are retained because their translation-time effects can escape the
+definition. Direct line-number/counter macros also receive conservative handling.
+
+This is an experimental source-reference model, not a compiler-level proof.
+Arbitrary nested token pasting, generated/forced includes, external modules,
+and observable debug/BTF names need stronger build-aware analysis. Layout and
+field-specific reachability are not inferred from absence of field accesses.
+
+The stages share a bounded lazy reference index and Git blob reader. Exact
+revision facts are cached in Git's `kpatch-references-v4.sqlite`; child revisions
+can update changed files instead of rescanning the tree. The include scan seeds
+plausible rename and header-helper queries using bounded substring patterns;
+exact identifier checks follow the scan. Later queries use Git's fixed-string matcher.
+High-frequency or unresolved references retain the
+candidate. See [the masking update](benchmarks/ast_pruning/2026-10-25-masking/REPORT.md)
+and [the original measurements](benchmarks/ast_pruning/2026-10-25/REPORT.md).
+
+### Execution and progress display
+
+Config filtering performs history/include preparation and computes decisions
+before consuming the upstream commit stream. The remaining stages are lazy:
+commits pass through them without materializing each intermediate result.
+Each stage currently owns a separate Rich progress display. Nested generators
+can therefore show downstream bars before those stages receive input; later
+totals are unknown. Parallel config progress advances when a root job finishes,
+so it can pause while workers process a large root. A shared display with explicit
+preparation tasks remains UI work; the bars do not represent separate full
+passes or additional parallel workers.
+
+### Benchmarking
+
 The pipeline loads commit metadata while leaving original patches in SQLite,
 spools compact preparation data and decisions to a temporary database, and
 streams retained patches into the destination. It shares bounded caches of
@@ -124,6 +211,18 @@ and a SHA-256 of ordered commit IDs and reduced patches. RSS can count shared
 pages repeatedly; PSS apportions shared pages. Tree peaks are sampled (RSS
 0.25s, PSS 1s), not hard bounds. It consumes results without collecting them,
 never saves filtered commits, and rejects ranges longer than 93 days.
+
+### Whitespace and comment filtering
+
+The whitespace stage checks diff hunks first. If a hunk starts inside a block
+comment whose opener is outside the patch, it recovers comment context from the
+complete source and rechecks the hunk. Ordinary code edits still avoid full-file
+tokenization. Candidate no-ops are confirmed against complete parent/child
+sources, using a literal-aware comment comparison before falling back to C token
+comparison. Source reads reuse the pipeline's bounded Git blob cache.
+
+The fix applies to subsequent filtering runs; existing filtered databases must
+be regenerated to remove previously retained comment-only changes.
 
 ### Parallel configuration filtering
 

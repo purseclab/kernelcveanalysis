@@ -19,6 +19,7 @@ from kpatch.filter import (
 )
 from filter_helpers import filter_commits
 from kpatch.diff import Diff
+from kpatch.filter.masking import MaskReason
 from kpatch.filter.config_filter import KernelConfig
 from kpatch.git import (
     CommitParent,
@@ -141,11 +142,9 @@ class _KeepNamedFile(CommitFilter):
     ) -> FilteredCommit | None:
         if self.seen is not None:
             self.seen.append(id(commit))
-        commit.diff.files = [
-            diff_file
-            for diff_file in commit.diff.files
-            if diff_file.file == self.filename
-        ]
+        for diff_file in commit.diff.files:
+            if diff_file.file != self.filename:
+                commit.mask_file(diff_file, MaskReason.FILE_SELECTION)
         return commit if commit.diff.files else None
 
 
@@ -158,7 +157,10 @@ class _ReplaceView(CommitFilter):
         context: FilterContext,
     ) -> FilteredCommit | None:
         replacement = FilteredCommit.from_commit(commit.original)
-        replacement.diff.files = commit.diff.files[-1:]
+        selected = commit.diff.files[-1].file
+        for diff_file in replacement.diff.files:
+            if diff_file.file != selected:
+                replacement.mask_file(diff_file, MaskReason.FILE_SELECTION)
         return replacement
 
 
@@ -598,13 +600,13 @@ class FilterCommitsTests(unittest.TestCase):
         self.assertNotIn("diff", vars(commit.parents[0]))
         self.assertIn("+new", view.materialize().diff_str)
 
-    def test_mutable_commit_accepts_explicit_diff_and_build_modes(self) -> None:
+    def test_masked_commit_accepts_explicit_build_modes(self) -> None:
         commit = self.make_commit("c1", "p0", ["drivers/foo.c"])
         diff = Diff.parse(commit.diff_str)
         modes = {(None, "drivers/foo.c"): FileBuildModes(old="y", new="m")}
-        view = FilteredCommit(commit, diff=diff, build_modes=modes)
+        view = FilteredCommit(commit, build_modes=modes)
 
-        self.assertIs(view.diff, diff)
+        self.assertEqual(view.diff.text, diff.render())
         self.assertIs(view.build_modes, modes)
         self.assertEqual(FilteredCommit.from_commit(commit).build_modes, {})
 

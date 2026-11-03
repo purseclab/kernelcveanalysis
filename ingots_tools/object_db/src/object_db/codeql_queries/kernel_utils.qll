@@ -45,24 +45,25 @@ abstract class KmallocCall extends FunctionCall {
     else result = "unknown"
   }
 
-  Struct getStruct() {
-    // get result from input sizeof argument
-    exists(Expr sof |
+  Class getStruct() {
+    // An explicit sizeof identifies the allocation's layout more directly than
+    // a cast/assignment of the returned pointer, which can name another type.
+    if exists(Expr sof |
       this.getSizeArg().getAChild*() = sof and
-      sizeofParam(sof) = result
-    ) or
-    // get result from return type
-    result = this.getFullyConverted().getType().stripType() 
+      sizeofParam(sof).getUnspecifiedType() instanceof Class
+    )
+    then
+      exists(Expr sof |
+        this.getSizeArg().getAChild*() = sof and
+        sizeofParam(sof).getUnspecifiedType() = result
+      )
+    else result = this.getFullyConverted().getType().stripType()
   }
 
   string isFlexible() {
-    this.getSize() = "unknown" and
-    this.getStruct().getAField() instanceof FlexibleArrayMember and
-    result = "true"
-    or
-    not this.getSize() = "unknown" and
-    not this.getStruct().getAField() instanceof FlexibleArrayMember and
-    result = "false"
+    if this.getStruct().getAField() instanceof FlexibleArrayMember
+    then result = "true"
+    else result = "false"
   }
 
   string getCacheName() {

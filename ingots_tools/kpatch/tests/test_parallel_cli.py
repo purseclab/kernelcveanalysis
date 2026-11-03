@@ -7,7 +7,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from kpatch.cli import app
-from kpatch.filter import FilterPipeline, MergeCommitFilter, WhitespaceFilter
+from kpatch.filter import DeadCodeFilter, FilterPipeline, MergeCommitFilter, RenameFilter, WhitespaceFilter
 
 
 class ParallelCliTests(unittest.TestCase):
@@ -32,10 +32,17 @@ class ParallelCliTests(unittest.TestCase):
                 configured.assert_called_once()
                 self.assertEqual(configured.call_args.kwargs, {"workers": expected})
                 pipeline = cast(FilterPipeline, run_filter.call_args.args[1])
-                self.assertEqual(len(pipeline.filters), 4)
+                if "--source-pruning" in arguments:
+                    self.assertEqual(len(pipeline.filters), 6)
+                    self.assertEqual([type(stage) for stage in pipeline.filters[-3:]], [DeadCodeFilter, WhitespaceFilter, RenameFilter])
+                else:
+                    self.assertEqual(len(pipeline.filters), 4)
 
     def test_default_workers_is_four(self) -> None:
         self._assert_workers([], 4)
+
+    def test_source_pruning_can_be_enabled(self) -> None:
+        self._assert_workers(["--source-pruning"], 4)
 
     def test_explicit_positive_workers(self) -> None:
         for workers in (1, 2, 7):

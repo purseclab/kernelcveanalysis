@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:debuggable="true" android:label="kpoc verify">
         <activity
-            android:name=".RunActivity"
+            android:name="com.purdue.kpoc.verify.RunActivity"
             android:exported="true" />
     </application>
 </manifest>

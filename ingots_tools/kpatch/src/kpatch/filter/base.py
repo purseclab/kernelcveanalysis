@@ -3,7 +3,11 @@ from collections.abc import Generator, Iterable
 from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import ClassVar
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from .reference_index import ReferenceIndex
 
 from rich.progress import (
     BarColumn,
@@ -15,6 +19,11 @@ from rich.progress import (
 )
 
 from .repository_file import RepositoryFileReader
+from .masking import (
+    CodeMask, EditMask, FileIdentity, IgnoredLines, LineRange, MaskReason,
+    FileSnapshot, PatchSnapshot, SourceSide, SourceVersions, changed_lines, ignored_lines,
+    ambiguous_eof_projection, project_file, replay_sources,
+)
 from ..diff import Diff, DiffFile
 from ..git import (
     CommitParent,
@@ -41,7 +50,14 @@ class FilteredCommit:
     """A mutable filtering view paired with its immutable source commit."""
 
     original: GitCommit
+    _snapshot: PatchSnapshot | None = field(default=None, repr=False)
     _diff: Diff | None = field(default=None, repr=False)
+    _edit_masks: list[EditMask] = field(default_factory=list, repr=False)
+    _code_masks: list[CodeMask] = field(default_factory=list, repr=False)
+    _file_edits: dict[FileIdentity, list[EditMask]] = field(default_factory=dict, repr=False)
+    _file_codes: dict[FileIdentity, list[CodeMask]] = field(default_factory=dict, repr=False)
+    _code_paths: dict[SourceSide, dict[str, list[CodeMask]]] = field(default_factory=dict, repr=False)
+    _original_files: dict[FileIdentity, FileSnapshot] = field(default_factory=dict, repr=False)
     build_modes: dict[tuple[str | None, str], FileBuildModes] = field(
         default_factory=dict
     )
@@ -49,11 +65,17 @@ class FilteredCommit:
     def __init__(
         self,
         original: GitCommit,
-        diff: Diff | None = None,
         build_modes: dict[tuple[str | None, str], FileBuildModes] | None = None,
     ) -> None:
         self.original = original
-        self._diff = diff
+        self._snapshot = None
+        self._diff = None
+        self._edit_masks = []
+        self._code_masks = []
+        self._file_edits = {}
+        self._file_codes = {}
+        self._code_paths = {side: {} for side in SourceSide}
+        self._original_files = {}
         self.build_modes = build_modes if build_modes is not None else {}
 
     @classmethod
@@ -62,15 +84,114 @@ class FilteredCommit:
 
     @property
     def diff(self) -> Diff:
-        """Parse only when a filter needs the patch, without caching on original."""
+        """Read the remaining patch; producers record masks instead of mutating it."""
+        return self.remaining_diff()
 
+    @property
+    def original_diff(self) -> PatchSnapshot:
+        if self._snapshot is None:
+            self._snapshot = PatchSnapshot.parse(self.original.diff_str)
+            self._original_files = {FileIdentity(file.file, file.old_file): file for file in self._snapshot.files}
+        return self._snapshot
+
+    @property
+    def edit_masks(self) -> tuple[EditMask, ...]:
+        return tuple(self._edit_masks)
+
+    @property
+    def code_masks(self) -> tuple[CodeMask, ...]:
+        return tuple(self._code_masks)
+
+    def mask_file(self, file: DiffFile, reason: MaskReason) -> None:
+        mask = EditMask(FileIdentity.of(file), reason, whole_file=True)
+        self._edit_masks.append(mask)
+        self._file_edits.setdefault(mask.file, []).append(mask)
+        self._diff = None
+
+    def has_masks(self, file: DiffFile) -> bool:
+        identity = FileIdentity.of(file)
+        return identity in self._file_edits or identity in self._file_codes
+
+    def code_masks_for(self, file: DiffFile) -> tuple[CodeMask, ...]:
+        return tuple(self._file_codes.get(FileIdentity.of(file), ()))
+
+    def mask_edits(
+        self, file: DiffFile, old_lines: tuple[LineRange, ...],
+        new_lines: tuple[LineRange, ...], reason: MaskReason,
+    ) -> None:
+        if old_lines or new_lines:
+            mask = EditMask(FileIdentity.of(file), reason, old_lines, new_lines)
+            self._edit_masks.append(mask)
+            self._file_edits.setdefault(mask.file, []).append(mask)
+            self._diff = None
+
+    def mask_code(
+        self, file: DiffFile, side: SourceSide, lines: tuple[LineRange, ...],
+        reason: MaskReason, *, whole_file: bool = False,
+    ) -> None:
+        if lines or whole_file:
+            mask = CodeMask(FileIdentity.of(file), side, reason, lines, whole_file)
+            self._code_masks.append(mask)
+            self._file_codes.setdefault(mask.file, []).append(mask)
+            path = file.old_file or file.file if side is SourceSide.OLD else file.file
+            self._code_paths[side].setdefault(path, []).append(mask)
+            self._diff = None
+
+    def _ignored(self, file: DiffFile, side: SourceSide, *, include_code: bool = True) -> IgnoredLines:
+        identity = FileIdentity.of(file)
+        return ignored_lines(identity, side, self._file_edits.get(identity, ()),
+                             self._file_codes.get(identity, ()) if include_code else ())
+
+    def remaining_diff(self) -> Diff:
         if self._diff is None:
-            self._diff = Diff.parse(self.original.diff_str)
+            files: list[DiffFile] = []
+            for snapshot in self.original_diff.files:
+                identity = FileIdentity(snapshot.file, snapshot.old_file)
+                if any(mask.whole_file for mask in self._file_edits.get(identity, ())):
+                    continue
+                file = snapshot.mutable()
+                projected = project_file(file, self._ignored(file, SourceSide.OLD), self._ignored(file, SourceSide.NEW))
+                if projected is not None:
+                    files.append(projected)
+            self._diff = Diff("", files)
+            self._diff.synchronize_text()
         return self._diff
 
-    @diff.setter
-    def diff(self, value: Diff) -> None:
-        self._diff = value
+    def original_file(self, file: DiffFile) -> DiffFile:
+        identity = FileIdentity.of(file)
+        _ = self.original_diff
+        if identity not in self._original_files:
+            raise ValueError("File is not part of the original patch")
+        return self._original_files[identity].mutable()
+
+    def changed_lines(self, file: DiffFile, side: SourceSide) -> frozenset[int]:
+        return changed_lines(self.original_file(file), side, self._ignored(file, side))
+
+    def code_source(self, path: str, side: SourceSide, source: bytes) -> bytes:
+        masks = self._code_paths[side].get(path, ())
+        return IgnoredLines((span for mask in masks for span in mask.lines),
+                            whole_file=any(mask.whole_file for mask in masks)).blank(source)
+
+    def effective_sources(self, file: DiffFile, sources: SourceVersions) -> SourceVersions:
+        original = self.original_file(file)
+        old, new = self._ignored(file, SourceSide.OLD), self._ignored(file, SourceSide.NEW)
+        if ambiguous_eof_projection(original, old, new):
+            old, new = IgnoredLines(), IgnoredLines()
+        return replay_sources(original, sources, old, new,
+                              IgnoredLines(), IgnoredLines())
+
+    def active_sources(
+        self, file: DiffFile, sources: SourceVersions, *, extra_code_masks: tuple[CodeMask, ...] = (),
+    ) -> SourceVersions:
+        codes = self.code_masks_for(file) + extra_code_masks
+        old_code = ignored_lines(FileIdentity.of(file), SourceSide.OLD, (), codes)
+        new_code = ignored_lines(FileIdentity.of(file), SourceSide.NEW, (), codes)
+        original = self.original_file(file)
+        old = self._ignored(file, SourceSide.OLD, include_code=False)
+        new = self._ignored(file, SourceSide.NEW, include_code=False)
+        if ambiguous_eof_projection(original, old, new):
+            old, new = IgnoredLines(), IgnoredLines()
+        return replay_sources(original, sources, old, new, old_code, new_code)
 
     def synchronize_diff(self) -> None:
         if self._diff is not None:
@@ -99,6 +220,7 @@ class FilterContext:
     structured_commits: StructuredCommits | None = None
     commits: list[GitCommit] = field(default_factory=list)
     file_reader: RepositoryFileReader | None = None
+    reference_index: "ReferenceIndex | None" = None
 
     @classmethod
     def from_db_range(
@@ -153,6 +275,7 @@ def filter_progress(name: str, total: int | None, show_progress: bool) -> Progre
 
 class CommitFilter(ABC):
     name: ClassVar[str]
+    requires_reference_index: ClassVar[bool] = False
 
     @property
     def requires_complete_history(self) -> bool:
@@ -285,8 +408,9 @@ class StreamingCommitFilter(CommitFilter):
 class FilterPipeline(StreamingCommitFilter):
     name: ClassVar[str] = "Filtering commit pipeline"
 
-    def __init__(self, filters: list[CommitFilter]):
+    def __init__(self, filters: list[CommitFilter], *, reference_cache_path: Path | None = None):
         self.filters = list(filters)
+        self.reference_cache_path = reference_cache_path
 
     @property
     def requires_complete_history(self) -> bool:
@@ -306,6 +430,11 @@ class FilterPipeline(StreamingCommitFilter):
         self._validate_name()
         with repository_file_reader(context) as reader, ExitStack() as stack:
             stage_context = replace(context, file_reader=reader)
+            if context.reference_index is None and any(stage.requires_reference_index for stage in self.filters):
+                from .reference_index import ReferenceIndex
+                reference_index = ReferenceIndex(context.repo, reader.read_file, self.reference_cache_path)
+                stack.callback(reference_index.close)
+                stage_context = replace(stage_context, reference_index=reference_index)
             filtered = commits
             for commit_filter in self.filters:
                 stage = commit_filter.iter_filter_mutable_commits(

@@ -26,7 +26,8 @@ from .jev_api import (
     ScoreResult,
     jev,
 )
-from .jev_filter import InputState, JevFilter
+from .classifier_filter import ClassifierFilter, selected_fix_type
+from .input_state import InputState
 
 __all__ = [
     "ChoiceQuestion",
@@ -37,7 +38,7 @@ __all__ = [
     "ItemKind",
     "ItemReferences",
     "ItemSpan",
-    "JevFilter",
+    "ClassifierFilter",
     "NoulQuestion",
     "NoulResult",
     "ParsedCFile",
@@ -54,4 +55,5 @@ __all__ = [
     "parse_c_file",
     "resolve_include_candidates",
     "resolve_referenced_context",
+    "selected_fix_type",
 ]

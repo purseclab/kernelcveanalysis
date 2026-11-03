@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from kpatch.diff import Diff
+from kpatch.filter.masking import MaskReason
 from kpatch.filter import (
     CommitFilter,
     ConfigFilter,
@@ -67,7 +68,8 @@ class ReplaceFilter(StreamingCommitFilter):
         if commit.original.commit_id == "reject":
             return None
         replacement = FilteredCommit.from_commit(commit.original)
-        replacement.diff.files = replacement.diff.files[-1:]
+        for file in replacement.diff.files[:-1]:
+            replacement.mask_file(file, MaskReason.FILE_SELECTION)
         return replacement
 
 

@@ -1,8 +1,9 @@
-from dataclasses import dataclass
 import hashlib
 import re
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Self
+
+from .synthesis_metadata import SynthesisMetadata
 
 
 @dataclass
@@ -47,26 +48,22 @@ class Location:
             ),
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.file_path}:{self.start.line}:{self.start.column}:{self.end.line}:{self.end.column}"
 
     def to_db_id(self) -> int:
         digest = hashlib.sha256(str(self).encode()).hexdigest()
         return int(digest, 16) & (2**63 - 1)
 
-    def read_source(self, source_context: Any) -> str:
-        linux_src = source_context
-        if hasattr(source_context, "linux_src"):
-            linux_src = source_context.linux_src
-
-        path = Path(linux_src) / self.file_path
+    def read_source(self, source_context: SynthesisMetadata) -> str:
+        path = source_context.linux_src / self.file_path
         if not path.exists():
             return f"/* Error: File {path} not found */"
 
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
-        except Exception as e:
+        except OSError as e:
             return f"/* Error reading file: {e} */"
 
         if not lines:

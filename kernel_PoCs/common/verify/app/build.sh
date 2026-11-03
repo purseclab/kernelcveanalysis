@@ -22,10 +22,6 @@ javac -source 8 -target 8 -classpath "$android_jar" -d "$out/classes" \
     "${java_sources[@]}"
 mapfile -t class_files < <(find "$out/classes" -name '*.class' -print)
 "$build_tools/d8" --lib "$android_jar" --output "$out/dex" "${class_files[@]}"
-"$build_tools/aapt2" link -o "$out/base.apk" \
-    --manifest "$app_dir/AndroidManifest.xml" -I "$android_jar"
-(cd "$out/dex" && zip -q "$out/base.apk" classes.dex)
-"$build_tools/zipalign" -f 4 "$out/base.apk" "$out/aligned.apk"
 if [[ ! -f $out/debug.keystore ]]; then
     keytool -genkeypair -keystore "$out/debug.keystore" \
         -storepass android -keypass android -alias androiddebugkey \
@@ -33,9 +29,20 @@ if [[ ! -f $out/debug.keystore ]]; then
         -dname 'CN=Android Debug,O=Android,C=US' >/dev/null 2>&1
 fi
 mkdir -p "$verify_dir/src/verify_kernel_poc/assets"
-"$build_tools/apksigner" sign \
-    --ks "$out/debug.keystore" --ks-pass pass:android --key-pass pass:android \
-    --ks-key-alias androiddebugkey --v4-signing-enabled false \
-    --out "$verify_dir/src/verify_kernel_poc/assets/kpoc-verify.apk" \
-    "$out/aligned.apk"
-echo "wrote $verify_dir/src/verify_kernel_poc/assets/kpoc-verify.apk"
+for variant in "1:com.purdue.kpoc.verify.one" "2:com.purdue.kpoc.verify.two"; do
+    number=${variant%%:*}
+    package=${variant#*:}
+    manifest="$out/AndroidManifest-$number.xml"
+    sed "s/package=\"com.purdue.kpoc.verify\"/package=\"$package\"/" \
+        "$app_dir/AndroidManifest.xml" > "$manifest"
+    "$build_tools/aapt2" link -o "$out/base-$number.apk" \
+        --manifest "$manifest" -I "$android_jar"
+    (cd "$out/dex" && zip -q "$out/base-$number.apk" classes.dex)
+    "$build_tools/zipalign" -f 4 "$out/base-$number.apk" "$out/aligned-$number.apk"
+    "$build_tools/apksigner" sign \
+        --ks "$out/debug.keystore" --ks-pass pass:android --key-pass pass:android \
+        --ks-key-alias androiddebugkey --v4-signing-enabled false \
+        --out "$verify_dir/src/verify_kernel_poc/assets/kpoc-verify-$number.apk" \
+        "$out/aligned-$number.apk"
+    echo "wrote $verify_dir/src/verify_kernel_poc/assets/kpoc-verify-$number.apk ($package)"
+done

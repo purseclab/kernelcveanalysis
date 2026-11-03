@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 from .adb import Adb
 from .models import AdbIdentity, VerifyError
@@ -192,6 +193,7 @@ def read_until_closed(
     connection: socket.socket,
     *,
     timeout: float,
+    on_output: Callable[[str], None] | None = None,
 ) -> str:
     connection.settimeout(timeout)
     chunks: list[bytes] = []
@@ -208,4 +210,6 @@ def read_until_closed(
         if not data:
             break
         chunks.append(data)
+        if on_output is not None:
+            on_output(data.decode("utf-8", errors="replace"))
     return b"".join(chunks).decode("utf-8", errors="replace")

@@ -92,9 +92,8 @@ Older binaries or unusual wrappers can be described with CLI overrides.
 --poc-arg VALUE
 --run-command '... {poc} ...'
 
---from-app
---app-apk PATH
---app-package PACKAGE
+--from-app [random|1|2|all]
+--run-only
 
 --root-check auto|flag|command|regex|none
 --root-flag-path PATH
@@ -112,8 +111,14 @@ uv run verify-kernel-poc -t challenge7.1.3.a \
 # Shared object with an embedded listening shell
 uv run verify-kernel-poc -t challenge7.1.3.a /path/to/libexp.so
 
-# JNI or shared library, loaded by the bundled helper app
+# JNI or shared library, loaded by a random helper app
 uv run verify-kernel-poc -t challenge7.1.3.a --from-app /path/to/libexp.so
+
+# Specific helper app
+uv run verify-kernel-poc -t challenge7.1.3.a --from-app 1 /path/to/libexp.so
+
+# Two VMs, both helper apps installed on each, both apps run on each
+uv run verify-kernel-poc -t challenge7.1.3.a --from-app all /path/to/libexp.so
 
 # JNI with a custom app runner
 uv run verify-kernel-poc -t challenge7.1.3.a \
@@ -124,6 +129,21 @@ uv run verify-kernel-poc -t challenge7.1.3.a \
   --root-check regex --root-check-regex 'uid=0\(root\)' /path/to/exp
 ```
 
+## Run-only and live output
+
+`--run-only` starts the payload, streams its stdout, and skips all root
+checks. It does not create the root-only flag or send `id`/`cat`/`getenforce`.
+It exits 0 once the payload was started; a payload that keeps running is stopped
+at `--timeout`.
+
+```bash
+uv run verify-kernel-poc -t challenge7.1.3.a --run-only /path/to/poc
+```
+
+Payload stdout is streamed live in both shell and app modes. The verification
+report is printed after the run. When `--json` is used, live output goes to
+stderr so stdout remains valid JSON.
+
 ## Run modes
 
 | Artifact / payload | Behavior |
@@ -132,7 +152,7 @@ uv run verify-kernel-poc -t challenge7.1.3.a \
 | executable + listening shell | Uses `adb forward`, connects, and sends root-check commands |
 | executable + reverse shell | Uses `adb reverse` for loopback IPs, otherwise listens on the host |
 | shared | Runs `LD_PRELOAD=<poc> /system/bin/sleep 200` by default |
-| shared/JNI + `--from-app` | Installs the helper APK and loads the PoC in app context |
+| shared/JNI + `--from-app` | Installs a helper app and loads the PoC in app context |
 | jni | Requires `--from-app` or `--run-command` |
 
 For a shared object that starts a detached worker, use
@@ -146,12 +166,23 @@ networking.
 
 ## App mode
 
-`--from-app` installs the tiny debuggable helper APK from
-`src/verify_kernel_poc/assets/kpoc-verify.apk`, copies the PoC into the app
-data directory, and starts the helper with an explicit Intent:
+There are two copies of the same helper app with different packages and paths:
+
+```text
+com.purdue.kpoc.verify.one  -> src/verify_kernel_poc/assets/kpoc-verify-1.apk
+com.purdue.kpoc.verify.two  -> src/verify_kernel_poc/assets/kpoc-verify-2.apk
+```
+
+`--from-app` chooses one at random. `--from-app 1` and `--from-app 2` choose a
+specific app. `--from-app all` starts two VMs, installs both apps on each VM,
+and runs the PoC with both apps on both VMs (four runs total). It requires
+`--template` and cannot be combined with `--adb`.
+
+The verifier installs the selected helper, copies the PoC into that app's data
+directory, and starts it with an explicit Intent:
 
 ```bash
-am start -W -n com.purdue.kpoc.verify/.RunActivity ...
+am start -W -n com.purdue.kpoc.verify.one/com.purdue.kpoc.verify.RunActivity ...
 ```
 
 The Activity starts the PoC from the app process (`u:r:untrusted_app`) and pumps
@@ -185,8 +216,7 @@ Activity.
 
 After the child starts, the root check is exactly the same as normal: the
 payload must read the randomized root-only flag. The helper app source and a
-reproducible build script live in `app/`. Use `--app-apk` to provide a different
-helper APK and `--app-package` if its package name differs.
+reproducible build script live in `app/`.
 
 ## Root flag
 

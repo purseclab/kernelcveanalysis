@@ -1,20 +1,15 @@
+/**
+ * @name Object database named cache allocations
+ * @id cpp/objectdb/named-cache-allocations
+ * @description Exports allocation sites with a resolved named cache.
+ * @kind table
+ */
 import cpp
 import kernel_utils
+import object_types
 
-//from KmallocCache c
-//select c.getName(), c.getSizeArg()
-
-// from KmallocCallWithCache c
-// select c, c.getCacheNameArg()
-
-from KmallocCall kmalloc_call, Struct s
-where
-  s = kmalloc_call.getStruct()
-  // TODO: find out why this is included
-  and not kmalloc_call.getSizeArg().isAffectedByMacro()
-  and kmalloc_call.getCacheName() != "default"
-select kmalloc_call.getLocation(), kmalloc_call, s, s.getLocation(), s.getSize(), kmalloc_call.getFlag(), kmalloc_call.getSize(), kmalloc_call.isFlexible(), kmalloc_call.getCacheName()
-
-// from FunctionCall c
-// where isKmemCacheAllocCall(c)
-// select c
+from KmallocCall call, Class allocatedType
+where allocatedType = call.getStruct() and call.getCacheName() != "default"
+select sourceLocation(call), call.getTarget().getName(), allocatedType.(ExportType),
+  allocatedType.getName(), sourceLocation(allocatedType), objectTypeSize(allocatedType),
+  call.getFlag(), call.getSize(), call.isFlexible(), call.getCacheName()

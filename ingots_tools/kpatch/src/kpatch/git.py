@@ -577,8 +577,13 @@ class GitDb(GitStore):
 
     db: Path
 
-    def __init__(self, db: Path):
+    def __init__(self, db: Path, *, read_only: bool = False):
         self.db = Path(db)
+        self._read_only = read_only
+        if read_only:
+            if not self.db.is_file():
+                raise FileNotFoundError(self.db)
+            return
         self.db.parent.mkdir(parents=True, exist_ok=True)
         existed = self.db.exists() and self.db.stat().st_size > 0
         self._initialize(existed)
@@ -588,7 +593,10 @@ class GitDb(GitStore):
         return cls(_path_for_db_name(db_name))
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db)
+        connection = (
+            sqlite3.connect(self.db.resolve().as_uri() + "?mode=ro", uri=True)
+            if self._read_only else sqlite3.connect(self.db)
+        )
         connection.row_factory = sqlite3.Row
         _ = connection.execute("PRAGMA foreign_keys = ON")
         return connection

@@ -180,16 +180,20 @@ def test_app_mode_intent() -> None:
         local_path="/tmp/exp.so",
         metadata=None,
         from_app=True,
-        app_package="com.purdue.kpoc.verify",
+        app_package="com.purdue.kpoc.verify.one",
         app_apk="/tmp/helper.apk",
         app_apk_path="/data/app/x/base.apk",
-        app_path="/data/data/com.purdue.kpoc.verify/files/exp.so",
+        app_path="/data/data/com.purdue.kpoc.verify.one/files/exp.so",
         app_port=23456,
         app_mode="jni",
     )
 
     command = build_app_intent(plan, pump=True)
-    assert command.startswith("am start -W -n com.purdue.kpoc.verify/.RunActivity ")
+    assert command.startswith(
+        "am start -W -n com.purdue.kpoc.verify.one/com.purdue.kpoc.verify.RunActivity "
+    )
     assert "--es mode jni" in command
     assert "--ei port 23456" in command
-    assert "--es lib_path /data/data/com.purdue.kpoc.verify/files/exp.so" in command
+    assert (
+        "--es lib_path /data/data/com.purdue.kpoc.verify.one/files/exp.so" in command
+    )

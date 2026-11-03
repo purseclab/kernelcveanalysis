@@ -18,7 +18,8 @@ from ..config_filter import (
     SourceAnalysisCache,
 )
 from ..source_filter import SourceIncludeIndex
-from ...diff import Diff, DiffFile
+from ..masking import MaskReason, SourceSide
+from ...diff import Diff, DiffFile, DiffFileType
 from ...git import GitCommit, StructuredCommits
 from .decisions import changed_paths, decide_commit
 from .history import ConfigHistoryStore, HistoryCommit, parse_history_diff
@@ -91,12 +92,18 @@ class ConfigFilter(StreamingCommitFilter):
         return parse_history_diff(commit.diff_str)
 
     def _populate_history(
-        self, structured: StructuredCommits, store: ConfigHistoryStore
+        self, structured: StructuredCommits, store: ConfigHistoryStore, context: FilterContext
     ) -> set[str]:
         source_paths: set[str] = set()
         sizes = _primary_subtree_sizes(structured)
         for commit in structured.commits.values():
-            diff = self._history_diff(commit)
+            if context.reference_index is not None:
+                patch = commit.diff_str
+                if not commit.is_merge:
+                    context.reference_index.observe_patch(patch)
+                diff = parse_history_diff(patch)
+            else:
+                diff = self._history_diff(commit)
             source_paths.update(changed_paths(diff))
             store.add_history(
                 HistoryCommit.from_commit(commit), diff, sizes[commit.commit_id]
@@ -116,9 +123,16 @@ class ConfigFilter(StreamingCommitFilter):
         snapshot = max(
             structured.commits.values(), key=lambda commit: commit.committer_date
         ).commit_id
+        references = context.reference_index
+        names = references.begin_bootstrap(snapshot) if references is not None else frozenset()
         source_includes = SourceIncludeIndex.from_repository(
-            context.repo, snapshot, self.config.srcarch, source_paths
+            context.repo, snapshot, self.config.srcarch, source_paths,
+            reference_names=names,
+            reference_hit=references.bootstrap_hit if references is not None and names else None,
+            prefer_pcre=references is not None,
         )
+        if references is not None:
+            references.finish_bootstrap()
         for diff in store.iter_history():
             source_includes.add_diff(diff)
         return source_includes
@@ -217,8 +231,11 @@ class ConfigFilter(StreamingCommitFilter):
         store = ConfigHistoryStore()
         self._store = store
         try:
-            paths = self._populate_history(structured, store)
+            paths = self._populate_history(structured, store, context)
             source_includes = self._source_includes(context, structured, store, paths)
+            if context.reference_index is not None and source_includes is not None:
+                snapshot = max(structured.commits.values(), key=lambda commit: commit.committer_date).commit_id
+                context.reference_index.bind_includes(source_includes, snapshot)
             paths.clear()
             self._collect_decisions(
                 context, structured, store, source_includes, show_progress
@@ -244,13 +261,18 @@ class ConfigFilter(StreamingCommitFilter):
             key = diff_file_key(diff_file)
             decision = decisions.get(key)
             if decision is None:
+                commit.mask_file(diff_file, MaskReason.CONFIG)
+                if diff_file.file.endswith((".c", ".h", ".S", ".s")) and ".lds" not in diff_file.file:
+                    for side in SourceSide:
+                        if side is SourceSide.OLD and diff_file.change_type in (DiffFileType.NEW, DiffFileType.COPY):
+                            continue
+                        commit.mask_code(diff_file, side, (), MaskReason.CONFIG, whole_file=True)
                 continue
             retained.append(diff_file)
             modes[key] = FileBuildModes(old=decision.old, new=decision.new)
 
         if not retained:
             return None
-        commit.diff.files = retained
         commit.build_modes.update(modes)
         return commit
 

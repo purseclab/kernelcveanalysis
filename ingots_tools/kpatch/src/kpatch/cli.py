@@ -9,7 +9,8 @@ import typer
 
 from .dataset import load_git_commits
 from .git import GitDb, GitRepo, parse_time, save_commits_to_db, load_commits_from_db
-from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, JevFilter, CountFilter
+from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, ClassifierFilter, CountFilter
+from .filter.source_pruning import source_pruning_tail
 from .visualization import show_commit_sunburst
 from .update import update_to_db
 from .extract import extract_to_db
@@ -128,7 +129,11 @@ def filter(
         int,
         typer.Option(min=1, help="Processes for the Kbuild config phase only; ignored without --config."),
     ] = 4,
+    source_pruning: Annotated[
+        bool, typer.Option("--source-pruning/--no-source-pruning", help="Enable experimental Tree-sitter rename and unreferenced-definition filters."),
+    ] = False,
 ):
+    kernel_config: KernelConfig | None = None
     if config is not None:
         kernel_config = KernelConfig(config.read_text())
         filter = FilterPipeline(
@@ -147,18 +152,24 @@ def filter(
             ]
         )
 
+    if source_pruning:
+        filter.filters[-1:] = source_pruning_tail(kernel_config)
     run(ctx, filter)
 
-@filter_app.command("rank", help="Runs jev ranking on filtered commits.")
+@filter_app.command("rank", help="Ranks filtered commits with OpenRouter GPT-6 Luna Decisions.")
 def rank(
     ctx: typer.Context,
+    all_commits: Annotated[
+        bool,
+        typer.Option("--all", help="Rank every commit instead of sampling 100."),
+    ] = False,
 ):
-    filter = FilterPipeline([
-        CountFilter(100, seed=67),
-        JevFilter(),
-    ])
+    filters: list[CommitFilter] = []
+    if not all_commits:
+        filters.append(CountFilter(100, seed=67))
+    filters.append(ClassifierFilter())
 
-    run(ctx, filter)
+    run(ctx, FilterPipeline(filters))
 
 def main():
     app()
