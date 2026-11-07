@@ -146,7 +146,7 @@ def filter(
     constant_branches: Annotated[
         bool, typer.Option(help="Also fold numeric preprocessor branches with complete source comparison. Adds source scanning cost. Requires --source-pruning."),
     ] = False,
-    source_pruning_lossy: Annotated[bool, typer.Option(help="Also assume incomplete preprocessing discovery for source equivalence, and ignore observable rename metadata; observed macro hazards still retain. Requires --source-pruning and --source-pruning-report.")] = False,
+    source_pruning_lossy: Annotated[bool, typer.Option(help="Also assume incomplete preprocessing discovery, ignore observable rename metadata, and allow code-address changes from source reordering; observed macro hazards still retain. Requires --source-pruning and --source-pruning-report.")] = False,
     source_pruning_report: Annotated[Path | None, typer.Option(help="JSONL source-pruning decisions, including lossy risk labels.")] = None,
     whitespace_line_numbers_lossy: Annotated[
         bool, typer.Option(help="Ignore physical line-number changes for otherwise equivalent tokens, gaps and byte columns. Can remove runtime-relevant changes. Requires --whitespace-report."),

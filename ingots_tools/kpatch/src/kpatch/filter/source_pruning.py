@@ -536,6 +536,10 @@ class RenameFilter(_SourceFilter):
             comparison = self._compare(pairs, masked_reorder=any(mask.reason is MaskReason.DEAD_CODE for mask in commit.code_masks))
             if comparison is None:
                 return commit
+            # Source permutations do not preserve observable function/return
+            # addresses. Require the explicit assumption and an audit sink.
+            if comparison.reorder is not None and (not self.lossy or self.on_pruned is None):
+                return commit
             mapping, diagnostics = comparison.mapping, comparison.diagnostics
             if mapping and not self.lossy:
                 # Source references do not establish name nonobservability:
@@ -597,11 +601,17 @@ class RenameFilter(_SourceFilter):
         if diagnostics:
             reason = MaskReason.RENAME_DIAGNOSTICS if mapping else MaskReason.DIAGNOSTIC_WORDING
         uncertainties = self._reorder_macros.assumed_uncertainties if self._reorder_macros is not None else frozenset()
-        lossy = bool(mapping) or comparison.bindings is not None or bool(uncertainties)
+        lossy = (bool(mapping) or comparison.bindings is not None
+                 or comparison.reorder is not None or bool(uncertainties))
         risks: tuple[str, ...] = (
             "preprocessing_inputs_and_compiler_flags_not_fully_pinned",
             "symbol_type_and_member_names_may_be_observable_through_btf_or_kallsyms",
         ) if mapping else ()
+        if comparison.reorder is not None:
+            risks += (
+                "function_and_callsite_addresses_may_change_runtime_behavior",
+                "compiler_generated_layout_and_instrumentation_not_proven_equivalent",
+            )
         if comparison.bindings is not None:
             reason = MaskReason.LOCAL_RENAME if comparison.bindings.lossy else MaskReason.PROTOTYPE_PARAMETERS
             symbols = tuple(sorted({item.old + "->" + item.new for item in comparison.bindings.renames}))

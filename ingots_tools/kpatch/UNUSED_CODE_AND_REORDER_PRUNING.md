@@ -3,9 +3,29 @@
 Implemented in the existing opt-in `--source-pruning` pipeline. Its order stays
 merge → config → ifdef → dead code → whitespace → final comparison. The final
 comparison is still `RenameFilter`; there is no extra stage or progress bar.
-Identifier substitutions require `--source-pruning-lossy` and an audit report:
-BTF/CO-RE and kallsyms can make their names observable. Default helper and
-initial return-arm reordering remain available independently of that option.
+Identifier substitutions and source reorders require `--source-pruning-lossy`
+and an audit report. BTF/CO-RE and kallsyms can make names observable; source
+permutations can change observable function and callsite addresses. Default
+filtering retains reorders. The API requires both `lossy=True` and an
+`on_pruned` callback to accept them.
+
+## Code-address assumption
+
+Identical source bodies and isolated control flow do not prove emitted-layout
+equivalence. Compiled controls demonstrate two behavior changes removed by the
+former default: immediate-return case reordering changes an unchanged callee's
+observed return address, and moving call-free leaf definitions changes an
+unchanged function-address comparison. These are runtime effects, beyond BTF or
+debug names. Restricting the new check to a directly spelled builtin in the
+moved code would miss the unchanged observer.
+
+Both reorder rules now require the explicit lossy option and an audit callback.
+Every accepted reorder is marked `lossy=true` and records
+`function_and_callsite_addresses_may_change_runtime_behavior` and
+`compiler_generated_layout_and_instrumentation_not_proven_equivalent`, in
+addition to any macro-discovery assumptions. Default or unaudited comparisons
+publish no new masks. Callback failures propagate. No low error-rate bound is
+claimed. Existing source-shape and macro guards remain required in lossy mode.
 
 ## Unused definitions
 
@@ -24,7 +44,7 @@ and recursive whole-program dead-code elimination have not been added.
 
 ## Independent helper reordering
 
-The new `independent_definition_reorder` rule accepts a permutation of adjacent
+The opt-in `independent_definition_reorder` rule accepts a permutation of adjacent
 static leaf function definitions in the same file when:
 
 - Each helper's complete signature and body have identical preprocessing tokens.
@@ -70,8 +90,9 @@ combine a reorder with a separate rename or logging-wording exemption.
 
 ## Adjacent terminal switch arms
 
-`independent_return_case_reorder` accepts permutations within the initial run of
-switch arms that each contain exactly one return statement. Every case label
+With the same audited assumption, `independent_return_case_reorder` accepts
+permutations within the initial run of switch arms that each contain exactly
+one return statement. Every case label
 and return expression must remain identical. Complex arms, fallthrough,
 declarations and directives are barriers; an unchanged warning/default arm
 can stay after a reordered run. Later runs are unsupported: a preceding complex
@@ -123,6 +144,12 @@ complete input-role contract. It is not a whole-build proof. Include ordering, f
 ordering, file moves, call-dependent helpers and semantic refactors remain work.
 
 ## Validation and measurement
+
+The latest code-address controls and audit requirement are described above;
+the historical measurements below refer to their own source snapshots. Actual
+public-pipeline fixtures now retain both address counterexamples by default and
+require the explicit audited assumption for removal. See
+[the current verification](FUTURE_PRUNING_WORK.md#source-reordering-and-code-address-observations--2026-11-07).
 
 Regression coverage includes harmless assembly text versus actual assembly,
 macro operators, exact helpers and dependency/call barriers, masking an unused

@@ -15,9 +15,9 @@ Since kernel requires patch before issuing cve.
 See [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md) for sample estimates,
 pruning criteria, and the proposed AST comparison approach.
 
-Experimental unused-definition and bounded reordering filters are now
-available through `filter config --source-pruning`. Identifier renames require
-the separate lossy mode; numeric constant folding requires `--constant-branches`.
+Experimental unused-definition filters are available through
+`filter config --source-pruning`. Identifier renames and bounded source reorders
+require the separate lossy mode; numeric constant folding requires `--constant-branches`.
 Target hardware inventory and general policy
 reachability remain future work. A narrow,
 opt-in compiler-backed policy stage is available through `kpatch policy` and
@@ -204,8 +204,8 @@ macro hazards. Macro discovery preserves known bindings even when another
 input is opaque. The default retains incomplete discovery; lossy mode can
 assume listed model/budget gaps and records each assumption. Failed searches,
 reads, malformed results and unsupported uncertainty reasons always retain.
-It also recognizes bounded permutations of adjacent unchanged static leaf
-helpers in the same file. Crossed helpers must have no calls or references
+Under the same explicit lossy option it recognizes bounded permutations of
+adjacent unchanged static leaf helpers in the same file. Crossed helpers must have no calls or references
 to one another; declarations and preprocessing directives are barriers.
 Macro bindings are checked in both revisions, allowing only literal numeric
 replacements for free expression identifiers. Calls, registration/init/section
@@ -214,6 +214,14 @@ The decision uses complete masked source views after dead-code pruning, and
 records an `independent_definition_reorder` edit mask. See
 [UNUSED_CODE_AND_REORDER_PRUNING.md](UNUSED_CODE_AND_REORDER_PRUNING.md).
 
+All source reorders assume code-address observations are irrelevant. An unchanged
+callee can inspect its return address, and unchanged code can compare helper
+addresses; either can change behavior after a source permutation. Reorders
+therefore require `--source-pruning-lossy` and its audit report. The API also
+requires an `on_pruned` callback to accept them. Every acceptance records the
+code-address and unproved compiler-layout/instrumentation risks; there is no
+measured false-removal bound for that assumption.
+
 Whole-file physical line and byte-column checks protect unchanged code around
 renames, diagnostics and reorders, including multiline macro invocations and
 backslash continuations. Known macro aliases of location builtins, or observed
@@ -221,8 +229,8 @@ token pasting that prevents resolving them, retain the candidate. Diagnostic
 exemptions cover only the recognized logging callee occurrences; evaluated
 arguments and other uses of the same spelling stay observable.
 
-An initial run of adjacent `switch` arms with one immediate `return` each can
-also be permuted. A preceding complex arm can fall through, so later runs are
+In explicit lossy mode, an initial run of adjacent `switch` arms with one
+immediate `return` each can also be permuted. A preceding complex arm can fall through, so later runs are
 retained. Other arms, declarations and directives are barriers. The complete source must
 otherwise match, and both revisions must pass the numeric macro guard. Type
 definitions inside return expressions remain observable. These decisions use

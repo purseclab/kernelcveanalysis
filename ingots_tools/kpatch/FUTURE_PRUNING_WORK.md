@@ -2,6 +2,12 @@
 
 ## Latest verified checkpoint — 2026-11-07
 
+All source reorders now require the explicit source-lossy option and an audit
+callback. Compiled public-pipeline controls show that unchanged code can observe
+changed function or return addresses after a reorder. Those risks are now
+recorded; default filtering retains reorders. See
+[the code-address repair](#source-reordering-and-code-address-observations--2026-11-07).
+
 Normal configuration filtering now skips advisory Kbuild preparation while
 input closure is unknown. The exact 500-original replay preserves every patch
 and mask with no preparation/source reads. Advisory collection is explicit
@@ -54,7 +60,7 @@ then uses 49 global macro scans rather than 111; observed lossy time falls from
 measurements, not a controlled end-to-end speedup claim. See the
 [latest implementation and measurements](#lazy-complete-file-evidence-and-closed-reference-checks--2026-11-07).
 
-**1,247 full-suite tests pass**, including the captured binary SELinux policy.
+**1,249 full-suite tests pass**, including the captured binary SELinux policy.
 Mypy passes all 65 Python files, and all 66 Python/C++ package sources match
 the final wheel.
 The preceding replay of the eleven previously accepted source candidates preserves
@@ -2325,3 +2331,103 @@ Frozen evidence is in ignored directories:
 - `benchmarks/unused_definition_opportunities/2026-11-07/` and
   `benchmarks/logging_call_yield/2026-11-07/` for new candidate pools and actual
   baseline checks.
+
+## Source reordering and code-address observations — 2026-11-07
+
+An independent review found two concrete runtime counterexamples to the former
+default reorder rules, using actual public `FilterPipeline([RenameFilter])`
+without guard waivers:
+
+- Reordering arms containing `return observe(...)` changes the return address
+  inspected by an unchanged callee. GCC and Clang at O0 produce different
+  return values, while the former filter removes the change as non-lossy.
+- Swapping two call-free static leaf definitions changes an unchanged integer
+  comparison of their function addresses. GCC at O0 and O2 changes program
+  behavior, while the former filter again removes it as non-lossy.
+
+Checking only for a directly spelled address builtin in the moved code cannot
+exclude unchanged observers. Source token equality, isolated control flow,
+macro checks and physical LINE/COLUMN checks do not prove emitted code-address
+equivalence. Therefore **every source reorder** now requires
+`--source-pruning-lossy --source-pruning-report PATH`. The API also requires an
+`on_pruned` callback. Default or unaudited reorder candidates publish no new
+masks. Every acceptance is marked `lossy=true` and adds these risks:
+
+- `function_and_callsite_addresses_may_change_runtime_behavior`
+- `compiler_generated_layout_and_instrumentation_not_proven_equivalent`
+
+Existing macro-discovery risks remain additive. A callback failure propagates;
+it does not silently omit the record. This mode deliberately admits the
+compiled behavior-changing controls and has no measured false-removal bound.
+The default repair does not weaken any source, macro, type or context guard.
+
+The broader braced-arm idea is not implemented. A complete original-patch
+screen of all 26,670 legacy IDs finds 2,573 changed case/default-keyword patches
+and sixteen whole-patch token permutations. Nine are keyword/comment false
+positives; seven actually change labels. No braced-arm candidate qualifies,
+and no additional whole switch candidate exists beyond the already measured
+hrtimer case. Another Bluetooth arm refactor has live static-data changes in a
+second file. All 34 inspected source blobs match native Git contents.
+
+Braces and terminal breaks alone would also be insufficient: an independent
+GCC/Clang O0/O2 control places static section records inside arms, then unchanged
+code reads the first linker record. Reordering changes its result. Declared
+storage/attributes, labels, preprocessing and other opaque effects therefore
+remain barriers even to a future source-shape extension.
+
+The latest measured seven strict structural acceptances are all diagnostic
+wording changes. The eleven explicit source-lossy acceptances comprise nine
+diagnostic changes, a prototype-parameter rename and the call-free hrtimer
+constant-return reorder. No accepted helper or call-bearing switch reorder is
+claimed safe by that inventory. This repair adds no new pruning class.
+
+Fourteen independent after-repair controls retain both compiled counterexamples
+by default and without an audit sink, and record both risks for explicit
+audited removal. They also verify propagated callback failure and complete
+three-stage source-tail behavior. These are concrete boundary controls, not
+a whole-program equivalence theorem.
+
+A complete after-repair kernel replay preserves all eleven default outcomes,
+including the seven accepted diagnostic commits, exact masks, audit records and
+remaining patches. A separate 640 MiB-bounded lossy replay stops before
+completing a macro query; that partial run does not establish an acceptance count.
+After checking available host memory, a separately bounded lossy-only run uses
+an 896 MiB hard limit, zero swap, the same production four-worker queries and
+reader rotation. It completes in 102 seconds with 620.9 MiB sampled combined
+RSS. All eleven removals, masks, remaining patches and audits match the prior
+complete baseline; the only audit additions are the two hrtimer address/layout
+risk labels. The smaller-cap attempts remain preserved as incomplete results.
+The final suite passes 1,249 tests, mypy checks 65 Python files and all 66
+packaged Python/C++ sources match the wheel. A later test-only coverage
+correction supplies the required callback so its macro-rejection fixture still
+reaches that guard; all 138 focused source/reorder tests then pass.
+
+An isolated resource comparison completes the exact offending query at four,
+two and one Git workers. Each emits the identical ordered 417,925-byte /
+3,131-row stream, including all checked row/byte budget prefixes. Four workers
+take 8.08 seconds with 451.7 MiB native peak RSS; two take 12.10 seconds with
+413.1 MiB; one takes 20.68 seconds with 373.3 MiB. These are local single-query
+measurements, not whole-pipeline throughput. Git 2.55's
+[versioned implementation](https://github.com/git/git/blob/v2.55.0/builtin/grep.c#L141-L176)
+flushes buffered worker results in input order. The measured memory savings do
+not justify a default slowdown, so production retains four workers.
+
+A separate current input audit still finds no matching target bundle in the
+declared local kernel/artifact stores. The supported challenge 7.1.2.a template
+exposes remote Image/initramfs paths, but no pinned source, dirty/generated
+inputs, kernel/vendor actions, original ABI list, ordered link inputs or debug
+encoder provenance. This is a scoped availability check, not a claim that no
+such files exist elsewhere. No source/policy guard is relaxed on that basis.
+
+Evidence remains in ignored directories:
+
+- `benchmarks/switch_block_review/2026-11-07/` for compiled controls and actual
+  before/after public-pipeline decisions, including the distinct
+  `lossy-only-896MiB/` completed replay.
+- `benchmarks/source_reorder_yield/2026-11-07/braced-arm-screen/` for the exact
+  original cohort screen and accepted-set classification.
+- `benchmarks/reorder_address_guard/2026-11-07/` for final verification.
+- `benchmarks/macro_grep_threads/2026-11-07/` for isolated ordered-output,
+  memory and timing comparisons without changing production resource flags.
+- `benchmarks/proof_input_audit/2026-11-07/` for the current supported-template
+  and declared-store check.

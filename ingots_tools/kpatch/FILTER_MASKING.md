@@ -85,7 +85,9 @@ policy exemption from an identifier-only rename.
 The same final stage accepts bounded same-file permutations of adjacent
 unchanged independent static leaf helpers. It checks the complete active source
 pair, including dead-code masks, even when a reduced hunk alone is not a valid
-function. It records `independent_definition_reorder` **edit** masks only after
+function. Reorders require the explicit source-lossy option and an audit callback
+because function and return addresses can change. It records
+`independent_definition_reorder` **edit** masks only after
 all remaining files qualify and both revisions pass the macro guard. It never
 excludes the reordered helpers as inactive code. No additional pipeline stage
 or progress bar is added. See [the reorder rules](UNUSED_CODE_AND_REORDER_PRUNING.md).

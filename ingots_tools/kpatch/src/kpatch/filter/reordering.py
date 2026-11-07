@@ -3,6 +3,8 @@
 Declarations and preprocessing directives are barriers. Function bodies and
 signatures must match exactly, and references between crossed functions are
 rejected. A separate repository macro check covers ordinary identifier macros.
+These source facts do not establish code-address or emitted-layout equivalence;
+the filtering caller must require an explicit audited assumption.
 As with the other raw-source analyses, compiler keyword macros, generated and
 forced includes/flags require the standard kernel compilation model.
 """
@@ -34,6 +36,8 @@ COLUMN_BUILTINS = frozenset({"__builtin_COLUMN", "__builtin_source_location"})
 
 @dataclass(frozen=True, slots=True)
 class ReorderProof:
+    """Source-permutation facts, not an emitted-code equivalence certificate."""
+
     symbols: tuple[str, ...]
     identifiers: frozenset[str]
     numeric_names: frozenset[str]

@@ -2,6 +2,8 @@
 
 No fallthrough, declarations or directives may cross another arm. Complete
 source tokens must otherwise match; the caller also checks macro bindings.
+Function/callsite addresses can still change. Filtering requires the caller's
+explicit audited assumption about those observations.
 """
 
 from dataclasses import dataclass
