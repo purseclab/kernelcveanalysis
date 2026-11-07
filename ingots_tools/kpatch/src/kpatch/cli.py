@@ -8,16 +8,23 @@ from dotenv import load_dotenv
 import typer
 
 from .dataset import load_git_commits
-from .git import GitDb, GitRepo, parse_time, save_commits_to_db, load_commits_from_db
+from .git import GitDb, GitRepo, parse_time, save_commits_to_db, load_commits_from_db, _path_for_db_name
 from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, ClassifierFilter, CountFilter
 from .filter.source_pruning import source_pruning_tail
+from .filter.pruning_audit import PruningAudit
 from .visualization import show_commit_sunburst
 from .update import update_to_db
 from .extract import extract_to_db
+from .policy_cli import policy_app
+from .policy_cli import policy_profile_inputs, setools_runtime, validate_policy_outputs
+from .filter.policy_analysis import PolicyFilter
+from .filter.policy_context import PolicyBuildContext
+from .filter.policy_profile import AnalysisScope, PolicyTargetProfile, SELinuxPolicyEvaluator
 
 app = typer.Typer()
 filter_app = typer.Typer()
 app.add_typer(filter_app, name="filter")
+app.add_typer(policy_app, name="policy")
 
 
 @app.callback()
@@ -132,6 +139,15 @@ def filter(
     source_pruning: Annotated[
         bool, typer.Option("--source-pruning/--no-source-pruning", help="Enable experimental Tree-sitter rename and unreferenced-definition filters."),
     ] = False,
+    source_pruning_lossy: Annotated[bool, typer.Option(help="Also assume incomplete preprocessing discovery for source equivalence, and ignore observable rename metadata; observed macro hazards still retain. Requires --source-pruning and --source-pruning-report.")] = False,
+    source_pruning_report: Annotated[Path | None, typer.Option(help="JSONL source-pruning decisions, including lossy risk labels.")] = None,
+    policy_profile: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Pinned SELinux/credential profile for compiler-backed policy filtering.")] = None,
+    policy_build_context: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Prepared compiler context JSON for policy analysis.")] = None,
+    policy_report: Annotated[Path | None, typer.Option(help="JSONL policy decisions, required with --policy-profile.")] = None,
+    policy_cache: Annotated[Path | None, typer.Option(help="Persistent compiler and binary-policy cache.")] = None,
+    policy_direct_app: Annotated[bool, typer.Option(help="Explicitly restrict policy scope to synchronous direct app context.")] = False,
+    setools_python: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
+    setools_module_path: Annotated[list[Path] | None, typer.Option(exists=True, file_okay=False)] = None,
 ):
     kernel_config: KernelConfig | None = None
     if config is not None:
@@ -152,9 +168,58 @@ def filter(
             ]
         )
 
+    if (source_pruning_lossy or source_pruning_report is not None) and not source_pruning:
+        raise typer.BadParameter("Source-pruning options require --source-pruning")
+    if source_pruning_lossy and source_pruning_report is None:
+        raise typer.BadParameter("--source-pruning-lossy requires --source-pruning-report to record risky removals")
+    if policy_profile is None:
+        if (policy_build_context is not None or policy_report is not None or policy_direct_app or policy_cache is not None
+                or setools_python is not None or setools_module_path):
+            raise typer.BadParameter("Policy options require --policy-profile")
+    elif policy_build_context is None or policy_report is None:
+        raise typer.BadParameter("--policy-profile requires --policy-build-context and --policy-report")
+    source_audit: PruningAudit | None = None
+    if source_pruning_report is not None:
+        args = get_run_args(ctx)
+        protected = (args.db.db, _path_for_db_name(args.destination_db_name)) + tuple(
+            value for value in (config, policy_profile, policy_build_context, policy_report, policy_cache) if value is not None)
+        try:
+            if policy_build_context is not None:
+                build = PolicyBuildContext.load(policy_build_context)
+                target = PolicyTargetProfile.load(policy_profile) if policy_profile is not None else None
+                validate_policy_outputs((source_pruning_report,), build,
+                                        protected + (policy_profile_inputs(target) if target else ()))
+            source_audit = PruningAudit.create(source_pruning_report, args.repo.repo, protected)
+        except (OSError, ValueError) as error:
+            raise typer.BadParameter(str(error)) from error
     if source_pruning:
-        filter.filters[-1:] = source_pruning_tail(kernel_config)
-    run(ctx, filter)
+        filter.filters[-1:] = source_pruning_tail(kernel_config, source_audit, lossy=source_pruning_lossy)
+    if policy_profile is None:
+        run(ctx, filter)
+        return
+    assert policy_build_context is not None and policy_report is not None
+    try:
+        import hashlib
+
+        target = PolicyTargetProfile.load(policy_profile)
+        build = PolicyBuildContext.load(policy_build_context)
+        if config is not None and hashlib.sha256(config.read_bytes()).hexdigest() != build.config_sha256:
+            raise ValueError("Config-stage and compiler policy configurations must match")
+        if policy_direct_app:
+            target = target.model_copy(update={"scope": AnalysisScope.DIRECT_APP})
+        validate_policy_outputs((policy_report,) + ((policy_cache,) if policy_cache is not None else ()), build,
+                                (policy_profile, policy_build_context) + policy_profile_inputs(target))
+        evaluator = SELinuxPolicyEvaluator(target.policy_file, enforcing=target.selinux_enforcing,
+                                           cache_path=policy_cache, runtime=setools_runtime(setools_python, setools_module_path))
+        policy_report.parent.mkdir(parents=True, exist_ok=True)
+        with policy_report.open("w") as report:
+            stage = PolicyFilter(target, build, evaluator, cache_path=policy_cache,
+                                 on_decision=lambda decision: print(decision.model_dump_json(), file=report))
+            filter.filters.append(stage)
+            run(ctx, filter)
+    except (OSError, ValueError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as error:
+        typer.echo(f"Policy filtering failed: {error}", err=True)
+        raise typer.Exit(1) from error
 
 @filter_app.command("rank", help="Ranks filtered commits with OpenRouter GPT-6 Luna Decisions.")
 def rank(

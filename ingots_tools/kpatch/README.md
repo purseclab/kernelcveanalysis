@@ -15,9 +15,33 @@ Since kernel requires patch before issuing cve.
 See [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md) for sample estimates,
 pruning criteria, and the proposed AST comparison approach.
 
-An experimental subset of rename and unused-definition filtering is now
-available through `filter config --source-pruning`. Reordering, target hardware
-inventory, and general policy reachability remain future work.
+Experimental unused-definition and bounded reordering filters are now
+available through `filter config --source-pruning`. Identifier renames require
+the separate lossy mode. Target hardware inventory and general policy
+reachability remain future work. A narrow,
+opt-in compiler-backed policy stage is available through `kpatch policy` and
+`filter config --policy-profile ...`; see the implementation notes and commands
+in [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md#compiler-backed-policy-prototype).
+
+The policy profile can pin a raw installed seccomp filter using
+`seccomp.filter_file` and `filter_sha256`. The ARM64 prototype resolves native
+and compat syscall slots from compiler facts and requires universal denial.
+Opaque callers and incomplete assembly/type-use coverage retain changes;
+service-inclusive findings remain candidates. BTF-enabled targets retain policy
+candidates until emitted metadata equivalence can be established. See the
+[capture and review results](FUTURE_PRUNING_WORK.md#exact-seccomp-capture-and-entry-proof-review--resumed-2026-11-07).
+
+Lossy source pruning recognizes consistent identifier substitutions and lexical
+function-prototype, parameter and local-variable renames. Types, bounds,
+attributes and implementation-reserved names stay observable. The separate
+`--source-pruning-lossy --source-pruning-report decisions.jsonl` mode enables
+comparisons and records their risks in JSONL. It can also assume explicitly
+listed model or budget gaps in macro discovery; observed macro hazards and
+search/read failures still retain the change. Missing macro bindings can change
+runtime behavior, so these assumptions are recorded as lossy. Renaming tags, members, types or
+symbols can change BTF, BPF CO-RE relocation and kallsyms behavior; source
+references alone do not establish equivalence. See
+[the source-pruning progress notes](FUTURE_PRUNING_WORK.md#source-pruning-correctness-and-binding-work).
 
 - Detect hardware and driver features present on the target device, rather than
   relying only on enabled kernel configuration symbols. A configured driver can
@@ -135,10 +159,16 @@ when rerunning the pipeline.
 uv run kpatch filter --repo linux --db all_commits --dest filtered_source --start 08-10-2026 --end 08-12-2026 config --config kernel.config --source-pruning
 ```
 
-The rename stage uses Tree-sitter C and complete parent/child token comparison
-to accept consistent identifier substitutions while preserving structure,
-values, and order. It checks references outside the changed files and retains
-exports, meaningful string changes, implicit function-name uses, and opaque macro cases.
+The default source stage retains identifier renames. With
+`--source-pruning-lossy --source-pruning-report decisions.jsonl`, it uses
+Tree-sitter C and complete parent/child token comparison to recognize consistent
+identifier substitutions while preserving structure, values, and order. It
+checks references outside the changed files and retains
+exports, meaningful string changes, implicit function-name uses, and observed
+macro hazards. Macro discovery preserves known bindings even when another
+input is opaque. The default retains incomplete discovery; lossy mode can
+assume listed model/budget gaps and records each assumption. Failed searches,
+reads, malformed results and unsupported uncertainty reasons always retain.
 It also recognizes bounded permutations of adjacent unchanged static leaf
 helpers in the same file. Crossed helpers must have no calls or references
 to one another; declarations and preprocessing directives are barriers.
@@ -149,12 +179,31 @@ The decision uses complete masked source views after dead-code pruning, and
 records an `independent_definition_reorder` edit mask. See
 [UNUSED_CODE_AND_REORDER_PRUNING.md](UNUSED_CODE_AND_REORDER_PRUNING.md).
 
+Whole-file physical line and byte-column checks protect unchanged code around
+renames, diagnostics and reorders, including multiline macro invocations and
+backslash continuations. Known macro aliases of location builtins, or observed
+token pasting that prevents resolving them, retain the candidate. Diagnostic
+exemptions cover only the recognized logging callee occurrences; evaluated
+arguments and other uses of the same spelling stay observable.
+
+An initial run of adjacent `switch` arms with one immediate `return` each can
+also be permuted. A preceding complex arm can fall through, so later runs are
+retained. Other arms, declarations and directives are barriers. The complete source must
+otherwise match, and both revisions must pass the numeric macro guard. Type
+definitions inside return expressions remain observable. These decisions use
+`independent_return_case_reorder` edit masks in the same final stage.
+
 The same opt-in stage also accepts diagnostic wording changes in standalone
 standard `pr_*`, `dev_*`, and `printk` calls. The `pr_debug`, `dev_dbg`, and
 `pr_cont` families are excluded;
 format conversions (including kernel pointer extensions), control characters,
 arguments, and other code remain significant. Local logger overrides and
-nonstandard `pr_fmt`/`dev_fmt` expansions block the exemption. Only literal
+nonstandard `pr_fmt`/`dev_fmt` expansions block the exemption. Caller bindings
+of modeled forwarding helpers and C backends also block it, including possible
+macro-generated declarations. Local token pasting/stringification retains the
+candidate when backend bindings cannot be established. Directive checks handle
+comments, continuations and digraphs; ordinary local variables named `file`,
+`line` or `fmt` are distinct from macro overrides of those names. Only literal
 concatenation with a final format parameter and standard module-name prefixes
 is supported for these prefix macros. Return-value uses, unknown wrappers,
 spliced/numeric-escape literals, and strings stored for later use are retained.
@@ -173,10 +222,16 @@ Rename comparison uses these complete-source views instead of reintroducing
 discarded edits. Rejected candidates publish no new masks. See
 [FILTER_MASKING.md](FILTER_MASKING.md) for the API and invariants.
 
+Kbuild object membership and possible include edges supply positive evidence;
+parser absence does not prove that a file is unused. Complete compiler and
+build-input closure is currently unknown, so those contexts retain unlisted
+files and do not authorize configuration-based code masks. Forced inputs,
+assembler data and generated inputs require the ongoing build-tracing work.
+
 The unused-definition stage considers changes confined to static functions,
 simple macros, or standalone named structures. It searches for references in
-both revisions, including unchanged consumers, and evaluates configuration and
-preprocessor guards. It can remove a qualifying file from a mixed commit, or
+both revisions, including unchanged consumers. Configuration and preprocessor
+guards are used only with explicit complete context. It can remove a qualifying file from a mixed commit, or
 mask individual unused functions while retaining other changes in the file.
 The partial-function fallback is limited to eight candidates per file;
 macros and types keep their more restrictive grouped checks. Whitespace cleanup
@@ -192,20 +247,48 @@ The opaque-construct guard uses syntax tokens, so `asm` in an include path,
 comment, or string no longer blocks an otherwise eligible unused definition.
 Actual assembly, implicit function-name tokens, and macro stringification or
 token pasting still block pruning.
+Source-only absence checks also retain contexts with raw line splices that can
+hide references. Before masking a definition, the stage checks moved LINE/COLUMN
+aliases in the remaining code, preserving original byte and line coordinates.
 
-This is an experimental source-reference model, not a compiler-level proof.
+Global-reference renames require a closed include and preprocessing spelling
+context in both modes. This prerequisite runs before expensive global position
+queries. The lossy flag retains its documented metadata and macro-discovery
+assumptions for other eligible comparisons.
+
+This is an experimental C-source reference model, not a whole-build proof.
 Arbitrary nested token pasting, generated/forced includes, external modules,
-and observable debug/BTF names need stronger build-aware analysis. Layout and
+and mixed input roles need stronger build-aware analysis. For example, an
+assembler can embed a header as raw bytes, making even a comment edit observable.
+Identifier renames with debug/BTF-name risks require the explicit lossy mode. Layout and
 field-specific reachability are not inferred from absence of field accesses.
 
 The stages share a bounded lazy reference index and Git blob reader. Exact
-revision facts are cached in Git's `kpatch-references-v4.sqlite`; child revisions
+revision facts are cached in Git's `kpatch-references-v8.sqlite`; child revisions
 can update changed files instead of rescanning the tree. The include scan seeds
 plausible rename and header-helper queries using bounded substring patterns;
 exact identifier checks follow the scan. Later queries use Git's fixed-string matcher.
 High-frequency or unresolved references retain the
 candidate. See [the masking update](benchmarks/ast_pruning/2026-10-25-masking/REPORT.md)
 and [the original measurements](benchmarks/ast_pruning/2026-10-25/REPORT.md).
+
+Macro discovery can read up to 32 additional complete files / 512 KiB when a
+literal requested definition appears after its original read budget. Complete
+file facts refine only that file's newly introduced opaque placeholders;
+previous observations from other files and all budget uncertainty remain.
+Read failures remain hard uncertainty. This uses the existing broad scan and
+adds no second repository-wide search.
+
+Git reference rows use a bounded binary parser: NUL terminates the path and
+line-number fields, and newline terminates the source contents. This preserves
+newlines in filenames and NUL bytes in source. Color and column formatting are
+disabled explicitly. Malformed, truncated or oversized rows fail the scan;
+they never establish absence. Both the default cache filename and query-key
+namespace changed to v8, including when an explicit cache file is reused.
+Exact tracked filenames use Git's literal pathspec mode, so names such as
+`:(exclude)*` cannot hide references in incremental searches. Historical include
+updates disable diff color and text conversion, and check parsed filenames
+against the NUL-delimited changed-path list before updating the shared graph.
 
 ### Execution and progress display
 

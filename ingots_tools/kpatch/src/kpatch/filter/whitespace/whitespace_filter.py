@@ -15,7 +15,7 @@ from ..base import (
     repository_file_reader,
 )
 from ...diff import DiffChunk, DiffFile, DiffFileType
-from ..masking import MaskReason, SourceVersions, line_macro_locations
+from ..masking import MaskReason, SourceVersions, has_compiler_source_locations, line_macro_locations
 
 _C_SOURCE_EXTENSIONS = (
     ".c",
@@ -154,6 +154,8 @@ class WhitespaceFilter(StreamingCommitFilter):
             old_bytes = read_func(parent_id, old_path)
             new_bytes = read_func(commit.original.commit_id, diff_file.file)
             if old_bytes != new_bytes and (b"__COUNTER__" in old_bytes or b"__COUNTER__" in new_bytes):
+                return False
+            if old_bytes != new_bytes and (has_compiler_source_locations(old_bytes) or has_compiler_source_locations(new_bytes)):
                 return False
             if (b"__LINE__" in old_bytes or b"__LINE__" in new_bytes) and line_macro_locations(old_bytes) != line_macro_locations(new_bytes):
                 return False

@@ -23,6 +23,10 @@ class MaskReason(StrEnum):
     DIAGNOSTIC_WORDING = "diagnostic_wording"
     RENAME_DIAGNOSTICS = "consistent_rename_and_diagnostics"
     REORDER = "independent_definition_reorder"
+    SWITCH_REORDER = "independent_return_case_reorder"
+    POLICY = "policy_unreachable"
+    PROTOTYPE_PARAMETERS = "prototype_parameter_names"
+    LOCAL_RENAME = "local_binding_rename_lossy"
     FILE_SELECTION = "file_selection"
 
 
@@ -93,6 +97,17 @@ class SourceVersions:
 def line_macro_locations(source: bytes) -> tuple[int, ...]:
     return tuple(number for number, line in enumerate(source.split(b"\n"), 1)
                  for _ in range(line.count(b"__LINE__")))
+
+
+_COMPILER_SOURCE_LOCATIONS = re.compile(
+    rb"\b__builtin_(?:LINE|COLUMN|FILE(?:_NAME)?|FUNCTION|FUNCSIG|source_location)\b"
+)
+
+
+def has_compiler_source_locations(source: bytes) -> bool:
+    """Compiler-evaluated locations require more than a raw-token comparison."""
+
+    return _COMPILER_SOURCE_LOCATIONS.search(source) is not None
 
 
 @dataclass(frozen=True, slots=True)

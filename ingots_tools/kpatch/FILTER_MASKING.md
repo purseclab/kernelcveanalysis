@@ -90,6 +90,13 @@ all remaining files qualify and both revisions pass the macro guard. It never
 excludes the reordered helpers as inactive code. No additional pipeline stage
 or progress bar is added. See [the reorder rules](UNUSED_CODE_AND_REORDER_PRUNING.md).
 
+The initial run of adjacent switch arms with a single immediate return uses the
+same stage and macro guard, recording `independent_return_case_reorder` edit
+masks. Later runs are retained because preceding arms could fall through.
+Complex arms stay in place as barriers. Complete surrounding source, case/return
+expressions and local type/name effects remain significant; this rule never
+masks the reordered arms as unreachable code.
+
 - **Config:** mask excluded edits; exclude code only for proven-unused compilation
   files on the appropriate revision sides. Build metadata exclusions stay edit
   masks, and copying a file does not exclude its unchanged source. Preserve
@@ -147,3 +154,24 @@ retain the original patch and mask history when implementing resumable stages.
 The benchmark's pruning decisions include mask snapshots for independent replay.
 
 See [the masking benchmark report](benchmarks/ast_pruning/2026-10-25-masking/REPORT.md).
+
+## Optional policy stage
+
+The compiler-backed `PolicyFilter` reads both original revisions and publishes
+`MaskReason.POLICY` edit masks only after every remaining file is equivalent
+outside proved runtime exclusions. It does not publish code masks or compile a
+patch reconstructed from remaining edits. Existing code masks participate in
+the final comparison, while the compiler sees the actual source. Incomplete
+caller/service scope records a candidate and retains the commit. See
+[FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md#compiler-backed-policy-prototype)
+for supported gates, pinned inputs and current limits.
+
+Source decisions can be recorded with `--source-pruning-report FILE`. Prototype
+parameter erasure uses `prototype_parameter_names`. The separate
+`--source-pruning-lossy` mode can produce `local_binding_rename_lossy`; those
+binding decisions, including prototype erasure, carry `lossy=true` and explicit
+risk reasons because preprocessing inputs are not fully pinned. A failed binding or
+macro check publishes no additional masks. Scope resolution includes block/for
+scopes and parameter/declaration identity, so equal spellings in other functions
+do not become one global substitution. Types, member names, external symbols,
+bounds, reserved annotations and other tokens remain part of the comparison.

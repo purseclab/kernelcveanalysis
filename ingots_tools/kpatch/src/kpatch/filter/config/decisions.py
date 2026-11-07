@@ -55,12 +55,17 @@ def decide_commit(
     )
 
     old_modes: dict[FileKey, ConfigValue | None] = {}
+    old_complete: dict[FileKey, bool] = {}
     needs_parent: dict[FileKey, bool] = {}
     for diff_file in diff.files:
         key = diff_file_key(diff_file)
         check_parent = _needs_parent(
             diff_file, build_description_changed, include_targets
         )
+        if state.source_includes is not None and state.source_includes.uncertain_sources:
+            # Any source edit may close/open unknown inclusion of another
+            # changed file. Reusing its new absence for the old side is unsafe.
+            check_parent = True
         needs_parent[key] = check_parent
         old_modes[key] = (
             state.get(diff_file.old_file or diff_file.file)
@@ -68,6 +73,7 @@ def decide_commit(
             and state.file_included(diff_file.old_file or diff_file.file)
             else None
         )
+        old_complete[key] = (old_modes[key] is None or state.cpp_context_complete(diff_file.old_file or diff_file.file))
 
     state.update_filter_state(diff, commit.commit_id)
     if commit.is_merge:
@@ -82,11 +88,14 @@ def decide_commit(
             else state.get(diff_file.file) if state.file_included(diff_file.file) else None
         )
         old_mode = old_modes[key]
+        new_complete = new_mode is None or state.cpp_context_complete(diff_file.file)
+        complete = old_complete[key] and new_complete
         if not needs_parent[key] and diff_file.change_type not in (
             DiffFileType.NEW,
             DiffFileType.COPY,
         ):
             old_mode = new_mode
+            complete = new_complete
         if old_mode is not None or new_mode is not None:
-            decisions[key] = FileDecision(old=old_mode, new=new_mode)
+            decisions[key] = FileDecision(old=old_mode, new=new_mode, complete=complete)
     return decisions

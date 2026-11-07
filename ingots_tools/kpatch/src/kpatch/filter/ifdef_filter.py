@@ -1,9 +1,7 @@
-import ast
 from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
-import operator as op
 import re
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from .base import (
     FilterContext,
@@ -13,8 +11,10 @@ from .base import (
     repository_file_reader,
 )
 from .config_filter import ConfigValue, KernelConfig
+from .cpp_expression import evaluate_cpp_expression, parse_cpp_integer
 from ..diff import DiffFile, DiffFileType
-from .masking import MaskReason, SourceSide, line_ranges, line_macro_locations
+from .masking import MaskReason, SourceSide, has_compiler_source_locations, line_ranges, line_macro_locations
+from .whitespace.c_lexer import preprocessor_directive_text, replace_c_comments
 from ..git import GitRepo
 
 C_SOURCE_EXTENSIONS = (
@@ -33,81 +33,6 @@ C_SOURCE_EXTENSIONS = (
 
 def is_c_source_file(path: str) -> bool:
     return any(path.endswith(ext) for ext in C_SOURCE_EXTENSIONS)
-
-
-_SAFE_OPERATORS: dict[type, Callable[..., Any]] = {
-    ast.Add: op.add,
-    ast.Sub: op.sub,
-    ast.Mult: op.mul,
-    ast.FloorDiv: op.floordiv,
-    ast.Mod: op.mod,
-    ast.BitAnd: op.and_,
-    ast.BitOr: op.or_,
-    ast.BitXor: op.xor,
-    ast.LShift: op.lshift,
-    ast.RShift: op.rshift,
-    ast.Eq: op.eq,
-    ast.NotEq: op.ne,
-    ast.Lt: op.lt,
-    ast.LtE: op.le,
-    ast.Gt: op.gt,
-    ast.GtE: op.ge,
-    ast.And: lambda a, b: a and b,
-    ast.Or: lambda a, b: a or b,
-    ast.Not: op.not_,
-    ast.Invert: op.invert,
-    ast.UAdd: op.pos,
-    ast.USub: op.neg,
-}
-
-
-def _eval_ast(node: ast.AST) -> int:
-    if isinstance(node, ast.Expression):
-        return _eval_ast(node.body)
-    elif isinstance(node, ast.Constant):
-        if isinstance(node.value, (int, bool)):
-            return int(node.value)
-        return int(bool(node.value))
-    elif isinstance(node, ast.UnaryOp):
-        oper = _SAFE_OPERATORS.get(type(node.op))
-        if oper is None:
-            raise ValueError(f"Unsupported unary operator: {type(node.op)}")
-        res = oper(_eval_ast(node.operand))
-        return int(res) if isinstance(res, bool) else int(res)
-    elif isinstance(node, ast.BinOp):
-        oper = _SAFE_OPERATORS.get(type(node.op))
-        if oper is None:
-            raise ValueError(f"Unsupported binary operator: {type(node.op)}")
-        left = _eval_ast(node.left)
-        right = _eval_ast(node.right)
-        return int(oper(left, right))
-    elif isinstance(node, ast.BoolOp):
-        if isinstance(node.op, ast.And):
-            for val in node.values:
-                if not _eval_ast(val):
-                    return 0
-            return 1
-        elif isinstance(node.op, ast.Or):
-            for val in node.values:
-                if _eval_ast(val):
-                    return 1
-            return 0
-    elif isinstance(node, ast.Compare):
-        left = _eval_ast(node.left)
-        for oper_node, comparator in zip(node.ops, node.comparators):
-            oper = _SAFE_OPERATORS.get(type(oper_node))
-            if oper is None:
-                raise ValueError(f"Unsupported compare operator: {type(oper_node)}")
-            right = _eval_ast(comparator)
-            if not oper(left, right):
-                return 0
-            left = right
-        return 1
-    elif isinstance(node, ast.Name):
-        if node.id in ("True", "False"):
-            return 1 if node.id == "True" else 0
-        raise ValueError(f"Unknown identifier: {node.id}")
-    raise ValueError(f"Unsupported AST node: {type(node)}")
 
 
 def _symbol_defined(
@@ -185,44 +110,55 @@ def _evaluate_condition(
     is_module: bool = False,
 ) -> bool | None:
     """Evaluate an expression, returning ``None`` when it is not understood."""
-    expr = expr.strip()
-    if not expr:
-        return True
+    if len(expr) > 4096:
+        return None
+    cleaned = replace_c_comments(expr)
+    if cleaned is None:
+        return None
+    expr = cleaned.strip()
+    # These kernel predicates model boolean/tristate configuration symbols.
+    # Numeric/string options need actual macro expansion, not ConfigValue's
+    # generic ENABLED representation for every non-tristate value.
+    def _predicate_value(symbol: str) -> ConfigValue | None:
+        if symbol.endswith("_MODULE") and symbol[:-7].startswith("CONFIG_"):
+            return ConfigValue.ENABLED if config.get(symbol[:-7]) is ConfigValue.MODULE else ConfigValue.DISABLED
+        return config.get(symbol) if config.get_raw(symbol) in {"", "y", "m", "n"} else None
 
-    # 1. Strip comments
-    expr = re.sub(r"/\*.*?\*/", " ", expr)
-    expr = re.sub(r"//.*$", "", expr)
+    predicates = re.finditer(r"\bIS_(?:ENABLED|BUILTIN|MODULE|REACHABLE)\s*\(\s*(CONFIG_[A-Za-z0-9_]+)\s*\)", expr)
+    predicate_values = {match[1]: _predicate_value(match[1]) for match in predicates}
+    if any(value is None for value in predicate_values.values()):
+        return None
 
     # 2. IS_ENABLED(CONFIG_X)
     expr = re.sub(
         r"\bIS_ENABLED\s*\(\s*(CONFIG_[A-Za-z0-9_]+)\s*\)",
-        lambda m: "1" if config.get(m.group(1)) in (ConfigValue.ENABLED, ConfigValue.MODULE) else "0",
+        lambda m: " 1 " if predicate_values[m.group(1)] in (ConfigValue.ENABLED, ConfigValue.MODULE) else " 0 ",
         expr,
     )
 
     # 3. IS_BUILTIN(CONFIG_X)
     expr = re.sub(
         r"\bIS_BUILTIN\s*\(\s*(CONFIG_[A-Za-z0-9_]+)\s*\)",
-        lambda m: "1" if config.get(m.group(1)) == ConfigValue.ENABLED else "0",
+        lambda m: " 1 " if predicate_values[m.group(1)] == ConfigValue.ENABLED else " 0 ",
         expr,
     )
 
     # 4. IS_MODULE(CONFIG_X)
     expr = re.sub(
         r"\bIS_MODULE\s*\(\s*(CONFIG_[A-Za-z0-9_]+)\s*\)",
-        lambda m: "1" if config.get(m.group(1)) == ConfigValue.MODULE else "0",
+        lambda m: " 1 " if predicate_values[m.group(1)] == ConfigValue.MODULE else " 0 ",
         expr,
     )
 
     # 5. IS_REACHABLE(CONFIG_X)
     def _repl_is_reachable(m: re.Match[str]) -> str:
         sym = m.group(1)
-        val = config.get(sym)
+        val = predicate_values[sym]
         if is_module:
             return "1" if val in (ConfigValue.ENABLED, ConfigValue.MODULE) else "0"
         return "1" if val == ConfigValue.ENABLED else "0"
 
-    expr = re.sub(r"\bIS_REACHABLE\s*\(\s*(CONFIG_[A-Za-z0-9_]+)\s*\)", _repl_is_reachable, expr)
+    expr = re.sub(r"\bIS_REACHABLE\s*\(\s*(CONFIG_[A-Za-z0-9_]+)\s*\)", lambda match: " " + _repl_is_reachable(match) + " ", expr)
 
     # 6. defined(X) or defined X
     def _repl_defined(m: re.Match[str]) -> str:
@@ -248,40 +184,26 @@ def _evaluate_condition(
             return "__KPATCH_UNKNOWN_SYMBOL"
         return "1" if known else "0"
 
-    expr = re.sub(r"\bdefined\s*\(\s*([A-Za-z0-9_]+)\s*\)|\bdefined\s+([A-Za-z0-9_]+)", _repl_defined, expr)
+    expr = re.sub(r"\bdefined\s*\(\s*([A-Za-z0-9_]+)\s*\)|\bdefined\s+([A-Za-z0-9_]+)", lambda match: " " + _repl_defined(match) + " ", expr)
 
     # 7. Unadorned CONFIG_X identifiers
     def _repl_config_ident(m: re.Match[str]) -> str:
         sym = m.group(0)
+        if sym.endswith("_MODULE") and sym[:-7].startswith("CONFIG_"):
+            return "1" if config.get(sym[:-7]) is ConfigValue.MODULE else "0"
         raw = config.get_raw(sym)
-        if raw:
-            try:
-                # If it is integer/hex (e.g. 64 or 0x40)
-                int(raw, 0)
-                return raw
-            except ValueError:
-                pass
-        val = config.get(sym)
-        if val == ConfigValue.ENABLED:
+        if raw == "y":
             return "1"
-        return "0"
+        if raw in {"", "m", "n"}:
+            return "0"
+        # Keep macro token boundaries when a signed constant is substituted:
+        # -CONFIG_NEGATIVE must become - -1, never a newly lexed --1 token.
+        return " " + raw + " " if parse_cpp_integer(raw) is not None else "__KPATCH_UNKNOWN_SYMBOL"
 
     expr = re.sub(r"\bCONFIG_[A-Za-z0-9_]+\b", _repl_config_ident, expr)
 
-    # 8. C operators to Python
-    expr = expr.replace("&&", " and ").replace("||", " or ")
-    expr = re.sub(r"!(?!=)", " not ", expr)
-
-    # Clean and strip any residual whitespace
-    expr = expr.strip()
-    if not expr:
-        return True
-
-    try:
-        parsed = ast.parse(expr, mode="eval")
-        return bool(_eval_ast(parsed))
-    except Exception:
-        return None
+    value = evaluate_cpp_expression(expr.strip())
+    return value.value != 0 if value is not None else None
 
 
 def evaluate_condition(expr: str, config: KernelConfig, is_module: bool = False) -> bool:
@@ -296,85 +218,83 @@ class _Conditional:
     # True only when a previous branch is known to have been selected.
     branch_taken: bool
     active: bool
+    has_else: bool = False
 
 
-_DIRECTIVE_RE = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
+_DIRECTIVE_RE = re.compile(r"^\s*(?:#|%:)\s*([A-Za-z_][A-Za-z_0-9]*)\b(.*)$")
+_NONSTANDARD_LAYOUT = re.compile(r"\r(?!\n)|[\v\f\x1c-\x1e\x85\u2028\u2029\ufeff\0]|\\[ \t]+\r?\n")
+_MODELED_PREDICATES = frozenset({"IS_ENABLED", "IS_BUILTIN", "IS_MODULE", "IS_REACHABLE"})
+
+
+@dataclass(frozen=True, slots=True)
+class _LogicalLine:
+    text: str
+    first_line: int
+    stop_line: int
+
+    def physical_lines(self) -> range:
+        return range(self.first_line, self.stop_line)
+
+
+def _logical_lines(content: str) -> tuple[_LogicalLine, ...] | None:
+    """Keep original line coordinates through phase-two splicing/comments."""
+    if _NONSTANDARD_LAYOUT.search(content):
+        return None
+    normalized = preprocessor_directive_text(content, strict_multiline=True)
+    if normalized is None:
+        return None
+    logical = iter(normalized.splitlines())
+    result: list[_LogicalLine] = []
+    first = 1
+    for number, physical in enumerate(content.splitlines(keepends=True), 1):
+        if physical.endswith(("\\\n", "\\\r\n")):
+            continue
+        text = next(logical, None)
+        if text is None:
+            return None
+        result.append(_LogicalLine(text, first, number + 1))
+        first = number + 1
+    if next(logical, None) is not None:
+        return None
+    # A terminal backslash-newline is not a complete logical line. Retain it
+    # instead of silently losing its physical coordinates.
+    if first <= len(content.splitlines()):
+        return None
+    return tuple(result)
+
+
+def _overrides_modeled_symbol(rest: str, config: KernelConfig, is_module: bool) -> bool:
+    match = re.match(r"\s*([A-Za-z_][A-Za-z_0-9]*)", rest)
+    return match is not None and (
+        match[1] in _MODELED_PREDICATES
+        or _symbol_defined(match[1], config, is_module) is not None
+    )
 
 
 def get_active_lines(content: str, config: KernelConfig, is_module: bool = False) -> set[int]:
-    """Return the set of 1-indexed line numbers that are actively compiled under `config`."""
-    lines = content.splitlines()
-    total_lines = len(lines)
-    if total_lines == 0:
-        return set()
-
-    # Most source files have no conditional directives at all.
-    if re.search(
-        r"^\s*#\s*(?:if|ifdef|ifndef|elif|else|endif)\b",
-        content,
-        re.MULTILINE,
-    ) is None:
-        return set(range(1, total_lines + 1))
-
+    """Return possibly active physical CPP lines, retaining unsupported state."""
+    all_lines = set(range(1, len(content.splitlines()) + 1))
+    logical = _logical_lines(content)
+    if logical is None:
+        return all_lines
     active_lines: set[int] = set()
     stack: list[_Conditional] = []
-    in_block_comment = False
-
-    idx = 0
-    while idx < total_lines:
-        line_no = idx + 1
-        raw_line = lines[idx]
-
-        # Handle multi-line C block comments
-        if in_block_comment:
-            if "*/" in raw_line:
-                in_block_comment = False
-                raw_line = raw_line.split("*/", 1)[1]
-            else:
-                # Entire line is inside block comment
-                current_active = stack[-1].active if stack else True
-                if current_active:
-                    active_lines.add(line_no)
-                idx += 1
-                continue
-
-        # Check if an unclosed block comment starts on this line before a directive
-        # But if a directive starts first, check directive first
-        stripped = raw_line.strip()
-        match = _DIRECTIVE_RE.match(stripped)
-
-        if match is None:
-            # Check if block comment starts
-            if "/*" in raw_line:
-                # Strip all closed /* ... */ pairs
-                cleaned = re.sub(r"/\*.*?\*/", "", raw_line)
-                if "/*" in cleaned:
-                    in_block_comment = True
-
-            current_active = stack[-1].active if stack else True
-            if current_active:
-                active_lines.add(line_no)
-            idx += 1
-            continue
-
-        # We found a directive line! Handle line continuations with backslash
-        directive = match.group(1)
-        rest = match.group(2)
-        directive_line_numbers = [line_no]
-
-        while raw_line.rstrip().endswith("\\") and idx + 1 < total_lines:
-            idx += 1
-            raw_line = lines[idx]
-            directive_line_numbers.append(idx + 1)
-            rest = f"{rest.rstrip('\\')} {raw_line.strip()}"
-
-        idx += 1
-
-        # Current parent state
+    for line in logical:
         parent_active = stack[-1].active if stack else True
-
+        match = _DIRECTIVE_RE.match(line.text)
+        if match is None:
+            if parent_active:
+                active_lines.update(line.physical_lines())
+            continue
+        directive, rest = match[1], match[2].strip()
+        if directive in {"define", "undef"} and parent_active and _overrides_modeled_symbol(rest, config, is_module):
+            # Captured config no longer represents this source environment.
+            # Macro expansion and local state updates need a real CPP context.
+            return all_lines
         if directive in ("if", "ifdef", "ifndef"):
-            if directive == "ifdef":
+            if directive != "if" and re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", rest) is None:
+                result = None
+            elif directive == "ifdef":
                 result = _evaluate_ifdef(rest, config, is_module) if parent_active else False
             elif directive == "ifndef":
                 result = _evaluate_ifndef(rest, config, is_module) if parent_active else False
@@ -388,48 +308,39 @@ def get_active_lines(content: str, config: KernelConfig, is_module: bool = False
                     active=parent_active and result is not False,
                 )
             )
-            # Directive lines are active if their enclosing parent scope was active
             if parent_active:
-                active_lines.update(directive_line_numbers)
+                active_lines.update(line.physical_lines())
 
         elif directive == "elif":
-            if stack:
-                frame = stack[-1]
-                if frame.parent_active and not frame.branch_taken:
-                    result = _evaluate_condition(rest, config, is_module)
-                else:
-                    result = False
-
-                frame.active = (
-                    frame.parent_active
-                    and not frame.branch_taken
-                    and result is not False
-                )
-                frame.branch_taken = frame.branch_taken or result is True
-                if frame.parent_active:
-                    active_lines.update(directive_line_numbers)
-            elif parent_active:
-                active_lines.update(directive_line_numbers)
+            if not stack or stack[-1].has_else:
+                return all_lines
+            frame = stack[-1]
+            result = _evaluate_condition(rest, config, is_module) if frame.parent_active and not frame.branch_taken else False
+            frame.active = frame.parent_active and not frame.branch_taken and result is not False
+            frame.branch_taken = frame.branch_taken or result is True
+            if frame.parent_active:
+                active_lines.update(line.physical_lines())
 
         elif directive == "else":
-            if stack:
-                frame = stack[-1]
-                frame.active = frame.parent_active and not frame.branch_taken
-                frame.branch_taken = True
-                if frame.parent_active:
-                    active_lines.update(directive_line_numbers)
-            elif parent_active:
-                active_lines.update(directive_line_numbers)
+            if not stack or stack[-1].has_else or rest:
+                return all_lines
+            frame = stack[-1]
+            frame.active = frame.parent_active and not frame.branch_taken
+            frame.branch_taken = frame.has_else = True
+            if frame.parent_active:
+                active_lines.update(line.physical_lines())
 
         elif directive == "endif":
-            if stack:
-                frame = stack.pop()
-                if frame.parent_active:
-                    active_lines.update(directive_line_numbers)
-            elif parent_active:
-                active_lines.update(directive_line_numbers)
-
-    return active_lines
+            if not stack or rest:
+                return all_lines
+            frame = stack.pop()
+            if frame.parent_active:
+                active_lines.update(line.physical_lines())
+        elif directive in {"elifdef", "elifndef"}:
+            return all_lines
+        elif parent_active:
+            active_lines.update(line.physical_lines())
+    return all_lines if stack else active_lines
 
 
 def diff_file_touches_active_code(
@@ -597,7 +508,7 @@ class IfdefFilter(StreamingCommitFilter):
             return None
         locations = line_macro_locations(raw) if b"__LINE__" in raw else ()
         return _SourceActivity(_active_lines_for_modes(content, self.config, modes), len(content.splitlines()),
-                               line_macros=locations, has_counter=b"__COUNTER__" in raw)
+                               line_macros=locations, has_counter=b"__COUNTER__" in raw or has_compiler_source_locations(raw))
 
     def _filter_file(
         self,
@@ -616,6 +527,10 @@ class IfdefFilter(StreamingCommitFilter):
             return True
 
         modes = commit.build_modes.get(diff_file_key(diff_file))
+        if modes is None or not modes.complete:
+            # Inclusion strength does not establish an exclusive MODULE mode
+            # or a closed preprocessor environment for an uncertain input.
+            return True
         old_modes: tuple[bool, ...]
         new_modes: tuple[bool, ...]
         if modes is None:

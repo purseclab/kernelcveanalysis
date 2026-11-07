@@ -28,3 +28,6 @@ kpatch = "kpatch.cli:main"
 [tool.mypy]
 plugins = ["pydantic.mypy"]
 exclude = ["tests/"]
+
+[tool.setuptools.package-data]
+"kpatch.filter" = ["policy_clang_worker.cpp"]

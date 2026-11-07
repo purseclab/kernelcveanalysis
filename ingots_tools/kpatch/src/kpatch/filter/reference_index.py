@@ -9,7 +9,6 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextlib import closing
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 import re
 import sqlite3
@@ -18,7 +17,8 @@ from time import perf_counter
 
 from pydantic import TypeAdapter
 
-from .source_filter import SourceIncludeIndex, _covering_literals, _iter_git_grep, _iter_git_output
+from .git_output import iter_git_records
+from .source_filter import SourceIncludeIndex, _covering_literals, _iter_git_grep
 from .syntax import IDENTIFIER
 from ..diff import Diff
 from ..git import GitRepo
@@ -71,6 +71,7 @@ class ReferenceIndex:
         self.source_includes: SourceIncludeIndex | None = None
         self._include_revision: str | None = None
         self._include_seen: set[str] = set()
+        self._include_failures: OrderedDict[str, None] = OrderedDict()
         self._scope: tuple[str, ...] | None = None
         self._scope_tag = ""
         self._is_live: Callable[[str, ReferenceSite], bool] | None = None
@@ -84,7 +85,7 @@ class ReferenceIndex:
         self._database: sqlite3.Connection | None = None
         if getattr(repo, "repo", None) is not None:
             if cache_path is None:
-                path = Path(repo._run_git(["rev-parse", "--git-path", "kpatch-references-v4.sqlite"]).decode().strip())
+                path = Path(repo._run_git(["rev-parse", "--git-path", "kpatch-references-v8.sqlite"]).decode().strip())
                 cache_path = path if path.is_absolute() else repo.repo / path
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             self._database = sqlite3.connect(cache_path, timeout=30)
@@ -99,6 +100,7 @@ class ReferenceIndex:
             self._database = None
         self.source_includes = None
         self._include_seen.clear()
+        self._include_failures.clear()
 
     def __enter__(self) -> "ReferenceIndex":
         return self
@@ -184,6 +186,22 @@ class ReferenceIndex:
         self.source_includes = index
         self._include_revision = revision
         self._include_seen = {revision}
+        self._include_failures.clear()
+
+    def ensure_includes(self, revision: str) -> bool:
+        """Enlarge possible edges/uncertainty before using build exclusions."""
+
+        if revision in self._include_failures:
+            return False
+        try:
+            complete = self._augment_includes(revision)
+        except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+            complete = False
+        if not complete:
+            self._include_failures[revision] = None
+            if len(self._include_failures) > 32:
+                self._include_failures.popitem(last=False)
+        return complete
 
     def _augment_includes(self, revision: str) -> bool:
         index = self.source_includes
@@ -191,19 +209,27 @@ class ReferenceIndex:
             return False
         if revision in self._include_seen:
             return True
-        paths = [path.decode() for path in _iter_git_output(
-            self.repo, ["diff", "--name-only", "-z", "--diff-filter=ACMRTUXB", self._include_revision, revision, "--", "*.c", "*.h", "*.S"], b"\0", (0,),
-        ) if path]
-        index.add_paths(paths)
-        source: str | None = None
-        arguments = ["diff", "--no-ext-diff", "--no-renames", "--unified=0", "--diff-filter=ACMRTUXB", "-G", r"^[[:space:]]*#[[:space:]]*include", self._include_revision, revision, "--", "*.c", "*.h", "*.S"]
-        for row in _iter_git_output(self.repo, arguments, b"\n", (0,)):
-            if row.startswith(b"+++ "):
-                if not row.startswith(b"+++ b/"):
+        arguments = ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--text",
+                     "--no-renames", "--ignore-submodules=none", "--unified=0", "--diff-filter=ACDMRTUXB",
+                     self._include_revision, revision, "--"]
+        rows: list[bytes] = []
+        size = 0
+        with closing(iter_git_records(self.repo, arguments, b"\n", (0,))) as output:
+            for row in output:
+                size += len(row) + 1
+                if size > 8 * 1024 * 1024:
                     return False
-                source = row[6:].decode()
-            elif source is not None and row.startswith(b"+"):
-                index.add_line(source, row[1:].decode("utf-8", errors="strict"))
+                rows.append(row)
+        # Every changed path can affect an existing directive through comments,
+        # macro definitions or phase-two splicing. The shared graph reads exact
+        # blobs before using these conservative historical candidate edges.
+        diff = Diff.parse(b"\n".join(rows).decode())
+        parsed_paths = {path for file in diff.files for path in (file.file, file.old_file) if path is not None}
+        # This diff parser does not decode every Git quoted-path spelling.
+        # Incomplete or altered headers cannot establish a complete update.
+        if parsed_paths != set(self._delta_paths(self._include_revision, revision)):
+            return False
+        index.add_diff(diff)
         self._include_revision = revision
         self._include_seen.add(revision)
         if len(self._include_seen) > 256:
@@ -224,7 +250,7 @@ class ReferenceIndex:
             return None
         if sum(len(path) + 1 for path in initial) > 512 * 1024:
             return None
-        if not self._augment_includes(revision):
+        if not self.ensure_includes(revision):
             return None
         sources = set(roots)
         if any(path.endswith(".h") and not index.includers(path) for path in sources):
@@ -250,7 +276,7 @@ class ReferenceIndex:
         return index.transitive_targets(sources)
 
     def _cache_name(self, name: str) -> str:
-        return "v4:" + name + self._scope_tag
+        return "v8:" + name + self._scope_tag
 
     def _remember(self, revision: str, name: str, sites: tuple[ReferenceSite, ...] | None) -> None:
         self._entries[revision, self._cache_name(name)] = sites
@@ -298,8 +324,11 @@ class ReferenceIndex:
     ) -> dict[str, tuple[ReferenceSite, ...] | None]:
         if len(names) > 256:
             return {name: None for name in names}
-        self._scope = tuple(sorted(scope)) if scope is not None else None
-        self._scope_tag = "\0" + sha256("\0".join(self._scope).encode()).hexdigest() if self._scope is not None else ""
+        # Include edges are useful positive hints, but unresolved macro includes,
+        # forced includes and unusual filenames prevent a complete absence scope.
+        # Search globally until the include index can certify that completeness.
+        self._scope = None
+        self._scope_tag = ""
         self._is_live, self._query_revision = is_live, revision
         self._query_names = names
         try:
@@ -407,9 +436,10 @@ class ReferenceIndex:
     def _delta_paths(self, parent: str, revision: str) -> tuple[str, ...]:
         key = (parent, revision)
         if key not in self._deltas:
-            paths = tuple(path.decode() for path in _iter_git_output(
-                self.repo, ["diff", "--no-renames", "--name-only", "-z", "--diff-filter=ACDMRTUXB", parent, revision], b"\0", (0,),
-            ) if path and (path.endswith((b".c", b".h", b".S", b".s", b".rs", b".mk")) or b"Makefile" in path or b"Kbuild" in path or b".lds" in path))
+            with closing(iter_git_records(
+                self.repo, ["diff", "--no-renames", "--ignore-submodules=none", "--name-only", "-z", "--diff-filter=ACDMRTUXB", parent, revision], b"\0", (0,),
+            )) as output:
+                paths = tuple(path.decode() for path in output if path)
             self._deltas[key] = paths
             while len(self._deltas) > 1 and (len(self._deltas) > 32 or sum(map(len, self._deltas.values())) > 32768):
                 self._deltas.popitem(last=False)
@@ -465,12 +495,15 @@ class ReferenceIndex:
         self._remember(revision, name, tuple(sites) if len(sites) <= 512 else None)
 
     def _scan(self, revision: str, names: frozenset[str], paths: tuple[str, ...] = ()) -> dict[str, tuple[ReferenceSite, ...] | None]:
-        arguments = ["grep", "--threads=8", "-n", "-z", "-I", "-F"]
+        arguments = ["grep", "--threads=8", "-n", "-z", "-a", "-F"]
         for name in _covering_literals(names):
             arguments.extend(("-e", name))
         arguments.append(revision)
         arguments.append("--")
-        arguments.extend(paths or ("*.c", "*.h", "*.S", "*.s", "*.rs", "*Makefile*", "*Kbuild*", "*.mk", "*.lds*"))
+        # C preprocessing can include any tracked filename; compilers can even
+        # accept NUL-containing source with warnings. Filename or Git binary
+        # suppression cannot establish absence of a reference.
+        arguments.extend(paths)
         prefix = f"{revision}:".encode()
         results: dict[str, list[ReferenceSite]] = {name: [] for name in names}
         self.repository_scans += 1
@@ -478,13 +511,11 @@ class ReferenceIndex:
         try:
             with closing(_iter_git_grep(self.repo, arguments)) as rows:
                 for row in rows:
-                    fields = row.split(b"\0", 2)
-                    if len(fields) != 3 or not fields[0].startswith(prefix):
-                        continue
-                    path = fields[0][len(prefix):].decode("utf-8", errors="strict")
-                    line = int(fields[1])
-                    site = ReferenceSite(path, line)
-                    matched = {match.group().decode() for match in _REFERENCE_WORD.finditer(fields[2])} & names
+                    if not row.path.startswith(prefix) or len(row.path) == len(prefix):
+                        raise ValueError("Unexpected Git grep path prefix")
+                    path = row.path[len(prefix):].decode("utf-8", errors="strict")
+                    site = ReferenceSite(path, row.line)
+                    matched = {match.group().decode() for match in _REFERENCE_WORD.finditer(row.contents)} & names
                     for name in matched:
                         if self._is_live is not None and name in self._query_names and revision == self._query_revision and self._is_live(name, site):
                             raise _LiveReference

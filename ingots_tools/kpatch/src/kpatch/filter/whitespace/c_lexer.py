@@ -122,6 +122,77 @@ _COMMENT_CONTEXT_RE = re.compile("|".join(
     }
 ))
 
+_NON_HORIZONTAL_SPACE = re.compile(r"[^ \t\v\f\r]")
+_IMPORT_WORD = re.compile(r"\bimport\b")
+
+
+@dataclass(slots=True)
+class _CommentDirectiveContext:
+    """Track directive/angle context over disjoint gaps between literals.
+
+    Comments are whitespace, including their internal newlines for directive
+    recognition. Only a newline outside a comment starts a new logical line.
+    Scanning each gap once avoids repeatedly copying/searching a growing line.
+    """
+
+    source: str
+    position: int = 0
+    leading: bool = True
+    directive: bool = False
+    angle_open: bool = False
+    unsupported_import: bool = False
+
+    def _imports_outside_directives(self, start: int, stop: int) -> bool:
+        leading, directive = self.leading, self.directive
+        cursor = start
+        for word in _IMPORT_WORD.finditer(self.source, start, stop):
+            newline = self.source.rfind("\n", cursor, word.start())
+            if newline >= 0:
+                cursor, leading, directive = newline + 1, True, False
+            if leading:
+                first = _NON_HORIZONTAL_SPACE.search(self.source, cursor, word.start())
+                if first is not None:
+                    leading = False
+                    directive = self.source.startswith(("#", "%:"), first.start())
+            if not directive:
+                return True
+            leading, cursor = False, word.end()
+        return False
+
+    def before(self, stop: int) -> None:
+        start = self.position
+        # Header-unit imports have header-name lexing outside # directives.
+        # They need a C++ preprocessing model; do not reinterpret their text as
+        # an ordinary comparison. Strings/comments are excluded from the gaps.
+        if not self.unsupported_import:
+            self.unsupported_import = self._imports_outside_directives(start, stop)
+        newline = self.source.rfind("\n", start, stop)
+        if newline >= 0:
+            start = newline + 1
+            self.leading, self.directive, self.angle_open = True, False, False
+        if self.leading:
+            first = _NON_HORIZONTAL_SPACE.search(self.source, start, stop)
+            if first is not None:
+                self.leading = False
+                self.directive = self.source.startswith(("#", "%:"), first.start())
+        if self.directive:
+            opener = self.source.rfind("<", start, stop)
+            closer = self.source.rfind(">", start, stop)
+            if opener >= 0 or closer >= 0:
+                self.angle_open = opener > closer
+
+    def after(self, stop: int, *, comment: bool) -> None:
+        self.position = stop
+        if not comment:
+            self.leading = False
+
+
+def _unsupported_comment_context(source: str) -> bool:
+    # Unsupported phase-one spellings must not fall through to an ordinary
+    # token comparison after a comment-normalization refusal.
+    return ("??" in source or "\ufeff" in source
+            or "\r" in source and re.search(r"\r(?!\n)", source) is not None)
+
 
 def source_line_starts_in_block_comment(source: str, line_number: int) -> bool:
     """Recover comment context omitted by a diff hunk, without emitting tokens."""
@@ -151,6 +222,45 @@ def source_line_starts_in_block_comment(source: str, line_number: int) -> bool:
     return False
 
 
+def preprocessor_directive_text(source: str, *, strict_multiline: bool = False) -> str | None:
+    """Normalize phase-two splices/comments while preserving directive lines.
+
+    Ambiguous angle-header/comment spellings remain unknown instead of being
+    interpreted as a different include path. This is intended for conservative
+    directive inventory, not full macro expansion.
+    """
+    source = re.sub(r"\\(?:\r\n|\n)", "", source)
+    if _unsupported_comment_context(source):
+        return None
+    invalid = False
+    context = _CommentDirectiveContext(source)
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal invalid
+        value = match.group()
+        context.before(match.start())
+        comment = match.lastgroup in {"BLOCK_COMMENT", "LINE_COMMENT"}
+        if match.lastgroup in {"UNCLOSED_STRING", "UNCLOSED_CHAR"}:
+            invalid = True
+        if comment:
+            if match.lastgroup == "BLOCK_COMMENT" and not value.endswith("*/"):
+                invalid = True
+            if strict_multiline and "\n" in value and context.directive:
+                # Newlines inside a directive's comment need different logical
+                # line handling. Do not feed a truncated condition to callers.
+                invalid = True
+            if context.directive and context.angle_open:
+                invalid = True
+            context.after(match.end(), comment=True)
+            return " " + "\n" * value.count("\n")
+        context.after(match.end(), comment=False)
+        return value
+
+    output = _COMMENT_CONTEXT_RE.sub(replace, source)
+    context.before(len(source))
+    return None if invalid or context.unsupported_import else output
+
+
 def replace_c_comments(source: str) -> str | None:
     """Replace comments with spaces, protecting literals and angle headers.
 
@@ -159,24 +269,30 @@ def replace_c_comments(source: str) -> str | None:
     """
 
     source = re.sub(r"\\(?:\r\n|\n)", "", source)
+    if _unsupported_comment_context(source):
+        return None
     invalid = False
+    context = _CommentDirectiveContext(source)
 
     def replace(match: re.Match[str]) -> str:
         nonlocal invalid
+        context.before(match.start())
+        comment = match.lastgroup in {"BLOCK_COMMENT", "LINE_COMMENT"}
         if match.lastgroup in {"UNCLOSED_STRING", "UNCLOSED_CHAR"}:
             invalid = True
-        if match.lastgroup in {"BLOCK_COMMENT", "LINE_COMMENT"}:
-            # Comment-looking text can be part of an angle header name. Keep
-            # it opaque; doing so for a comparison/shift too is conservative.
-            line_start = source.rfind("\n", 0, match.start()) + 1
-            opener = source.rfind("<", line_start, match.start())
-            if opener >= 0 and source.rfind(">", line_start, match.start()) < opener:
+        if comment:
+            # A directive's angle operand can contain comment-looking text.
+            # Ordinary comparisons/shifts do not give it header-name meaning.
+            context.after(match.end(), comment=True)
+            if context.directive and context.angle_open:
                 return match.group()
             return " "
+        context.after(match.end(), comment=False)
         return match.group()
 
     result = _COMMENT_CONTEXT_RE.sub(replace, source)
-    return None if invalid else result
+    context.before(len(source))
+    return None if invalid or context.unsupported_import else result
 
 
 def tokenize_c_source(
@@ -192,6 +308,8 @@ def tokenize_c_source(
     """
     # Phase 2: line splicing of escaped newlines
     source = re.sub(r"\\(?:\r\n|\n)", "", source)
+    if _unsupported_comment_context(source):
+        return None
 
     tokens: list[CToken] = []
     in_directive = False
@@ -206,6 +324,9 @@ def tokenize_c_source(
         kind = match.lastgroup
         val = match.group()
         start = match.start()
+
+        if kind == "IDENTIFIER" and val == "import" and not in_directive:
+            return None
 
         if kind in ("UNCLOSED_STRING", "UNCLOSED_CHAR"):
             return None
@@ -234,7 +355,7 @@ def tokenize_c_source(
             continue
 
         if at_line_start:
-            if val == "#":
+            if val in {"#", "%:"}:
                 in_directive = True
                 directive_name = None
                 macro_name_seen = False
@@ -243,9 +364,9 @@ def tokenize_c_source(
             at_line_start = False
 
         if in_directive:
-            if directive_name is None and val != "#":
+            if directive_name is None and val not in {"#", "%:"}:
                 directive_name = val
-                if directive_name == "include":
+                if directive_name in {"include", "include_next", "import"}:
                     expect_header_name = True
             elif directive_name == "define":
                 if not macro_name_seen and kind == "IDENTIFIER":

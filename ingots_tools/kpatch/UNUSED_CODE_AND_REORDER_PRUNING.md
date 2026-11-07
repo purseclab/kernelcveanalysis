@@ -1,8 +1,11 @@
-# Unused-code guards and helper reordering
+# Unused-code guards and independent reordering
 
 Implemented in the existing opt-in `--source-pruning` pipeline. Its order stays
 merge → config → ifdef → dead code → whitespace → final comparison. The final
 comparison is still `RenameFilter`; there is no extra stage or progress bar.
+Identifier substitutions require `--source-pruning-lossy` and an audit report:
+BTF/CO-RE and kallsyms can make their names observable. Default helper and
+initial return-arm reordering remain available independently of that option.
 
 ## Unused definitions
 
@@ -35,12 +38,25 @@ static leaf function definitions in the same file when:
 - Both revisions pass a repository macro-definition check. Ordinary free
   expression identifiers may expand only to literal numeric token expressions;
   function/local/type/field names must have no potentially active macro binding.
-  Unknown bindings, aliases and function-like macros retain the candidate.
+  Observed aliases and function-like macros retain the candidate. Unknown
+  discovery retains by default; explicit lossy mode may assume only the listed
+  model/budget gaps and records those premises in its audit report.
 
 Macro lookup normalizes comments and backslash continuations, handles ordinary
 and digraph directive spellings, and reuses existing Kbuild decisions for
-disabled translation units. Header definitions remain conservative. Facts are
-cached by revision/name independently of the current mask ledger.
+disabled translation units. Header definitions remain conservative. Typed
+observations preserve known bindings together with any discovery uncertainty,
+including positive recovery from unsupported source layouts. A later known
+binding is not lost because an earlier file was opaque. Search/read failures,
+malformed rows and unrecognized uncertainty reasons cannot be assumed away.
+Facts are cached by revision/name independently of the current mask ledger;
+parsed file facts also use a bounded content-hash cache across revisions.
+
+Full-source position checks cover code outside the compared region as well as
+multiline invocation extents and physical byte columns. Observed location
+aliases and macro operators that prevent resolving them retain the candidate.
+Only accepted logging callee occurrences receive the diagnostic-text exemption.
+The same spelling in an argument or unrelated expression is still checked.
 
 Comparison uses full original Git sources with the existing code/edit masks
 applied. In particular, an unused helper added alongside a reorder can be
@@ -52,21 +68,58 @@ Successful reorders produce whole-file **edit masks**; the helpers remain live
 code. Failed comparisons publish no speculative code masks. The rule does not
 combine a reorder with a separate rename or logging-wording exemption.
 
+## Adjacent terminal switch arms
+
+`independent_return_case_reorder` accepts permutations within the initial run of
+switch arms that each contain exactly one return statement. Every case label
+and return expression must remain identical. Complex arms, fallthrough,
+declarations and directives are barriers; an unchanged warning/default arm
+can stay after a reordered run. Later runs are unsupported: a preceding complex
+arm can fall through into the run's first return, making its position significant.
+Ranges and stacked labels are unsupported.
+
+Return expressions cannot introduce tag or enumerator definitions, including
+inside `sizeof`: those definitions can change a later arm's name bindings.
+Statement expressions, assembly, pragmas and position-dependent constructs
+also retain the change. Both revisions pass the same macro guard, with keyword
+spellings protected from macro bindings. All source outside canonicalized runs
+must have equal preprocessing tokens. The rule uses edit masks and adds no stage.
+
 ## Bounds and assumptions
 
 The hunk gate is limited to 256 KiB of changed text; full reorder comparisons
 to 512 KiB per file, 16 KiB per helper and 128 eligible helpers. Macro queries
-are lazy, with at most 64 names per proof, 32 source files / 512 KiB of source
-per scan, 4,096 matched directive records and a 512-entry in-memory cache.
-Over-budget or unresolved queries retain the commit. The existing shared blob
+are lazy, with at most 64 names per proof, 128 source files / 2 MiB of source
+per scan and 4,096 matched directive records. Explicit lossy discovery uses
+512 files / 8 MiB / 16,384 records and audits any assumed budget gap. Both modes
+have a 512-entry observation cache and a parsed-file cache limited to 256 files,
+16 MiB input and 16,384 definitions. Over-budget or unresolved queries retain
+by default. The existing shared blob
 reader and incremental spelling index remain in use; no whole-kernel AST is kept.
 
-This remains a raw-source kernel analysis under the existing build model,
-including its assumption about independently compiled translation units.
+A separate positive-evidence allowance reads at most 32 complete files / 512 KiB
+after a literal requested definition is encountered beyond the baseline read
+budget. A size precheck bounds these reads. Certain full-file facts can replace
+only newly introduced row placeholders; earlier same-name opacity from another
+file remains. Baseline counters, limits, uncertainty and row-boundary behavior
+are preserved, and read failures stay nonassumable. The additional evidence
+comes from the same repository scan.
+
+Unused-definition checks reject raw phase-two spelling contexts and verify
+remaining-code LINE/COLUMN dependencies with the candidate spans blanked at
+their original offsets. Raw global-reference renames require complete literal
+include/spelling context even in lossy mode; failed context checks run before
+expensive global location queries. External/generated input closure remains a
+separate model limitation.
+
+This remains an experimental C-source model. Kbuild input closure is currently
+unknown, so parser absence and captured configuration do not authorize masks.
+Explicit complete CPP context is required for configuration projection.
 Compiler keyword macros, generated or forced includes, command-line definitions,
 arbitrary preprocessing tricks, external modules and debug/BTF observability
-need stronger compiler-aware analysis. It is not a general proof of identical
-binaries. Include ordering, field/enum ordering, switch ordering, statement
+need stronger compiler-aware analysis. A file can also be embedded as raw data
+by assembly or consumed by a generator; even comment equivalence then needs a
+complete input-role contract. It is not a whole-build proof. Include ordering, field/enum ordering, other switch ordering, statement
 ordering, file moves, call-dependent helpers and semantic refactors remain work.
 
 ## Validation and measurement
@@ -81,6 +134,17 @@ The pruning verifier independently replays mask coordinates. Reorder validation
 shares the production reorder/macro policy helpers; it is not an independent
 implementation of C equivalence. Previously excluded unused definitions must
 be verified before a dependent reorder decision.
+
+The 2026-11-07 switch inventory examined all 26,670 IDs in the legacy retained
+cohort. Of 191 case-label patches, seven had token-permutation hunks in every
+stored file; one matched complete original sources and passed conservative
+macro/configuration checks: `3c3af563b317` (hrtimer). Its raw file set already
+equals the stored set, and exact parent/child Kbuild modes are enabled. Independent
+inspection confirmed unchanged clock-to-base mappings and default behavior.
+This is one concrete new removal, not a fresh Kbuild replay of all 26,670 IDs.
+Independent compiled enum-binding and preceding-fallthrough counterexamples
+were retained after review. Earlier results are saved under `before-fallthrough-fix/`.
+Evidence is in `benchmarks/switch_reordering/2026-11-07/`.
 
 Measurement uses the frozen 100 surviving commits reviewed in
 [PRUNING_SAMPLE_REVIEW_2026_11_06.md](PRUNING_SAMPLE_REVIEW_2026_11_06.md), rebuilt
@@ -126,3 +190,31 @@ the new reorder); its shared-policy limitation is described above. Evidence,
 baseline source, runner and hashes are saved under
 `benchmarks/source_pruning_easy/2026-11-06/final/` (the existing ignored benchmark
 artifact directory).
+
+## Latest full-original comparison replay
+
+The 85-candidate results in this section predate the caller-binding repair.
+That repair rechecks the eleven accepted originals and retains one additional
+GIC wording commit: seven default removals and ten lossy removals remain. The
+wider 85/full-cohort counts have not been recomputed. See the
+[later evidence](FUTURE_PRUNING_WORK.md#logger-binding-repair-and-further-bounds--2026-11-07).
+
+Later safety work supersedes the earlier yield figures for the current source
+snapshot. A full 26,670-ID structural screen found 85 complete-patch comparison
+candidates. Replaying those actual original parent/child sources with current
+production guards removes eight by default and eleven with explicit lossy mode.
+Only one ID is new versus the historical ten diagnostic removals:
+`ab017a15fdb2`, a prototype-parameter rename. The two other mode differences
+restore old diagnostic exemptions under explicit incomplete-macro assumptions.
+No body rename or reorder from the historical relaxed candidate union passes
+the current guards. The new removal is 0.00375% of the legacy retained cohort,
+and remains conditional on incomplete preprocessing inputs.
+
+The default replay takes 49.34 seconds; lossy takes 874.77 seconds for the 85
+candidates with the benchmark's reader rotation/cache setup. This is not a full
+pipeline benchmark or a proven memory bound. Full results and inspection are in
+`benchmarks/lossy_yield/2026-11-07/current-production-replay/`; the detailed
+[latest progress notes](FUTURE_PRUNING_WORK.md#partial-macro-facts-and-source-positions--resumed-2026-11-07)
+include the risk, timing and memory limits. The current frozen snapshot passes
+1,018 tests, all 58 Python source files pass mypy, and all 59 Python/C++ package
+sources match the built wheel.

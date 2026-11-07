@@ -25,6 +25,7 @@ from .masking import CodeMask, EditMask, LineRange, MaskReason, SourceSide, Sour
 from .merge_filter import MergeCommitFilter
 from .score_filter import ScoreFilter
 from .source_pruning import DeadCodeFilter, RenameFilter, source_pruning_tail
+from .policy_analysis import PolicyFilter
 from .whitespace import (
     CToken,
     CTokenKind,
@@ -152,6 +153,7 @@ __all__ = [
     "MergeCommitFilter",
     "RunFilterArgs",
     "RenameFilter",
+    "PolicyFilter",
     "ScoreFilter",
     "SourceNoopFilter",
     "StreamingCommitFilter",

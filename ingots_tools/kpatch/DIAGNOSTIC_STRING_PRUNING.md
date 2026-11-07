@@ -3,6 +3,12 @@
 Implemented on 2026-11-06 in the existing opt-in `RenameFilter`, enabled by
 `filter config --source-pruning`. The default pipeline is unchanged.
 
+The inspection and benchmark counts below describe their historical snapshots.
+Later caller-binding and source-position repairs tighten eligibility. The latest
+selected replay removes seven by default and ten in explicit lossy mode from
+eleven previously accepted originals; the wider cohort was not rerun after those
+repairs. See the [current scope and safety evidence](FUTURE_PRUNING_WORK.md#logger-binding-repair-and-further-bounds--2026-11-07).
+
 ## Inspection before implementation
 
 The survey used all **26,670** non-merge survivors in
@@ -82,6 +88,49 @@ API contract, not strict program equivalence. Log output, diagnostic metadata,
 and external log consumers can observe wording changes. Included/generated
 macro overrides remain a limitation of this source-level model; local checks
 are not compiler-resolved macro bindings.
+
+## Caller constraints and latest verification — 2026-11-07
+
+The caller checks now cover the modeled logger forwarding chain, external C
+backends, and free identifiers used inside those macros. C declaration shadows
+are separate from macro overrides: an ordinary local `file`, `line` or `fmt`
+does not replace fields/keywords in a header macro. Parenthesized function
+pointers, later comma declarators, watched names in possible macro-argument/type
+contexts, and nonformal replacement names count as possible backend bindings.
+Local pasting/stringification retains the candidate when it can conceal a
+binding. Prefix hooks keep the existing validated concatenation exemption.
+This is a finite caller-constraint model, not general CPP binding completeness.
+
+Directive inventory uses the shared comment/splice normalizer and recognizes
+digraphs; ambiguous contexts retain. Comments between directive tokens, split
+keywords or names, and `undef` cannot hide a known helper override. The ASCII
+macro-parameter grammar is shared with macro discovery, so formal parameters
+are not mistaken for free replacement names. The dependency facts were checked
+against current headers and three actual historical candidate parents.
+
+Independent compiled controls found default false removals involving helper
+overrides, an `unlikely` hook in once logging, and macro-generated backend
+bindings. All 14 counterexample commits now retain with their behavior-changing
+witnesses unchanged. Outer logger extents remain significant: faithful GNU
+variadic forwarding can change a hidden COLUMN value even in an argument before
+the edited format. The repair therefore does not exempt outer argument extents.
+
+The latest replay rechecks only the 11 previously accepted full-original patches:
+seven remove by default and ten in lossy mode. Both modes now retain
+`97c03ec2c0e0`, whose unrelated `MPIDR_TO_SGI_AFFINITY` macro uses token pasting.
+No other previously accepted ID changes. This is a conservative lost removal,
+not evidence of a logic change in that wording patch. The wider 85-candidate or
+26,670-commit cohort was not rerun after this repair. Earlier tables below are
+historical measurements under their stated masks and source snapshots.
+
+Expanding logger families alone found no new whole-commit candidates. Adding
+plain `%s` literal-data normalization produced one structural DRM candidate;
+current default and lossy macro guards retain it. Neither extension was shipped.
+Full verification passes **1,025 tests**, real binary SELinux-policy tests,
+mypy for all 58 Python sources, and byte checks for all 59 Python/C++ wheel
+sources. Evidence is in `benchmarks/logging_family_yield/2026-11-07/`, especially
+`review/CURRENT_PRODUCTION_SAFETY_REVIEW.md`, `after-macro-binding-repair/`, and
+`verification-current/`.
 
 ## Candidate confirmation
 

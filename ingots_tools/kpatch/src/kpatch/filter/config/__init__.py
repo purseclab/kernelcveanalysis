@@ -269,7 +269,7 @@ class ConfigFilter(StreamingCommitFilter):
                         commit.mask_code(diff_file, side, (), MaskReason.CONFIG, whole_file=True)
                 continue
             retained.append(diff_file)
-            modes[key] = FileBuildModes(old=decision.old, new=decision.new)
+            modes[key] = FileBuildModes(old=decision.old, new=decision.new, complete=decision.complete)
 
         if not retained:
             return None

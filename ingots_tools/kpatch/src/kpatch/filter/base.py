@@ -37,8 +37,11 @@ from ..git import (
 
 @dataclass(frozen=True, slots=True)
 class FileBuildModes:
+    """Exclusive CPP modes only when complete; otherwise inclusion evidence."""
+
     old: str | None = None
     new: str | None = None
+    complete: bool = False
 
 
 def diff_file_key(diff_file: DiffFile) -> tuple[str | None, str]:

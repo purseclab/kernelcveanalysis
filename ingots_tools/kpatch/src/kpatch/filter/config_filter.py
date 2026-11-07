@@ -12,13 +12,19 @@ from kexploit_utils import Architecture
 
 from ..git import GitRepo
 from ..diff import Diff
-from .source_filter import SourceIncludeIndex
+from .source_filter import IncludeFacts, SourceIncludeIndex
 
 
 class ConfigValue(StrEnum):
     ENABLED = "y"
     MODULE = "m"
     DISABLED = "n"
+
+
+class BuildInputClosure(StrEnum):
+    """No current parser result certifies complete compiler/framework inputs."""
+
+    UNKNOWN = "unknown"
 
 
 class KernelConfig:
@@ -128,6 +134,8 @@ class KbuildMakefile:
         ("lib-y", ConfigValue.ENABLED),
         # Kbuild folds both lib-y and lib-m into the directory's lib.a.
         ("lib-m", ConfigValue.ENABLED),
+        ("always-y", ConfigValue.ENABLED),
+        ("always-m", ConfigValue.ENABLED),
     )
     _BUILD_DEPENDENCY_EXTENSIONS = {
         ".S",
@@ -138,6 +146,7 @@ class KbuildMakefile:
         ".lds",
         ".o",
         ".raw",
+        ".s",
         ".so",
     }
 
@@ -176,7 +185,9 @@ class KbuildMakefile:
         self._parse(contents, include_stack)
         self._collect_goals()
         for goal, mode in (extra_goals or {}).items():
-            self._add_goal(goal, mode, set())
+            # Incoming targets are prerequisites selected by another directory,
+            # rather than entries in this directory's composite object lists.
+            self._add_goal(goal, mode, set(), expand_composite=False)
 
     @staticmethod
     def _logical_lines(contents: str) -> list[str]:
@@ -554,13 +565,7 @@ class KbuildMakefile:
         return self._expand(self._variables.get(variable, "")).split()
 
     def _is_build_dependency(self, dependency: str) -> bool:
-        """Whether a prerequisite replaces an object's implicit source.
-
-        Kbuild commonly adds ``FORCE`` and header prerequisites to an object
-        while still compiling its matching source through the implicit rule.
-        Generated objects and linker inputs, on the other hand, describe the
-        actual source chain and must be followed.
-        """
+        """Whether a prerequisite can lead to another configured build input."""
 
         repository_dependency = self._repository_path(dependency)
         if (
@@ -584,6 +589,8 @@ class KbuildMakefile:
         goal: str,
         mode: ConfigValue,
         resolving: set[tuple[str, ConfigValue]],
+        *,
+        expand_composite: bool = True,
     ) -> None:
         goal = goal.strip()
         if not goal or "$" in goal:
@@ -593,72 +600,88 @@ class KbuildMakefile:
             return
 
         repository_goal = self._repository_path(goal)
-        dependencies = self._dependencies.get(repository_goal)
-        if dependencies is None:
-            repository_expression = self._repository_expression(goal)
-            for target_pattern, pattern_dependencies in self._pattern_dependencies:
-                stem = self._make_pattern_stem(
-                    repository_expression, target_pattern
-                )
-                if stem is not None:
-                    dependencies = [
-                        dependency.replace("%", stem, 1)
-                        for dependency in pattern_dependencies
-                    ]
-                    break
-
-        build_dependencies = (
-            [
-                dependency
-                for dependency in dependencies
-                if self._is_build_dependency(dependency)
-            ]
-            if dependencies is not None
-            else None
-        )
-        if build_dependencies:
-            key = (repository_goal, mode)
-            if key in resolving:
-                return
-            resolving.add(key)
-            for dependency in build_dependencies:
-                self._add_goal(dependency, mode, resolving)
-            resolving.remove(key)
-            return
-
-        if goal.endswith((".c", ".S")):
-            self._record(goal, mode)
-            return
-        if goal.endswith(".lds"):
-            self._record(f"{goal}.S", mode)
-            return
-        if not goal.endswith(".o"):
-            self._record_external_goal(goal, mode)
-            return
-
-        stem = goal[:-2]
-        component_variables = (f"{stem}-objs", f"{stem}-y", f"{stem}-m")
-        is_composite = any(name in self._variables for name in component_variables)
-        if not is_composite:
-            self._record(goal, mode)
-            return
-
-        key = (goal, mode)
+        key = (repository_goal, mode)
         if key in resolving:
             return
         resolving.add(key)
-        variables: tuple[str, ...] = component_variables[:2]
+        try:
+            components = self._object_components(goal, mode) if expand_composite else []
+            if components:
+                # scripts/Makefile.build expands obj-y/obj-m composites one level.
+                # A member's similarly named variable may be a temporary list.
+                for component in components:
+                    if self._repository_path(component) == repository_goal:
+                        self._record_implicit_input(goal, mode)
+                    else:
+                        self._add_goal(
+                            component, mode, resolving, expand_composite=False
+                        )
+            else:
+                self._record_implicit_input(goal, mode)
+
+            # Prerequisites can be generated includes or incbin data, even when
+            # they end in .c/.o/.so. They do not establish a replacement recipe.
+            # Keep the implicit input as well as every possible dependency chain.
+            for dependency in self._build_dependencies(goal):
+                self._add_goal(dependency, mode, resolving, expand_composite=False)
+        finally:
+            resolving.remove(key)
+
+    def _object_components(self, goal: str, mode: ConfigValue) -> list[str]:
+        if not goal.endswith(".o"):
+            return []
+        stem = goal[:-2]
+        variables = [f"{stem}-objs", f"{stem}-y"]
         if mode is ConfigValue.MODULE:
-            variables = component_variables
-        for variable in variables:
-            for component in self._tokens(variable):
-                self._add_goal(component, mode, resolving)
-        resolving.remove(key)
+            variables.append(f"{stem}-m")
+        return [
+            component
+            for variable in variables
+            for component in self._tokens(variable)
+        ]
+
+    def _build_dependencies(self, goal: str) -> list[str]:
+        repository_goal = self._repository_path(goal)
+        dependencies = list(self._dependencies.get(repository_goal, ()))
+        expression = self._repository_expression(goal)
+        # Make can select a later pattern when an earlier source does not exist.
+        # Without running Make, retain all applicable source alternatives.
+        for pattern, alternatives in self._pattern_dependencies:
+            stem = self._make_pattern_stem(expression, pattern)
+            if stem is not None:
+                dependencies.extend(
+                    dependency.replace("%", stem, 1) for dependency in alternatives
+                )
+        return [
+            dependency
+            for dependency in dict.fromkeys(dependencies)
+            if self._is_build_dependency(dependency)
+        ]
+
+    def _record_implicit_input(self, goal: str, mode: ConfigValue) -> None:
+        if goal.endswith((".c", ".S", ".o")):
+            self._record(goal, mode)
+        elif goal.endswith(".s"):
+            self._record(goal, mode)
+            self._record(goal[:-2] + ".c", mode)
+        elif goal.endswith(".lds"):
+            self._record(goal + ".S", mode)
+        else:
+            self._record_external_goal(goal, mode)
 
     def _collect_goals(self) -> None:
         for variable, mode in self._goals:
             for goal in self._tokens(variable):
-                self._add_goal(goal, mode, set())
+                self._add_goal(
+                    goal,
+                    mode,
+                    set(),
+                    expand_composite=variable in {"obj-y", "obj-m"},
+                )
+        if not self.folder and "prepare" in self._dependencies:
+            # The kernel's top-level build invokes this Kbuild target before
+            # compiling objects; its generators affect the configured kernel.
+            self._add_goal("prepare", ConfigValue.ENABLED, set(), expand_composite=False)
 
     def get(self, file: str) -> ConfigValue | None:
         normalized = file.rstrip("/")
@@ -902,6 +925,7 @@ class KbuildDirectory:
             "obj": self.folder,
             "srctree": "",
             "objtree": "",
+            "KBUILD_BUILTIN": "y",
         }
         srcarch = _linux_srcarch(self._config.architecture)
         if srcarch:
@@ -989,6 +1013,8 @@ class _SourceAnalysisKey:
     source: str
     mode: ConfigValue
     contents_sha256: bytes
+    index_generation: int
+    possible_modules: bool
 
 
 class SourceAnalysisCache:
@@ -1010,7 +1036,7 @@ class SourceAnalysisCache:
         self.config = config
         self.source_includes = source_includes
         self._max_entries = max_entries
-        self._entries: OrderedDict[_SourceAnalysisKey, frozenset[str]] = OrderedDict()
+        self._entries: OrderedDict[_SourceAnalysisKey, IncludeFacts] = OrderedDict()
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -1021,7 +1047,11 @@ class SourceAnalysisCache:
         mode: ConfigValue,
         contents: bytes,
     ) -> frozenset[str]:
-        key = _SourceAnalysisKey(source, mode, sha256(contents).digest())
+        return self.analyze_facts(source, mode, contents).targets
+
+    def analyze_facts(self, source: str, mode: ConfigValue, contents: bytes,
+                      *, possible_modules: bool = False) -> IncludeFacts:
+        key = _SourceAnalysisKey(source, mode, sha256(contents).digest(), self.source_includes.generation, possible_modules)
         cached = self._entries.get(key)
         if cached is not None:
             self._entries.move_to_end(key)
@@ -1031,19 +1061,11 @@ class SourceAnalysisCache:
         # module. Hash raw bytes before the existing replacement decoding.
         from .ifdef_filter import get_active_lines
 
-        decoded = contents.decode("utf-8", errors="replace")
-        active_lines = get_active_lines(
-            decoded,
-            self.config,
-            is_module=mode is ConfigValue.MODULE,
-        )
-        result = frozenset(
-            target
-            for line_number, line in enumerate(decoded.splitlines(), start=1)
-            if line_number in active_lines
-            if (target := self.source_includes.target_from_line(source, line))
-            is not None
-        )
+        def active(text: str) -> set[int]:
+            if possible_modules:
+                return get_active_lines(text, self.config, is_module=False) | get_active_lines(text, self.config, is_module=True)
+            return get_active_lines(text, self.config, is_module=mode is ConfigValue.MODULE)
+        result = self.source_includes.analyze_source(source, contents, active)
         self._entries[key] = result
         if len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)
@@ -1104,9 +1126,12 @@ class KbuildState:
         self._target_folder_owners: dict[str, frozenset[str]] = {}
         self._architecture_indexed = False
         self._active_includes_cache: dict[
-            tuple[str, ConfigValue], frozenset[str]
+            tuple[str, ConfigValue], IncludeFacts
         ] = {}
         self._include_value_cache: dict[str, ConfigValue | None] = {}
+        self._include_generation = source_includes.generation if source_includes is not None else 0
+        self._uncertainty_ready = False
+        self._uncertain_mode: ConfigValue | None = None
 
     @classmethod
     def copy(cls, other: Self) -> Self:
@@ -1147,6 +1172,9 @@ class KbuildState:
         out._architecture_indexed = other._architecture_indexed
         out._active_includes_cache = dict(other._active_includes_cache)
         out._include_value_cache = dict(other._include_value_cache)
+        out._include_generation = other._include_generation
+        out._uncertainty_ready = other._uncertainty_ready
+        out._uncertain_mode = other._uncertain_mode
 
         return out
 
@@ -1185,7 +1213,13 @@ class KbuildState:
         if parent is None:
             mode = ConfigValue.ENABLED
         else:
-            mode = parent.resolve(parent.rules.get(folder))
+            mode = None
+            ancestor: KbuildCacheEntry | None = parent
+            while ancestor is not None:
+                selection = ancestor.resolve(ancestor.rules.get(folder))
+                if selection is not None:
+                    mode = KbuildMakefile._merge_mode(mode, selection)
+                ancestor = ancestor.parent
 
         entry = KbuildCacheEntry(
             path=folder,
@@ -1309,6 +1343,10 @@ class KbuildState:
         source: str,
         mode: ConfigValue,
     ) -> frozenset[str]:
+        return self._active_source_facts(source, mode).targets
+
+    def _active_source_facts(self, source: str, mode: ConfigValue) -> IncludeFacts:
+        self._check_include_generation()
         key = (source, mode)
         cached = self._active_includes_cache.get(key)
         if cached is not None:
@@ -1316,16 +1354,35 @@ class KbuildState:
 
         assert self.source_includes is not None
         assert self._source_analysis_cache is not None
-        result: frozenset[str]
+        result: IncludeFacts
         try:
             contents = self._read_file(self.base_commit, source)
         except (FileNotFoundError, subprocess.CalledProcessError):
-            result = frozenset()
+            result = IncludeFacts(unknown=True)
         else:
-            result = self._source_analysis_cache.analyze(source, mode, contents)
+            result = self._source_analysis_cache.analyze_facts(source, mode, contents, possible_modules=True)
 
         self._active_includes_cache[key] = result
         return result
+
+    def _check_include_generation(self) -> None:
+        if self.source_includes is None or self._include_generation == self.source_includes.generation:
+            return
+        self._include_generation = self.source_includes.generation
+        self._active_includes_cache.clear()
+        self._include_value_cache.clear()
+        self._uncertainty_ready = False
+        self._uncertain_mode = None
+
+    def _collect_uncertain_includes(self) -> None:
+        """Cache the root's unclosed build-input scope, without tree rescans."""
+
+        if self._uncertainty_ready or self.source_includes is None:
+            return
+        # Recipes, forced compiler inputs, assembly inputs and unsupported Make
+        # expansions are not closed. No current API accepts a closure certificate.
+        self._uncertain_mode = ConfigValue.ENABLED
+        self._uncertainty_ready = True
 
     def _get_with_includes(
         self,
@@ -1344,37 +1401,66 @@ class KbuildState:
                 source_mode = self._get_with_includes(source, resolving)
                 if source_mode is None:
                     continue
-                if file not in self._active_source_includes(source, source_mode):
+                facts = self._active_source_facts(source, source_mode)
+                if file not in facts.targets and not facts.unknown:
                     continue
                 value = KbuildMakefile._merge_mode(value, source_mode)
                 if value is ConfigValue.ENABLED:
                     break
             resolving.remove(file)
 
-        self._include_value_cache[file] = value
+        # A recursive None can come from cutting a cycle whose other path is
+        # still resolving. It is not reusable absence for a later root query.
+        if value is not None or not resolving:
+            self._include_value_cache[file] = value
         return value
 
     def get(self, file: str) -> ConfigValue | None:
+        self._check_include_generation()
+        value = self.object_membership(file)
+        if value is not None:
+            return value
+        if self.source_includes is None:
+            # Without even a tracked input vocabulary, parser absence cannot
+            # authorize removal. Explicit object observations remain available.
+            return ConfigValue.ENABLED
+        if not self.source_includes.has_input(file):
+            return None
+        self._collect_uncertain_includes()
+        return self._uncertain_mode
+
+    @property
+    def build_input_closure(self) -> BuildInputClosure:
+        # A future closed status needs a validated compiler/framework input
+        # certificate. There is deliberately no trusted boolean bypass today.
+        return BuildInputClosure.UNKNOWN
+
+    def object_membership(self, file: str) -> ConfigValue | None:
+        """Parser object observation; None is not an absence certificate."""
+
+        return self._get_kbuild(file)
+
+    def modeled_inclusion(self, file: str) -> ConfigValue | None:
+        """Positive literal-graph observations, without uncertainty fallback."""
+
+        self._check_include_generation()
         return self._get_with_includes(file, set())
+
+    def cpp_context_complete(self, file: str) -> bool:
+        """Whether boolean inclusion also supplies an exclusive CPP context."""
+
+        return False
 
     def read_file(self, commit: str, path: str) -> bytes:
         return self._read_file(commit, path)
 
     def _path_included(self, path: str) -> bool:
-        # folder in root dir always excluded
-        if posixpath.dirname(path) == "":
-            return False
-
         return self.get(path) is not None
 
     def file_included(self, file: str) -> bool:
-        extension = posixpath.splitext(file)[-1]
-
-        if extension in CODE_FILES or extension in HEADER_FILES:
-            return self._path_included(file)
-        else:
-            # other files we ignore
-            return False
+        # Preprocessor inputs can have any filename. Literal/uncertain include
+        # evidence, rather than a suffix, determines whether a file matters.
+        return self._path_included(file)
 
     def _delete_cache_subtree(
         self,
@@ -1421,6 +1507,11 @@ class KbuildState:
             for path in (file.file, file.old_file)
             if path is not None
         }
+        if changed_paths:
+            self._uncertainty_ready = False
+            self._uncertain_mode = None
+            # This cache contains only literal-graph modes, never fallback.
+            # Existing targeted invalidation below remains sufficient for it.
         for path in changed_paths:
             self._active_includes_cache.pop((path, ConfigValue.ENABLED), None)
             self._active_includes_cache.pop((path, ConfigValue.MODULE), None)

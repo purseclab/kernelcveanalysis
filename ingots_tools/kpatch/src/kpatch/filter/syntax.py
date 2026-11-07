@@ -88,14 +88,15 @@ def macro_definitions(tree: Tree) -> list[Node]:
     return QueryCursor(_MACROS_QUERY).captures(tree.root_node).get("item", [])
 
 
-def has_opaque_tokens(tree: Tree) -> bool:
+def has_opaque_tokens(tree: Tree, *, implicit_names: bool = True) -> bool:
     """Find actual opaque constructs, excluding comments/literals/include paths.
 
     Macro replacement tokens still count: stringification, token pasting and
     implicit function-name constructs can escape an otherwise unused definition.
     """
-    identifiers = {b"asm", b"__asm", b"__asm__", b"__func__", b"__FUNCTION__",
-                   b"__PRETTY_FUNCTION__", b"__builtin_FUNCTION"}
+    identifiers = {b"asm", b"__asm", b"__asm__"}
+    if implicit_names:
+        identifiers.update({b"__func__", b"__FUNCTION__", b"__PRETTY_FUNCTION__", b"__builtin_FUNCTION"})
     for token in syntax_tokens(tree):
         if token.kind == "ERROR":
             return True
@@ -137,6 +138,18 @@ def declarator_name(node: Node) -> Node | None:
             return current
         current = current.child_by_field_name("declarator")
     return None
+
+
+def macro_parameter_names(text: bytes) -> frozenset[str] | None:
+    """Names from the supported complete ASCII macro-parameter grammar."""
+    if re.fullmatch(rb"\(\s*(?:(?:[A-Za-z_]\w*\s*,\s*)*"
+                    rb"(?:[A-Za-z_]\w*(?:\s*\.\.\.)?|\.\.\.)\s*)?\)", text) is None:
+        return None
+    names = re.findall(rb"[A-Za-z_]\w*", text)
+    if len(set(names)) != len(names):
+        return None
+    result = frozenset(name.decode() for name in names)
+    return result | {"__VA_ARGS__"} if re.search(rb"(?:\(|,)\s*\.\.\.\s*\)", text) else result
 
 
 def definitions(source: bytes, tree: Tree) -> tuple[Definition, ...]:
@@ -189,7 +202,7 @@ def definitions(source: bytes, tree: Tree) -> tuple[Definition, ...]:
             continue
         found.append(Definition(
             node_text(name).decode(), node.type, node.start_byte, node.end_byte,
-            node.start_point.row + 1, node.end_point.row + 1,
+            node.start_point.row + 1, node.start_point.row + node_text(node).rstrip(b"\r\n").count(b"\n") + 1,
         ))
     return tuple(found)
 
@@ -208,6 +221,70 @@ def declaration_names(tree: Tree) -> frozenset[bytes]:
         if name is not None:
             names.add(node_text(name))
     return frozenset(names)
+
+
+def unclosed_declaration_names(tree: Tree) -> frozenset[bytes]:
+    """Names requiring linkage/type proof beyond local source references.
+
+    Other translation units can construct external symbol names with macros.
+    Block-scope function/type-alias declarations also need semantic types before
+    their linkage can be classified. Static and ordinary scalar locals remain
+    eligible for the separate include/reference proof.
+    """
+
+    names: set[bytes] = set()
+    for node in nodes(tree.root_node):
+        if node.type not in {"function_definition", "declaration"}:
+            continue
+        storage = {node_text(child) for child in node.children if child.type == "storage_class_specifier"}
+        if storage & {b"static", b"typedef"}:
+            continue
+        parent = node.parent
+        while parent is not None and parent.type in {"preproc_if", "preproc_ifdef", "preproc_else", "preproc_elif"}:
+            parent = parent.parent
+        file_scope = parent is not None and parent.type == "translation_unit"
+        semantic_type = any(child.type in {"function_declarator", "type_identifier"} for child in nodes(node))
+        if not (file_scope or b"extern" in storage or node.type == "function_definition" or semantic_type):
+            continue
+        for declarator in node.children_by_field_name("declarator"):
+            name = declarator_name(declarator)
+            if name is not None:
+                names.add(node_text(name))
+            else:
+                # Parenthesized/function-pointer declarators do not always
+                # expose a declarator field in raw C syntax. Their identifiers
+                # need semantic classification, never an empty linkage set.
+                names.update(node_text(child) for child in nodes(declarator)
+                             if child.type in {"identifier", "type_identifier"})
+    return frozenset(names)
+
+
+def renamed_region_identifiers(tree: Tree, names: frozenset[bytes]) -> frozenset[str] | None:
+    """Identifier footprint of C constructs whose names change.
+
+    A raw AST cannot certify macro definitions or expansion-generated C syntax.
+    The caller must establish that these identifiers have no macro bindings in
+    every included/consumer context before relying on the raw declarations.
+    """
+
+    identifiers: set[str] = set()
+    # A macro can turn any C keyword/type-looking construct into a declaration
+    # with different linkage. Cover every top-level construct rather than
+    # certifying an empty footprint for syntax outside a declaration whitelist.
+    for node in tree.root_node.named_children:
+        tokens = tokenize_c_source(node_text(node).decode())
+        if tokens is None:
+            return None
+        found = {token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER}
+        if not any(name.encode() in names for name in found):
+            continue
+        for macro in QueryCursor(_MACROS_QUERY).captures(node).get("item", []):
+            replacement = tokenize_c_source(node_text(macro).decode())
+            if replacement is None or any(token.kind is CTokenKind.IDENTIFIER and token.value.encode() in names
+                                          for token in replacement):
+                return None
+        identifiers.update(found)
+    return frozenset(identifiers)
 
 
 def syntax_tokens(tree: Tree) -> Iterator[SyntaxToken]:

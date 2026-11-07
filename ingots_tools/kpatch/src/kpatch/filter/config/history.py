@@ -47,6 +47,7 @@ class PrimaryHistory:
 class FileDecision:
     old: ConfigValue | None
     new: ConfigValue | None
+    complete: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +56,7 @@ class _StoredDecision:
     file: str
     old: ConfigValue | None
     new: ConfigValue | None
+    complete: bool = False
 
 
 _DIFF_ADAPTER = TypeAdapter(Diff)
@@ -177,7 +179,7 @@ def _add_decisions(
     if not decisions:
         return
     records = [
-        _StoredDecision(old_file, file, decision.old, decision.new)
+        _StoredDecision(old_file, file, decision.old, decision.new, decision.complete)
         for (old_file, file), decision in decisions.items()
     ]
     connection.execute(
@@ -390,7 +392,7 @@ class ConfigHistoryStore:
         if row is None:
             return {}
         return {
-            (record.old_file, record.file): FileDecision(record.old, record.new)
+            (record.old_file, record.file): FileDecision(record.old, record.new, record.complete)
             for record in _DECISIONS_ADAPTER.validate_json(row[0])
         }
 

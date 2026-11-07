@@ -7,21 +7,20 @@ As with the other raw-source analyses, compiler keyword macros, generated and
 forced includes/flags require the standard kernel compilation model.
 """
 
-from collections import Counter, OrderedDict
+from collections import Counter
 from collections.abc import Callable
-from contextlib import closing
 from dataclasses import dataclass
 import re
 
 from tree_sitter import Node
 
-from .source_filter import _iter_git_grep
+from .macro_lookup import MacroLookup, MacroObservation, MacroOrigin
 from .reference_index import ReferenceSite
 from .syntax import (
     call_expressions, declaration_names, definitions, has_opaque_tokens,
     macro_definitions, node_text, nodes, parse_source,
 )
-from .whitespace.c_lexer import CToken, CTokenKind, replace_c_comments, tokenize_c_source
+from .whitespace.c_lexer import CToken, CTokenKind, tokenize_c_source
 from ..diff import DiffFile
 from ..git import GitRepo
 
@@ -29,6 +28,8 @@ from ..git import GitRepo
 _KEYWORDS = frozenset("auto break case char const continue default do double else enum extern float for goto if inline int long register restrict return short signed sizeof static struct switch typedef union unsigned void volatile while _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary _Noreturn _Static_assert _Thread_local".split())
 _TOP_LEVEL = frozenset({"preproc_if", "preproc_ifdef", "preproc_else", "preproc_elif"})
 _NUMERIC_OPERATORS = frozenset("( ) + - * / % << >> & | ^ ~ ! && || == != < > <= >= ? :".split())
+LINE_BUILTINS = frozenset({"__LINE__", "__builtin_LINE", "__builtin_source_location"})
+COLUMN_BUILTINS = frozenset({"__builtin_COLUMN", "__builtin_source_location"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,12 +47,6 @@ class _Function:
     tokens: tuple[CToken, ...]
     identifiers: frozenset[str]
     protected_names: frozenset[str]
-
-
-@dataclass(frozen=True, slots=True)
-class _Macro:
-    function_like: bool
-    value: bytes
 
 
 def hunk_reorder_candidate(file: DiffFile) -> bool:
@@ -165,93 +160,137 @@ def independent_reorder(old: bytes, new: bytes) -> ReorderProof | None:
 
 
 class ReorderMacroGuard:
-    """Small lazy macro-definition cache, distinct from ordinary use facts.
+    """Keep observed bindings separate from incomplete discovery.
 
-    Unknown, function-like and nonliteral replacements retain the candidate.
-    Searches cover tracked C/header/assembly/include fragments. They do not
-    infer compiler-generated definitions or command-line macro bindings.
+    Normal mode retains unknown observations. Explicit lossy source analysis
+    can assume the missing context while still checking every observed binding.
+    Discovery itself never turns an incomplete result into an absence proof.
     """
 
     def __init__(self, repo: GitRepo, read_file: Callable[[str, str], bytes],
-                 active_site: Callable[[str, ReferenceSite], bool]) -> None:
-        self.repo, self.read_file = repo, read_file
-        self.active_site = active_site
-        self._cache: OrderedDict[tuple[str, str], tuple[_Macro, ...] | None] = OrderedDict()
-        self.repository_scans = 0
+                 active_site: Callable[[str, ReferenceSite], bool], *, allow_unknown: bool = False) -> None:
+        self.allow_unknown = allow_unknown
+        self._discovery = MacroLookup(repo, read_file, active_site, allow_unknown=allow_unknown)
+        self._assumptions: set[str] = set()
 
-    def _lookup(self, revision: str, names: frozenset[str]) -> dict[str, tuple[_Macro, ...] | None]:
-        missing = names - {name for name in names if (revision, name) in self._cache}
-        if missing:
-            found = self._scan(revision, missing)
-            for name, macros in found.items():
-                self._cache[revision, name] = macros
-                if len(self._cache) > 512:
-                    self._cache.popitem(last=False)
-        return {name: self._cache.get((revision, name)) for name in names}
+    @property
+    def repository_scans(self) -> int:
+        return self._discovery.repository_scans
 
-    def _scan(self, revision: str, names: frozenset[str]) -> dict[str, tuple[_Macro, ...] | None]:
-        result: dict[str, list[_Macro]] = {name: [] for name in names}
-        alternation = "|".join(re.escape(name) for name in sorted(names))
-        pattern = r"^[[:space:]]*#[[:space:]]*define[[:space:]]+(" + alternation + r")([[:space:](]|/\*|$)"
-        # A continuation before/in a macro name cannot establish absence from
-        # the ordinary spelling search. These rare directives retain the query.
-        split_name = r"^[[:space:]]*#[[:space:]]*([a-zA-Z_]*\\|define[[:space:]]+[a-zA-Z_0-9]*\\)[[:space:]]*$"
-        unusual = r"^[[:space:]]*(%:|#[[:space:]]*(/\*|define[[:space:]]*/\*)|/\*.*\*/[[:space:]]*#|\*/[[:space:]]*#)"
-        partial_name = re.compile(rb"^\s*#\s*define\s+([A-Za-z_0-9]+)\\\s*$")
-        arguments = ["grep", "--threads=4", "-n", "-z", "-I", "-P", "-e", pattern, "-e", split_name, "-e", unusual, revision,
-                     "--", "*.c", "*.h", "*.S", "*.s", "*.inc"]
-        seen: set[str] = set()
-        prefix = (revision + ":").encode()
-        total_bytes = 0
-        self.repository_scans += 1
-        with closing(_iter_git_grep(self.repo, arguments)) as rows:
-            for count, row in enumerate(rows):
-                fields = row.split(b"\0", 2)
-                if len(fields) != 3:
-                    return {name: None for name in names}
-                partial = partial_name.search(fields[2])
-                if partial is not None and not any(name.startswith(partial[1].decode()) for name in names):
-                    continue
-                path = fields[0]
-                if count >= 4096 or not path.startswith(prefix):
-                    return {name: None for name in names}
-                filename = path[len(prefix):].decode()
-                if filename in seen or not self.active_site(revision, ReferenceSite(filename, int(fields[1]))):
-                    continue
-                seen.add(filename)
-                source = self.read_file(revision, filename)
-                total_bytes += len(source)
-                if len(seen) > 32 or total_bytes > 512 * 1024:
-                    return {name: None for name in names}
-                clean = replace_c_comments(source.decode())
-                if clean is None:
-                    return {name: None for name in names}
-                clean = re.sub(r"(?m)^(\s*)%:", r"\1#", clean)
-                for node in macro_definitions(parse_source(clean.encode())):
-                    name_node = node.child_by_field_name("name")
-                    if name_node is None or (name := node_text(name_node).decode()) not in names:
-                        continue
-                    if node.has_error:
-                        return {name: None for name in names}
-                    value = node.child_by_field_name("value")
-                    result[name].append(_Macro(node.type == "preproc_function_def", node_text(value) if value is not None else b""))
-        return {name: tuple(macros) for name, macros in result.items()}
+    @property
+    def assumed_uncertainties(self) -> frozenset[str]:
+        return frozenset(self._assumptions)
+
+    def reset_assumptions(self) -> None:
+        self._assumptions.clear()
+
+    def _lookup(self, revision: str, names: frozenset[str]) -> dict[str, MacroObservation]:
+        return self._discovery.lookup(revision, names)
+
+    def _usable(self, observation: MacroObservation) -> bool:
+        if not observation.uncertainties:
+            return True
+        if not self.allow_unknown or not observation.assumable:
+            return False
+        self._assumptions.update(observation.uncertainties)
+        return True
 
     def allows(self, revision: str, proof: ReorderProof) -> bool:
         if len(proof.identifiers) > 64:
             return False
-        for name, macros in self._lookup(revision, proof.identifiers).items():
-            if macros is None:
+        for name, observation in self._lookup(revision, proof.identifiers).items():
+            if not self._usable(observation):
                 return False
-            if not macros:
-                continue
-            if name not in proof.numeric_names:
+            if observation.definitions and name not in proof.numeric_names:
                 return False
-            for macro in macros:
-                tokens = tokenize_c_source(macro.value.decode())
-                if macro.function_like or not tokens or not all(
-                    t.kind is CTokenKind.PP_NUMBER or t.kind is CTokenKind.PUNCTUATOR and t.value in _NUMERIC_OPERATORS
-                    for t in tokens
+            for macro in observation.definitions:
+                if macro.function_like or macro.replacement is None:
+                    return False
+                tokens = tokenize_c_source(macro.replacement.decode())
+                if not tokens or not all(
+                    token.kind is CTokenKind.PP_NUMBER
+                    or token.kind is CTokenKind.PUNCTUATOR and token.value in _NUMERIC_OPERATORS
+                    for token in tokens
                 ):
                     return False
         return True
+
+    def binding_names_safe(self, revision: str, names: frozenset[str]) -> bool:
+        # CALL(parameter) can invoke a raw function-like macro binding even
+        # without a literal parameter(...) occurrence in the original source.
+        if len(names) > 64:
+            return False
+        for observation in self._lookup(revision, names).values():
+            if (not self._usable(observation)
+                    or any(macro.origin is not MacroOrigin.UNCLASSIFIED for macro in observation.definitions)):
+                return False
+        return True
+
+    def compiler_names_safe(self, revision: str, names: frozenset[str]) -> bool:
+        return all(self._usable(observation)
+                   and all(macro.origin is MacroOrigin.SOURCE for macro in observation.definitions)
+                   for observation in self._lookup(revision, names).values())
+
+    def source_names_unbound(self, revision: str, names: frozenset[str]) -> bool:
+        """An unclosed include walk cannot discard already observed macros."""
+        return all(self._usable(observation)
+                   and not any(macro.origin is MacroOrigin.SOURCE for macro in observation.definitions)
+                   for observation in self._lookup(revision, names).values())
+
+    def location_independent(self, revision: str, names: frozenset[str], builtins: frozenset[str]) -> bool:
+        """Follow observed replacements, preserving known physical locations."""
+        pending = set(names)
+        visited: set[str] = set()
+        for _ in range(8):
+            pending.difference_update(visited)
+            if not pending:
+                return True
+            if pending & builtins or len(visited | pending) > 256:
+                return False
+            batch = frozenset(pending)
+            pending.clear()
+            for observation in self._lookup(revision, batch).values():
+                if not self._usable(observation):
+                    return False
+                for macro in observation.definitions:
+                    if macro.origin is MacroOrigin.UNCLASSIFIED:
+                        continue
+                    if macro.replacement is None:
+                        return False
+                    tokens = tokenize_c_source(macro.replacement.decode())
+                    if tokens is None or any(token.value in {"#", "##", "%:", "%:%:", "_Pragma", "__pragma"}
+                                             for token in tokens):
+                        return False
+                    pending.update({token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER}
+                                   - macro.parameters)
+            visited.update(batch)
+        return False
+
+    def preserves_bindings(self, revision: str, identifiers: frozenset[str], renamed: frozenset[str]) -> bool:
+        pending = set(identifiers)
+        visited: set[str] = set()
+        for _ in range(8):
+            pending.difference_update(visited)
+            if not pending:
+                return True
+            if len(visited | pending) > 128:
+                return False
+            batch = frozenset(pending)
+            pending.clear()
+            for observation in self._lookup(revision, batch).values():
+                if not self._usable(observation):
+                    return False
+                for macro in observation.definitions:
+                    if macro.origin is MacroOrigin.UNCLASSIFIED:
+                        continue
+                    if macro.origin is MacroOrigin.COMPILER or macro.replacement is None:
+                        return False
+                    tokens = tokenize_c_source(macro.replacement.decode())
+                    if tokens is None or any(token.value in {"#", "##", "%:", "%:%:"} for token in tokens):
+                        return False
+                    names = {token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER} - macro.parameters
+                    if names & renamed:
+                        return False
+                    pending.update(names)
+            visited.update(batch)
+        return False
