@@ -69,19 +69,26 @@ def _walk_history(
 
 
 class ConfigFilter(StreamingCommitFilter):
-    """Filter commits through the configured Kbuild graph and primary history."""
+    """Retain unclosed inputs, optionally collecting Kbuild observations.
+
+    The available model does not establish a complete build-input universe.
+    Diagnostic preparation is therefore opt-in and never implied by retention.
+    """
 
     name: ClassVar[str] = "Filtering kernel configuration"
 
     @property
     def requires_complete_history(self) -> bool:
-        return True
+        return self.collect_observations
 
-    def __init__(self, config: KernelConfig, workers: int = 1) -> None:
+    def __init__(
+        self, config: KernelConfig, workers: int = 1, *, collect_observations: bool = False,
+    ) -> None:
         if workers < 1:
             raise ValueError("workers must be at least 1")
         self.config = config
         self.workers = workers
+        self.collect_observations = collect_observations
         self._store: ConfigHistoryStore | None = None
         self._prepared_context: tuple[int, int] | None = None
 
@@ -248,6 +255,13 @@ class ConfigFilter(StreamingCommitFilter):
     def filter_mutable_commit(
         self, commit: FilteredCommit, context: FilterContext
     ) -> FilteredCommit | None:
+        commit.build_modes.clear()
+        if not self.collect_observations:
+            # A stale exclusive mode must never authorize a later exclusion.
+            # Check merges before touching their potentially deferred patch.
+            if commit.original.is_merge:
+                return None
+            return commit if commit.diff.files else None
         self._prepare(context, show_progress=False)
         if self._store is None:
             return None
@@ -287,7 +301,8 @@ class ConfigFilter(StreamingCommitFilter):
         self._validate_name()
         self._close_preparation()
         try:
-            self._prepare(context, show_progress=show_progress)
+            if self.collect_observations:
+                self._prepare(context, show_progress=show_progress)
             for commit in commits:
                 result = self.filter_mutable_commit(commit, context)
                 if result is not None:

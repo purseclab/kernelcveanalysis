@@ -149,6 +149,22 @@ first-parent-patch / ordered-parent-ID representation as `extract`.
 
 ## Filtering performance
 
+### Configuration evidence
+
+A base kernel config does not establish complete build inputs. Vendor modules,
+forced includes, generated sources and raw-byte consumers can introduce other
+inputs. Until that evidence is complete, the normal configuration stage retains
+files, clears stale exclusive preprocessor modes and skips Kbuild/include
+preparation. The config still supplies architecture data to source analysis.
+
+`--config-observations` explicitly requests advisory Kbuild modes and requires
+`--config` plus complete source history. It adds full-history/include scans;
+those observations do not authorize configuration or `#if` exclusions. The
+Python equivalents are `ConfigFilter(..., collect_observations=True)` and
+`filter_commit_time_range(..., config_observations=True)`. Worker settings apply
+only to that optional analysis. See the
+[build-input and live-device findings](FUTURE_PRUNING_WORK.md#configuration-observations-and-live-module-closure--2026-11-07).
+
 ### Experimental source pruning
 
 Add `--source-pruning` to `filter config` to run configuration, preprocessor
@@ -311,8 +327,9 @@ against the NUL-delimited changed-path list before updating the shared graph.
 
 ### Execution and progress display
 
-Config filtering performs history/include preparation and computes decisions
-before consuming the upstream commit stream. The remaining stages are lazy:
+Only `--config-observations` performs history/include preparation and computes
+advisory modes before consuming the upstream commit stream. Normal config
+filtering skips that preparation. The remaining stages are lazy:
 commits pass through them without materializing each intermediate result.
 Each stage currently owns a separate Rich progress display. Nested generators
 can therefore show downstream bars before those stages receive input; later
@@ -375,21 +392,21 @@ risk. Unknown syntax, token/gap changes and byte-column changes remain retained.
 Reports and caches are validated together against source/build inputs, Git
 metadata, databases and SQLite sidecars before any output is initialized.
 
-### Parallel configuration filtering
+### Parallel configuration observations
 
-The normal configuration CLI defaults to four workers:
+Advisory observation analysis defaults to four workers when explicitly enabled:
 
 ```console
 uv run kpatch filter --repo linux --db all_commits --dest filtered \
-  --start 07-01-2026 --end 08-01-2026 config --config kernel.config --workers 4
+  --start 07-01-2026 --end 08-01-2026 config --config kernel.config --config-observations --workers 4
 ```
 
 `--workers 1` selects the serial reference path. The worker count must be
 positive. Only the Kbuild/config history-decision phase is parallel; history
 projection, global include indexing, `#if`/whitespace filtering, and the final
-output writer stay centralized. With no kernel config there is no parallel
-Kbuild phase. The Python `ConfigFilter(config, workers=...)` and
-`filter_commit_time_range(..., workers=...)` APIs default to one worker; use
+output writer stay centralized. Without `--config-observations` there is no
+parallel Kbuild phase. The Python APIs default to one worker and require
+`collect_observations=True` or `config_observations=True` respectively; use
 an `if __name__ == "__main__":` entry point when spawning from scripts.
 
 - The coordinator prepares the complete selected history and global include
@@ -418,7 +435,8 @@ parallelism and native/Rust acceleration are not implemented.
 
 #### Measured multiprocessing comparison
 
-Separate sequential runs on the same `[2026-07-01, 2026-08-01)` range (10,681
+These historical preparation measurements do not describe the current default
+fast path. Separate sequential runs on the same `[2026-07-01, 2026-08-01)` range (10,681
 input commits) with the same configuration and memory sampler:
 
 | Workers | Load + filtering | Speedup | Sampled tree RSS | Sampled tree PSS |

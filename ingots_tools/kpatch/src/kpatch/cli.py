@@ -129,13 +129,16 @@ def get_run_args(ctx: typer.Context) -> RunFilterArgs:
 def run(ctx: typer.Context, filter: CommitFilter):
     run_filter(get_run_args(ctx), filter)
 
-@filter_app.command("config", help="Filter commits for promising lpe commits based of code present for a given config.")
+@filter_app.command("config", help="Filter source changes; configuration exclusions require complete build-input evidence.")
 def filter(
     ctx: typer.Context,
     config: Annotated[Path | None, typer.Option(help="Kernel config file to filter with.")] = None,
+    config_observations: Annotated[
+        bool, typer.Option(help="Collect advisory Kbuild modes with full-history scans. Does not authorize exclusions. Requires --config."),
+    ] = False,
     workers: Annotated[
         int,
-        typer.Option(min=1, help="Processes for the Kbuild config phase only; ignored without --config."),
+        typer.Option(min=1, help="Processes for --config-observations only; ignored otherwise."),
     ] = 4,
     source_pruning: Annotated[
         bool, typer.Option("--source-pruning/--no-source-pruning", help="Enable experimental Tree-sitter rename and unreferenced-definition filters."),
@@ -157,13 +160,15 @@ def filter(
     setools_python: Annotated[Path | None, typer.Option(exists=True, dir_okay=False)] = None,
     setools_module_path: Annotated[list[Path] | None, typer.Option(exists=True, file_okay=False)] = None,
 ):
+    if config_observations and config is None:
+        raise typer.BadParameter("--config-observations requires --config")
     kernel_config: KernelConfig | None = None
     if config is not None:
         kernel_config = KernelConfig(config.read_text())
         filter = FilterPipeline(
             [
                 MergeCommitFilter(),
-                ConfigFilter(kernel_config, workers=workers),
+                ConfigFilter(kernel_config, workers=workers, collect_observations=config_observations),
                 IfdefFilter(kernel_config),
                 WhitespaceFilter(),
             ]

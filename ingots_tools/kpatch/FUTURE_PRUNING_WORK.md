@@ -2,6 +2,13 @@
 
 ## Latest verified checkpoint — 2026-11-07
 
+Normal configuration filtering now skips advisory Kbuild preparation while
+input closure is unknown. The exact 500-original replay preserves every patch
+and mask with no preparation/source reads. Advisory collection is explicit
+through `--config-observations`; live vendor modules demonstrate why the base
+config cannot authorize exclusions. See
+[the configuration and device checkpoint](#configuration-observations-and-live-module-closure--2026-11-07).
+
 Numeric branch folding is available separately through
 `--source-pruning --constant-branches`. A complete 26,670-original replay adds
 **one whole removal and one partial file**, both requiring the explicit
@@ -47,10 +54,9 @@ then uses 49 global macro scans rather than 111; observed lossy time falls from
 measurements, not a controlled end-to-end speedup claim. See the
 [latest implementation and measurements](#lazy-complete-file-evidence-and-closed-reference-checks--2026-11-07).
 
-**1,231 full-suite tests pass** before the final stage-selection change,
-including the captured binary SELinux policy; **189 targeted tests pass** on
-the final selection API. Mypy passes all 65 Python files, and all 66 Python/C++
-package sources match the final wheel.
+**1,247 full-suite tests pass**, including the captured binary SELinux policy.
+Mypy passes all 65 Python files, and all 66 Python/C++ package sources match
+the final wheel.
 The preceding replay of the eleven previously accepted source candidates preserves
 exactly seven default and eleven lossy accepted IDs. The other 74 previously
 rejected structural candidates were not replayed for this lexer change.
@@ -2211,3 +2217,111 @@ Independent native Git and compiler controls cover the reader, regular-file
 evidence, branch scanner, line assumptions and budget boundaries. Source/test
 snapshots and manifests remain in ignored verification directories. Tests and
 benchmark artifacts remain outside the milestone commit.
+
+## Configuration observations and live module closure — 2026-11-07
+
+The normal `ConfigFilter` now skips expensive Kbuild/include preparation while
+build-input closure is unknown. It retains nonempty nonmerge changes, preserves
+existing masks and clears stale exclusive preprocessor modes. No additional
+exclusion is authorized. Positive advisory modes remain available with
+`ConfigFilter(..., collect_observations=True)` or CLI
+`--config kernel.config --config-observations`. Only that analysis requires
+complete history and uses `--workers`; its modes remain incomplete and cannot
+enable configuration-based `#if` masking. The time-range Python helper exposes
+the same choice as `config_observations=True`.
+
+This separation addresses a measured cost with no exclusion benefit. In a fresh
+deterministic sample of 500 nonmerge raw commits from UTC January 1–8, 2025,
+the actual model walks all 1,018 history transitions and retains every one of
+the 1,010 changed files. An independent diagnostic records old/new
+`modeled_inclusion` without publishing masks:
+
+| Diagnostic observation | Count |
+| --- | ---: |
+| Whole original commits with all candidate sources absent from the model | 274 / 500 (54.8%) |
+| Other partially absent commits | 40 / 500 |
+| Candidate C/header/`.S` files absent on both applicable sides | 638 / 763 |
+| Other files kept positive | 247 |
+| Certified exclusions | **0** |
+
+This is a raw 2025 sample, separate from the 26,670 legacy survivors. It does not
+establish a 54.8% safe pruning rate or bound the false-removal rate. Every actual
+build-input closure is `UNKNOWN`. Model absence omits arbitrary recipes,
+forced/generated inputs, assembly/raw-data consumers and vendor-module builds.
+The first preparation attempt reaches the 640 MiB limit and is killed before
+any sample observation completes. A retry with command-local Git resource
+limits completes in 156.6 seconds, still reaching the memory limit with reclaim
+but no OOM. No user/repository Git configuration is changed. These costs belong
+to the advisory preparation/model experiment, not the new fast default.
+
+An actual replay of the fast default on the identical 500 originals retains
+all patches and masks byte-for-byte against the recorded production decisions.
+The direct stage takes 0.112 seconds, with zero preparation calls, repository
+reads or native requests. A one-stage pipeline takes 0.119 seconds and starts
+one idle shared reader without making requests. Setup/checks included take
+1.08 seconds with a 210.4 MiB sampled peak. These are stage measurements after
+loading the inputs, not an end-to-end speedup ratio against the separate
+diagnostic experiment. Both runs use immutable source snapshots.
+
+Independent small-repository controls compare actual advisory preparation with
+the default across source, binary, symlink, gitlink, file-mode and structural
+changes. Stale complete modes are cleared; absent/incomplete modes cannot
+enable IfdefFilter reads or masks. Eleven full-original paired source-tail
+controls preserve exact patches, masks and audit records, with seven removals
+in default mode and eleven in explicit source-lossy mode. That isolates
+metadata-consumer behavior rather than claiming whole-kernel bootstrap or
+population-wide pipeline parity. All 1,247 tests pass on the final source,
+including the captured binary policy; mypy and all 66 packaged-source checks
+pass. Tests and benchmark artifacts remain outside the commit.
+
+Live challenge 7.1.2.a supplies concrete counterevidence to a base-config-only
+lossy rule. Four vendor modules are loaded despite their options being unset or
+absent in the running kernel config: `dummy_hcd`, `usbip_core`, `vhci_hcd` and
+`virtio_pmem`. Repeated config/boot identity and byte-identical installed/live
+GNU build-ID notes establish the observation. At the inspected upstream
+revision, nine candidate C inputs behind those object names have no literal
+Kbuild membership under that base config. The current uncertainty guard retains
+all nine. Their mapping is an upstream observation, not authenticated Android
+source provenance. Ten original legacy commits touch those candidate paths;
+none is wholly confined to them, so this is not ten demonstrated false removals.
+
+The same environment has virtual USB controllers, persistent-memory namespaces
+and simulated Wi-Fi. Current device absence cannot exclude software-created or
+later bound resources. The binary policy grants app USB descriptor operations
+despite denying direct open, while privileged services can open and transfer
+descriptors. Complete source registration/callback, module, resource-creation
+and mediation evidence is needed before pruning those paths. Reviewing all ten
+hardware candidates in the earlier 100-sample certifies zero new exclusions.
+Read-only inspection reused an existing instance; it changed no device state.
+
+The installed modules retain symbols and BTF, but no DWARF or BTF.ext. Their
+compiler strings identify Android Clang 18 and provide no authenticated source
+tree or build manifest. Exact kernel/vendor source and generated/forced inputs,
+commands, available-module universe and link/metadata provenance remain needed
+for target-policy and default configuration exclusions. A captured base config,
+binary SELinux policy or seccomp denial does not supply those missing premises.
+
+Other bounded investigations also leave their proof obligations explicit:
+
+- An exact whole-cohort screen finds eleven prototype-only removals, nine with
+  no same-file outside use, plus static-function removal candidates. The current
+  query omits prototypes, but compiler/preprocessing/consumer and location
+  evidence is still required. Actual `DeadCodeFilter` retains all 65 checked
+  originals. Adding SCC grouping alone would duplicate existing behavior.
+- Whole logging-API conversions produce eleven additional structural
+  opportunities, mostly severity/rate/once changes. Rate limiting can affect
+  availability, argument evaluation and private state. Two `-ENOMEM` probe
+  idioms need exact helper/binding/instrumentation proofs; deferred-probe reasons
+  are stateful. No new logging rule is enabled from these counts.
+
+Frozen evidence is in ignored directories:
+
+- `benchmarks/config_fastpath/2026-11-07/` for final controls and measurements.
+- `benchmarks/kbuild_diagnostic_yield/2026-11-07/` for the exact raw sample,
+  complete history, independent verification, both preparation attempts and
+  the `default-fast/` replay.
+- `benchmarks/device_policy/2026-11-07/` for live modules, devices, policy rules,
+  provenance limits and the per-callback analysis proposal.
+- `benchmarks/unused_definition_opportunities/2026-11-07/` and
+  `benchmarks/logging_call_yield/2026-11-07/` for new candidate pools and actual
+  baseline checks.
