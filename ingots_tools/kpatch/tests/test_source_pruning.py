@@ -9,6 +9,7 @@ from unittest.mock import patch
 from kpatch.filter import DeadCodeFilter, FilterContext, FilteredCommit, FilterPipeline, IfdefFilter, KernelConfig, LineRange, MaskReason, RenameFilter, WhitespaceFilter
 from kpatch.filter.reference_index import ReferenceIndex, ReferenceSite, spelling_guards
 from kpatch.filter.repository_file import RepositoryFileReader
+from kpatch.filter.reordering import hunk_reorder_candidate
 from kpatch.filter.source_pruning import PruningDecision, source_pruning_tail
 from kpatch.filter.source_filter import SourceIncludeIndex, _iter_git_grep
 from kpatch.git import CommitParent, GitCommit, GitRepo
@@ -55,6 +56,124 @@ class SourcePruningTests(unittest.TestCase):
         commit = self.change({"unit.c": a}, {"unit.c": a.replace("old_helper", "new_helper")})
         self.assertEqual(self.run_stage(commit, rename=True), [])
         self.assertEqual(self.decisions[0].rule, "consistent_rename")
+
+    def test_unused_header_is_not_blocked_by_asm_include_or_comment(self) -> None:
+        old = ('#include <asm/memory.h>\n/* asm __func__ ## are words in a comment. */\n'
+               'static inline int isolated_widget(void) { return 1; }\n')
+        c = self.change({"api.h": old}, {"api.h": old.replace("return 1", "return 2")})
+        self.assertEqual(self.run_stage(c), [])
+        self.assertEqual(self.decisions[0].symbols, ("isolated_widget",))
+
+    def test_unused_literal_macro_is_not_blocked_by_opaque_words_in_string(self) -> None:
+        c = self.change({"api.h": '#define ISOLATED_WIDGET "asm ## __func__"\n'},
+                        {"api.h": '#define ISOLATED_WIDGET "__asm__ #text"\n'})
+        self.assertEqual(self.run_stage(c), [])
+
+    def test_unused_guard_preserves_real_asm_and_macro_effects(self) -> None:
+        prefixes = ['void run(void) { asm("nop"); }\n', 'void run(void) { __asm__("nop"); }\n',
+                    '#define NAME(x) prefix ## x\n', '#define TEXT(x) #x\n']
+        for prefix in prefixes:
+            with self.subTest(prefix=prefix):
+                old = prefix + 'static int isolated_widget(void) { return 1; }\n'
+                self.assertEqual(len(self.run_stage(self.change({"unit.c": old}, {"unit.c": old.replace('return 1', 'return 2')}))), 1)
+
+    def test_independent_static_helpers_reorder_is_pruned(self) -> None:
+        a = 'static int first(int n) { return n + 1; }\n'
+        b = 'static int second(int n) { return n - 1; }\n'
+        c = self.change({"unit.c": a + b}, {"unit.c": b + a})
+        self.assertEqual(self.run_stage(c, rename=True), [])
+        self.assertEqual(self.decisions[0].rule, "independent_definition_reorder")
+        self.assertEqual(self.decisions[0].symbols, ("first", "second"))
+        with RepositoryFileReader(self.repo) as reader:
+            Verifier(self.repo, reader, KernelConfig("")).verify(Decision.model_validate(asdict(self.decisions[0])))
+
+    def test_reorder_after_masking_a_new_unused_helper(self) -> None:
+        a = 'static int first(int n) { return n + 1; }\n'
+        b = 'static int second(int n) { return n - 1; }\n'
+        unused = 'static int isolated_widget(void) { return 777; }\n'
+        caller = 'int run(void) { return first(1) + second(2); }\n'
+        c = self.change({"unit.c": a + b + caller}, {"unit.c": b + a + unused + caller})
+        decisions: list[PruningDecision] = []
+        pipeline = FilterPipeline(list(source_pruning_tail(on_pruned=decisions.append)))
+        self.assertEqual(pipeline.filter_commits([c], FilterContext(self.repo), False), [])
+        self.assertEqual([d.rule for d in decisions], ["unreferenced_definition", "independent_definition_reorder"])
+        with RepositoryFileReader(self.repo) as reader:
+            verifier = Verifier(self.repo, reader, KernelConfig(""))
+            for decision in decisions:
+                verifier.verify(Decision.model_validate(asdict(decision)))
+
+    def test_masked_reorder_uses_complete_sources_when_reduced_hunk_is_incomplete(self) -> None:
+        a = 'static inline int first(int n)\n{\n\treturn n & 1;\n}\n\n'
+        b = 'static inline int second(int n)\n{\n\treturn n & 2;\n}\n\n'
+        unused = 'static inline int isolated_widget(int n)\n{\n\treturn n & 4;\n}\n\n'
+        caller = 'int run(void) { return first(1) + second(2); }\n'
+        c = self.change({"unit.c": a + b + caller}, {"unit.c": b + a + unused + caller})
+        views = FilterPipeline([DeadCodeFilter()]).filter_mutable_commits([FilteredCommit(c)], FilterContext(self.repo), False)
+        self.assertEqual(len(views), 1)
+        self.assertFalse(hunk_reorder_candidate(views[0].diff.files[0]))
+        self.assertEqual(FilterPipeline([RenameFilter()]).filter_mutable_commits(views, FilterContext(self.repo), False), [])
+
+    def test_reorder_allows_literal_numeric_macros(self) -> None:
+        a = 'static inline int first(const struct card *c) { return c->quirks & FLAG_A; }\n'
+        b = 'static inline int second(const struct card *c) { return c->quirks & FLAG_B; }\n'
+        c = self.change({"api.h": '#define FLAG_A (1<<4)\n#define FLAG_B (1<<5)\n', "unit.c": a + b},
+                        {"unit.c": b + a})
+        self.assertEqual(self.run_stage(c, rename=True), [])
+
+    def test_reorder_retains_external_position_and_unknown_macros(self) -> None:
+        a = 'static int first(void) { return VALUE; }\n'
+        b = 'static int second(void) { return VALUE + 1; }\n'
+        for macros in ('#define VALUE __COUNTER__\n', '#define VALUE __LINE__\n',
+                       '#define VALUE OTHER_VALUE\n', '#define VALUE compute()\n',
+                       '#define \\\nVALUE __COUNTER__\n', '#define VA\\\nLUE __COUNTER__\n',
+                       '#\\\ndefine VALUE __COUNTER__\n', '#/**/define VALUE __COUNTER__\n',
+                       '#define/**/VALUE __COUNTER__\n', '#define VALUE/**/__COUNTER__\n',
+                       '%:define VALUE __COUNTER__\n', '/* prefix */ #define VALUE __COUNTER__\n'):
+            with self.subTest(macros=macros):
+                c = self.change({"api.h": macros, "unit.c": a + b}, {"unit.c": b + a})
+                self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+                self.assertEqual(self.decisions, [])
+
+    def test_reorder_retains_macro_capture_of_parameter_or_field(self) -> None:
+        a = 'static int first(int n) { return n + 1; }\n'
+        b = 'static int second(int n) { return n - 1; }\n'
+        c = self.change({"api.h": '#define n __COUNTER__\n', "unit.c": a + b}, {"unit.c": b + a})
+        self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+
+    def test_reorder_ignores_unrelated_continued_macro_definitions(self) -> None:
+        a = 'static int first(int n) { return n + 1; }\n'
+        b = 'static int second(int n) { return n - 1; }\n'
+        macros = '#define OTHER\\\n 1\n#define \\\n UNRELATED 2\n'
+        c = self.change({"api.h": macros, "unit.c": a + b}, {"unit.c": b + a})
+        self.assertEqual(self.run_stage(c, rename=True), [])
+
+    def test_reorder_ignores_macro_definitions_in_disabled_translation_units(self) -> None:
+        a = 'static int first(int n) { return n + 1; }\n'
+        b = 'static int second(int n) { return n - 1; }\n'
+        c = self.change({"drivers/Makefile": 'obj-$(CONFIG_OTHER) += capture.o\n',
+                         "drivers/capture.c": '#define n __COUNTER__\n', "unit.c": a + b},
+                        {"unit.c": b + a})
+        self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+        self.assertEqual(self.run_stage(c, rename=True, config=KernelConfig('# CONFIG_OTHER is not set\n')), [])
+
+    def test_reorder_rejects_behavior_changes_and_file_moves(self) -> None:
+        a = 'static int first(void) { return 1; }\n'
+        b = 'static int second(void) { return 2; }\n'
+        c = self.change({"unit.c": a + b}, {"unit.c": b + a.replace('return 1', 'return 3')})
+        self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+        c = self.change({"unit.c": a + b, "other.c": ''}, {"unit.c": a, "other.c": b})
+        self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+
+    def test_reorder_failure_does_not_publish_preview_masks(self) -> None:
+        a = 'static int first(void) { return VALUE; }\n'
+        b = 'static int second(void) { return VALUE + 1; }\n'
+        inactive = '#if 0\nint dead = 1;\n#endif\n'
+        c = self.change({"api.h": '#define VALUE __COUNTER__\n', "unit.c": inactive + a + b},
+                        {"unit.c": inactive + b + a})
+        view = FilteredCommit(c)
+        self.assertEqual(len(RenameFilter(KernelConfig('')).filter_mutable_commits([view], FilterContext(self.repo), False)), 1)
+        self.assertEqual(view.code_masks, ())
+        self.assertEqual(view.edit_masks, ())
 
     def test_rename_ignores_pruned_logic_and_unchanged_references_in_inactive_code(self) -> None:
         old = ("static int old_helper(void) { return 1; }\n"
@@ -258,6 +377,52 @@ class SourcePruningTests(unittest.TestCase):
         a = 'static int old_helper(void) { puts("old_helper"); return 1; }\n'
         c = self.change({"unit.c": a}, {"unit.c": a.replace("old_helper", "new_helper")})
         self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+
+    def test_diagnostic_wording_only_is_pruned_and_audited(self) -> None:
+        old = 'void run(void) { pr_err("allocation failed: %d\\n", err); }\n'
+        c = self.change({"unit.c": old}, {"unit.c": old.replace("allocation failed", "allocation failure")})
+        self.assertEqual(self.run_stage(c, rename=True), [])
+        self.assertEqual(self.decisions[0].rule, "diagnostic_wording")
+        self.assertEqual(self.decisions[0].symbols, ())
+        with RepositoryFileReader(self.repo) as reader:
+            Verifier(self.repo, reader, KernelConfig("")).verify(Decision.model_validate(asdict(self.decisions[0])))
+
+    def test_rename_and_diagnostic_name_update_are_pruned(self) -> None:
+        old = ('static int old_helper(void) { pr_info("old_helper: done\\n"); return 1; }\n'
+               'int run(void) { return old_helper(); }\n')
+        c = self.change({"unit.c": old}, {"unit.c": old.replace("old_helper", "new_helper")})
+        self.assertEqual(self.run_stage(c, rename=True), [])
+        self.assertEqual(self.decisions[0].rule, "consistent_rename_and_diagnostics")
+        with RepositoryFileReader(self.repo) as reader:
+            Verifier(self.repo, reader, KernelConfig("")).verify(Decision.model_validate(asdict(self.decisions[0])))
+
+    def test_diagnostic_change_cannot_hide_behavior_or_foreign_reference(self) -> None:
+        old = 'static int old_helper(void) { pr_err("old\\n"); return 1; }\nint run(void) { return old_helper(); }\n'
+        for new in (old.replace('"old', '"new').replace('return 1', 'return 2'),
+                    old.replace('old_helper', 'new_helper').replace('"old', '"new')):
+            with self.subTest(new=new):
+                c = self.change({"unit.c": old, "outside.c": 'int other(void) { return old_helper(); }\n'}, {"unit.c": new})
+                self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+                self.assertEqual(self.decisions, [])
+
+    def test_diagnostics_respect_masks_and_keep_other_files(self) -> None:
+        old = '#if 0\nint inactive = 1;\n#endif\nvoid run(void) { pr_err("old\\n"); }\n'
+        new = old.replace('inactive = 1', 'inactive = 2').replace('"old', '"new')
+        c = self.change({"unit.c": old}, {"unit.c": new})
+        stages = [IfdefFilter(KernelConfig("")), RenameFilter()]
+        self.assertEqual(FilterPipeline(stages).filter_commits([c], FilterContext(self.repo), False), [])
+        c = self.change({"unit.c": old, "other.c": 'int n = 1;\n'}, {"unit.c": new, "other.c": 'int n = 2;\n'})
+        self.assertEqual(len(self.run_stage(c, rename=True)), 1)
+
+    def test_logging_control_and_line_counter_changes_are_retained(self) -> None:
+        for old, new in [
+            ('void run(void) { pr_err("%p", ptr); }\n', 'void run(void) { pr_err("%px", ptr); }\n'),
+            ('void run(void) { pr_err("old"); }\n', 'void run(void) { pr_err("new\\n"); }\n'),
+            ('void run(void) { pr_err("old"); }\nint line = __LINE__;\n', 'void run(void) {\n pr_err("new"); }\nint line = __LINE__;\n'),
+            ('void run(void) { pr_err("old"); }\nint n = __COUNTER__;\n', 'void run(void) { pr_err("new"); }\nint n = __COUNTER__;\n'),
+        ]:
+            with self.subTest(old=old):
+                self.assertEqual(len(self.run_stage(self.change({"unit.c": old}, {"unit.c": new}), rename=True)), 1)
 
     def test_inconsistent_or_colliding_rename_is_retained(self) -> None:
         a = "static int old_helper(void) { return 1; }\nint run(void) { return old_helper(); }\n"

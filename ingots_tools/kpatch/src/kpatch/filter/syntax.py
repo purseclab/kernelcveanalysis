@@ -22,6 +22,8 @@ _DECLARATIONS_QUERY = Query(_C_LANGUAGE, "\n".join(
 _COMMENTS_QUERY = Query(_C_LANGUAGE, "(comment) @item")
 _SENSITIVE_QUERY = Query(_C_LANGUAGE, "(function_definition) @item (string_literal) @item (preproc_arg) @item")
 _ARGUMENTS_QUERY = Query(_C_LANGUAGE, "(argument_list) @item")
+_CALLS_QUERY = Query(_C_LANGUAGE, "(call_expression) @item")
+_MACROS_QUERY = Query(_C_LANGUAGE, "(preproc_def) @item (preproc_function_def) @item")
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +78,34 @@ def sensitive_nodes(tree: Tree) -> list[Node]:
 
 def argument_lists(tree: Tree) -> list[Node]:
     return QueryCursor(_ARGUMENTS_QUERY).captures(tree.root_node).get("item", [])
+
+
+def call_expressions(tree: Tree) -> list[Node]:
+    return QueryCursor(_CALLS_QUERY).captures(tree.root_node).get("item", [])
+
+
+def macro_definitions(tree: Tree) -> list[Node]:
+    return QueryCursor(_MACROS_QUERY).captures(tree.root_node).get("item", [])
+
+
+def has_opaque_tokens(tree: Tree) -> bool:
+    """Find actual opaque constructs, excluding comments/literals/include paths.
+
+    Macro replacement tokens still count: stringification, token pasting and
+    implicit function-name constructs can escape an otherwise unused definition.
+    """
+    identifiers = {b"asm", b"__asm", b"__asm__", b"__func__", b"__FUNCTION__",
+                   b"__PRETTY_FUNCTION__", b"__builtin_FUNCTION"}
+    for token in syntax_tokens(tree):
+        if token.kind == "ERROR":
+            return True
+        if token.kind in {"identifier", "type_identifier", "field_identifier", "asm", "__asm", "__asm__"} and token.value in identifiers:
+            return True
+        if token.kind in {"##", str(CTokenKind.PUNCTUATOR)} and token.value in {b"##", b"%:%:"}:
+            return True
+        if token.kind == str(CTokenKind.PUNCTUATOR) and token.value in {b"#", b"%:"}:
+            return True
+    return False
 
 
 def recover_static_functions(source: bytes, names: frozenset[bytes]) -> list[Node]:

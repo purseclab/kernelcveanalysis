@@ -20,6 +20,9 @@ class MaskReason(StrEnum):
     WHITESPACE = "whitespace_or_comments"
     DEAD_CODE = "unreferenced_definition"
     RENAME = "consistent_rename"
+    DIAGNOSTIC_WORDING = "diagnostic_wording"
+    RENAME_DIAGNOSTICS = "consistent_rename_and_diagnostics"
+    REORDER = "independent_definition_reorder"
     FILE_SELECTION = "file_selection"
 
 

@@ -1,4 +1,4 @@
-"""Tree-sitter rename equivalence and conservative zero-reference filtering."""
+"""Tree-sitter renames, helper reorders, diagnostic wording and unused code."""
 
 from collections.abc import Callable, Generator, Iterable
 from collections import OrderedDict
@@ -11,11 +11,13 @@ from typing import ClassVar
 
 from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
 from .config_filter import KbuildMakefileCache, KbuildState, KernelConfig
+from .diagnostic_strings import normalize_diagnostic_strings
 from .ifdef_filter import get_active_lines
-from .masking import CodeMask, EditMask, FileIdentity, LineRange, MaskReason, SourceSide, SourceVersions, line_ranges
+from .masking import CodeMask, EditMask, FileIdentity, LineRange, MaskReason, SourceSide, SourceVersions, line_macro_locations, line_ranges
 from .reference_index import ReferenceIndex, ReferenceIndexStats, ReferenceSite, spelling_guards
+from .reordering import ReorderMacroGuard, ReorderProof, hunk_reorder_candidate, independent_reorder
 from .syntax import (
-    MAX_SOURCE_BYTES, Definition, argument_lists, comments, declaration_names, declarator_name, definitions,
+    MAX_SOURCE_BYTES, Definition, argument_lists, comments, declaration_names, declarator_name, definitions, has_opaque_tokens,
     node_text, outside_definitions, parse_source, recover_static_functions, sensitive_nodes, syntax_tokens,
 )
 from .whitespace.c_lexer import CTokenKind, replace_c_comments, tokenize_c_source
@@ -57,6 +59,13 @@ class SourceAnalysis:
     code_masks: tuple[CodeMask, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class SourceComparison:
+    mapping: dict[bytes, bytes]
+    diagnostics: bool
+    reorder: ReorderProof | None = None
+
+
 def _eligible(file: DiffFile) -> bool:
     return (
         file.file.endswith((".c", ".h")) and file.change_type is DiffFileType.DEFAULT
@@ -80,6 +89,7 @@ class _SourceFilter(StreamingCommitFilter):
         self._makefiles = KbuildMakefileCache(config) if config is not None else None
         self._site_cache: OrderedDict[tuple[str, str], bool] = OrderedDict()
         self._state: KbuildState | None = None
+        self._reorder_macros: ReorderMacroGuard | None = None
 
     def stats(self) -> SourcePruningStats:
         return replace(self._stats)
@@ -104,6 +114,7 @@ class _SourceFilter(StreamingCommitFilter):
                 self._index = None
                 self._site_cache.clear()
                 self._state = None
+                self._reorder_macros = None
 
     def _planned_input(self, commits: Iterable[FilteredCommit]) -> Generator[FilteredCommit, None, None]:
         assert self._index is not None
@@ -218,7 +229,7 @@ class _SourceFilter(StreamingCommitFilter):
         return False
 
 
-def _hunk_rename_candidate(file: DiffFile) -> bool:
+def _hunk_rename_candidate(file: DiffFile, *, allow_strings: bool = False) -> bool:
     old: list[str] = []
     new: list[str] = []
     for chunk in file.chunks:
@@ -229,7 +240,8 @@ def _hunk_rename_candidate(file: DiffFile) -> bool:
     if a is None or b is None or len(a) != len(b):
         return False
     return all(
-        x == y or (x.kind is CTokenKind.IDENTIFIER and y.kind is CTokenKind.IDENTIFIER)
+        x == y or (x.kind is y.kind and (x.kind is CTokenKind.IDENTIFIER
+                                        or allow_strings and x.kind is CTokenKind.STRING_LITERAL))
         for x, y in zip(a, b)
     )
 
@@ -238,9 +250,44 @@ _OPAQUE_NAMES = re.compile(rb"##|\b(?:__func__|__FUNCTION__|__PRETTY_FUNCTION__|
 
 
 class RenameFilter(_SourceFilter):
-    """Reject a whole patch only after consistent, declaration-anchored renaming."""
+    """Consistent renames, independent helper reorders and diagnostic wording."""
 
-    name: ClassVar[str] = "Filtering equivalent renames"
+    name: ClassVar[str] = "Filtering equivalent renames, reorders and diagnostic wording"
+
+    def _compare(self, pairs: list[SourcePair], *, masked_reorder: bool) -> SourceComparison | None:
+        if masked_reorder or all(hunk_reorder_candidate(pair.file) for pair in pairs):
+            proofs = [independent_reorder(pair.old, pair.new) for pair in pairs]
+            if all(proof is not None for proof in proofs):
+                identifiers = frozenset(name for proof in proofs if proof is not None for name in proof.identifiers)
+                protected = frozenset(name for proof in proofs if proof is not None for name in proof.identifiers - proof.numeric_names)
+                reorder = ReorderProof(tuple(sorted({name for proof in proofs if proof is not None for name in proof.symbols})),
+                                       identifiers, identifiers - protected)
+                return SourceComparison({}, False, reorder)
+        if all(_hunk_rename_candidate(pair.file) for pair in pairs):
+            mapping = self._mapping(pairs)
+            return SourceComparison(mapping, False) if mapping is not None else None
+        normalized: list[SourcePair] = []
+        diagnostics = False
+        for pair in pairs:
+            old = normalize_diagnostic_strings(pair.old)
+            new = normalize_diagnostic_strings(pair.new)
+            diagnostics |= old.literals != new.literals
+            normalized.append(SourcePair(pair.file, old.contents, new.contents))
+        if any(max(len(pair.old), len(pair.new)) > MAX_SOURCE_BYTES for pair in normalized):
+            return None
+        if not diagnostics:
+            mapping = self._mapping(pairs)
+            return SourceComparison(mapping, False) if mapping is not None else None
+        if any(line_macro_locations(pair.old) != line_macro_locations(pair.new)
+               or b"__COUNTER__" in pair.old + pair.new for pair in pairs):
+            return None
+        # No identifier changes: no outside-reference proof is needed. Compare
+        # complete preprocessing tokens, retaining every non-diagnostic change.
+        if all((tokens := tokenize_c_source(pair.old.decode())) is not None
+               and tokens == tokenize_c_source(pair.new.decode()) for pair in normalized):
+            return SourceComparison({}, True)
+        mapping = self._mapping(normalized)
+        return SourceComparison(mapping, True) if mapping is not None else None
 
     def _mapping(self, pairs: list[SourcePair]) -> dict[bytes, bytes] | None:
         mapping: dict[bytes, bytes] = {}
@@ -375,7 +422,9 @@ class RenameFilter(_SourceFilter):
         self._stats.processed_commits += 1
         if commit.original.is_merge or not commit.diff.files:
             return commit
-        if not all(_eligible(file) and _hunk_rename_candidate(file) for file in commit.diff.files):
+        if not all(_eligible(file) and (_hunk_rename_candidate(file, allow_strings=True) or hunk_reorder_candidate(file)
+                                      or any(mask.reason is MaskReason.DEAD_CODE for mask in commit.code_masks_for(file)))
+                   for file in commit.diff.files):
             return commit
         pairs: list[SourcePair] = []
         analyses: list[SourceAnalysis] = []
@@ -390,17 +439,37 @@ class RenameFilter(_SourceFilter):
             except (ValueError, UnicodeError):
                 return commit
         try:
-            mapping = self._mapping(pairs)
-            if mapping is None or not self._closed_scope(commit, pairs, mapping, context):
+            comparison = self._compare(pairs, masked_reorder=any(mask.reason is MaskReason.DEAD_CODE for mask in commit.code_masks))
+            if comparison is None:
+                return commit
+            mapping, diagnostics = comparison.mapping, comparison.diagnostics
+            if comparison.reorder is not None:
+                if self._reorder_macros is None:
+                    self._reorder_macros = ReorderMacroGuard(
+                        context.repo, self._read_file or context.repo.read_file,
+                        lambda revision, site: self._active_site(revision, site, context),
+                    )
+                assert commit.original.parent is not None
+                if not all(self._reorder_macros.allows(revision, comparison.reorder)
+                           for revision in (commit.original.parent.commit_id, commit.original.commit_id)):
+                    return commit
+            if mapping and not self._closed_scope(commit, pairs, mapping, context):
                 return commit
         except (OSError, ValueError, UnicodeError, subprocess.CalledProcessError):
             return commit
         for analysis in analyses:
             for mask in analysis.code_masks:
                 commit.mask_code(analysis.pair.file, mask.side, mask.lines, mask.reason)
-        self._record(commit, tuple(file.file for file in commit.diff.files), "consistent_rename", tuple(name.decode() for name in mapping))
+        reason = MaskReason.RENAME
+        symbols = tuple(name.decode() for name in mapping)
+        if comparison.reorder is not None:
+            reason = MaskReason.REORDER
+            symbols = comparison.reorder.symbols
+        if diagnostics:
+            reason = MaskReason.RENAME_DIAGNOSTICS if mapping else MaskReason.DIAGNOSTIC_WORDING
+        self._record(commit, tuple(file.file for file in commit.diff.files), reason.value, symbols)
         for file in commit.diff.files:
-            commit.mask_file(file, MaskReason.RENAME)
+            commit.mask_file(file, reason)
         self._stats.eliminated_commits += 1
         return None
 
@@ -488,7 +557,7 @@ class DeadCodeFilter(_SourceFilter):
         outside = self._effective_source(outside_definitions(source, items))
         if any(re.search(rb"\b" + re.escape(name.encode()) + rb"\b", outside) for name in names):
             return False
-        if _OPAQUE_NAMES.search(source):
+        if has_opaque_tokens(parse_source(source)):
             return False
         if re.search(rb"\b(?:__LINE__|__COUNTER__)\b", source):
             return False
@@ -617,7 +686,7 @@ def source_pruning_tail(
     config: KernelConfig | None = None,
     on_pruned: Callable[[PruningDecision], None] | None = None,
 ) -> tuple[StreamingCommitFilter, ...]:
-    """Prune definitions, clean up residual comments, then compare renames."""
+    """Prune definitions, clean up comments, then compare remaining source."""
     return DeadCodeFilter(config, on_pruned), WhitespaceFilter(), RenameFilter(config, on_pruned)
 
 

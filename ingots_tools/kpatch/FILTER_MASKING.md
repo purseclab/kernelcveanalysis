@@ -74,6 +74,22 @@ With `--source-pruning`, the shared factory builds:
 merge → config → ifdef → dead code → whitespace → rename
 ```
 
+The final stage also applies the narrow diagnostic-wording policy described in
+[DIAGNOSTIC_STRING_PRUNING.md](DIAGNOSTIC_STRING_PRUNING.md). It compares temporary
+normalized source views and records whole-file **edit** masks only after the
+whole remaining commit qualifies. Diagnostic wording never produces a code
+mask: the logging call and its argument evaluation remain live. Decisions use
+`diagnostic_wording` or `consistent_rename_and_diagnostics` to distinguish the
+policy exemption from an identifier-only rename.
+
+The same final stage accepts bounded same-file permutations of adjacent
+unchanged independent static leaf helpers. It checks the complete active source
+pair, including dead-code masks, even when a reduced hunk alone is not a valid
+function. It records `independent_definition_reorder` **edit** masks only after
+all remaining files qualify and both revisions pass the macro guard. It never
+excludes the reordered helpers as inactive code. No additional pipeline stage
+or progress bar is added. See [the reorder rules](UNUSED_CODE_AND_REORDER_PRUNING.md).
+
 - **Config:** mask excluded edits; exclude code only for proven-unused compilation
   files on the appropriate revision sides. Build metadata exclusions stay edit
   masks, and copying a file does not exclude its unchanged source. Preserve

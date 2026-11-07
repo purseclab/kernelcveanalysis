@@ -138,8 +138,33 @@ uv run kpatch filter --repo linux --db all_commits --dest filtered_source --star
 The rename stage uses Tree-sitter C and complete parent/child token comparison
 to accept consistent identifier substitutions while preserving structure,
 values, and order. It checks references outside the changed files and retains
-exports, changed strings, implicit function-name uses, and opaque macro cases.
-It does not implement order-independent AST comparison.
+exports, meaningful string changes, implicit function-name uses, and opaque macro cases.
+It also recognizes bounded permutations of adjacent unchanged static leaf
+helpers in the same file. Crossed helpers must have no calls or references
+to one another; declarations and preprocessing directives are barriers.
+Macro bindings are checked in both revisions, allowing only literal numeric
+replacements for free expression identifiers. Calls, registration/init/section
+effects, file moves, and statement/include/field/enum reorders remain excluded.
+The decision uses complete masked source views after dead-code pruning, and
+records an `independent_definition_reorder` edit mask. See
+[UNUSED_CODE_AND_REORDER_PRUNING.md](UNUSED_CODE_AND_REORDER_PRUNING.md).
+
+The same opt-in stage also accepts diagnostic wording changes in standalone
+standard `pr_*`, `dev_*`, and `printk` calls. The `pr_debug`, `dev_dbg`, and
+`pr_cont` families are excluded;
+format conversions (including kernel pointer extensions), control characters,
+arguments, and other code remain significant. Local logger overrides and
+nonstandard `pr_fmt`/`dev_fmt` expansions block the exemption. Only literal
+concatenation with a final format parameter and standard module-name prefixes
+is supported for these prefix macros. Return-value uses, unknown wrappers,
+spliced/numeric-escape literals, and strings stored for later use are retained.
+This is a diagnostic-text policy exemption under the standard kernel logging
+API contract, not strict program equivalence. Included/generated macro overrides
+remain a compiler-analysis limitation. The stage removes a whole commit only
+when all remaining edits qualify; it does not erase individual changed log lines
+from a commit that also changes behavior. See
+[DIAGNOSTIC_STRING_PRUNING.md](DIAGNOSTIC_STRING_PRUNING.md) for the inspection
+estimate, measured yield, and validation.
 
 Stages preserve an immutable original patch and record typed edit masks or
 code masks. Edit masks retain parent text when reconstructing a source;
@@ -163,6 +188,10 @@ and enumerators inside structures are retained because their names can escape
 the enclosing definition. Definitions containing preprocessor directives or
 pragmas are retained because their translation-time effects can escape the
 definition. Direct line-number/counter macros also receive conservative handling.
+The opaque-construct guard uses syntax tokens, so `asm` in an include path,
+comment, or string no longer blocks an otherwise eligible unused definition.
+Actual assembly, implicit function-name tokens, and macro stringification or
+token pasting still block pruning.
 
 This is an experimental source-reference model, not a compiler-level proof.
 Arbitrary nested token pasting, generated/forced includes, external modules,
