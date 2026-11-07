@@ -20,7 +20,8 @@ precedes it. The comparison hashes token kinds, spellings and gaps, plus every
 real token's physical start/end line and UTF-8 byte column. It maps token starts
 after a removed splice and token ends before that splice. Directive boundaries
 and optional ordinary newline tokens remain significant; their columns and
-trailing trivia do not.
+trailing trivia do not. An explicit newline already separates tokens, so the
+gap immediately following it is normalized; all other gaps remain significant.
 
 Angle header names are atomic, with their exact internal bytes preserved.
 The lexer advances past the whole header instead of emitting its contents as
@@ -49,6 +50,11 @@ contexts this implementation does not model, so they also retain changes.
 Non-ASCII whitespace outside literals/comments is unsupported.
 
 ## Scope
+
+Every existing side must have a regular Git mode (`100644` or `100755`). Missing
+patch modes require an exact historical tree lookup; unresolved modes retain
+the change. Symlinks named like C files are excluded because their blob bytes
+are link targets, where comment-looking text can select a different file.
 
 This certifies the modeled C/C++ source observations for fixed surrounding
 inputs. It does not establish whole-build input closure. A generator, assembler

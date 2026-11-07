@@ -17,7 +17,8 @@ pruning criteria, and the proposed AST comparison approach.
 
 Experimental unused-definition and bounded reordering filters are now
 available through `filter config --source-pruning`. Identifier renames require
-the separate lossy mode. Target hardware inventory and general policy
+the separate lossy mode; numeric constant folding requires `--constant-branches`.
+Target hardware inventory and general policy
 reachability remain future work. A narrow,
 opt-in compiler-backed policy stage is available through `kpatch policy` and
 `filter config --policy-profile ...`; see the implementation notes and commands
@@ -158,6 +159,24 @@ when rerunning the pipeline.
 ```console
 uv run kpatch filter --repo linux --db all_commits --dest filtered_source --start 08-10-2026 --end 08-12-2026 config --config kernel.config --source-pruning
 ```
+
+Add `--constant-branches` to include `ConstantConditionalFilter` before dead-code
+pruning. It resolves numeric preprocessor conditions such as
+`#if 0`, including nested groups and `#elif` chains. Unknown macro conditions
+remain unresolved. It validates both complete original files, then compares
+their complete projected source before publishing any masks. Active tokens,
+macro effects, byte columns and physical line numbers must still match.
+Commits with more than 256 eligible source files pass through this stage
+without reads or masks, bounding extra work on tree-wide edits.
+`--whitespace-line-numbers-lossy --whitespace-report PATH` separately permits
+line-number differences and records their risks. Constant folding is off by
+default because its measured additional yield is small and its cost is material;
+see the measured coverage and cost in
+[the constant-branch notes](FUTURE_PRUNING_WORK.md#numeric-preprocessor-branches-and-source-file-modes--2026-11-07).
+
+Source filters require regular Git file modes on every existing side. When
+patch metadata omits a mode, an exact historical tree lookup must establish it.
+Symlink target text is retained even when it resembles C tokens or comments.
 
 The default source stage retains identifier renames. With
 `--source-pruning-lossy --source-pruning-report decisions.jsonl`, it uses

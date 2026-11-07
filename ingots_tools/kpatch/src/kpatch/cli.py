@@ -140,6 +140,9 @@ def filter(
     source_pruning: Annotated[
         bool, typer.Option("--source-pruning/--no-source-pruning", help="Enable experimental Tree-sitter rename and unreferenced-definition filters."),
     ] = False,
+    constant_branches: Annotated[
+        bool, typer.Option(help="Also fold numeric preprocessor branches with complete source comparison. Adds source scanning cost. Requires --source-pruning."),
+    ] = False,
     source_pruning_lossy: Annotated[bool, typer.Option(help="Also assume incomplete preprocessing discovery for source equivalence, and ignore observable rename metadata; observed macro hazards still retain. Requires --source-pruning and --source-pruning-report.")] = False,
     source_pruning_report: Annotated[Path | None, typer.Option(help="JSONL source-pruning decisions, including lossy risk labels.")] = None,
     whitespace_line_numbers_lossy: Annotated[
@@ -173,7 +176,7 @@ def filter(
             ]
         )
 
-    if (source_pruning_lossy or source_pruning_report is not None) and not source_pruning:
+    if (constant_branches or source_pruning_lossy or source_pruning_report is not None) and not source_pruning:
         raise typer.BadParameter("Source-pruning options require --source-pruning")
     if source_pruning_lossy and source_pruning_report is None:
         raise typer.BadParameter("--source-pruning-lossy requires --source-pruning-report to record risky removals")
@@ -214,6 +217,7 @@ def filter(
     if source_pruning:
         filter.filters[-1:] = source_pruning_tail(
             kernel_config, source_audit, lossy=source_pruning_lossy,
+            constant_branches=constant_branches,
             whitespace_line_numbers_lossy=whitespace_line_numbers_lossy,
             whitespace_audit=whitespace_audit,
         )

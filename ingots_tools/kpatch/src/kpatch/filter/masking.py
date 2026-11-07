@@ -19,6 +19,8 @@ class MaskReason(StrEnum):
     IFDEF = "inactive_preprocessor_branch"
     WHITESPACE = "whitespace_or_comments"
     WHITESPACE_LINES_LOSSY = "whitespace_line_numbers_lossy"
+    CONSTANT_BRANCH = "constant_preprocessor_branch"
+    CONSTANT_BRANCH_LINES_LOSSY = "constant_preprocessor_branch_line_numbers_lossy"
     DEAD_CODE = "unreferenced_definition"
     RENAME = "consistent_rename"
     DIAGNOSTIC_WORDING = "diagnostic_wording"

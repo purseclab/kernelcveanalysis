@@ -2,6 +2,14 @@
 
 ## Latest verified checkpoint — 2026-11-07
 
+Numeric branch folding is available separately through
+`--source-pruning --constant-branches`. A complete 26,670-original replay adds
+**one whole removal and one partial file**, both requiring the explicit
+line-number assumption; it adds no strict whole removals. Its measured cost is
+material, so existing source-pruning runs keep their original stage set.
+Source-mode checks also fix a compiled symlink false-pruning case. See
+[the implementation and measurements](#numeric-preprocessor-branches-and-source-file-modes--2026-11-07).
+
 The separate **`--whitespace-line-numbers-lossy`** option now removes **381 of
 515 complete original comment candidates**, compared with **172 by default**:
 **209 additional commits, or 0.784 percentage points of the 26,670 legacy
@@ -39,8 +47,10 @@ then uses 49 global macro scans rather than 111; observed lossy time falls from
 measurements, not a controlled end-to-end speedup claim. See the
 [latest implementation and measurements](#lazy-complete-file-evidence-and-closed-reference-checks--2026-11-07).
 
-**1,165 tests pass**, including the captured binary SELinux policy; mypy passes
-all 62 Python files, and all 63 Python/C++ package sources match the wheel.
+**1,231 full-suite tests pass** before the final stage-selection change,
+including the captured binary SELinux policy; **189 targeted tests pass** on
+the final selection API. Mypy passes all 65 Python files, and all 66 Python/C++
+package sources match the final wheel.
 The preceding replay of the eleven previously accepted source candidates preserves
 exactly seven default and eleven lossy accepted IDs. The other 74 previously
 rejected structural candidates were not replayed for this lexer change.
@@ -2028,3 +2038,176 @@ Evidence remains in ignored benchmark directories:
   `benchmarks/scalar_temporaries/2026-11-07/` for the bounded negative screens.
 
 Benchmarks and test files remain outside milestone commits as requested.
+
+## Numeric preprocessor branches and source file modes — 2026-11-07
+
+`--source-pruning --constant-branches` starts its source tail with
+`ConstantConditionalFilter`. Constant folding has its own opt-in because its
+additional measured yield is small and its cost remains material. Existing
+source-pruning runs keep their three-stage tail.
+It folds environment-independent numeric CPP conditions, including nested
+groups, selected arms and all-false chains. A preceding unknown condition keeps
+its chain unresolved; nested numeric groups can still be considered. Macro
+conditions, unsupported directives, malformed input and exhausted budgets retain
+changes. Assembly files are excluded because their `#` lines have other roles.
+
+The scanner returns candidate ranges, not permission to erase code. The stage
+requires supported complete original sources on both sides, composes candidates
+with existing code/edit masks in original coordinates, and compares the complete
+projected pair. Only a successful whole-file comparison publishes masks. A
+failed comparison leaves every candidate in that file unmasked; a different
+file in the same commit can still be pruned. Selected-arm macro directives and
+other preprocessing effects remain visible. Both physical token coordinates
+and stringification-relevant gaps remain significant by default.
+
+The separate whitespace line-number assumption also applies to this comparison.
+Strict decisions use `constant_preprocessor_branch`; assumed decisions use
+`constant_preprocessor_branch_line_numbers_lossy` and require the whitespace
+audit callback/report with both existing line-observation risks. The source
+lossy flag alone does not enable this assumption. Callback failures propagate.
+
+`1c4f7235112934232975e6ed08a896a4caa71dd9` ("crypto: drbg - Remove broken
+commented-out code") is a verified additional whole removal under the explicit
+line-number assumption. Strict mode retains it because deleting the disabled
+group shifts later source lines. The full original Git patch matches the stored
+patch; all four combinations of source-lossy and line-lossy options confirm
+that only the line flag controls this removal. This is an audited lossy example,
+not a new default-safe gain or evidence for a low false-removal rate.
+
+A necessary byte precheck avoids parsing source pairs with no possible numeric
+group. It removes standard splices and deliberately overcounts comments,
+literals and uncertain spellings. It never authorizes pruning. Independent
+checks of 16,000 raw/masked inputs find no precheck false negatives. Scanner
+facts use a 512-entry / 16 MiB represented-input cache without retaining source
+buffers. Individual sources are bounded to 2 MiB, 65,536 LF characters, 128
+nesting levels and 2,048 groups.
+
+An explicit per-commit budget now skips the entire constant stage before any
+source read or mode lookup when more than 256 source files are eligible. It
+publishes no masks and increments `budget_skipped_commits`; such work selection
+is not proof coverage. This prevents tree-wide edits from forcing thousands of
+extra source reads. Other stages still apply their own rules and budgets.
+
+The completed isolated-stage replay covers **all 26,670 original commits** in
+three contiguous ranges with fresh caches at restarts. It takes 1,402.4 seconds
+(23.4 minutes) in total, with a 493.4 MiB sampled peak and no OOM. It uses the
+frozen proof implementation before the reader cache, file budget and separate
+selection flag. One interrupted attempt is retried from its exact uncompleted
+index. All eight accepted whole patches match the full original Git/DB patches.
+
+There are five strict whole removals, all already covered by strict whitespace;
+three line-lossy whole removals, two already covered by line-lossy whitespace;
+and ten partially pruned commits. The **isolated additional whole gain is one
+commit**, DRBG, or **0.00375 percentage points** of this cohort. There is no new
+strict whole gain. The earlier 14,168-input prefix has zero additional wholes;
+the complete replay establishes the small gain rather than extrapolating it.
+
+Actual whitespace-stage comparisons of all ten partial originals find only one
+additional file, `net/dccp/output.c`, also under the line-number assumption.
+Running constant folding followed by whitespace on all ten full originals in
+both modes retains every commit: complementary masks produce no further whole
+gain. This is a two-stage comparison without configuration, unused-definition
+or target-policy pruning, not a full Kbuild pipeline yield claim.
+
+A separate full original-patch inventory finds only **12 commits (0.045%)**
+above the new 256-file budget, containing 20,563 eligible files. All eight
+accepted wholes have one eligible file and remain under the limit. The inventory
+takes 8.2 seconds without source reads; it measures work selection, not pruning
+correctness. All ten partial commits also remain below the cap (maximum 175
+eligible files), preserving every accepted file decision structurally. Earlier
+pipeline masks can reduce a commit's remaining eligible count.
+
+The exact first 4,600 results match the preceding implementation across eleven
+checks, including raw hashes, retained IDs, masks, audit decisions and reads.
+The precheck reduces that local elapsed time from 391.6 to 207.5 seconds
+(1.89x); about 90% of source pairs skip parsing in the longer run. These are
+shared-host observations, not a complete-cohort throughput claim.
+
+A separate actual source-pipeline comparison of the same 100 originals takes
+12.01 seconds without the new stage and 17.62 seconds with it, retaining all
+100 with identical masks. Git blob-content payload is identical at 28.5 MB;
+the new stage adds 602 reader/metadata requests and CPU work. This 47% local
+elapsed overhead is material despite the precheck. A separately verified
+opportunity does not justify claiming a useful population tradeoff.
+
+These measurements precede the shared-reader metadata cache and the new
+per-commit bound. The unbounded replay encounters two tree-wide edits touching
+8,016 and 6,673 files; those input blocks take minutes despite bounded memory.
+They motivate an explicit work limit rather than a semantic shortcut.
+
+The shared repository reader now keeps a bounded 4,096-entry positive metadata
+cache for exact native-width full object IDs and normalized paths. Repeated
+reads can return the existing OID-cached bytes without another Git command;
+evicted bytes can be requested directly by their known OID. Symbolic revisions,
+abbreviations, cross-width hex refs and failed reads retain native resolution.
+Content buffers still have one 16 MiB / 4,096-entry owner.
+
+Both metadata and contents expire when the native Git process is replaced.
+Git pins its replacement-object map within a process; keeping OID bytes across
+restarts previously produced stale results after a blob replacement. The new
+epoch rule repairs that case as well as preventing stale commit/path metadata.
+Cache hits do no native work and do not trigger rotation; the next native read
+rotates after the existing 8,192-read limit. Independent SHA-1/SHA-256 controls
+cover mutable refs, empty files, eviction, invalid paths, close behavior and
+commit/blob replacements across actual restarts.
+
+The final reader/budget version still takes 13.13 seconds without constant
+folding and 18.99 seconds with it on the same 100 originals, with identical
+retained IDs and masks. Native requests fall relative to the previous reader,
+but correct epoch invalidation increases blob payload at the benchmark's
+128-read rotation setting. No wall-time improvement is claimed. The incremental
+45% local overhead and thin additional yield are why constant folding requires
+the separate `--constant-branches` flag. These shared-host timings do not
+predict the normal 8,192-read setting or full-cohort throughput.
+
+The shared layout digest also normalizes the gap immediately following an
+explicit semantic newline: that newline already separates preprocessing tokens.
+Ordinary gaps remain significant. An actual replay of all 515 original
+whitespace candidates preserves the exact **172 strict / 381 line-lossy** whole
+sets and all per-file outcomes. Compiler controls retain dangerous gaps and
+line observations. Numeric-group preprocessing checks cover 92 trees in 736
+GCC/Clang runs without changing output tokens.
+
+An independent safety review found a separate concrete false-pruning case:
+Git symlinks named `api.h` or `api.c` can have token-equivalent target strings
+such as `./*one*/header.h` and `./*two*/header.h`, while the actual included
+headers return different values. Whitespace in a link target is path data.
+Whitespace, ifdef and source-analysis filters now require positive regular-file
+evidence (`100644` or `100755`) on each existing side. Complete patch modes cost
+no extra queries. Missing modes require an exact literal historical tree lookup;
+unknown modes, read failures, symlinks and submodules retain changes. Compiled
+GCC/Clang controls retain the link changes with both complete and omitted mode
+metadata, while regular-file positives still prune.
+
+Evidence remains in ignored directories:
+
+- `benchmarks/constant_conditionals/2026-11-07/`, including production
+  integration, compiler/scanner reviews, precheck verification, population
+  replay, pipeline cost and whitespace regression.
+- `benchmarks/source_file_modes/2026-11-07/symlink-whitespace/` for the original
+  failure and repaired real-Git/compiler controls.
+
+Further unused-code investigations produce no certified additional default
+whole removals. Scalar-return candidates still have other live edits or require
+conversion/alias reasoning. Contextual unused-macro proofs still need complete
+translation-unit inputs and macro/paste closure: multi-token arguments can
+construct a changed macro from an interior subinterval of a paste chain.
+Ignoring unknown forced inputs or metadata consumers remains unsafe.
+
+Target-policy reachability remains blocked on matching target build provenance
+and complete caller/metadata closure. A fresh read-only challenge 7.1 template
+check provides Image/initramfs paths but no authentic source/config/compiler/ABI
+manifest. Re-extracted historical MM translation units still contain opaque
+assembly and indirect calls. The current policy filter retains the genuine
+`process_mrelease` candidate; neither a captured seccomp denial nor a historical
+build establishes complete target reachability. No policy or hardware guard is
+relaxed by this milestone.
+
+Verification includes 1,231 passing full-suite tests with the captured binary
+SELinux policy before the final stage-selection change, followed by 189 passing
+source, CLI, audit and streaming tests on the final selection API. Mypy checks
+65 Python sources, and all 66 Python/C++ package sources match the final wheel.
+Independent native Git and compiler controls cover the reader, regular-file
+evidence, branch scanner, line assumptions and budget boundaries. Source/test
+snapshots and manifests remain in ignored verification directories. Tests and
+benchmark artifacts remain outside the milestone commit.

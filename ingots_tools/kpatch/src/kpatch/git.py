@@ -376,6 +376,33 @@ class GitRepo(GitStore):
     def read_file(self, commit: str, path: str) -> bytes:
         return self._run_git(["show", f"{commit}:{path}"])
 
+    def read_file_mode(self, commit: str, path: str) -> str | None:
+        """Read one exact historical blob's Git mode without pathspec magic.
+
+        Missing paths, non-blob entries and malformed/ambiguous output do not
+        establish a source role. Git failures retain their usual exception.
+        """
+        import os
+
+        if not path:
+            return None
+        output = self._run_git([
+            "--literal-pathspecs", "ls-tree", "-z", "--full-tree",
+            "--end-of-options", commit, "--", path,
+        ])
+        if not output.endswith(b"\0") or output.count(b"\0") != 1:
+            return None
+        header, separator, found_path = output[:-1].partition(b"\t")
+        fields = header.split(b" ")
+        if not separator or found_path != os.fsencode(path) or len(fields) != 3:
+            return None
+        mode, kind, object_id = fields
+        if (kind != b"blob" or mode not in {b"100644", b"100755", b"120000"}
+                or len(object_id) not in {40, 64}
+                or any(character not in b"0123456789abcdefABCDEF" for character in object_id)):
+            return None
+        return mode.decode("ascii")
+
     def resolve_head(self) -> str:
         """Resolve HEAD once so an extraction cannot follow a moving branch."""
 

@@ -103,9 +103,11 @@ def _unsupported(source: bytes) -> bool:
             or _BARE_CR.search(source) is not None or _GNU_SPLICE.search(source) is not None)
 
 
-def _token_frame(span: CTokenSpan) -> bytes:
+def _token_frame(span: CTokenSpan, *, after_newline: bool) -> bytes:
     kind, value = span.token.kind.value.encode(), span.token.value.encode()
-    gap = span.whitespace_before if span.token.kind not in _SEMANTIC_NEWLINES else False
+    # The explicit newline already separates tokens. Additional following
+    # trivia cannot introduce a second kind of separation/stringification gap.
+    gap = span.whitespace_before if not after_newline and span.token.kind not in _SEMANTIC_NEWLINES else False
     return pack(">II?", len(kind), len(value), gap) + kind + value
 
 
@@ -177,16 +179,18 @@ class LayoutComparer:
             return None
 
     def _token_digest(self, source: str) -> _LayoutFact | None:
-        body_digest = sha256(b"kpatch:pp-layout:body:v1\0")
+        body_digest = sha256(b"kpatch:pp-layout:body:v2\0")
         line_digest = sha256(b"kpatch:pp-layout:lines:v1\0")
         mapper, cursor = _SpliceMap(source), _PhysicalCursor(source)
         count = 0
+        after_newline = False
         for span in iter_c_token_spans(source, self.ignore_non_directive_newlines, _MAX_TOKENS):
             if span.token.kind is CTokenKind.OTHER or (
                 span.token.kind is CTokenKind.IDENTIFIER and span.token.value in _HEADER_OPERATORS
             ):
                 return None
-            body_digest.update(_token_frame(span))
+            body_digest.update(_token_frame(span, after_newline=after_newline))
+            after_newline = span.token.kind in _SEMANTIC_NEWLINES
             if span.token.kind not in _SEMANTIC_NEWLINES:
                 cursor.advance(mapper.physical(span.start, right_bias=True))
                 first_line, first_column = cursor.line, cursor.column

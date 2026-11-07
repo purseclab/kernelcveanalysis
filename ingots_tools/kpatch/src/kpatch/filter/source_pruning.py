@@ -12,6 +12,7 @@ from typing import ClassVar
 from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
 from .binding_renames import BindingComparison, compare_bindings
 from .config_filter import BuildInputClosure, KbuildMakefileCache, KbuildState, KernelConfig
+from .constant_filter import ConstantConditionalFilter
 from .diagnostic_strings import normalize_diagnostic_strings
 from .ifdef_filter import get_active_lines
 from .masking import CodeMask, FileIdentity, LineRange, MaskReason, SourceSide, SourceVersions, has_compiler_source_locations, line_macro_locations, line_ranges
@@ -22,6 +23,7 @@ from .reordering import COLUMN_BUILTINS, LINE_BUILTINS, ReorderMacroGuard, Reord
 from .switch_reordering import independent_switch_reorder
 from .source_filter import SourceIncludeIndex
 from .source_locations import SourcePositionExemptions, changed_identifier_positions
+from .source_modes import regular_source_change
 from .syntax import (
     MAX_SOURCE_BYTES, Definition, argument_lists, comments, declaration_names, declarator_name, definitions, has_opaque_tokens,
     node_text, outside_definitions, parse_source, recover_static_functions, sensitive_nodes, syntax_tokens,
@@ -140,6 +142,8 @@ class _SourceFilter(StreamingCommitFilter):
 
     def _pair(self, commit: FilteredCommit, file: DiffFile, context: FilterContext) -> SourcePair | None:
         if not _eligible(file) or commit.original.parent is None:
+            return None
+        if not regular_source_change(file, context.repo, commit.original.parent.commit_id, commit.original.commit_id):
             return None
         read = self._read_file or context.repo.read_file
         try:
@@ -866,12 +870,19 @@ class DeadCodeFilter(_SourceFilter):
 def source_pruning_tail(
     config: KernelConfig | None = None,
     on_pruned: Callable[[PruningDecision], None] | None = None,
-    *, lossy: bool = False,
+    *, lossy: bool = False, constant_branches: bool = False,
     whitespace_line_numbers_lossy: bool = False,
     whitespace_audit: Callable[[PruningDecision], None] | None = None,
 ) -> tuple[StreamingCommitFilter, ...]:
-    """Prune definitions, clean up comments, then compare remaining source."""
+    """Optionally fold constants, prune definitions, then compare source."""
+    constant_stage: tuple[StreamingCommitFilter, ...] = (
+        ConstantConditionalFilter(
+            on_pruned, line_numbers_lossy=whitespace_line_numbers_lossy,
+            on_line_numbers_assumed=whitespace_audit,
+        ),
+    ) if constant_branches else ()
     return (
+        *constant_stage,
         DeadCodeFilter(config, on_pruned, lossy=lossy),
         WhitespaceFilter(line_numbers_lossy=whitespace_line_numbers_lossy, on_pruned=whitespace_audit),
         RenameFilter(config, on_pruned, lossy=lossy),

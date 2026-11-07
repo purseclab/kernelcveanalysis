@@ -15,6 +15,7 @@ from .cpp_expression import evaluate_cpp_expression, parse_cpp_integer
 from ..diff import DiffFile, DiffFileType
 from .masking import MaskReason, SourceSide, has_compiler_source_locations, line_ranges, line_macro_locations
 from .whitespace.c_lexer import preprocessor_directive_text, replace_c_comments
+from .source_modes import regular_source_change
 from ..git import GitRepo
 
 C_SOURCE_EXTENSIONS = (
@@ -545,6 +546,8 @@ class IfdefFilter(StreamingCommitFilter):
             else None
         )
         old_path = diff_file.old_file or diff_file.file
+        if not regular_source_change(diff_file, context.repo, parent_id, commit.original.commit_id):
+            return True
         old_active = self._active_side(
             context,
             parent_id,

@@ -17,6 +17,7 @@ from ..base import (
 from ...diff import DiffChunk, DiffFile, DiffFileType
 from ..masking import FileIdentity, MaskReason, SourceVersions
 from ..pruning_decision import PruningDecision
+from ..source_modes import regular_source_change
 
 _C_SOURCE_EXTENSIONS = (
     ".c",
@@ -155,6 +156,8 @@ class WhitespaceFilter(StreamingCommitFilter):
             else None
         )
         if parent_id is None:
+            return None
+        if not regular_source_change(diff_file, context.repo, parent_id, commit.original.commit_id):
             return None
 
         read_func = (
