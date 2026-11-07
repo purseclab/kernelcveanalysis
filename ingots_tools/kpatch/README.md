@@ -330,11 +330,15 @@ The whitespace stage checks diff hunks first. If a hunk starts inside a block
 comment whose opener is outside the patch, it recovers comment context from the
 complete source and rechecks the hunk. Ordinary code edits still avoid full-file
 tokenization. Candidate no-ops are confirmed against complete parent/child
-sources, using a literal-aware comment comparison before falling back to C token
-comparison. Source reads reuse the pipeline's bounded Git blob cache.
+sources. Acceptance requires matching preprocessing tokens, logical whitespace
+gaps and physical token locations, including when location macros come from an
+included header. Excluded code is blanked while preserving its physical lines.
+Strict decoding and unsupported syntax retain changes. Source reads reuse the
+pipeline's bounded Git blob cache; layout facts have a separate bounded cache.
+See [WHITESPACE_PRUNING.md](WHITESPACE_PRUNING.md) for the checks and limits.
 
-The fix applies to subsequent filtering runs; existing filtered databases must
-be regenerated to remove previously retained comment-only changes.
+The fix applies to subsequent runs. Regenerate existing filtered databases from
+raw commits to apply the corrected pruning decisions.
 
 ### Parallel configuration filtering
 

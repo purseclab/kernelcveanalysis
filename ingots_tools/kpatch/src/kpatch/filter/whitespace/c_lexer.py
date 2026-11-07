@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import StrEnum
 import re
@@ -24,6 +25,20 @@ class CToken:
 
     kind: CTokenKind
     value: str
+
+
+@dataclass(frozen=True, slots=True)
+class CTokenSpan:
+    """A token's offsets and preceding trivia in phase-two-normalized text."""
+
+    token: CToken
+    start: int
+    end: int
+    whitespace_before: bool
+
+
+class CTokenizationError(ValueError):
+    """A source spelling or token budget prevents a complete token stream."""
 
 
 _PUNCTUATORS = [
@@ -124,6 +139,8 @@ _COMMENT_CONTEXT_RE = re.compile("|".join(
 
 _NON_HORIZONTAL_SPACE = re.compile(r"[^ \t\v\f\r]")
 _IMPORT_WORD = re.compile(r"\bimport\b")
+_RAW_STRING_PREFIX_RE = re.compile(r'\b(?:u8|u|U|L)?R"')
+_HEADER_OPERATORS = frozenset({"__has_include", "__has_include_next", "__has_embed"})
 
 
 @dataclass(slots=True)
@@ -190,7 +207,7 @@ class _CommentDirectiveContext:
 def _unsupported_comment_context(source: str) -> bool:
     # Unsupported phase-one spellings must not fall through to an ordinary
     # token comparison after a comment-normalization refusal.
-    return ("??" in source or "\ufeff" in source
+    return ("??" in source or "\ufeff" in source or _RAW_STRING_PREFIX_RE.search(source) is not None
             or "\r" in source and re.search(r"\r(?!\n)", source) is not None)
 
 
@@ -295,23 +312,42 @@ def replace_c_comments(source: str) -> str | None:
     return None if invalid or context.unsupported_import else result
 
 
-def tokenize_c_source(
+def iter_c_token_spans(
     source: str,
     ignore_non_directive_newlines: bool = True,
-) -> tuple[CToken, ...] | None:
-    """Decompose C source text into an ISO C preprocessing-token stream.
+    token_limit: int | None = None,
+) -> Generator[CTokenSpan, None, None]:
+    """Yield preprocessing tokens with phase-two offsets and logical gaps.
 
-    Translation phase 2 backslash-newlines are spliced, comments and
-    insignificant whitespace are discarded, and preprocessor directive boundaries
-    are preserved. If the source contains unterminated tokens (such as unclosed
-    string literals), None is returned so callers can conservatively retain the file.
+    Whitespace/comments before the first token also count as a gap. Emitted
+    newline tokens consume their own span; ignored newlines contribute to the
+    next token's gap. A directive without a final LF receives one zero-width
+    directive-newline token at EOF. Consumers must exhaust the iterator to prove
+    successful tokenization: unsupported input or a budget overrun raises.
+
+    Trailing unclosed block comments remain tolerated for partial diff hunks,
+    as in ``tokenize_c_source``. Complete-source consumers must check that
+    context separately. C++ raw literals and unmodeled header operands fail
+    closed instead of being interpreted as ordinary strings/comments.
     """
-    # Phase 2: line splicing of escaped newlines
     source = re.sub(r"\\(?:\r\n|\n)", "", source)
     if _unsupported_comment_context(source):
-        return None
+        raise CTokenizationError("unsupported source spelling")
+    if token_limit is not None and token_limit < 0:
+        raise CTokenizationError("token limit must be nonnegative")
 
-    tokens: list[CToken] = []
+    emitted = 0
+    whitespace_before = False
+
+    def span(kind: CTokenKind, value: str, start: int, end: int) -> CTokenSpan:
+        nonlocal emitted, whitespace_before
+        if token_limit is not None and emitted >= token_limit:
+            raise CTokenizationError("token limit exceeded")
+        emitted += 1
+        result = CTokenSpan(CToken(kind, value), start, end, whitespace_before)
+        whitespace_before = False
+        return result
+
     in_directive = False
     at_line_start = True
     directive_name: str | None = None
@@ -319,38 +355,51 @@ def tokenize_c_source(
     saw_whitespace_after_macro_name = False
     expect_header_name = False
     last_end = 0
+    position = 0
 
-    for match in _MASTER_RE.finditer(source):
+    while position < len(source):
+        match = _MASTER_RE.match(source, position)
+        if match is None:
+            raise CTokenizationError("unrecognized token boundary")
         kind = match.lastgroup
         val = match.group()
         start = match.start()
+        position = match.end()
 
         if kind == "IDENTIFIER" and val == "import" and not in_directive:
-            return None
+            raise CTokenizationError("unsupported header-unit import")
+        if kind == "IDENTIFIER" and val in _HEADER_OPERATORS:
+            raise CTokenizationError("unsupported header operand")
 
         if kind in ("UNCLOSED_STRING", "UNCLOSED_CHAR"):
-            return None
+            raise CTokenizationError("unterminated literal")
 
         if kind == "WHITESPACE":
+            if any(character not in " \t\v\f" for character in val):
+                raise CTokenizationError("unsupported non-ASCII whitespace")
+            whitespace_before = True
             if in_directive and directive_name == "define" and macro_name_seen:
                 saw_whitespace_after_macro_name = True
             continue
 
         if kind in ("BLOCK_COMMENT", "LINE_COMMENT"):
+            whitespace_before = True
             if in_directive and directive_name == "define" and macro_name_seen:
                 saw_whitespace_after_macro_name = True
             continue
 
         if kind == "NEWLINE":
             if in_directive:
-                tokens.append(CToken(CTokenKind.DIRECTIVE_NEWLINE, "\n"))
+                yield span(CTokenKind.DIRECTIVE_NEWLINE, "\n", start, position)
                 in_directive = False
                 directive_name = None
                 macro_name_seen = False
                 saw_whitespace_after_macro_name = False
                 expect_header_name = False
             elif not ignore_non_directive_newlines:
-                tokens.append(CToken(CTokenKind.NEWLINE, "\n"))
+                yield span(CTokenKind.NEWLINE, "\n", start, position)
+            else:
+                whitespace_before = True
             at_line_start = True
             continue
 
@@ -366,6 +415,8 @@ def tokenize_c_source(
         if in_directive:
             if directive_name is None and val not in {"#", "%:"}:
                 directive_name = val
+                if directive_name == "embed":
+                    raise CTokenizationError("unsupported embed directive")
                 if directive_name in {"include", "include_next", "import"}:
                     expect_header_name = True
             elif directive_name == "define":
@@ -374,7 +425,7 @@ def tokenize_c_source(
                     saw_whitespace_after_macro_name = False
                 elif macro_name_seen:
                     if val == "(" and not saw_whitespace_after_macro_name and start == last_end:
-                        tokens.append(CToken(CTokenKind.MACRO_FUNCTION_LPAREN, "("))
+                        yield span(CTokenKind.MACRO_FUNCTION_LPAREN, "(", start, position)
                         last_end = match.end()
                         macro_name_seen = False
                         continue
@@ -384,29 +435,46 @@ def tokenize_c_source(
                 if val == "<":
                     header_match = _HEADER_NAME_RE.match(source, start)
                     if header_match is not None:
-                        tokens.append(
-                            CToken(CTokenKind.HEADER_NAME, header_match.group())
-                        )
+                        # An atomic header owns its entire spelling. Advancing
+                        # the cursor prevents duplicate interior tokens and
+                        # comment matches from swallowing following source.
+                        position = header_match.end()
+                        yield span(CTokenKind.HEADER_NAME, header_match.group(), start, position)
                         last_end = header_match.end()
                         continue
+                    raise CTokenizationError("unterminated header name")
 
         last_end = match.end()
 
+        if kind == "OTHER" and val in {'"', "'"}:
+            raise CTokenizationError("unterminated literal")
+
         match kind:
             case "IDENTIFIER":
-                tokens.append(CToken(CTokenKind.IDENTIFIER, val))
+                token_kind = CTokenKind.IDENTIFIER
             case "PP_NUMBER":
-                tokens.append(CToken(CTokenKind.PP_NUMBER, val))
+                token_kind = CTokenKind.PP_NUMBER
             case "STRING":
-                tokens.append(CToken(CTokenKind.STRING_LITERAL, val))
+                token_kind = CTokenKind.STRING_LITERAL
             case "CHAR":
-                tokens.append(CToken(CTokenKind.CHAR_CONSTANT, val))
+                token_kind = CTokenKind.CHAR_CONSTANT
             case "PUNCT":
-                tokens.append(CToken(CTokenKind.PUNCTUATOR, val))
+                token_kind = CTokenKind.PUNCTUATOR
             case _:
-                tokens.append(CToken(CTokenKind.OTHER, val))
+                token_kind = CTokenKind.OTHER
+        yield span(token_kind, val, start, position)
 
     if in_directive:
-        tokens.append(CToken(CTokenKind.DIRECTIVE_NEWLINE, "\n"))
+        yield span(CTokenKind.DIRECTIVE_NEWLINE, "\n", len(source), len(source))
 
-    return tuple(tokens)
+
+def tokenize_c_source(
+    source: str,
+    ignore_non_directive_newlines: bool = True,
+) -> tuple[CToken, ...] | None:
+    """Return preprocessing tokens, or None for unsupported source spelling."""
+
+    try:
+        return tuple(span.token for span in iter_c_token_spans(source, ignore_non_directive_newlines))
+    except CTokenizationError:
+        return None

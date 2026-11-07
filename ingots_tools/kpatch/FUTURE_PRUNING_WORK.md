@@ -2,7 +2,21 @@
 
 ## Latest verified checkpoint — 2026-11-07
 
-The latest complete **85-candidate original-patch replay** removes seven by
+The whitespace stage now requires complete token, logical-gap and physical
+location equivalence. A replay of **515 comment candidates** selected from all
+26,670 original legacy patches removes **172 whole commits (0.645%)** and
+partially prunes 13 more. An independent audit replays every whole acceptance
+from original patches/blobs and checks all 199 files using a separate coordinate
+calculation. This is a stage result, not a regenerated whole-pipeline rate or
+an additional gain over the previous implementation.
+
+The previous rule removed 418 in the same pool. The stronger rule retains
+246 whose equivalence is unproved; this does not mean every one changes runtime
+behavior. Compiler controls demonstrate why token equality alone is insufficient.
+See [the whitespace checkpoint](#whitespace-layout-proof-and-complete-comment-seed-replay--2026-11-07)
+and [the implemented contract](WHITESPACE_PRUNING.md).
+
+The preceding complete **85-candidate original-patch replay** removes seven by
 default and eleven in explicit lossy mode. Lazy complete-file macro evidence
 adds the hrtimer return-case reorder `3c3af563b317`; the prior accepted set was
 seven/ten. This is one additional commit, or **0.00375% of the 26,670 legacy
@@ -16,8 +30,11 @@ then uses 49 global macro scans rather than 111; observed lossy time falls from
 measurements, not a controlled end-to-end speedup claim. See the
 [latest implementation and measurements](#lazy-complete-file-evidence-and-closed-reference-checks--2026-11-07).
 
-**1,083 tests pass**, including the captured binary SELinux policy; mypy passes
-all 59 Python files, and all 60 Python/C++ package sources match the wheel.
+**1,127 tests pass**, including the captured binary SELinux policy; mypy passes
+all 60 Python files, and all 61 Python/C++ package sources match the wheel.
+A current replay of the eleven previously accepted source candidates preserves
+exactly seven default and eleven lossy accepted IDs. The other 74 previously
+rejected structural candidates were not replayed for this lexer change.
 The earlier v8 [transport repair](#reference-transport-repair--resumed-2026-11-07)
 and its 76 overlapping independent scenarios remain verified.
 
@@ -1803,3 +1820,85 @@ macro-only candidates with local references finds no define/undef-only match.
 Evidence is under `benchmarks/syntax_equivalence_yield/2026-11-07/`,
 `benchmarks/macro_lifetime_yield/2026-11-07/` and the typed certificate design in
 `benchmarks/unused_macro_closure/2026-11-07/review/DESIGN.md`.
+
+## Whitespace layout proof and complete comment-seed replay — 2026-11-07
+
+The whitespace stage now compares complete supported preprocessing-token
+spellings, logical whitespace gaps and physical start/end positions for every
+real token. It decodes source strictly and maps standard phase-two splices with
+right-biased token starts and left-biased ends. Excluded code is blanked at its
+original physical lines through `active_sources`, rather than reverted as an
+ignored edit. A failed or incomplete certificate retains the change.
+
+This addresses compiled counterexamples involving invalid UTF-8 string bytes,
+included line/column aliases, macro stringification gaps and C++ raw literals.
+Atomic header handling also avoids duplicate interior tokens and comment-looking
+filenames consuming subsequent source. Unmodeled header operators, raw literals,
+unsupported spellings and resource-limit overruns retain changes. There is no
+fallback to the former unsafe comment-strip or token-value acceptance.
+
+The independent compiler review covers 26 actual Git fixtures: fourteen
+behavior-changing cases and one unsupported case are retained; eleven stable
+positives are pruned. A mixed mask fixture preserves an included line alias's
+runtime change from 5 to 6. Fixed surrounding inputs and the prior edit-mask
+contract remain assumptions; raw-source consumers and build metadata are not
+certified. See [WHITESPACE_PRUNING.md](WHITESPACE_PRUNING.md).
+
+The cohort inventory examines all 26,670 original patches, not the saved reduced
+file lists. It finds one whole-commit hunk-gate positive and 514 ambiguous
+comment-interior seeds, selected by comment edit shapes or subject terms. These
+terms select the experiment; they are not production pruning rules. All 515
+selected originals are replayed with fresh masks and complete parent/child
+sources. Other commits failing this experiment's selection are not established
+as unprunable.
+
+| Measurement | Previous rule | Complete layout rule |
+| --- | ---: | ---: |
+| Whole commits removed in the same 515 inputs | 418 | 172 |
+| Partially pruned commits | 11 | 13 |
+| Files masked | 575 | 254 |
+| Additional whole removals versus previous rule | — | 0 |
+| Whole removals retained instead | — | 246 |
+| Original-patch inventory and hunk gate | 85.78 s | 140.96 s |
+| Candidate replay | 33.33 s | 124.37 s |
+| Sampled process-tree RSS, including monitor | 321.7 MiB | 370.2 MiB |
+
+These sequential shared-host observations are not a controlled throughput
+benchmark. The stronger proof costs more CPU. Hunk rejection still avoids
+complete-file scans for ordinary code edits, and the comparison streams tokens
+with a 2 MiB / 131,072-token limit. Its digest-fact cache has 512-entry / 16 MiB
+represented-input bounds and retains no source buffers. The replay records
+1,163 fact scans, 37 cache hits and 124 unsupported scans. A future fast comment
+certificate must preserve logical preprocessing behavior, physical coordinates,
+complete supported grammar and budgets; a comment mask alone is insufficient.
+Avoiding span allocation for hunk-only token consumers is another measured
+optimization opportunity, not implemented in this checkpoint.
+
+An independent second pass verifies all 172 whole removals and all 199 original
+files: raw patch/blob hashes, complete original file sets, fresh actual-stage
+results and direct token/gap/UTF-8 position equality using indexed splice cuts
+and bisection rather than the production digest/cursor. There is zero overlap
+with the prior 85 structural candidates. Of these files, 193 contain literal
+includes and 119 contain standard splices; no accepted file changes LF count or
+an include/header directive shape. Retained and partially pruned cases were not
+independently audited by this pass. The result is conditional source equivalence,
+not a whole-build or policy-reachability theorem.
+
+A separate regression reloads the eleven previously accepted original structural
+patches and preserves their exact seven default / eleven lossy accepted sets.
+The other 74 prior rejects are not replayed. The final 1,127-test run includes the
+captured binary SELinux policy; mypy passes 60 Python files, and every one of the
+61 Python/C++ package sources matches the wheel.
+
+Frozen inputs, source snapshots, original patches, full reports and resource
+observations remain in ignored benchmark directories:
+
+- `benchmarks/whitespace_layout/2026-11-07/`, including `old-baseline/`,
+  `independent-audit/`, `source-regression/` and `verification-final/`.
+- `benchmarks/whitespace_layout_review/2026-11-07/after-repair/` for compiled
+  controls and independent grammar review.
+- `benchmarks/whitespace_token_spans/2026-11-07/` for lexer differential goldens.
+
+No filtered database is written by these experiments. The milestone commit
+contains production code and durable documentation only; tests and benchmark
+artifacts stay outside the commit as requested.

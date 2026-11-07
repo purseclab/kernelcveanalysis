@@ -4,10 +4,10 @@ from itertools import chain
 from typing import ClassVar
 
 from .c_lexer import (
-    replace_c_comments,
     source_line_starts_in_block_comment,
     tokenize_c_source,
 )
+from .layout import LayoutComparer
 from ..base import (
     FilterContext,
     FilteredCommit,
@@ -15,7 +15,7 @@ from ..base import (
     repository_file_reader,
 )
 from ...diff import DiffChunk, DiffFile, DiffFileType
-from ..masking import MaskReason, SourceVersions, has_compiler_source_locations, line_macro_locations
+from ..masking import MaskReason, SourceVersions
 
 _C_SOURCE_EXTENSIONS = (
     ".c",
@@ -48,15 +48,18 @@ class WhitespaceFilterStats:
 class WhitespaceFilter(StreamingCommitFilter):
     """Filter out changes that only modify comments, formatting, or whitespace.
 
-    Diff files whose old and new versions yield identical ISO C preprocessing
-    token streams are pruned from the diff. Commits with no remaining modified files
-    are eliminated entirely.
+    Pruning requires identical supported preprocessing tokens, token separation,
+    and physical token locations. Included macros can observe both whitespace
+    and locations even when the changed file contains no explicit observer.
     """
 
     name: ClassVar[str] = "Filtering whitespace and comments"
 
     def __init__(self, ignore_non_directive_newlines: bool = True):
         self.ignore_non_directive_newlines = ignore_non_directive_newlines
+        self._layout = LayoutComparer(
+            ignore_non_directive_newlines=ignore_non_directive_newlines,
+        )
         self._read_file: Callable[[str, str], bytes] | None = None
         self._processed_commits = 0
         self._eliminated_commits = 0
@@ -109,7 +112,7 @@ class WhitespaceFilter(StreamingCommitFilter):
         context: FilterContext,
         diff_file: DiffFile,
     ) -> bool:
-        """Return True if diff_file does not semantically alter code tokens."""
+        """Return whether the remaining edit preserves supported source layout."""
         # Conservatively retain non-C source, assembly, binary, mode changes, and structural changes
         if not _is_c_source_file(diff_file.file) and (
             diff_file.old_file is None or not _is_c_source_file(diff_file.old_file)
@@ -153,17 +156,14 @@ class WhitespaceFilter(StreamingCommitFilter):
         try:
             old_bytes = read_func(parent_id, old_path)
             new_bytes = read_func(commit.original.commit_id, diff_file.file)
-            if old_bytes != new_bytes and (b"__COUNTER__" in old_bytes or b"__COUNTER__" in new_bytes):
-                return False
-            if old_bytes != new_bytes and (has_compiler_source_locations(old_bytes) or has_compiler_source_locations(new_bytes)):
-                return False
-            if (b"__LINE__" in old_bytes or b"__LINE__" in new_bytes) and line_macro_locations(old_bytes) != line_macro_locations(new_bytes):
-                return False
             if commit.has_masks(diff_file):
-                sources = commit.effective_sources(diff_file, SourceVersions(old_bytes, new_bytes))
+                # Excluded code remains blank at its original physical lines.
+                # Reverting it as an edit would conceal location changes after
+                # an insertion in an inactive branch.
+                sources = commit.active_sources(diff_file, SourceVersions(old_bytes, new_bytes))
                 old_bytes, new_bytes = sources.old, sources.new
-            old_source = old_bytes.decode("utf-8", errors="replace")
-            new_source = new_bytes.decode("utf-8", errors="replace")
+            old_source = old_bytes.decode("utf-8", errors="strict")
+            new_source = new_bytes.decode("utf-8", errors="strict")
 
             # Ordinary code edits still avoid tokenizing complete files. The
             # pipeline's shared blob reader reuses sources read by IfdefFilter.
@@ -180,24 +180,10 @@ class WhitespaceFilter(StreamingCommitFilter):
                     ):
                         return False
 
-            old_without_comments = replace_c_comments(old_source)
-            if (
-                old_without_comments is not None
-                and old_without_comments == replace_c_comments(new_source)
-            ):
-                return True
-
-            t_old = tokenize_c_source(
-                old_source,
-                ignore_non_directive_newlines=self.ignore_non_directive_newlines,
-            )
-            t_new = tokenize_c_source(
-                new_source,
-                ignore_non_directive_newlines=self.ignore_non_directive_newlines,
-            )
-            if t_old is None or t_new is None:
-                return False
-            return t_old == t_new
+            # Equal token values alone miss included __LINE__/COLUMN aliases
+            # and macro stringification. Every acceptance uses the complete
+            # bounded layout certificate; an unsupported result retains edits.
+            return self._layout.equivalent(old_bytes, new_bytes)
         except Exception:
             # Conservatively retain on unreadable files or missing git objects
             return False
