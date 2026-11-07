@@ -15,7 +15,8 @@ from ..base import (
     repository_file_reader,
 )
 from ...diff import DiffChunk, DiffFile, DiffFileType
-from ..masking import MaskReason, SourceVersions
+from ..masking import FileIdentity, MaskReason, SourceVersions
+from ..pruning_decision import PruningDecision
 
 _C_SOURCE_EXTENSIONS = (
     ".c",
@@ -51,12 +52,22 @@ class WhitespaceFilter(StreamingCommitFilter):
     Pruning requires identical supported preprocessing tokens, token separation,
     and physical token locations. Included macros can observe both whitespace
     and locations even when the changed file contains no explicit observer.
+    Explicit lossy line-number pruning preserves columns but assumes line
+    observations are irrelevant, and requires an audit callback.
     """
 
     name: ClassVar[str] = "Filtering whitespace and comments"
 
-    def __init__(self, ignore_non_directive_newlines: bool = True):
+    def __init__(
+        self, ignore_non_directive_newlines: bool = True, *,
+        line_numbers_lossy: bool = False,
+        on_pruned: Callable[[PruningDecision], None] | None = None,
+    ) -> None:
+        if line_numbers_lossy and on_pruned is None:
+            raise ValueError("Lossy whitespace line-number pruning requires a decision callback")
         self.ignore_non_directive_newlines = ignore_non_directive_newlines
+        self.line_numbers_lossy = line_numbers_lossy
+        self.on_pruned = on_pruned
         self._layout = LayoutComparer(
             ignore_non_directive_newlines=ignore_non_directive_newlines,
         )
@@ -106,24 +117,24 @@ class WhitespaceFilter(StreamingCommitFilter):
             return False
         return t_old == t_new
 
-    def _is_noop_file(
+    def _noop_reason(
         self,
         commit: FilteredCommit,
         context: FilterContext,
         diff_file: DiffFile,
-    ) -> bool:
-        """Return whether the remaining edit preserves supported source layout."""
+    ) -> MaskReason | None:
+        """Classify equivalence or the explicit, audited line-number assumption."""
         # Conservatively retain non-C source, assembly, binary, mode changes, and structural changes
         if not _is_c_source_file(diff_file.file) and (
             diff_file.old_file is None or not _is_c_source_file(diff_file.old_file)
         ):
-            return False
+            return None
         if diff_file.binary or diff_file.mode_changed:
-            return False
+            return None
         if diff_file.change_type is not DiffFileType.DEFAULT:
-            return False
+            return None
         if not diff_file.chunks:
-            return False
+            return None
 
         # A hunk can begin inside a block comment whose opener is outside the
         # patch. A local mismatch then needs source context, not rejection.
@@ -136,7 +147,7 @@ class WhitespaceFilter(StreamingCommitFilter):
             and mismatched_chunk.old_start <= 1
             and mismatched_chunk.new_start <= 1
         ):
-            return False
+            return None
 
         parent_id = (
             commit.original.parent.commit_id
@@ -144,7 +155,7 @@ class WhitespaceFilter(StreamingCommitFilter):
             else None
         )
         if parent_id is None:
-            return False
+            return None
 
         read_func = (
             self._read_file
@@ -174,19 +185,23 @@ class WhitespaceFilter(StreamingCommitFilter):
                     old_in_comment = source_line_starts_in_block_comment(old_source, old_line)
                     new_in_comment = source_line_starts_in_block_comment(new_source, new_line)
                     if not (old_in_comment or new_in_comment):
-                        return False
+                        return None
                     if not self.is_chunk_noop(
                         chunk, old_in_comment=old_in_comment, new_in_comment=new_in_comment,
                     ):
-                        return False
+                        return None
 
             # Equal token values alone miss included __LINE__/COLUMN aliases
             # and macro stringification. Every acceptance uses the complete
             # bounded layout certificate; an unsupported result retains edits.
-            return self._layout.equivalent(old_bytes, new_bytes)
+            if self._layout.equivalent(old_bytes, new_bytes):
+                return MaskReason.WHITESPACE
+            if self.line_numbers_lossy and self._layout.equivalent_ignoring_line_numbers(old_bytes, new_bytes):
+                return MaskReason.WHITESPACE_LINES_LOSSY
+            return None
         except Exception:
             # Conservatively retain on unreadable files or missing git objects
-            return False
+            return None
 
     def filter_mutable_commit(
         self,
@@ -196,9 +211,11 @@ class WhitespaceFilter(StreamingCommitFilter):
         self._processed_commits += 1
         retained: list[DiffFile] = []
         for diff_file in commit.diff.files:
-            if self._is_noop_file(commit, context, diff_file):
+            reason = self._noop_reason(commit, context, diff_file)
+            if reason is not None:
                 self._pruned_files += 1
-                commit.mask_file(diff_file, MaskReason.WHITESPACE)
+                commit.mask_file(diff_file, reason)
+                self._record(commit, diff_file, reason)
             else:
                 retained.append(diff_file)
 
@@ -207,6 +224,22 @@ class WhitespaceFilter(StreamingCommitFilter):
             return None
 
         return commit
+
+    def _record(self, commit: FilteredCommit, file: DiffFile, reason: MaskReason) -> None:
+        if self.on_pruned is None:
+            return
+        lossy = reason is MaskReason.WHITESPACE_LINES_LOSSY
+        risks = (
+            "source_line_number_observations_may_change_runtime_behavior",
+            "included_macros_may_observe_changed_lines",
+        ) if lossy else ()
+        identity = FileIdentity.of(file)
+        self.on_pruned(PruningDecision(
+            commit.original.commit_id, (file.file,), reason.value, (),
+            tuple(mask for mask in commit.edit_masks if mask.file == identity),
+            tuple(mask for mask in commit.code_masks if mask.file == identity),
+            lossy, risks,
+        ))
 
     def iter_filter_mutable_commits(
         self,

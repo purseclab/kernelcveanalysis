@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from enum import StrEnum
 import re
@@ -312,24 +312,33 @@ def replace_c_comments(source: str) -> str | None:
     return None if invalid or context.unsupported_import else result
 
 
-def iter_c_token_spans(
+def _make_token(
+    kind: CTokenKind,
+    value: str,
+    _start: int,
+    _end: int,
+    _whitespace_before: bool,
+) -> CToken:
+    return CToken(kind, value)
+
+
+def _make_span(
+    kind: CTokenKind,
+    value: str,
+    start: int,
+    end: int,
+    whitespace_before: bool,
+) -> CTokenSpan:
+    return CTokenSpan(CToken(kind, value), start, end, whitespace_before)
+
+
+def _iter_c_tokens[T](
     source: str,
-    ignore_non_directive_newlines: bool = True,
-    token_limit: int | None = None,
-) -> Generator[CTokenSpan, None, None]:
-    """Yield preprocessing tokens with phase-two offsets and logical gaps.
-
-    Whitespace/comments before the first token also count as a gap. Emitted
-    newline tokens consume their own span; ignored newlines contribute to the
-    next token's gap. A directive without a final LF receives one zero-width
-    directive-newline token at EOF. Consumers must exhaust the iterator to prove
-    successful tokenization: unsupported input or a budget overrun raises.
-
-    Trailing unclosed block comments remain tolerated for partial diff hunks,
-    as in ``tokenize_c_source``. Complete-source consumers must check that
-    context separately. C++ raw literals and unmodeled header operands fail
-    closed instead of being interpreted as ordinary strings/comments.
-    """
+    ignore_non_directive_newlines: bool,
+    token_limit: int | None,
+    factory: Callable[[CTokenKind, str, int, int, bool], T],
+) -> Generator[T, None, None]:
+    """Share recognition and bounds across token-only and located results."""
     source = re.sub(r"\\(?:\r\n|\n)", "", source)
     if _unsupported_comment_context(source):
         raise CTokenizationError("unsupported source spelling")
@@ -339,12 +348,12 @@ def iter_c_token_spans(
     emitted = 0
     whitespace_before = False
 
-    def span(kind: CTokenKind, value: str, start: int, end: int) -> CTokenSpan:
+    def emit(kind: CTokenKind, value: str, start: int, end: int) -> T:
         nonlocal emitted, whitespace_before
         if token_limit is not None and emitted >= token_limit:
             raise CTokenizationError("token limit exceeded")
         emitted += 1
-        result = CTokenSpan(CToken(kind, value), start, end, whitespace_before)
+        result = factory(kind, value, start, end, whitespace_before)
         whitespace_before = False
         return result
 
@@ -390,14 +399,14 @@ def iter_c_token_spans(
 
         if kind == "NEWLINE":
             if in_directive:
-                yield span(CTokenKind.DIRECTIVE_NEWLINE, "\n", start, position)
+                yield emit(CTokenKind.DIRECTIVE_NEWLINE, "\n", start, position)
                 in_directive = False
                 directive_name = None
                 macro_name_seen = False
                 saw_whitespace_after_macro_name = False
                 expect_header_name = False
             elif not ignore_non_directive_newlines:
-                yield span(CTokenKind.NEWLINE, "\n", start, position)
+                yield emit(CTokenKind.NEWLINE, "\n", start, position)
             else:
                 whitespace_before = True
             at_line_start = True
@@ -425,7 +434,7 @@ def iter_c_token_spans(
                     saw_whitespace_after_macro_name = False
                 elif macro_name_seen:
                     if val == "(" and not saw_whitespace_after_macro_name and start == last_end:
-                        yield span(CTokenKind.MACRO_FUNCTION_LPAREN, "(", start, position)
+                        yield emit(CTokenKind.MACRO_FUNCTION_LPAREN, "(", start, position)
                         last_end = match.end()
                         macro_name_seen = False
                         continue
@@ -439,7 +448,7 @@ def iter_c_token_spans(
                         # the cursor prevents duplicate interior tokens and
                         # comment matches from swallowing following source.
                         position = header_match.end()
-                        yield span(CTokenKind.HEADER_NAME, header_match.group(), start, position)
+                        yield emit(CTokenKind.HEADER_NAME, header_match.group(), start, position)
                         last_end = header_match.end()
                         continue
                     raise CTokenizationError("unterminated header name")
@@ -462,10 +471,31 @@ def iter_c_token_spans(
                 token_kind = CTokenKind.PUNCTUATOR
             case _:
                 token_kind = CTokenKind.OTHER
-        yield span(token_kind, val, start, position)
+        yield emit(token_kind, val, start, position)
 
     if in_directive:
-        yield span(CTokenKind.DIRECTIVE_NEWLINE, "\n", len(source), len(source))
+        yield emit(CTokenKind.DIRECTIVE_NEWLINE, "\n", len(source), len(source))
+
+
+def iter_c_token_spans(
+    source: str,
+    ignore_non_directive_newlines: bool = True,
+    token_limit: int | None = None,
+) -> Generator[CTokenSpan, None, None]:
+    """Yield preprocessing tokens with phase-two offsets and logical gaps.
+
+    Whitespace/comments before the first token also count as a gap. Emitted
+    newline tokens consume their own span; ignored newlines contribute to the
+    next token's gap. A directive without a final LF receives one zero-width
+    directive-newline token at EOF. Consumers must exhaust the iterator to prove
+    successful tokenization: unsupported input or a budget overrun raises.
+
+    Trailing unclosed block comments remain tolerated for partial diff hunks,
+    as in ``tokenize_c_source``. Complete-source consumers must check that
+    context separately. C++ raw literals and unmodeled header operands fail
+    closed instead of being interpreted as ordinary strings/comments.
+    """
+    return _iter_c_tokens(source, ignore_non_directive_newlines, token_limit, _make_span)
 
 
 def tokenize_c_source(
@@ -475,6 +505,6 @@ def tokenize_c_source(
     """Return preprocessing tokens, or None for unsupported source spelling."""
 
     try:
-        return tuple(span.token for span in iter_c_token_spans(source, ignore_non_directive_newlines))
+        return tuple(_iter_c_tokens(source, ignore_non_directive_newlines, None, _make_token))
     except CTokenizationError:
         return None

@@ -340,6 +340,22 @@ See [WHITESPACE_PRUNING.md](WHITESPACE_PRUNING.md) for the checks and limits.
 The fix applies to subsequent runs. Regenerate existing filtered databases from
 raw commits to apply the corrected pruning decisions.
 
+`--whitespace-line-numbers-lossy` separately permits physical line numbers to
+change while preserving supported tokens, whitespace gaps and byte columns.
+Included line-number macros can affect runtime behavior, so this is an explicit
+assumption, independent of `--source-pruning-lossy`. It requires its own report:
+
+```console
+uv run kpatch filter --repo linux --db all_commits --dest filtered_lossy config \
+  --whitespace-line-numbers-lossy --whitespace-report whitespace-decisions.jsonl
+```
+
+The JSONL records distinguish strict removals from line-number assumptions,
+include original-coordinate masks for the affected file and state the runtime
+risk. Unknown syntax, token/gap changes and byte-column changes remain retained.
+Reports and caches are validated together against source/build inputs, Git
+metadata, databases and SQLite sidecars before any output is initialized.
+
 ### Parallel configuration filtering
 
 The normal configuration CLI defaults to four workers:

@@ -18,6 +18,7 @@ class MaskReason(StrEnum):
     CONFIG = "configuration"
     IFDEF = "inactive_preprocessor_branch"
     WHITESPACE = "whitespace_or_comments"
+    WHITESPACE_LINES_LOSSY = "whitespace_line_numbers_lossy"
     DEAD_CODE = "unreferenced_definition"
     RENAME = "consistent_rename"
     DIAGNOSTIC_WORDING = "diagnostic_wording"

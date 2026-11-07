@@ -15,6 +15,7 @@ from .filter import FilterContext, FilterPipeline, MergeCommitFilter, Whitespace
 from .filter.policy_analysis import PolicyCommitDecision, PolicyFilter
 from .filter.policy_clang import ClangUnavailable
 from .filter.policy_context import PolicyBuildContext
+from .filter.output_paths import repository_input_roots, validate_output_paths
 from .filter.policy_profile import AnalysisScope, PolicyTargetProfile, SELinuxPermissionQuery, SELinuxPolicyEvaluator, SEToolsRuntime
 from .git import GitRepo
 
@@ -30,19 +31,10 @@ def policy_profile_inputs(profile: PolicyTargetProfile) -> tuple[Path, ...]:
 
 def validate_policy_outputs(outputs: tuple[Path, ...], build: PolicyBuildContext,
                             protected: tuple[Path, ...]) -> None:
-    resolved = tuple(path.resolve() for path in outputs)
-    if len(set(resolved)) != len(resolved):
-        raise ValueError("Policy report and cache must have different paths")
-    inputs = {path.resolve() for path in (*protected, build.compilation_database, build.config_file)}
-    input_stats = tuple(path.stat() for path in inputs if path.exists())
-    input_inodes = {(status.st_dev, status.st_ino) for status in input_stats}
-    for path in resolved:
-        status = path.stat() if path.exists() else None
-        if status is not None and status.st_nlink > 1:
-            raise ValueError("Policy output/cache must not be hardlinked to another file")
-        aliases_input = status is not None and (status.st_dev, status.st_ino) in input_inodes
-        if aliases_input or path in inputs or path.is_relative_to(build.source_root) or path.is_relative_to(build.build_root):
-            raise ValueError("Store policy output/cache outside frozen source/build roots and policy/build inputs")
+    validate_output_paths(
+        outputs, protected=(*protected, build.compilation_database, build.config_file),
+        protected_roots=(*repository_input_roots(build.source_root), build.build_root),
+    )
 
 
 def setools_runtime(python: Path | None, module_paths: list[Path] | None) -> SEToolsRuntime | None:

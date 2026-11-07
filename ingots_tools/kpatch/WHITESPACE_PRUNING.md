@@ -60,3 +60,32 @@ Token columns are physical UTF-8 byte columns, as exercised against the installe
 GCC/Clang controls. This is not a claim about every frontend's visual diagnostic
 column convention. Moving code or changing its token gaps is conservatively
 retained, even when a particular build might not observe the difference.
+
+## Explicit line-number assumption
+
+The default remains strict. The separate `--whitespace-line-numbers-lossy`
+option, with mandatory `--whitespace-report`, permits only the physical line
+coordinates to differ. Token kinds/spellings, logical gaps, directive boundaries,
+physical byte columns, supported-input checks and resource limits still apply.
+It does not enable other lossy source-pruning rules.
+
+The cached complete fact has a framed token/gap/column digest and a separate
+ordered line digest. Strict comparison checks both; the explicit relaxed method
+checks the first. Both use the same complete scan and bounded cache.
+
+This is an assumption, not a runtime-equivalence proof. An included `__LINE__`
+alias can control a branch, array size, preprocessing condition or generated
+name. Compiled controls demonstrate a changed return value accepted only by the
+lossy option. There is no measured upper bound on its false-removal rate.
+
+Every pruned file receives an audit record. Strict acceptances stay labeled
+`whitespace_or_comments`, `lossy=false`; additional acceptances use
+`whitespace_line_numbers_lossy`, `lossy=true`, with explicit runtime-risk reasons.
+Each record contains only the affected file's original-coordinate masks. The
+programmatic lossy mode also requires a decision callback; callback failures
+propagate rather than silently omitting an audit.
+
+Report/cache validation covers all destinations before opening any: source,
+build and Git metadata roots, protected inputs, SQLite sidecars, aliases and
+overlapping output paths. Linked-worktree metadata outside the checkout is
+protected as well. Existing destination-name symlinks are rejected.

@@ -2,6 +2,15 @@
 
 ## Latest verified checkpoint — 2026-11-07
 
+The separate **`--whitespace-line-numbers-lossy`** option now removes **381 of
+515 complete original comment candidates**, compared with **172 by default**:
+**209 additional commits, or 0.784 percentage points of the 26,670 legacy
+survivors**. It requires `--whitespace-report` and preserves token spellings,
+gaps and byte columns while explicitly assuming changed line observations are
+irrelevant. This can remove runtime-relevant changes; the error rate is not
+bounded by these measurements. The default stays strict. See
+[the lossy checkpoint](#audited-line-number-assumption-and-lexer-performance--2026-11-07).
+
 The whitespace stage now requires complete token, logical-gap and physical
 location equivalence. A replay of **515 comment candidates** selected from all
 26,670 original legacy patches removes **172 whole commits (0.645%)** and
@@ -30,9 +39,9 @@ then uses 49 global macro scans rather than 111; observed lossy time falls from
 measurements, not a controlled end-to-end speedup claim. See the
 [latest implementation and measurements](#lazy-complete-file-evidence-and-closed-reference-checks--2026-11-07).
 
-**1,127 tests pass**, including the captured binary SELinux policy; mypy passes
-all 60 Python files, and all 61 Python/C++ package sources match the wheel.
-A current replay of the eleven previously accepted source candidates preserves
+**1,165 tests pass**, including the captured binary SELinux policy; mypy passes
+all 62 Python files, and all 63 Python/C++ package sources match the wheel.
+The preceding replay of the eleven previously accepted source candidates preserves
 exactly seven default and eleven lossy accepted IDs. The other 74 previously
 rejected structural candidates were not replayed for this lexer change.
 The earlier v8 [transport repair](#reference-transport-repair--resumed-2026-11-07)
@@ -1902,3 +1911,120 @@ observations remain in ignored benchmark directories:
 No filtered database is written by these experiments. The milestone commit
 contains production code and durable documentation only; tests and benchmark
 artifacts stay outside the commit as requested.
+
+## Audited line-number assumption and lexer performance — 2026-11-07
+
+A separate `--whitespace-line-numbers-lossy --whitespace-report PATH` option is
+now implemented. It does not follow from `--source-pruning-lossy`. The default
+still compares complete supported tokens, logical gaps and physical start/end
+lines and byte columns. The optional mode omits only the line coordinates;
+unknown syntax, budgets, byte columns, stringification gaps and changed tokens
+still retain the edit. It requires a decision callback through the API too.
+
+Each complete cached fact now contains a framed token/gap/column digest and an
+ordered line digest. Strict comparison checks both; the explicit relaxed method
+checks the former. Both share the same bounded complete scan/cache. An
+independent helper replay of 515 originals / 688 file pairs finds zero strict
+changes against committed `ce89cdd`. It observes 1,337 scans and 144 unsupported
+scans in both comparers. Cached relaxed lookups cost no new scans. The split
+helper measures 116.60 s versus 114.65 s before, a 1.7% increase in that sequential
+helper-only experiment, not a full-pipeline measurement.
+
+| Actual whitespace stage, same 515 originals | Whole removals | Additional versus strict | Share of legacy cohort |
+| --- | ---: | ---: | ---: |
+| Default strict | 172 | — | 0.645% |
+| Explicit line-number assumption | 381 | 209 | 1.429% total; 0.784 points additional |
+
+The actual lossy replay has 20 partially pruned commits and 523 masked files. It
+uses complete original patches, no inherited masks or config/file exclusions,
+and records every acceptance. All 172 strict whole removals remain included.
+The 209 extra whole removals comprise 207 previously classified line-only
+retentions plus two more original documentation commits in binder and regmap.
+An independent actual-stage audit verifies all 209 incremental acceptances
+from original patches/blobs across 227 files, including a separate token/gap
+and UTF-8 byte-column comparison. It confirms strict retention and mandatory
+lossy risk records for every case; it does not prove runtime equivalence.
+The earlier 207 estimate was a mechanical upper bound within the 246 old-rule
+retentions, not a bound on all candidates.
+
+The mode is intentionally lossy. Included line-number aliases can affect a
+branch, array size, preprocessor condition or generated name. Compiled controls
+show a logic return value changing from 0 to 1 despite matching tokens, gaps and
+byte columns; a separate control changes diagnostic stdout while retaining its
+return value. Both are retained by default and explicitly pruned/audited only
+under the new assumption. Neither logging spellings in a file nor a comment-only
+patch proves that every line-number observation is diagnostic. There is no
+measured false-removal rate bound or whole-build closure claim.
+
+Audit records distinguish strict `whitespace_or_comments` / `lossy=false` from
+`whitespace_line_numbers_lossy` / `lossy=true`. Additional removals record
+`source_line_number_observations_may_change_runtime_behavior` and
+`included_macros_may_observe_changed_lines`. Each record carries only the
+current file's masks in original coordinates. Callback failures propagate.
+A small real CLI/SQLite integration saves and reloads three original commits:
+strict keeps the line-changing and runtime-changing commits, while lossy keeps
+only the runtime change and writes separate strict/lossy records. Its source DB
+stays unchanged; only database-name path resolution is redirected to fixtures.
+
+A shared lexer factory also avoids allocating `CTokenSpan` objects for token-only
+hunk consumers. Token and span recognition still share one generic scanner.
+Against committed `ce89cdd`, 10,384 complete token/span comparisons and 2,656
+budget/error-prefix comparisons show zero differences. Five paired lexer-only
+samples measure 1.18x faster tokenization on 122 original kernel hunk sides and
+1.19–1.32x on small toy workloads. The span path has no measured regression in
+that experiment. These are tokenizer measurements, not pipeline speed claims.
+A new complete 26,670-original-patch hunk-gate pass selects exactly the same
+515 IDs and raw-patch checksum in 105.52 s, compared with the preceding 140.96 s
+observation. This is a shared-host timing comparison, not a controlled 25%
+end-to-end speedup claim.
+
+A final actual default-stage replay removes exactly the same 172 IDs as the
+committed strict checkpoint in 113.62 s. Every recorded decision is non-lossy.
+This verifies the full current stage, in addition to the helper comparison.
+
+The actual 515-input lossy replay takes 125.07 s with 1,163 complete fact scans,
+729 cache hits and 124 unsupported scans; sampled process-tree RSS including the
+monitor peaks at 334.7 MiB. The frozen original candidate inventory is reused,
+with each selected raw patch hash checked again. It is not a new population-wide
+Kbuild rerun. The previous strict replay took 124.37 s on its own snapshot;
+shared-host timing and mode differences prevent a controlled speedup claim.
+
+Adding a mandatory report exposed concrete path-validation defects. Source,
+whitespace and policy reports/caches are now checked together before any is
+initialized. The shared validator protects explicit inputs, raw/destination DBs,
+SQLite sidecars, source/build trees and Git/common directories outside linked
+checkouts. It rejects output aliasing, parent/child destinations, sidecar
+collisions, nonregular files, file parents, hardlinks and destination-name
+symlinks. Regression controls preserve a live WAL/readable database, separate
+Git HEAD/reference caches, linked-worktree metadata and existing reports. The
+common record type is in `pruning_decision.py`; existing source-stage imports
+remain available.
+
+The final 1,165-test run includes the real captured binary SELinux policy. Mypy
+passes 62 Python files, and all 63 Python/C++ package sources match the wheel.
+No target-policy or hardware reachability guard is relaxed by this feature.
+Exact matching target build/input metadata remains necessary for those proofs.
+
+A bounded unused-code investigation found no new removal class to implement:
+154 original macro-only cases produce no candidates for the literal bounded
+reset-lifetime screen. A full 26,670-patch screen selects 16 literal `#if 0`
+seeds, ten eligible original-C/default cases; none preserves the outside source
+layout when the literal-zero groups are erased. A concrete disabled-code
+removal keeps token spellings but shifts later source lines, and the current
+stages retain it. Separately, 2,992 return-variable patch seeds produce zero
+matches for the narrow scalar-return token-delta screen. These negative screens
+do not rule out broader temporary/alias dataflow opportunities and do not
+justify weakening macro, location or build-input closure.
+
+Evidence remains in ignored benchmark directories:
+
+- `benchmarks/whitespace_line_numbers_lossy/2026-11-07/` for helper comparison,
+  actual replay, CLI integration and full verification.
+- `benchmarks/whitespace_recovery_options/2026-11-07/` for the retention
+  classification, compiled logic/diagnostic controls and independent audits.
+- `benchmarks/whitespace_no_span/2026-11-07/` for lexer differential/performance
+  measurements and the new population hunk-gate check.
+- `benchmarks/unused_proof_opportunities/2026-11-07/` and
+  `benchmarks/scalar_temporaries/2026-11-07/` for the bounded negative screens.
+
+Benchmarks and test files remain outside milestone commits as requested.

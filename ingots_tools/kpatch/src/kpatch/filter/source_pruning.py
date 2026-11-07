@@ -14,7 +14,8 @@ from .binding_renames import BindingComparison, compare_bindings
 from .config_filter import BuildInputClosure, KbuildMakefileCache, KbuildState, KernelConfig
 from .diagnostic_strings import normalize_diagnostic_strings
 from .ifdef_filter import get_active_lines
-from .masking import CodeMask, EditMask, FileIdentity, LineRange, MaskReason, SourceSide, SourceVersions, has_compiler_source_locations, line_macro_locations, line_ranges
+from .masking import CodeMask, FileIdentity, LineRange, MaskReason, SourceSide, SourceVersions, has_compiler_source_locations, line_macro_locations, line_ranges
+from .pruning_decision import PruningDecision
 from .macro_environment import MacroEnvironmentGuard
 from .reference_index import ReferenceIndex, ReferenceIndexStats, ReferenceSite, spelling_guards
 from .reordering import COLUMN_BUILTINS, LINE_BUILTINS, ReorderMacroGuard, ReorderProof, hunk_reorder_candidate, independent_reorder
@@ -33,18 +34,6 @@ from ..diff import DiffFile, DiffFileType
 
 _NAME_KINDS = frozenset({"identifier", "type_identifier", "field_identifier"})
 _NONSTANDARD_LINEBREAK = re.compile(r"\r(?!\n)|[\v\f\x1c-\x1e\x85\u2028\u2029]")
-
-
-@dataclass(frozen=True, slots=True)
-class PruningDecision:
-    commit_id: str
-    paths: tuple[str, ...]
-    rule: str
-    symbols: tuple[str, ...]
-    edit_masks: tuple[EditMask, ...] = ()
-    code_masks: tuple[CodeMask, ...] = ()
-    lossy: bool = False
-    risk_reasons: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -878,9 +867,15 @@ def source_pruning_tail(
     config: KernelConfig | None = None,
     on_pruned: Callable[[PruningDecision], None] | None = None,
     *, lossy: bool = False,
+    whitespace_line_numbers_lossy: bool = False,
+    whitespace_audit: Callable[[PruningDecision], None] | None = None,
 ) -> tuple[StreamingCommitFilter, ...]:
     """Prune definitions, clean up comments, then compare remaining source."""
-    return DeadCodeFilter(config, on_pruned, lossy=lossy), WhitespaceFilter(), RenameFilter(config, on_pruned, lossy=lossy)
+    return (
+        DeadCodeFilter(config, on_pruned, lossy=lossy),
+        WhitespaceFilter(line_numbers_lossy=whitespace_line_numbers_lossy, on_pruned=whitespace_audit),
+        RenameFilter(config, on_pruned, lossy=lossy),
+    )
 
 
 __all__ = ["DeadCodeFilter", "PruningDecision", "RenameFilter", "SourcePruningStats", "source_pruning_tail"]

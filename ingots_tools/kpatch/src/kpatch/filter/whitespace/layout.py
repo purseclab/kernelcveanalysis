@@ -45,7 +45,8 @@ class LayoutStats:
 
 @dataclass(frozen=True, slots=True)
 class _LayoutFact:
-    digest: bytes
+    body_digest: bytes
+    line_digest: bytes
     token_count: int
 
 
@@ -132,6 +133,17 @@ class LayoutComparer:
         first, second = self._fact(old), self._fact(new)
         return first is not None and second is not None and first == second
 
+    def equivalent_ignoring_line_numbers(self, old: bytes, new: bytes) -> bool:
+        """Ignore physical lines while preserving tokens, gaps and byte columns.
+
+        This explicitly permits changes observed through line-number builtins
+        and included aliases. Complete-source support and bounds still apply.
+        """
+        first, second = self._fact(old), self._fact(new)
+        return (first is not None and second is not None
+                and first.body_digest == second.body_digest
+                and first.token_count == second.token_count)
+
     def _fact(self, source: bytes) -> _LayoutFact | None:
         if len(source) > _MAX_SOURCE_BYTES:
             self._scans += 1
@@ -165,7 +177,8 @@ class LayoutComparer:
             return None
 
     def _token_digest(self, source: str) -> _LayoutFact | None:
-        digest = sha256(b"kpatch:pp-layout:v1\0")
+        body_digest = sha256(b"kpatch:pp-layout:body:v1\0")
+        line_digest = sha256(b"kpatch:pp-layout:lines:v1\0")
         mapper, cursor = _SpliceMap(source), _PhysicalCursor(source)
         count = 0
         for span in iter_c_token_spans(source, self.ignore_non_directive_newlines, _MAX_TOKENS):
@@ -173,11 +186,12 @@ class LayoutComparer:
                 span.token.kind is CTokenKind.IDENTIFIER and span.token.value in _HEADER_OPERATORS
             ):
                 return None
-            digest.update(_token_frame(span))
+            body_digest.update(_token_frame(span))
             if span.token.kind not in _SEMANTIC_NEWLINES:
                 cursor.advance(mapper.physical(span.start, right_bias=True))
                 first_line, first_column = cursor.line, cursor.column
                 cursor.advance(mapper.physical(span.end, right_bias=False))
-                digest.update(pack(">IIII", first_line, first_column, cursor.line, cursor.column))
+                body_digest.update(pack(">II", first_column, cursor.column))
+                line_digest.update(pack(">II", first_line, cursor.line))
             count += 1
-        return _LayoutFact(digest.digest(), count)
+        return _LayoutFact(body_digest.digest(), line_digest.digest(), count)

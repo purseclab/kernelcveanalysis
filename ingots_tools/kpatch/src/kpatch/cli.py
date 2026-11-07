@@ -12,6 +12,7 @@ from .git import GitDb, GitRepo, parse_time, save_commits_to_db, load_commits_fr
 from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, ClassifierFilter, CountFilter
 from .filter.source_pruning import source_pruning_tail
 from .filter.pruning_audit import PruningAudit
+from .filter.output_paths import repository_input_roots, validate_output_paths
 from .visualization import show_commit_sunburst
 from .update import update_to_db
 from .extract import extract_to_db
@@ -141,6 +142,10 @@ def filter(
     ] = False,
     source_pruning_lossy: Annotated[bool, typer.Option(help="Also assume incomplete preprocessing discovery for source equivalence, and ignore observable rename metadata; observed macro hazards still retain. Requires --source-pruning and --source-pruning-report.")] = False,
     source_pruning_report: Annotated[Path | None, typer.Option(help="JSONL source-pruning decisions, including lossy risk labels.")] = None,
+    whitespace_line_numbers_lossy: Annotated[
+        bool, typer.Option(help="Ignore physical line-number changes for otherwise equivalent tokens, gaps and byte columns. Can remove runtime-relevant changes. Requires --whitespace-report."),
+    ] = False,
+    whitespace_report: Annotated[Path | None, typer.Option(help="JSONL whitespace decisions, required with --whitespace-line-numbers-lossy.")] = None,
     policy_profile: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Pinned SELinux/credential profile for compiler-backed policy filtering.")] = None,
     policy_build_context: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Prepared compiler context JSON for policy analysis.")] = None,
     policy_report: Annotated[Path | None, typer.Option(help="JSONL policy decisions, required with --policy-profile.")] = None,
@@ -172,6 +177,8 @@ def filter(
         raise typer.BadParameter("Source-pruning options require --source-pruning")
     if source_pruning_lossy and source_pruning_report is None:
         raise typer.BadParameter("--source-pruning-lossy requires --source-pruning-report to record risky removals")
+    if whitespace_line_numbers_lossy and whitespace_report is None:
+        raise typer.BadParameter("--whitespace-line-numbers-lossy requires --whitespace-report to record risky removals")
     if policy_profile is None:
         if (policy_build_context is not None or policy_report is not None or policy_direct_app or policy_cache is not None
                 or setools_python is not None or setools_module_path):
@@ -179,21 +186,41 @@ def filter(
     elif policy_build_context is None or policy_report is None:
         raise typer.BadParameter("--policy-profile requires --policy-build-context and --policy-report")
     source_audit: PruningAudit | None = None
-    if source_pruning_report is not None:
-        args = get_run_args(ctx)
-        protected = (args.db.db, _path_for_db_name(args.destination_db_name)) + tuple(
-            value for value in (config, policy_profile, policy_build_context, policy_report, policy_cache) if value is not None)
+    whitespace_audit: PruningAudit | None = None
+    reports = tuple(path for path in (source_pruning_report, whitespace_report) if path is not None)
+    args = get_run_args(ctx)
+    protected = (args.db.db, _path_for_db_name(args.destination_db_name)) + tuple(
+        value for value in (config, policy_profile, policy_build_context, setools_python) if value is not None
+    ) + tuple(setools_module_path or ())
+    outputs = reports + tuple(path for path in (policy_report, policy_cache) if path is not None)
+    if reports:
         try:
             if policy_build_context is not None:
                 build = PolicyBuildContext.load(policy_build_context)
                 target = PolicyTargetProfile.load(policy_profile) if policy_profile is not None else None
-                validate_policy_outputs((source_pruning_report,), build,
+                validate_policy_outputs(outputs, build,
                                         protected + (policy_profile_inputs(target) if target else ()))
-            source_audit = PruningAudit.create(source_pruning_report, args.repo.repo, protected)
+            # Validate every writable report/cache together before any open.
+            validate_output_paths(outputs, protected=protected,
+                                  protected_roots=repository_input_roots(args.repo.repo))
+            if source_pruning_report is not None:
+                source_audit = PruningAudit.create(source_pruning_report, args.repo.repo,
+                                                  protected + tuple(path for path in outputs if path != source_pruning_report))
+            if whitespace_report is not None:
+                whitespace_audit = PruningAudit.create(whitespace_report, args.repo.repo,
+                                                      protected + tuple(path for path in outputs if path != whitespace_report))
         except (OSError, ValueError) as error:
             raise typer.BadParameter(str(error)) from error
     if source_pruning:
-        filter.filters[-1:] = source_pruning_tail(kernel_config, source_audit, lossy=source_pruning_lossy)
+        filter.filters[-1:] = source_pruning_tail(
+            kernel_config, source_audit, lossy=source_pruning_lossy,
+            whitespace_line_numbers_lossy=whitespace_line_numbers_lossy,
+            whitespace_audit=whitespace_audit,
+        )
+    else:
+        filter.filters[-1] = WhitespaceFilter(
+            line_numbers_lossy=whitespace_line_numbers_lossy, on_pruned=whitespace_audit,
+        )
     if policy_profile is None:
         run(ctx, filter)
         return
@@ -207,8 +234,9 @@ def filter(
             raise ValueError("Config-stage and compiler policy configurations must match")
         if policy_direct_app:
             target = target.model_copy(update={"scope": AnalysisScope.DIRECT_APP})
-        validate_policy_outputs((policy_report,) + ((policy_cache,) if policy_cache is not None else ()), build,
-                                (policy_profile, policy_build_context) + policy_profile_inputs(target))
+        validate_policy_outputs(outputs, build, protected + policy_profile_inputs(target))
+        validate_output_paths(outputs, protected=protected,
+                              protected_roots=repository_input_roots(args.repo.repo))
         evaluator = SELinuxPolicyEvaluator(target.policy_file, enforcing=target.selinux_enforcing,
                                            cache_path=policy_cache, runtime=setools_runtime(setools_python, setools_module_path))
         policy_report.parent.mkdir(parents=True, exist_ok=True)
