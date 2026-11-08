@@ -62,6 +62,16 @@ or program can read a source/header as raw bytes; source equivalence does not
 justify pruning that separate role. Unpinned forced inputs and build-time source
 metadata remain part of the existing source-analysis limits.
 
+Before accepting a file, the shared raw-input index checks both original
+historical versions for recognized assembly and Make generator consumers.
+Positive consumers, recognized unresolved inputs, scan errors and budget limits
+retain the candidate, including in line-number-lossy mode. The index uses bounded
+revision and content caches; unchanged consumer facts can survive revision
+updates. Per-file parser-budget failures remain cached uncertainties, while
+aggregate inventory failures prevent reuse of an incomplete snapshot.
+An empty observation does not prove that arbitrary scripts or external inputs
+cannot consume this file. See [the shared API](FILTER_MASKING.md#raw-input-consumer-veto).
+
 Token columns are physical UTF-8 byte columns, as exercised against the installed
 GCC/Clang controls. This is not a claim about every frontend's visual diagnostic
 column convention. Moving code or changing its token gaps is conservatively

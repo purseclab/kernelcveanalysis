@@ -1,11 +1,11 @@
 """Whole-file source equivalence after folding numeric CPP conditionals."""
 
 from collections.abc import Callable, Generator, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import subprocess
 from typing import ClassVar
 
-from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader, source_role_veto
 from .constant_conditionals import ConstantConditionalScanner, may_have_numeric_condition
 from .masking import CodeMask, FileIdentity, MaskReason, SourceSide, SourceVersions
 from .pruning_decision import PruningDecision
@@ -108,10 +108,13 @@ class ConstantConditionalFilter(StreamingCommitFilter):
             if ranges
         )
         sources = commit.active_sources(file, raw, extra_code_masks=masks)
+        reason: MaskReason | None = None
         if self._layout.equivalent(sources.old, sources.new):
-            return _ConditionalProof(masks, MaskReason.CONSTANT_BRANCH)
-        if self.line_numbers_lossy and self._layout.equivalent_ignoring_line_numbers(sources.old, sources.new):
-            return _ConditionalProof(masks, MaskReason.CONSTANT_BRANCH_LINES_LOSSY)
+            reason = MaskReason.CONSTANT_BRANCH
+        elif self.line_numbers_lossy and self._layout.equivalent_ignoring_line_numbers(sources.old, sources.new):
+            reason = MaskReason.CONSTANT_BRANCH_LINES_LOSSY
+        if reason is not None and not source_role_veto(commit, file, context):
+            return _ConditionalProof(masks, reason)
         return None
 
     def _publish(self, commit: FilteredCommit, file: DiffFile, proof: _ConditionalProof) -> None:
@@ -164,6 +167,8 @@ class ConstantConditionalFilter(StreamingCommitFilter):
         with repository_file_reader(context) as reader:
             self._read_file = reader.read_file
             try:
-                yield from super().iter_filter_mutable_commits(commits, context, show_progress, total=total)
+                yield from super().iter_filter_mutable_commits(
+                    commits, replace(context, file_reader=reader), show_progress, total=total,
+                )
             finally:
                 self._read_file = None

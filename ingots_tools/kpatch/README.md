@@ -301,8 +301,18 @@ assumptions for other eligible comparisons.
 
 This is an experimental C-source reference model, not a whole-build proof.
 Arbitrary nested token pasting, generated/forced includes, external modules,
-and mixed input roles need stronger build-aware analysis. For example, an
-assembler can embed a header as raw bytes, making even a comment edit observable.
+and mixed input roles need stronger build-aware analysis. Before publishing a
+source-based mask, all semantic stages share a positive raw-consumer check on
+both original revisions. Recognized assembly `.incbin`/`.include` inputs and
+explicit Make generator prerequisites retain the file, including comment-only
+and C-inactive changes. Scan failures and budget limits also retain candidates.
+The index is lazy, bounded and updated from revision deltas; ordinary C compiler
+dependencies do not themselves veto pruning. An empty observation is not proof
+that every build or external consumer has been found. For example, arbitrary
+generator scripts and computed build rules still need a complete build-input
+manifest. See [the masking API](FILTER_MASKING.md#raw-input-consumer-veto).
+Unresolved inputs currently have a broad retention effect on kernel trees;
+historical pruning measurements made before this veto are not current yields.
 Identifier renames with debug/BTF-name risks require the explicit lossy mode. Layout and
 field-specific reachability are not inferred from absence of field accesses.
 
@@ -379,6 +389,8 @@ gaps and physical token locations, including when location macros come from an
 included header. Excluded code is blanked while preserving its physical lines.
 Strict decoding and unsupported syntax retain changes. Source reads reuse the
 pipeline's bounded Git blob cache; layout facts have a separate bounded cache.
+Recognized raw assembly and generator consumers veto acceptance even when the
+C preprocessing tokens and locations match.
 See [WHITESPACE_PRUNING.md](WHITESPACE_PRUNING.md) for the checks and limits.
 
 The fix applies to subsequent runs. Regenerate existing filtered databases from

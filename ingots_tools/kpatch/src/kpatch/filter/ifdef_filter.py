@@ -1,5 +1,5 @@
 from collections.abc import Callable, Generator, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 from typing import ClassVar
 
@@ -9,6 +9,7 @@ from .base import (
     StreamingCommitFilter,
     diff_file_key,
     repository_file_reader,
+    source_role_veto,
 )
 from .config_filter import ConfigValue, KernelConfig
 from .cpp_expression import evaluate_cpp_expression, parse_cpp_integer
@@ -565,9 +566,16 @@ class IfdefFilter(StreamingCommitFilter):
         if old_active.line_macros != new_active.line_macros or old_active.has_counter or new_active.has_counter:
             return True
 
-        for side, activity in ((SourceSide.OLD, old_active), (SourceSide.NEW, new_active)):
-            inactive = line_ranges(number for number in range(1, activity.line_count + 1) if number not in activity.active)
-            commit.mask_code(diff_file, side, inactive, MaskReason.IFDEF, whole_file=activity.whole_inactive)
+        old_inactive = line_ranges(number for number in range(1, old_active.line_count + 1)
+                                   if number not in old_active.active)
+        new_inactive = line_ranges(number for number in range(1, new_active.line_count + 1)
+                                   if number not in new_active.active)
+        if not (old_inactive or new_inactive or old_active.whole_inactive or new_active.whole_inactive):
+            return True
+        if source_role_veto(commit, diff_file, context):
+            return True
+        commit.mask_code(diff_file, SourceSide.OLD, old_inactive, MaskReason.IFDEF, whole_file=old_active.whole_inactive)
+        commit.mask_code(diff_file, SourceSide.NEW, new_inactive, MaskReason.IFDEF, whole_file=new_active.whole_inactive)
         return True
 
     def filter_mutable_commit(
@@ -590,7 +598,7 @@ class IfdefFilter(StreamingCommitFilter):
             try:
                 yield from super().iter_filter_mutable_commits(
                     commits,
-                    context,
+                    replace(context, file_reader=reader),
                     show_progress=show_progress,
                     total=total,
                 )

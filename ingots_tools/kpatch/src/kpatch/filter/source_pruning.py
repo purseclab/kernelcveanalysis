@@ -9,7 +9,7 @@ import re
 import subprocess
 from typing import ClassVar
 
-from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader, source_role_veto
 from .binding_renames import BindingComparison, compare_bindings
 from .config_filter import BuildInputClosure, KbuildMakefileCache, KbuildState, KernelConfig
 from .constant_filter import ConstantConditionalFilter
@@ -108,7 +108,7 @@ class _SourceFilter(StreamingCommitFilter):
             try:
                 with closing(self._planned_input(commits)) as planned:
                     yield from super().iter_filter_mutable_commits(
-                        planned, context, show_progress, total=total,
+                        planned, replace(context, file_reader=reader), show_progress, total=total,
                     )
             finally:
                 self.index_stats = self._index.stats()
@@ -590,6 +590,8 @@ class RenameFilter(_SourceFilter):
                     return commit
         except (OSError, ValueError, UnicodeError, subprocess.CalledProcessError):
             return commit
+        if any(source_role_veto(commit, pair.file, context) for pair in pairs):
+            return commit
         for analysis in analyses:
             for mask in analysis.code_masks:
                 commit.mask_code(analysis.pair.file, mask.side, mask.lines, mask.reason)
@@ -830,6 +832,8 @@ class DeadCodeFilter(_SourceFilter):
             if (self._unused(parent, pair, pair.old, old_group, context, None, frozenset(), commit)
                     and self._unused(commit.original.commit_id, pair, pair.new, new_group, context, parent, paths, commit)
                     and self._locations_safe(commit, pair, old_group, new_group, context)):
+                if source_role_veto(commit, file, context):
+                    return ()
                 for item in candidates:
                     commit.mask_code(file, SourceSide.OLD, item.old_lines, MaskReason.DEAD_CODE)
                     commit.mask_code(file, SourceSide.NEW, item.new_lines, MaskReason.DEAD_CODE)
@@ -855,6 +859,8 @@ class DeadCodeFilter(_SourceFilter):
                 continue
             if not self._locations_safe(commit, pair, old_group, new_group, context):
                 continue
+            if not pruned and source_role_veto(commit, file, context):
+                return ()
             commit.mask_code(file, SourceSide.OLD, decision.old_lines, MaskReason.DEAD_CODE)
             commit.mask_code(file, SourceSide.NEW, decision.new_lines, MaskReason.DEAD_CODE)
             pruned.append(name)

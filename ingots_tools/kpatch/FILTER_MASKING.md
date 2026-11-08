@@ -177,3 +177,45 @@ macro check publishes no additional masks. Scope resolution includes block/for
 scopes and parameter/declaration identity, so equal spellings in other functions
 do not become one global substitution. Types, member names, external symbols,
 bounds, reserved annotations and other tokens remain part of the comparison.
+
+## Raw input consumer veto
+
+`FilterContext.input_roles` implements `SourceInputRoleProvider.lookup(context,
+revision, path) -> RawInputObservation`. The default provider lazily shares a
+bounded `RawInputIndex` with stages using the same repository and blob reader.
+It records positive assembly and Make generator consumers. It does not certify
+that a source has only C/C++ preprocessing consumers.
+
+Immediately before publishing a semantic mask, whitespace, constant branches,
+configured branches, unused definitions, renames and policy exclusions check
+the original parent/path and child/path. Additions and deletions check their
+existing side. A positive consumer, unresolved recognized inventory, failed
+scan or exceeded budget retains the candidate without new masks or a pruning
+audit. Policy decisions report `unknown` with
+`raw_input_consumer_or_unresolved_consumer_inventory`. Earlier masks remain
+unchanged. Selection filters have no source-equivalence claim and do not query
+this service.
+
+Literal assembler `.incbin` and `.include` can consume comments or code hidden
+from the C preprocessor. Explicit Make generator prerequisites can also expose
+comment data: Linux `lib/build_OID_registry` parses numeric OIDs from header
+comments. Ordinary `#include` and normal C compilation alone do not establish
+a raw consumer. The supported inventory is deliberately a positive veto; an
+empty lookup does not close arbitrary scripts, computed Make rules, external
+inputs or language roles. No negative result is promoted into build-membership
+or policy reachability evidence.
+
+Cold discovery and revision updates use bounded NUL-delimited Git streams.
+Parsed file facts and revision snapshots are bounded and shared; source files
+are checked only after the stage's other conditions would otherwise accept.
+The default configuration passthrough therefore performs no new role scan.
+For retention-only checks, an unchanged regular consumer can provide a cached
+uncertainty witness. Its bytes are verified at each new revision; a match
+retains immediately, while a changed or missing witness falls back to the
+inventory. This shortcut returns nonempty uncertainty and establishes no
+equivalence, complete inventory or exclusion. The full inventory lookup remains
+available separately.
+The shortcut can omit other consumer facts because uncertainty already vetoes
+the mask. A future mode that deliberately ignores uncertainty must use the full
+lookup before considering acceptance; clearing uncertainty from a shortcut
+result would also discard possible positive raw consumers.

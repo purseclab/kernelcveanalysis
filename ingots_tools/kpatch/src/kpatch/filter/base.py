@@ -4,9 +4,11 @@ from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+import subprocess
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 if TYPE_CHECKING:
+    from .input_roles import RawInputIndex, RawInputObservation
     from .reference_index import ReferenceIndex
 
 from rich.progress import (
@@ -24,7 +26,7 @@ from .masking import (
     FileSnapshot, PatchSnapshot, SourceSide, SourceVersions, changed_lines, ignored_lines,
     ambiguous_eof_projection, project_file, replay_sources,
 )
-from ..diff import Diff, DiffFile
+from ..diff import Diff, DiffFile, DiffFileType
 from ..git import (
     CommitParent,
     GitCommit,
@@ -217,6 +219,31 @@ class FilteredCommit:
         return replace(self.original, parents=parents)
 
 
+class SourceInputRoleProvider(Protocol):
+    def lookup(
+        self, context: "FilterContext", revision: str, path: str,
+    ) -> "RawInputObservation": ...
+
+
+@dataclass(slots=True)
+class _CachedSourceInputRoles:
+    _repo: GitRepo | None = None
+    _reader: RepositoryFileReader | None = None
+    _index: "RawInputIndex | None" = None
+
+    def lookup(
+        self, context: "FilterContext", revision: str, path: str,
+    ) -> "RawInputObservation":
+        if (self._index is None or self._repo is not context.repo
+                or self._reader is not context.file_reader):
+            from .input_roles import RawInputIndex
+
+            read = context.file_reader.read_file if context.file_reader is not None else context.repo.read_file
+            self._index = RawInputIndex(context.repo, read)
+            self._repo, self._reader = context.repo, context.file_reader
+        return self._index.veto_observation(revision, path)
+
+
 @dataclass(frozen=True, slots=True)
 class FilterContext:
     repo: GitRepo
@@ -224,6 +251,7 @@ class FilterContext:
     commits: list[GitCommit] = field(default_factory=list)
     file_reader: RepositoryFileReader | None = None
     reference_index: "ReferenceIndex | None" = None
+    input_roles: SourceInputRoleProvider = field(default_factory=_CachedSourceInputRoles, repr=False, compare=False)
 
     @classmethod
     def from_db_range(
@@ -249,6 +277,27 @@ class FilterContext:
             structured_commits=structured_commits,
             commits=commits,
         )
+
+
+def source_role_veto(commit: FilteredCommit, file: DiffFile, context: FilterContext) -> bool:
+    """Retain recognized raw consumers or failed scans; empty is no closure proof."""
+
+    versions: list[tuple[str, str]] = []
+    if file.change_type is not DiffFileType.NEW:
+        parent = commit.original.parent
+        if parent is None:
+            return True
+        versions.append((parent.commit_id, file.old_file or file.file))
+    if file.change_type is not DiffFileType.DELETE:
+        versions.append((commit.original.commit_id, file.file))
+    try:
+        for revision, path in versions:
+            observation = context.input_roles.lookup(context, revision, path)
+            if observation.consumers or observation.uncertainties:
+                return True
+    except (OSError, UnicodeError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return True
+    return False
 
 
 @contextmanager

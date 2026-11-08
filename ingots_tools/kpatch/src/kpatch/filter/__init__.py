@@ -9,6 +9,7 @@ from .base import (
     FilterContext,
     FilteredCommit,
     FilterPipeline,
+    SourceInputRoleProvider,
     StreamingCommitFilter,
 )
 from .config import ConfigFilter
@@ -159,6 +160,7 @@ __all__ = [
     "PolicyFilter",
     "ScoreFilter",
     "SourceNoopFilter",
+    "SourceInputRoleProvider",
     "StreamingCommitFilter",
     "WhitespaceFilter",
     "WhitespaceFilterStats",

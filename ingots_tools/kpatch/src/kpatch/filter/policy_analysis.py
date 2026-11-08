@@ -8,14 +8,14 @@ real revisions. A direct-subject finding is never promoted to service closure.
 
 from collections.abc import Callable, Generator, Iterable
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import re
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from .base import FilterContext, FilteredCommit, StreamingCommitFilter
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader, source_role_veto
 from .config_filter import ConfigValue, KernelConfig
 from .masking import MaskReason, SourceSide
 from .policy_clang import ClangAnalyzer, ClangByteExclusion, ClangCall, ClangConstraint, ClangFunction, ClangGuard, ClangWriteEffect, TranslationUnitFacts
@@ -366,8 +366,11 @@ class PolicyFilter(StreamingCommitFilter):
         try:
             compiler = RevisionCompiler(context.repo, self.build_context, analyzer, cache_path=self.cache_path)
             self.compiler = compiler
-            with closing(super().iter_filter_mutable_commits(commits, context, show_progress, total=total)) as output:
-                yield from output
+            with repository_file_reader(context) as reader:
+                with closing(super().iter_filter_mutable_commits(
+                    commits, replace(context, file_reader=reader), show_progress, total=total,
+                )) as output:
+                    yield from output
         finally:
             if compiler is not None:
                 compiler.close()
@@ -473,6 +476,9 @@ class PolicyFilter(StreamingCommitFilter):
                 reasons = ("service_delegation_and_async_scope_not_closed",)
         elif any(file.reasons and file.reasons != ("remaining_reachable_or_unmodeled_changes",) for file in files):
             status = "unknown"
+        if status == "excluded" and any(source_role_veto(commit, file, context) for file in commit.diff.files):
+            status = "unknown"
+            reasons = ("raw_input_consumer_or_unresolved_consumer_inventory",)
         decision = PolicyCommitDecision(commit_id=commit.original.commit_id, status=status, scope=self.profile.scope,
                                         profile_sha256=self.profile.fingerprint, policy_sha256=self.profile.policy_sha256,
                                         build_context_sha256=self.build_context.fingerprint, files=files, reasons=reasons)

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Generator, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import chain
 from typing import ClassVar
 
@@ -13,6 +13,7 @@ from ..base import (
     FilteredCommit,
     StreamingCommitFilter,
     repository_file_reader,
+    source_role_veto,
 )
 from ...diff import DiffChunk, DiffFile, DiffFileType
 from ..masking import FileIdentity, MaskReason, SourceVersions
@@ -197,10 +198,13 @@ class WhitespaceFilter(StreamingCommitFilter):
             # Equal token values alone miss included __LINE__/COLUMN aliases
             # and macro stringification. Every acceptance uses the complete
             # bounded layout certificate; an unsupported result retains edits.
+            reason: MaskReason | None = None
             if self._layout.equivalent(old_bytes, new_bytes):
-                return MaskReason.WHITESPACE
-            if self.line_numbers_lossy and self._layout.equivalent_ignoring_line_numbers(old_bytes, new_bytes):
-                return MaskReason.WHITESPACE_LINES_LOSSY
+                reason = MaskReason.WHITESPACE
+            elif self.line_numbers_lossy and self._layout.equivalent_ignoring_line_numbers(old_bytes, new_bytes):
+                reason = MaskReason.WHITESPACE_LINES_LOSSY
+            if reason is not None and not source_role_veto(commit, diff_file, context):
+                return reason
             return None
         except Exception:
             # Conservatively retain on unreadable files or missing git objects
@@ -257,7 +261,7 @@ class WhitespaceFilter(StreamingCommitFilter):
             try:
                 yield from super().iter_filter_mutable_commits(
                     commits,
-                    context,
+                    replace(context, file_reader=reader),
                     show_progress=show_progress,
                     total=total,
                 )
