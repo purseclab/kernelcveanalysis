@@ -19,6 +19,13 @@ Python/C++ sources match the wheel. See
 [the preceding directive repair](#directive-ending-lines-and-multiline-comments--2026-11-08)
 and [the assumption contract](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
 
+The supplied local Linux tree now also supports an isolated upstream 6.6.46
+reference build. One calibrated parent/child object experiment completes, but
+changes machine code and establishes **zero new removals**. A separate likelihood
+annotation census finds 20 syntactic candidates, also unpruned. See
+[the reference experiment](#local-reference-build-and-differential-compilation--2026-11-08)
+and [the annotation inventory](#boolean-likelihood-annotations--2026-11-08).
+
 The following checkpoint and later experiment sections preserve historical
 results from their own implementations; their default counts are superseded by
 the current raw-input guard and must not be added to the current totals.
@@ -3060,3 +3067,159 @@ matching target/compiler inputs and caller closure remain the useful next
 frontier for policy, hardware and more general unused-code exclusions. This is
 an evidence-scoped assessment, not proof that no other opportunity exists.
 The report is in ignored `benchmarks/source_frontier_after_define/2026-11-08/`.
+
+## Local reference build and differential compilation — 2026-11-08
+
+The user supplied the following local tree as the closest available source for
+a kernel distributed as a binary:
+`/home/jack/Documents/college/purdue/research/linux_src/linux`. The checkout is
+upstream Linux 6.6.50 at `ad07a29023cebd40848fce81e6732d671ede5fe6`; its existing
+object store also contains the upstream 6.6.46 tag, peeled to
+`99fd042016c7489192d05ff21a10620c2142301d`. No network clone or duplicate history
+pack was needed. The user's HEAD, index, tracked files and personal untracked
+files remain unchanged. Reference identity is recorded independently of the
+captured Android kernel's reported 6.6.46 version.
+
+A bounded applicability screen compares 52 complete original patches with both
+references. It uses all original hunks and companion files, without earlier
+stage masks or a reconstructed partial patch:
+
+| Population / result | Each reference |
+| --- | ---: |
+| Selected syscall-body originals | 32 |
+| Selected single-C static-body originals | 20 |
+| Complete context-aligned originals | 10 |
+| Inapplicable originals | 36 |
+| Originals with missing paths | 6 |
+
+All ten aligned cases are from the syscall population; none of the twenty
+static-body originals aligns. These selected counts are applicability evidence,
+not a random-cohort pruning estimate. Seven matches use unique exact regions;
+three further matches use successful read-only Git checks at 6.6.50 and identical
+full blobs/modes at 6.6.46. The process_mrelease original examined earlier does
+not apply to these reference snapshots merely because its historical objects
+are available. Evidence is in ignored
+`benchmarks/source_reference_reuse/2026-11-08/` and
+`benchmarks/reference_applicability/2026-11-08/`.
+
+An owned shared clone materializes only the 6.6.46 source, with an external
+ARM64 build directory. `olddefconfig` and `prepare` succeed using the captured
+Android configuration as input and cached Clang 18.1.8. The resolved reference
+configuration differs by **410 symbols**: 203 removed, 194 added and 13 changed.
+Compiler resource-directory and Nix host-tool paths are explicit. This is a
+reference context, not the original Android compiler/build context. No final
+kernel, module link or MODPOST is attempted; the original ABI whitelist remains
+unavailable, and neither a replacement whitelist nor disabled symbol trimming
+is used. Preparation takes 111.45 seconds and occupies about 1.64 GB including
+the owned source, output and evidence. Independent checks verify a clean owned
+source and unchanged user checkout. The preparation record also preserves an
+initial subprocess HOME override; follow-on execution preserves the actual
+HOME and disables compiler default configuration explicitly.
+
+The first paired experiment uses complete original commit
+`d1c735d44c12544cea9b04ca88d65c12892c0539`, which adds `unlikely()` around the
+existing null-task condition in `kernel/kcmp.c`. Only `kernel/kcmp.o` is requested
+from Kbuild. Kbuild also rebuilds normal preparation and vDSO prerequisites after
+the recorded compiler-command change; all actual compiler commands are saved.
+The original VFS-overlay replay then reproduces the native Kbuild object
+**byte for byte**. The child uses the same compiler arguments, working directory,
+virtual source, overlay filename and output path. Actual DWARF main-file
+checksums establish that each compiler invocation read its intended full source.
+Both 625-file dependency sets and all non-main dependency hashes agree.
+
+The child object fails equality: **12 of 34 ELF sections differ**, including
+`.text`, text/alternative relocations, symbols and DWARF. Both text sections are
+1,520 bytes, but their instructions differ. Inequality does not itself prove
+different C-level results; it does rule out claiming object identity. Different
+source checksums embedded in DWARF 5 also mean raw whole-ELF equality would reject
+source-changing pairs even when instructions matched. Any future projection
+that omits this metadata needs its own explicit relevance contract. No BTF
+equality or final linked-image equivalence is inferred from this experiment.
+
+The pair takes 29.78 seconds, peaks at 153 MB cgroup memory and adds 21.2 MB of
+owned output. The complete capsule occupies 1.66 GB with 9.20 GB free afterward;
+there is no OOM or swap use. Native outputs and sidecar presence/absence are
+restored, source/config/generated inputs remain unchanged, and all workers are
+reaped. The independent audit verifies all 63 artifact hashes and dependency,
+source-identity and restoration checks. Evidence and the captured compilation
+command are under ignored `benchmarks/reference_build_66/2026-11-08/`, including
+`independent-review/kcmp-probe-review.json`.
+
+For future incremental analysis, reuse the prepared source/build and recorded
+native commands, check full-patch applicability first, and recompile only affected
+translation units plus changed dependencies. Keep reference-patch experiments
+distinct from `RevisionCompiler`'s actual revision overlays: its revision IDs
+must continue to identify real Git snapshots. The existing build-context API
+can describe a frozen reference context, but a single compilation-database entry
+does not certify whole-kernel caller or build-input closure. No context was
+captured here; extraction would require a matching Clang 18 worker, and missing
+TU commands remain unknown. Otherwise eligible policy files with BTF enabled
+still retain as `emitted_btf_equivalence_unproved`; kcmp without a raw seccomp
+profile is outside the modeled entry-gate subset even before that guard.
+The captured binary
+policy and live observations remain useful independently. Unknown Android source,
+vendor inputs, caller/service paths and emitted metadata cannot be replaced by
+the reference version number. No production exclusion guard changes here.
+
+The larger future opportunity remains configuration-model absence. A saved-only
+reassessment of the earlier 500-original raw January 2025 sample reduces its
+274 diagnostic whole candidates to **268 / 500 (53.6%)** after conservatively
+protecting 3,859 distinct paths from recorded compiler inputs, reference kcmp
+dependencies, upstream candidate module inputs and known raw consumers. The six
+additional vetoes touch `security/lsm_audit.c` and Qualcomm SCM sources. These
+positive protections come from several explicitly recorded contexts; their
+absence is not negative evidence. The old sample uses a different configuration
+and is not the 26,670-survivor population. No new-config replay or pruning occurs,
+and no false-removal rate is established.
+
+A prospective audited reference-model scope needs typed membership, semantic
+gaps and hard-failure provenance first. Currently `modeled_inclusion()` returns
+a mode or `None`, and `KbuildDirectory._read_optional()` collapses optional-file
+absence and native Git failure into the same result. Those saved unknowns cannot
+be retroactively called complete model evaluations. Keep observed inputs as
+positive vetoes, preserve unknown actual build/CPP closure, and distinguish any
+chosen model scope from Android absence. Live module names/aliases and
+`modules.order` identify targets rather than their exact source members;
+candidate upstream mappings are useful conservative protections only. No broad
+configuration bypass is shipped. The detailed profile proposal, exact six
+vetoes and reproducible saved arithmetic are under ignored
+`benchmarks/reference_scope_options/2026-11-08/`.
+
+## Boolean likelihood annotations — 2026-11-08
+
+A separate complete screen of the fixed **26,670 original legacy survivors**
+finds 26 whole-hunk likelihood-annotation candidates. A bounded full-source
+inspection confirms twenty: fourteen additions, four removals, one prediction
+reversal and one move/regroup, all using `likely` or `unlikely`. These twenty are
+**0.0750% of the cohort**; the raw 26-case ceiling is 0.0975%. Neither number is an
+additional accepted pruning rate. Three macro-replacement cases, one non-Boolean
+return case and two cases outside the twenty-case source-read bound remain
+unproved. The screen reads forty original blobs, 2.63 MB, in 4.54 seconds after
+the 12.09-second hunk census; no whole-kernel analysis is involved.
+
+The candidate rule must compare parsed operator trees. Erasing call tokens and
+parentheses is unsound: for `x=1, y=0, z=0`, changing `if (x || y && z)` to
+`if (unlikely(x || y) && z)` changes the condition from true to false under the
+normal Booleanizing macro. Both have a Boolean-use site, yet different grouping.
+GCC and Clang reproduce that difference at both tested optimization levels.
+An independent stronger comparator substitutes the argument AST subtree only
+after parsing and preserves all other operators, leaves and evaluation order.
+It rejects this counterexample and confirms all twenty saved candidates.
+
+The immediate consuming expression must also use truth value only: a condition,
+logical negation, AND or OR. Casts, arithmetic, comparisons, arbitrary arguments,
+returned values, `sizeof`/`typeof` and ternary value arms remain outside the rule.
+The independent controls cover these restrictions in seventeen small programs
+across two compilers and two optimization levels.
+
+Actual annotation binding is a separate requirement. Ordinary functions,
+custom macros, forced definitions and branch-profiling variants can add effects.
+Wrapper insertion also moves argument columns; included location-sensitive
+macros can therefore change runtime values despite matching source ASTs. Raw
+source consumers, compiler layout, timing/speculation and instrumentation remain
+separate obligations. The kcmp object experiment supplies a concrete instruction
+layout difference. Existing source/line/input assumptions do not silently grant
+a new annotation policy. A future filter needs resolved bindings and positions,
+plus a stated treatment of these effects, before measuring accepted incremental
+yield. No annotation filter or new lossy flag is shipped. The census and stronger
+review are under ignored `benchmarks/likelihood_annotations/2026-11-08/`.
