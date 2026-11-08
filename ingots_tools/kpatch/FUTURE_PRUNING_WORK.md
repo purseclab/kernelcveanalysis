@@ -56,25 +56,56 @@ header helpers as well as the main source, preserving those registrations while
 accepting local type/debug changes and ordinary local alternative-patch records.
 Cross-translation-unit LTO emission remains unsupported.
 
-All **1,480 tests pass**, including the captured binary SELinux policy. Mypy
+The source-only unused-global rule also checks emission effects. An uncalled
+global function may cause an inline helper and its startup registration to be
+emitted. It now requires a call-free lexical leaf with only bound local/parameter
+value references and no observed macro bindings. Native direct-call,
+helper-address and type-macro/VLA controls are retained in both modes. Exact
+unused-static variants produce no startup change, so the existing static rule
+is unchanged. See [unused definitions](UNUSED_CODE_AND_REORDER_PRUNING.md).
+
+All **1,497 tests pass**, including the captured binary SELinux policy. Mypy
 passes all 71 Python files, and all 72 Python/C++ package sources match the
 built wheel. The complete test run records unchanged source/test hashes.
 Verification artifacts are in
-`benchmarks/runtime_relevance_checkpoint/2026-11-08/final/`.
+`benchmarks/runtime_relevance_checkpoint/2026-11-08/final-repair/`.
 
 Historical sample percentages below remain opportunity estimates, not new
 automatic pruning rates. Large configuration and unused-definition replays are
 reported only after their complete original-patch runs finish; preparation
 timeouts provide no exclusion count.
 
-Large configuration and unused-definition replays remain incomplete. The
-seven-original strict source replay retains all seven; its lossy profiles have
-no completed gain measurement. The 500-original configuration replay has not
-finished preparation, so its zero published decisions are not a zero-removal
-result. Include-hint transport is the remaining measured performance problem:
-whole-line output exceeded 1 GB; matched fragments reduce payload but still
-produce millions of repeated path/line records. These checkpoint results do
-not establish a new population pruning percentage.
+The actual whole-kernel include-index bootstrap now completes in **90.17 s**,
+with a **735 MB** peak cgroup footprint and no swap/OOM. It uses a fresh process
+and index with warm OS/Git caches: 87,234 tracked paths, 60,705 source nodes and
+380,351 positive edges. Preferred native PCRE matching, line-bounded patterns
+and 64 KiB batches of same-source fragments avoid the preceding regex and
+per-row parsing stalls. Full reference-callback rows and normalization
+uncertainty remain intact. This is a bootstrap timing, not a complete filter
+throughput or pruning-rate measurement. Evidence is in
+`benchmarks/config_restore/2026-11-08/ram-bootstrap-result/`.
+
+The preserved **500-original configuration replay remains incomplete**. Its
+one-worker run spans 3,047 history transitions and 251 independent roots. It
+stops at the 465 s soft limit during history preparation, after at least 74,000
+source reads / 697 MB returned, with a 1.24 GB peak and no OOM or swap. Candidate
+processing never starts; zero published decisions is not zero exclusions.
+The remaining performance task is reuse of build/source facts across independent
+history roots and earlier publication of prepared branch decisions. This timing
+does not measure ordinary cached sequential revisions or parallel workers.
+The frozen inputs, resource samples and terminal phase are saved in
+`benchmarks/config_restore/2026-11-08/final-preserved500-result/`.
+
+The **seven-original source+line-lossy replay completes in 268.30 s** and
+retains all seven, with no code/edit masks or pruning audits. The earlier strict
+replay also retains all seven. The final run uses actual original patches and
+the public source tail, with the reference configuration and all required audit
+sinks; it changes no source-role or reference provider. Its 22,408 reader calls
+return 280 MB, and its frozen source/input identities remain valid. The expanded
+definition inventory therefore establishes **zero additional removals in this
+small pool**. Results are in
+`benchmarks/configured_unused/2026-11-08/final-one-profile-resumed/`.
+These checkpoint results do not establish a new population pruning percentage.
 
 ## Previous whitespace checkpoint — 2026-11-08
 

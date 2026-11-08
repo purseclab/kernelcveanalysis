@@ -12,7 +12,7 @@ import re
 
 from tree_sitter import Node
 
-from .syntax import declarator_name, node_text, nodes, parse_source
+from .syntax import MAX_SOURCE_BYTES, declarator_name, node_text, nodes, parse_source
 from .whitespace.c_lexer import tokenize_c_source
 
 
@@ -42,6 +42,12 @@ class BindingComparison:
     @property
     def lossy(self) -> bool:
         return any(item.kind is not BindingKind.PROTOTYPE_PARAMETER for item in self.renames)
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionValueReferences:
+    unbound_names: frozenset[str]
+    has_calls: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,29 +221,29 @@ class _Normalizer:
         for child in node.named_children:
             self._walk(child)
 
-    def _function(self, function: Node) -> None:
+    def _function(self, function: Node) -> bool:
         if not self.bodies or function.has_error:
-            return
+            return False
         text = node_text(function)
         if re.search(rb"(?m)^\s*#|\b(?:asm|__asm__|__attribute__|__attribute|_Pragma|__pragma)\b", text):
-            return
+            return False
         if parse_source(text).root_node.has_error:
-            return
+            return False
         if sum(node.type == "function_definition" for node in nodes(function)) != 1:
-            return
+            return False
         declarator = function.child_by_field_name("declarator")
         body = function.child_by_field_name("body")
         if declarator is None or body is None:
-            return
+            return False
         parameters = declarator.child_by_field_name("parameters")
         # Pointer-return declarators wrap the function declarator.
         while parameters is None and (nested := declarator.child_by_field_name("declarator")) is not None:
             declarator = nested
             parameters = declarator.child_by_field_name("parameters")
         if parameters is None:
-            return
+            return False
         if any(node.type == "function_declarator" for parameter in parameters.named_children for node in nodes(parameter)):
-            return
+            return False
         self.type_names = {node_text(node) for node in nodes(function) if node.type == "type_identifier"}
         self.environment = frozenset(node_text(node).decode() for node in nodes(function) if node.type == "identifier")
         before = len(self.bindings)
@@ -261,7 +267,8 @@ class _Normalizer:
         for child in body.named_children:
             self._walk(child)
         self.scopes.pop()
-        if self.invalid:
+        valid = not self.invalid
+        if not valid:
             self.bindings[before:] = []
             self.replacements = {start: value for start, value in self.replacements.items()
                                  if not function.start_byte <= start < function.end_byte}
@@ -269,6 +276,7 @@ class _Normalizer:
         self.invalid = False
         self.type_names.clear()
         self.environment = frozenset()
+        return valid
 
     def normalize(self) -> _View:
         tree = parse_source(self.source)
@@ -288,6 +296,38 @@ class _Normalizer:
             start = end
         pieces.append(self.source[start:])
         return _View(b"".join(pieces), tuple(self.bindings), frozenset(self.invoked))
+
+
+def function_value_references(source: bytes) -> FunctionValueReferences | None:
+    """Resolve local value occurrences, retaining unsupported function syntax.
+
+    Offsets, rather than a set of local spellings, distinguish references that
+    precede a shadowing declaration and references in signature/VLA bounds.
+    This is a lexical source fact, not a macro-expansion or reachability proof.
+    """
+    if len(source) > MAX_SOURCE_BYTES or b"\0" in source:
+        return None
+    tree = parse_source(source)
+    functions = [node for node in tree.root_node.named_children if node.type != "comment"]
+    if tree.root_node.has_error or len(functions) != 1 or functions[0].type != "function_definition":
+        return None
+    function = functions[0]
+    declarator = function.child_by_field_name("declarator")
+    # Parameters of a returned function type have prototype scope. The
+    # existing body renamer does not resolve that nested declarator shape.
+    if declarator is None or sum(node.type == "function_declarator" for node in nodes(declarator)) != 1:
+        return None
+    name = declarator_name(declarator) if declarator is not None else None
+    normalizer = _Normalizer(source, bodies=True)
+    try:
+        if name is None or not normalizer._function(function):
+            return None
+        unbound = frozenset(node_text(node).decode() for node in nodes(function)
+                            if node.type in {"identifier", "true", "false", "null"}
+                            and node != name and node.start_byte not in normalizer.replacements)
+    except UnicodeError:
+        return None
+    return FunctionValueReferences(unbound, any(node.type == "call_expression" for node in nodes(function)))
 
 
 def compare_bindings(old: bytes, new: bytes, *, bodies: bool = False) -> BindingComparison | None:

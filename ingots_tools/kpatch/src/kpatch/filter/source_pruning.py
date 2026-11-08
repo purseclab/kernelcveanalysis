@@ -10,7 +10,7 @@ import subprocess
 from typing import ClassVar
 
 from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
-from .binding_renames import BindingComparison, compare_bindings
+from .binding_renames import BindingComparison, compare_bindings, function_value_references
 from .config_filter import KbuildMakefileCache, KbuildState, KernelConfig, SourceAnalysisCache
 from .constant_filter import ConstantConditionalFilter
 from .diagnostic_strings import normalize_diagnostic_strings
@@ -794,14 +794,16 @@ class DeadCodeFilter(_SourceFilter):
 
     def _definition_macros_safe(
         self, revision: str, names: frozenset[str], tag_names: frozenset[str],
-        scope_names: frozenset[str], context: FilterContext,
+        scope_names: frozenset[str], context: FilterContext, *, unexpanded_names: frozenset[str],
     ) -> bool:
-        return (self._macro_replacements_safe(revision, scope_names, tag_names, context, declarations=True)
-                and self._macro_replacements_safe(revision, names, tag_names, context, declarations=False))
+        return (self._macro_replacements_safe(revision, scope_names, tag_names, context, declarations=True,
+                                             unexpanded_names=unexpanded_names)
+                and self._macro_replacements_safe(revision, names, tag_names, context, declarations=False,
+                                                  unexpanded_names=unexpanded_names))
 
     def _macro_replacements_safe(
         self, revision: str, names: frozenset[str], tag_names: frozenset[str], context: FilterContext,
-        *, declarations: bool,
+        *, declarations: bool, unexpanded_names: frozenset[str] = frozenset(),
     ) -> bool:
         """Reject observed expansions with nonlocal preprocessing/code effects.
 
@@ -814,7 +816,7 @@ class DeadCodeFilter(_SourceFilter):
         pending, visited = set(names), set[str]()
         forbidden = {"#", "##", "%:", "%:%:", "asm", "__asm", "__asm__", "_Pragma", "__pragma",
                      "__COUNTER__", "section", "__section__", "__section", "constructor", "destructor",
-                     "__constructor__", "__destructor__",
+                     "__constructor__", "__destructor__", "cleanup", "__cleanup__",
                      "alias", "__alias__", "used", "__used", "__used__", ";", "{", "}"}
         if declarations:
             forbidden.update({"struct", "union", "enum"})
@@ -831,6 +833,11 @@ class DeadCodeFilter(_SourceFilter):
                     if not self.lossy or not observation.assumable:
                         return False
                     self._environment_assumptions.update(observation.uncertainties)
+                # The external-function leaf proof describes the original
+                # syntax. Even a type/keyword macro can hide VLA evaluation
+                # that emits a helper and its startup registration.
+                if name in unexpanded_names and observation.definitions:
+                    return False
                 for macro in observation.definitions:
                     if macro.origin is not MacroOrigin.SOURCE or macro.replacement is None:
                         return False
@@ -900,6 +907,15 @@ class DeadCodeFilter(_SourceFilter):
         if any(re.search(rb"\b" + re.escape(name.encode()) + rb"\b", outside) for name in external):
             return False
         fragments = tuple(source[item.start:item.end] for item in items)
+        for item, fragment in zip(items, fragments, strict=True):
+            if item.external_linkage:
+                function_values = function_value_references(fragment)
+                # Emitting an uncalled external function can also emit a
+                # referenced helper and its startup registrations. Only local
+                # value leaves are certified here; observed runtime inputs are
+                # never replaced by an absence assumption.
+                if function_values is None or function_values.has_calls or function_values.unbound_names:
+                    return False
         if any(has_opaque_tokens(parse_source(fragment), implicit_names=False) for fragment in fragments):
             return False
         if any(re.search(rb"\b__COUNTER__\b", fragment) for fragment in fragments):
@@ -913,18 +929,24 @@ class DeadCodeFilter(_SourceFilter):
         if not environment.closed:
             self._environment_assumptions.add(environment.reason)
         footprint: set[str] = set()
+        unexpanded_names: set[str] = set()
         for item in items:
             if item.kind in {"preproc_def", "preproc_function_def"}:
                 continue
             tokens = tokenize_c_source(source[item.start:item.end].decode())
             if tokens is None:
                 return False
-            footprint.update(token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER)
+            identifiers = {token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER}
+            footprint.update(identifiers)
+            if item.external_linkage:
+                unexpanded_names.update(identifiers)
         if len(footprint) > 256:
             return False
         tag_names = frozenset(name for item in items for name in item.tag_names)
         scope_names = frozenset(name for item in items for name in item.scope_names)
-        if footprint and not self._definition_macros_safe(revision, frozenset(footprint), tag_names, scope_names, context):
+        if footprint and not self._definition_macros_safe(
+                revision, frozenset(footprint), tag_names, scope_names, context,
+                unexpanded_names=frozenset(unexpanded_names)):
             # A known expansion may escape the apparent function/type body.
             # Incomplete discovery can be audited; an observed binding cannot.
             return False

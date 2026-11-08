@@ -77,7 +77,10 @@ _HISTORY_HINT_RE = re.compile(INCLUDE_HINT_PATTERN.replace("[[:space:]]", r"\s")
 
 
 def _has_include_hint(line: str) -> bool:
-    return line.startswith(("+", "-", " ")) and _HISTORY_HINT_RE.search(line[1:]) is not None
+    if not line.startswith(("+", "-", " ")):
+        return False
+    contents = line[1:]
+    return contents.lstrip().startswith(("#", "%:", "??=")) or _HISTORY_HINT_RE.search(contents) is not None
 
 
 def _history_patch_text(patch_text: str) -> str:

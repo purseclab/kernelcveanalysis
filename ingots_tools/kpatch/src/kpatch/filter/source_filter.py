@@ -24,6 +24,16 @@ _INCLUDE_RE = re.compile(
 _INPUT_DIRECTIVE_RE = re.compile(r'^\s*#\s*(include|include_next|import|embed)\b')
 _GNU_SPLICE_RE = re.compile(r'\\[^\S\r\n]+(?:\r\n|\n)')
 _GLOBAL_TARGET_CACHE_SIZE = 4096
+_BOOTSTRAP_FRAGMENT_BYTES = 64 * 1024
+_BOOTSTRAP_FRAGMENT_SEPARATOR = b"\n\0\n"
+_ASCII_STRING_WHITESPACE = b" \t\r\n\v\f\x1c\x1d\x1e\x1f"
+
+
+def _may_need_normalization(fragment: bytes) -> bool:
+    """Avoid decoding ordinary fragments without losing str.rstrip cases."""
+
+    suffix = fragment.rstrip(_ASCII_STRING_WHITESPACE)
+    return suffix.endswith((b"\\", b"??/")) or bool(suffix and suffix[-1] >= 128)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,7 +159,7 @@ class SourceIncludeIndex:
         *,
         reference_names: frozenset[str] = frozenset(),
         reference_hit: Callable[[str, int, bytes], None] | None = None,
-        prefer_pcre: bool = False,
+        prefer_pcre: bool = True,
     ) -> "SourceIncludeIndex":
         out = cls(srcarch)
         with closing(iter_git_records(repo, ["ls-tree", "-r", "-z", commit], b"\0", (0,))) as entries:
@@ -200,22 +210,72 @@ class SourceIncludeIndex:
             "-n", "-z", "-a", matcher, *patterns, commit, "--",
         ]
         with closing(_iter_git_grep(repo, arguments)) as rows:
-            for row in rows:
-                if not row.path.startswith(prefix) or len(row.path) == len(prefix):
-                    raise ValueError("Unexpected Git grep path prefix")
-                path = row.path[len(prefix):].decode("utf-8")
-                line = row.contents
-                out.add_line(path, line.decode("utf-8", errors="replace"))
-                if any(marker in line for marker in (b"#", b"%", b"?", b"\\")):
-                    candidates.add(path)
-                if reference_hit is not None:
-                    reference_hit(path, row.line, line)
+            if reference_names:
+                for row in rows:
+                    if not row.path.startswith(prefix) or len(row.path) == len(prefix):
+                        raise ValueError("Unexpected Git grep path prefix")
+                    path = row.path[len(prefix):].decode("utf-8")
+                    line = row.contents
+                    out.add_line(path, line.decode("utf-8", errors="replace"))
+                    if any(marker in line for marker in (b"#", b"%", b"?", b"\\")):
+                        candidates.add(path)
+                    if reference_hit is not None:
+                        reference_hit(path, row.line, line)
+            else:
+                out._add_bootstrap_fragments(rows, prefix, reference_hit)
         # A marker is not proof of a complete include inventory. Keep every
         # candidate uncertain and defer full normalization to reader-cached,
         # exact-revision analysis of enabled inputs and their dynamic closure.
         for path in candidates:
             out._mark_uncertain(path)
         return out
+
+    def _add_bootstrap_fragments(
+        self, rows: Iterable[GitGrepRow], prefix: bytes,
+        reference_hit: Callable[[str, int, bytes], None] | None,
+    ) -> None:
+        """Batch positive-only hints without inventing adjacent source text."""
+
+        raw_path: bytes | None = None
+        path = ""
+        batch = bytearray()
+
+        def flush() -> None:
+            if batch:
+                self._add_bootstrap_hints(path, batch.decode("utf-8", errors="replace"))
+                batch.clear()
+
+        for row in rows:
+            if row.path != raw_path:
+                flush()
+                if not row.path.startswith(prefix) or len(row.path) == len(prefix):
+                    raise ValueError("Unexpected Git grep path prefix")
+                raw_path = row.path
+                path = raw_path[len(prefix):].decode("utf-8")
+            fragment = row.contents
+            if (path not in self._normalization_sources and _may_need_normalization(fragment)
+                    and needs_normalization(fragment.decode("utf-8", errors="replace"))):
+                self._mark_normalization(path)
+            if len(fragment) > _BOOTSTRAP_FRAGMENT_BYTES:
+                flush()
+                self._add_bootstrap_hints(path, fragment.decode("utf-8", errors="replace"))
+            else:
+                separator_bytes = len(_BOOTSTRAP_FRAGMENT_SEPARATOR) if batch else 0
+                if len(batch) + separator_bytes + len(fragment) > _BOOTSTRAP_FRAGMENT_BYTES:
+                    flush()
+                if batch:
+                    batch.extend(_BOOTSTRAP_FRAGMENT_SEPARATOR)
+                batch.extend(fragment)
+            if reference_hit is not None:
+                reference_hit(path, row.line, fragment)
+        flush()
+
+    def _add_bootstrap_hints(self, source: str, text: str) -> None:
+        source = self._tracked_paths.get(source, source)
+        for hint in literal_include_hints(text):
+            target = self.target_from_line(source, hint)
+            if target is not None:
+                self._add_edge(source, target)
 
     def _snapshot(self) -> _SourceIncludeSnapshot:
         paths = list(self._tracked_paths)

@@ -304,6 +304,9 @@ prototypes, simple macros, typedefs and whole named structures/unions/enums.
 Every enumerator or introduced type name participates in reference checks.
 Global function definitions require the configured kernel model; without a
 configuration, public function entries remain live.
+They must also be call-free leaves with only bound local/parameter value
+references and no observed macro bindings. Otherwise emitting an uncalled global
+function can still make a helper emit startup registrations.
 It searches both revisions, including unchanged configured consumers. Ordinary
 host-tool and documentation mentions are outside the kernel runtime model;
 configured include/build inputs and linker references remain relevant.

@@ -10,7 +10,7 @@ import re
 # Shared by Git's ERE and PCRE matchers. Continuation rows let the caller spot
 # a filename split across physical lines without normalizing every C source.
 INCLUDE_HINT_PATTERN = (
-    r'^.*(\\|\?\?/)[[:space:]]*$|include.*|import.*|#|%:|\?\?[/=]|"[^"]+"|<[A-Za-z_0-9./+-]+>'
+    r'^.*(\\|\?\?/)[[:space:]]*$|include.*|import.*|define.*\..*|".*"|<[A-Za-z_0-9./+-]+>'
     r'|[A-Za-z_0-9./+-]+\.(h|c|S|s|inc|txt|rst|def|tbl|lds)([^A-Za-z_0-9]|$)'
     r'|\\[[:space:]]*$'
 )

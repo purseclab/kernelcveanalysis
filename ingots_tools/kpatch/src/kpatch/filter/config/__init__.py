@@ -138,7 +138,7 @@ class ConfigFilter(StreamingCommitFilter):
             context.repo, snapshot, self.config.srcarch, source_paths,
             reference_names=names,
             reference_hit=references.bootstrap_hit if references is not None and names else None,
-            prefer_pcre=references is not None,
+            prefer_pcre=True,
         )
         if references is not None:
             references.finish_bootstrap()

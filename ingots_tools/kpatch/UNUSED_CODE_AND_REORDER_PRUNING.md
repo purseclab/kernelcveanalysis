@@ -52,6 +52,17 @@ the apparently unused function or typedef. Known macro-created tags, GNU
 `__real_`/`__wrap_` references and build-glue symbol references also retain
 affected definitions.
 
+An uncalled global function can still cause a referenced inline helper to emit
+a startup callback. Global-function pruning therefore also requires a call-free
+function whose value references resolve to its own parameters or local bindings.
+This check resolves occurrences at their lexical offsets, including signature
+and VLA bounds; a later shadowing declaration does not hide an earlier use.
+Any observed macro binding in the function's token footprint retains it, since
+even a type macro can hide an evaluated VLA call. Native call, helper-address
+and type-macro controls each change startup behavior and remain candidates in
+both default and lossy modes. The corresponding unused static-function controls
+show no startup change; this repair leaves their existing eligibility unchanged.
+
 Configured consumers now use the restored build/include model, including
 headers and non-C include fragments. Ordinary host-tool/documentation mentions
 do not keep a kernel definition live. Incomplete macro/include discovery may
