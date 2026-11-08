@@ -7,7 +7,7 @@ Operational/budget uncertainty must retain the proposed source mask.
 
 from bisect import bisect_right
 from collections import OrderedDict, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterable
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
@@ -18,7 +18,7 @@ from time import perf_counter
 
 from ..git import GitRepo
 from .config_filter import KbuildMakefile
-from .git_output import iter_git_records
+from .git_output import _iter_git_chunks, iter_git_records
 from .input_role_models import (InputInventoryState, RawInputConsumer, RawInputFailure, RawInputFailureKind,
                                 RawInputKind, RawInputObservation, RawInputUnknown, RawInputUnknownKind)
 
@@ -36,6 +36,9 @@ class RawInputIndexStats:
     witness_reads: int = 0
     witness_hits: int = 0
     veto_cache_hits: int = 0
+    delta_rows: int = 0
+    candidate_paths: int = 0
+    consumer_rebuilds: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +96,19 @@ class _ReadBudget:
     input_bytes: int = 0
 
 
+@dataclass(slots=True)
+class _MarkerBatch:
+    modes: dict[str, bytes] = field(default_factory=dict)
+    path_bytes: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _DeltaEntry:
+    path: str
+    mode: bytes
+    path_bytes: int
+
+
 @dataclass(frozen=True, slots=True)
 class _CachedFacts:
     facts: _FileFacts
@@ -110,7 +126,8 @@ _MAX_FILES = 8192
 _MAX_BYTES = 16 * 1024 * 1024
 _MAX_FILE_BYTES = 1024 * 1024
 _MAX_REFERENCES = 32768
-_MAX_CHANGED_PATHS = 1024
+_MAX_DELTA_ROWS = 500000
+_MAX_DELTA_PATH_BYTES = 16 * 1024 * 1024
 _MAX_TREE_ROWS = 500000
 _MAX_SNAPSHOTS = 4
 _MAX_FILE_CACHE = 4096
@@ -129,6 +146,62 @@ _MAKE_VARIABLE = re.compile(r'\$\(([A-Za-z_][A-Za-z_0-9]*)\)|\$\{([A-Za-z_][A-Za
 _COMPILE = re.compile(r'\$[({](?:CC|HOSTCC|CXX|HOSTCXX|CPP)[)}]|\b(?:gcc|clang|cc|cpp|g\+\+|clang\+\+)\b|'
                       r'\$\(call\s+(?:if_changed(?:_rule|_dep)?|cmd),\s*(?:cc_o_c|cc_s_c|as_o_S|cpp_s_S)\s*\)')
 _RAW_TOOL = re.compile(r'\b(?:perl|python[0-9.]*|awk|sed|cat|cp|xxd|objcopy)\b')
+
+
+def _delta_entry(header: bytes, raw_path: bytes, oid_width: int) -> _DeltaEntry:
+    fields = header.split(b' ')
+    if len(fields) != 5 or not fields[0].startswith(b':') or not raw_path:
+        raise ValueError('invalid_tree_delta')
+    old_mode, new_mode = fields[0][1:], fields[1]
+    modes = {b'000000', b'100644', b'100755', b'120000', b'160000'}
+    if old_mode not in modes or new_mode not in modes or fields[4] not in {b'A', b'D', b'M', b'T'}:
+        raise ValueError('invalid_tree_delta_mode_or_status')
+    for mode, oid in ((old_mode, fields[2]), (new_mode, fields[3])):
+        if (len(oid) != oid_width or re.fullmatch(rb'[0-9a-fA-F]+', oid) is None
+                or (mode == b'000000') != (oid == b'0' * oid_width)):
+            raise ValueError('invalid_tree_delta_object')
+    if ((fields[4] == b'A') != (old_mode == b'000000')
+            or (fields[4] == b'D') != (new_mode == b'000000')):
+        raise ValueError('invalid_tree_delta_status')
+    path = raw_path.decode('utf-8')
+    if _normal(path) != path:
+        raise ValueError('invalid_tree_delta_path')
+    return _DeltaEntry(path, new_mode, len(raw_path) + 1)
+
+
+def _iter_delta_entries(chunks: Iterable[bytes], oid_width: int) -> Generator[_DeltaEntry, None, None]:
+    """Require both NUL fields, including the final path terminator."""
+
+    pending = bytearray()
+    header: bytes | None = None
+    rows = path_bytes = 0
+    for chunk in chunks:
+        offset = 0
+        while offset < len(chunk):
+            end = chunk.find(b'\0', offset)
+            field_end = len(chunk) if end < 0 else end
+            pending.extend(chunk[offset:field_end])
+            limit = 2 * oid_width + 32 if header is None else _MAX_DELTA_PATH_BYTES - path_bytes - 1
+            if len(pending) > limit:
+                if header is None:
+                    raise ValueError('oversize_tree_delta_header')
+                raise _InventoryLimit(RawInputFailureKind.DELTA_PATH_BUDGET)
+            if end < 0:
+                break
+            offset = end + 1
+            if header is None:
+                header = bytes(pending)
+            else:
+                entry = _delta_entry(header, bytes(pending), oid_width)
+                rows += 1
+                path_bytes += entry.path_bytes
+                if rows > _MAX_DELTA_ROWS:
+                    raise _InventoryLimit(RawInputFailureKind.DELTA_ROW_BUDGET)
+                yield entry
+                header = None
+            pending.clear()
+    if header is not None or pending:
+        raise ValueError('unterminated_tree_delta')
 
 
 def _make_path(path: str) -> bool:
@@ -440,24 +513,6 @@ class RawInputIndex:
                     raise _InventoryLimit(RawInputFailureKind.FILE_BUDGET)
         return found
 
-    def _changed_markers(self, revision: str, paths: tuple[str, ...]) -> set[str]:
-        found: set[str] = set()
-        batch: list[str] = []
-        size = 0
-        for path in paths:
-            path_size = len(path.encode('utf-8')) + 1
-            if path_size > _MARKER_BATCH_BYTES:
-                raise _InventoryLimit(RawInputFailureKind.PATH_BUDGET)
-            if batch and (len(batch) >= _MARKER_BATCH_PATHS or size + path_size > _MARKER_BATCH_BYTES):
-                found.update(self._markers(revision, tuple(batch)))
-                batch.clear()
-                size = 0
-            batch.append(path)
-            size += path_size
-        if batch:
-            found.update(self._markers(revision, tuple(batch)))
-        return found
-
     def _account(self, path: str, source: bytes, budget: _ReadBudget) -> None:
         budget.files += 1
         budget.input_bytes += len(source)
@@ -499,6 +554,7 @@ class RawInputIndex:
             self._witness = _UncertaintyWitness(path, key[0], unknowns)
 
     def _read(self, snapshot: _Snapshot, path: str, mode: bytes, budget: _ReadBudget) -> None:
+        self._stats = replace(self._stats, consumer_rebuilds=self._stats.consumer_rebuilds + 1)
         snapshot.aliases.discard(path)
         if mode == b'000000':
             snapshot.files.pop(path, None)
@@ -543,14 +599,31 @@ class RawInputIndex:
                 continue
             self._store(snapshot, path, source, budget, alias=True, source_path=target)
 
+    def _flush_markers(self, snapshot: _Snapshot, batch: _MarkerBatch, budget: _ReadBudget) -> None:
+        if not batch.modes:
+            return
+        for path in self._markers(snapshot.revision, tuple(batch.modes)):
+            self._read(snapshot, path, batch.modes[path], budget)
+        batch.modes.clear()
+        batch.path_bytes = 0
+
+    def _inventory_path(self, snapshot: _Snapshot, path: str, mode: bytes, batch: _MarkerBatch, budget: _ReadBudget) -> None:
+        # Cold and delta inventories use precisely the same recognized scope.
+        if mode == b'120000' or _make_path(path):
+            self._read(snapshot, path, mode, budget)
+        elif path.endswith(_SOURCE_SUFFIXES):
+            size = len(path.encode('utf-8')) + 1
+            if size > _MARKER_BATCH_BYTES:
+                raise _InventoryLimit(RawInputFailureKind.PATH_BUDGET)
+            if batch.modes and (len(batch.modes) >= _MARKER_BATCH_PATHS or batch.path_bytes + size > _MARKER_BATCH_BYTES):
+                self._flush_markers(snapshot, batch, budget)
+            batch.modes[path] = mode
+            batch.path_bytes += size
+            self._stats = replace(self._stats, candidate_paths=self._stats.candidate_paths + 1)
+
     def _cold(self, snapshot: _Snapshot, budget: _ReadBudget) -> None:
         self._stats = replace(self._stats, repository_scans=self._stats.repository_scans + 1)
-        batch: dict[str, bytes] = {}
-        batch_bytes = 0
-        def flush() -> None:
-            for path in self._markers(snapshot.revision, tuple(batch)):
-                self._read(snapshot, path, batch[path], budget)
-            batch.clear()
+        batch = _MarkerBatch()
         args = ['ls-tree', '-r', '-z', snapshot.revision]
         with closing(iter_git_records(self.repo, args, b'\0', (0,))) as rows:
             for count, row in enumerate(rows):
@@ -562,44 +635,24 @@ class RawInputIndex:
                         or re.fullmatch(rb'[0-9a-fA-F]+', fields[2]) is None):
                     raise ValueError('invalid_tree_entry')
                 path = raw_path.decode('utf-8')
-                if fields[0] == b'120000' or _make_path(path):
-                    self._read(snapshot, path, fields[0], budget)
-                elif path.endswith(_SOURCE_SUFFIXES):
-                    size = len(raw_path) + 1
-                    if size > _MARKER_BATCH_BYTES:
-                        raise _InventoryLimit(RawInputFailureKind.PATH_BUDGET)
-                    if batch and (len(batch) >= _MARKER_BATCH_PATHS or batch_bytes + size > _MARKER_BATCH_BYTES):
-                        flush()
-                        batch_bytes = 0
-                    batch[path] = fields[0]
-                    batch_bytes += size
-        if batch:
-            flush()
+                self._inventory_path(snapshot, path, fields[0], batch, budget)
+        self._flush_markers(snapshot, batch, budget)
 
     def _incremental(self, snapshot: _Snapshot, anchor: _Snapshot, budget: _ReadBudget) -> None:
-        changes: dict[str, bytes] = {}
-        args = ['diff-tree', '--no-commit-id', '-r', '--raw', '-z', '--no-abbrev', '--no-renames', anchor.revision, snapshot.revision]
-        with closing(iter_git_records(self.repo, args, b'\0', (0,))) as rows:
-            for header in rows:
-                fields = header.split()
-                raw_path = next(rows, b'')
-                if (len(fields) != 5 or not header.startswith(b':') or not raw_path
-                        or fields[4] not in {b'A', b'D', b'M', b'T'}):
-                    raise ValueError('invalid_tree_delta')
-                changes[raw_path.decode('utf-8')] = fields[1]
-                if len(changes) > _MAX_CHANGED_PATHS:
-                    raise _InventoryLimit(RawInputFailureKind.CHANGED_PATH_BUDGET)
         snapshot.files = anchor.files.copy()
         snapshot.links = anchor.links.copy()
         snapshot.aliases = anchor.aliases.copy()
-        live = tuple(path for path, mode in changes.items() if mode != b'000000')
-        markers = self._changed_markers(snapshot.revision, live) if live else set()
-        for path, mode in changes.items():
-            snapshot.files.pop(path, None)
-            snapshot.links.pop(path, None)
-            snapshot.aliases.discard(path)
-            if path in markers or _make_path(path) or mode == b'120000':
-                self._read(snapshot, path, mode, budget)
+        batch = _MarkerBatch()
+        args = ['diff-tree', '--no-commit-id', '-r', '--raw', '-z', '--no-abbrev', '--no-renames', anchor.revision, snapshot.revision]
+        with closing(_iter_git_chunks(self.repo, args, (0,))) as chunks:
+            for entry in _iter_delta_entries(chunks, len(snapshot.revision)):
+                self._stats = replace(self._stats, delta_rows=self._stats.delta_rows + 1)
+                snapshot.files.pop(entry.path, None)
+                snapshot.links.pop(entry.path, None)
+                snapshot.aliases.discard(entry.path)
+                if entry.mode != b'000000':
+                    self._inventory_path(snapshot, entry.path, entry.mode, batch, budget)
+        self._flush_markers(snapshot, batch, budget)
         self._stats = replace(self._stats, incremental_updates=self._stats.incremental_updates + 1)
 
     def _build(self, revision: str) -> _Snapshot:

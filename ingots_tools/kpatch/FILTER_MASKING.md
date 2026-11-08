@@ -229,3 +229,11 @@ positive consumers, failed scans and aggregate limits remain barriers. The
 mandatory assumption report is written before any new masks, and every affected
 stage decision includes `lossy=true`, additive risk labels and original-side
 evidence. See [the API, flag and compiled risk controls](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
+
+Raw consumer updates share the cold scan's path dispatch. Every changed path
+first loses stale facts, links and alias state; only eligible source candidates
+enter bounded marker batches. A native raw-diff row/path-byte limit, truncated
+NUL framing, invalid metadata or nonzero exit leaves the snapshot incomplete.
+Alias refresh and global index checks finish before full publication. Cached
+facts can avoid cold rereads, so operational failure outcomes need not match a
+fresh scan; completed inventories are compared for their recognized data.

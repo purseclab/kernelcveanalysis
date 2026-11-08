@@ -35,7 +35,8 @@ class RawInputFailureKind(StrEnum):
     INPUT_BUDGET = 'input_budget'
     REFERENCE_BUDGET = 'reference_budget'
     TREE_BUDGET = 'tree_budget'
-    CHANGED_PATH_BUDGET = 'changed_path_budget'
+    DELTA_ROW_BUDGET = 'delta_row_budget'
+    DELTA_PATH_BUDGET = 'delta_path_budget'
     PATH_BUDGET = 'path_budget'
     PROTOCOL = 'protocol'
 

@@ -318,6 +318,9 @@ supported unresolved Make/assembly expressions are irrelevant, after a full
 recognized inventory. Observed raw consumers and scan failures still retain.
 This can remove runtime-relevant changes and has no measured error-rate bound;
 see [source-input assumptions](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
+Consumer revision updates stream bounded raw diffs and batch only candidate
+source paths for marker discovery, preserving complete facts across large
+non-consumer changes. Read and protocol failures still retain the candidate.
 Identifier renames with debug/BTF-name risks require the explicit lossy mode. Layout and
 field-specific reachability are not inferred from absence of field accesses.
 

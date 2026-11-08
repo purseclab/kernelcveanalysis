@@ -1,6 +1,29 @@
 # Future pruning work
 
-## Latest verified checkpoint — 2026-11-07
+## Latest verified checkpoint — 2026-11-08
+
+The current 515-original whitespace replay removes **zero whole commits without
+the explicit input-role assumption**, including in line-number mode. Recognized
+raw consumers and unresolved input roles retain changes by default. With
+`--unresolved-inputs-lossy` and its mandatory report, strict lines remove **168**;
+also enabling the audited line-number assumption removes **369**. These are
+**0.63% / 1.38% of the original 26,670 legacy survivors**, not additional
+whole-pipeline rates. Neither assumption has a measured false-removal bound.
+
+Exact streaming index updates recover **65 / 140 additional whole removals**
+over `7491d42` under those same assumptions, with no dropped masks or removals.
+The local paired replay takes 14.43% less elapsed time, with slightly higher
+memory. All **1,341 tests** pass, mypy checks 68 Python sources, and 69 packaged
+Python/C++ sources match the wheel. Independent auditing verifies every accepted
+mask and all historical consumer coordinates. See
+[the complete streaming results](#exact-streaming-consumer-updates--2026-11-08)
+and [the assumption contract](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
+
+The following checkpoint and later experiment sections preserve historical
+results from their own implementations; their default counts are superseded by
+the current raw-input guard and must not be added to the current totals.
+
+## Historical checkpoint — 2026-11-07
 
 All source reorders now require the explicit source-lossy option and an audit
 callback. Compiled public-pipeline controls show that unchanged code can observe
@@ -2685,3 +2708,131 @@ all 418 unique path/SHA pairs against actual regular Git blobs. It completes in
 38.81 seconds using 535 batched literal tree queries and 418 blob reads
 (7.97 MB), with no swap or OOM. This verifies evidence provenance, not the truth
 of the deliberately lossy assumption about those unresolved consumers.
+
+## Exact streaming consumer updates — 2026-11-08
+
+The `7491d42` replay recovered 103/229 whitespace wholes under explicit input
+assumptions, while 68/145 historical wholes were still retained on the old
+1,024 changed-path limit. The index first materialized and counted every changed
+path, including ordinary C code and documentation, before checking which paths
+could affect the supported consumer inventory. Sparse revisions repeatedly hit
+that limit and later forced cold scans.
+
+Updates now stream the complete raw Git diff. Every changed path removes its
+old facts, link and alias membership, including deletes and type transitions.
+The cold scan and incremental scan share the same dispatch: Make paths and
+symlinks are processed directly; only existing recognized C/ASM suffixes go to
+marker batches of at most 2,048 paths / 64 KiB. Other regular data/docs are
+neither searched nor parsed. Final link/target state is applied to all consumer
+aliases before rebuilding the positive/unknown/failure indices.
+
+This removes the all-changes dictionary and its 1,024-path cap. Separate hard
+limits of 500,000 raw rows and 16 MiB encoded path bytes bound the stream;
+`delta_row_budget` and `delta_path_budget` replace the obsolete failure kind.
+Header buffering is limited by native OID width. Both NUL fields, including the
+last pathname terminator, normalized UTF-8 paths, modes/OIDs/status and native
+success are required. A late producer/marker error or limit leaves the child
+incomplete and the anchor unchanged. Existing actual consumer work limits,
+global references and content caches remain in force. No new semantic or
+lossy assumption is introduced.
+
+Successful recognized data is compared against separate fresh cold indices.
+This does not promise identical operational failures: a warm inventory may reuse
+facts that a cold inventory must reread within its work budget. The existing
+per-update read budgets and global reference limits are unchanged; no new
+snapshot-cardinality policy is inferred from this improvement.
+
+Fifty-eight focused tests cover the existing index and the new implementation /
+independent delta controls. They include more than 1,024 irrelevant changes with
+a late positive consumer, both marker-batch boundaries, aliases through hidden
+extensions, target-only changes, renames/deletes/mode transitions, SHA-256 Git
+repositories, LF/colon/glob/Unicode names, exact limits, malformed metadata,
+truncated final NULs and real producers that exit after valid rows. Every late
+failure remains incomplete and reaps its native process. All eight saved compiled
+controls retain their prior default/assumed outcomes, reusing the same 32 GCC /
+Clang executable runs.
+
+A real original `d60f2280…` (`lib/lockref.c`) provides the first actual recovery.
+Starting from the recorded anchor `4477b060…`, the committed baseline retains it
+because parent/child inventory updates hit `changed_path_budget`. The new
+strict whitespace stage with the same explicit input assumption whole-prunes it
+with both required audits. Parent and child inventories each contain 3,322
+facts, 62 links and nine aliases and exactly match independent fresh cold data
+across files, links, aliases, unknowns, failures and positive maps. The new
+pipeline takes 2.57 seconds after a 24.06-second anchor seed; fresh parent/child
+oracles take 24.64/24.39 seconds. These local timings are not an independent
+throughput benchmark. The one separately bounded comparison finishes in 102.72
+seconds, under its 896 MiB hard / 832 MiB RSS limits, without OOM or swap.
+
+All 1,341 tests pass, including captured binary SELinux integration; mypy checks
+68 Python sources and all 69 packaged Python/C++ sources match the wheel. The
+large paired replay uses the previous experiment's unchanged original order,
+four modes, shared cache/reader, fresh masks and resource caps. Final population
+counts are recorded only after completion and independent artifact verification.
+Evidence lives in ignored `benchmarks/streaming_input_delta/2026-11-08/` and
+`benchmarks/input_role_streaming_delta/2026-11-07/` directories.
+
+The completed same-order four-mode replay covers all 515 originals. Only the
+index implementation and its typed operational-limit names differ from the
+`7491d42` baseline; flags, source proofs, original masks and consumer scope are
+unchanged:
+
+| Mode | Before streaming | After streaming | Additional whole removals | Original 26,670 cohort |
+| --- | ---: | ---: | ---: | ---: |
+| Default strict | 0 | 0 | 0 | 0% |
+| Default line-number mode | 0 | 0 | 0 | 0% |
+| Explicit input assumption, strict lines | 103 | 168 | 65 | 0.63% total |
+| Explicit input plus line-number assumptions | 229 | 369 | 140 | 1.38% total |
+
+The new assumption-qualified totals cover 32.62% / 71.65% of the selected 515,
+with 12 / 20 additional retained partial commits and 246 / 503 published file
+masks. No previously accepted whole identity is dropped. The 168 remain a subset
+of 369, and both remain within the historical 172/381. The four / twelve
+historical whole candidates still retained have observed positive consumer
+matches. No revision-budget failure accounts for those remaining cases in this
+completed sample. A positive includes conservative basename matches, so this is
+not a count of proven runtime-changing commits.
+
+The paired worker takes 936.75 seconds versus 1,094.73 before (14.43% lower
+elapsed time in these local runs); the monitor takes 937.68 seconds. It performs
+one cold inventory instead of 23, and 766 incremental updates instead of 460.
+Marker queries fall to 931 from 1,303. Across all updates it validates 560,830 raw rows
+and considers 519,041 candidate paths, rebuilding 14,349 consumers. The raw-row
+and encoded-path limits apply separately to each revision update, not to these
+cumulative counters. Peak sampled combined RSS is 786.5 MiB and the cgroup peak
+is 829.0 MiB, under the unchanged 832 MiB RSS / 896 MiB hard limits with no OOM or
+swap. Memory is slightly higher than the previous 743.7/778.8 MiB run; streaming
+Python metadata does not bound Git's internal diff queue. These are paired
+experiment measurements, not a universal speed or memory guarantee.
+
+The separate structural replay fully completes default 0/11 and input-assumed
+strict 7/11 (previously 2/11), recovering all seven historical diagnostic-wording
+cases. The combined source-lossy profile stops at its original 295-second limit
+after six of eleven commits: five whole removals and the positively matched
+prototype retained, with five outcomes unresolved. Its hrtimer reorder is
+actually removed only with the existing source-lossy flag, recording both
+code-address/layout risks and the input-role risk. This partial profile is not
+reported as a complete five/eleven result, and no source profiles are added to
+the separate population's cohort percentage. No retry or guard override was
+used to complete it.
+
+Independent verification checks all 515 original identities, all 749 published
+file masks with their mandatory and stage audits, strict/line subset relations,
+and zero lost masks or whole removals from `7491d42`. A separate fresh native Git
+oracle verifies all 65,142 historical revision/path coordinates and all 477
+unique path/SHA pairs from accepted-mask evidence against regular Git blobs.
+It uses 845 literal batched tree queries and freshly hashes 477 blobs (10.84 MB),
+finishing in 74.33 seconds with no swap or OOM. All production hashes match the
+full test suite and packaged wheel. These checks establish evidence provenance
+and implementation consistency; they do not establish the truth of the explicit
+lossy input assumption or a bound on false removals.
+
+Further basename precision needs typed operand-origin and match-provenance
+records before it can justify narrower matching. A name may come from a direct
+prerequisite, a harvested variable value or a contextual expansion. Make's
+`src`, `obj` and `srctree` bindings, nested includes, assembler search paths, and
+generated/external aliases are not pinned by this index. Directory spelling
+alone cannot certify an exact-only reference. Removing basename fallback, or
+turning a positive match into waivable uncertainty, would change the assumption
+boundary rather than provide another exact optimization. Preserve these vetoes
+until the relevant invocation and binding evidence is available.

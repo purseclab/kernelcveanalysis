@@ -112,3 +112,25 @@ Local ignored evidence is in `benchmarks/source_role_assumptions/2026-11-07/`,
 `benchmarks/input_role_assumption_characterization/2026-11-07/` and
 `benchmarks/typed_input_role_preflight/2026-11-07/`. Test and benchmark artifacts
 are excluded from milestone commits under the user's commit constraint.
+
+## Streaming revision updates
+
+Revision updates stream the complete native raw diff. Every changed pathname
+loses its previous facts/link/alias state, including deletions and type changes.
+Make paths and symlinks use direct dispatch; only recognized C/assembly candidate
+paths enter positive marker batches, bounded at 2,048 paths and 64 KiB of argv
+path bytes. Unrecognized regular documentation/data files need neither marker
+search nor source parsing. Aliases are refreshed after the final link changes.
+
+The old limit of 1,024 materialized changed paths is replaced by separate hard
+limits of 500,000 raw rows and 16 MiB encoded pathname bytes. These produce
+`delta_row_budget` and `delta_path_budget` failures. A complete final NUL,
+validated modes/OIDs/status/paths and successful native exit are required before
+publishing a full inventory. The existing consumer read/file, global reference
+and content-cache limits still apply; this change adds no semantic assumption.
+
+Successful incremental facts are checked against independent fresh scans.
+Operational failure outcomes need not be identical: a warm update can reuse
+facts that a cold scan would have to reread within its work budget. The real
+kernel preflight completes both fresh scans and verifies exact parent/child
+facts, links, aliases, unknowns, failures and positive maps.
