@@ -5,18 +5,19 @@
 The current 515-original whitespace replay removes **zero whole commits without
 the explicit input-role assumption**, including in line-number mode. Recognized
 raw consumers and unresolved input roles retain changes by default. With
-`--unresolved-inputs-lossy` and its mandatory report, strict lines remove **168**;
-also enabling the audited line-number assumption removes **369**. These are
-**0.63% / 1.38% of the original 26,670 legacy survivors**, not additional
+`--unresolved-inputs-lossy` and its mandatory report, strict lines remove **169**;
+also enabling the audited line-number assumption removes **379**. These are
+**0.63% / 1.42% of the original 26,670 legacy survivors**, not additional
 whole-pipeline rates. Neither assumption has a measured false-removal bound.
 
-Exact streaming index updates recover **65 / 140 additional whole removals**
-over `7491d42` under those same assumptions, with no dropped masks or removals.
-The local paired replay takes 14.43% less elapsed time, with slightly higher
-memory. All **1,341 tests** pass, mypy checks 68 Python sources, and 69 packaged
-Python/C++ sources match the wheel. Independent auditing verifies every accepted
-mask and all historical consumer coordinates. See
-[the complete streaming results](#exact-streaming-consumer-updates--2026-11-08)
+The latest layout repair preserves directive-ending lines and supports multiline
+directive comments, adding **1 / 10 whole removals** over `d87c33c` without new
+flags or assumptions. The preceding streaming index update recovered **65 / 140**
+over `7491d42`; these are successive gains under the same assumptions, with no
+dropped prior masks or removals in the paired replays. All **1,344 tests** pass,
+mypy checks 68 Python sources, and 69 packaged Python/C++ sources match the wheel.
+See [the latest layout results](#directive-ending-lines-and-multiline-comments--2026-11-08),
+[the preceding streaming results](#exact-streaming-consumer-updates--2026-11-08)
 and [the assumption contract](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
 
 The following checkpoint and later experiment sections preserve historical
@@ -2836,3 +2837,95 @@ alone cannot certify an exact-only reference. Removing basename fallback, or
 turning a positive match into waivable uncertainty, would change the assumption
 boundary rather than provide another exact optimization. Preserve these vetoes
 until the relevant invocation and binding evidence is available.
+
+## Directive-ending lines and multiline comments — 2026-11-08
+
+The preceding layout comparator missed a physical directive-ending line when
+all real tokens retained their coordinates. In a compiled control, adding a
+trailing standard splice to `#line 100` and removing the next blank line changes
+GCC's later `__LINE__` from 101 to 100; Clang keeps 101 in this example. The old
+strict comparator accepted both. GNU line markers and an included line alias
+expose the same issue. These are host language controls, not target-kernel
+build-equivalence certificates.
+
+The strict line digest now includes every directive terminator's physical start
+line, mapping after removed splices. A synthetic EOF terminator uses that same
+anchor, preserving explicit-LF versus implicit-EOF equivalence. Terminator
+columns remain irrelevant, so trailing comment widths are not newly significant.
+The existing line-number-lossy mode can still waive these line observations
+with its mandatory audit; no new flag or assumption was added.
+
+This also permits multiline block comments within directives: the located lexer
+already keeps a directive active across a comment's internal newlines. Layout
+uses comment normalization only for validity, then compares the complete located
+tokens. Shared line-based CPP, macro, include and diagnostic consumers retain
+their stricter normalization checks. Token/gap/column, unsupported-input, raw
+consumer and resource guards are unchanged. See
+[the updated contract](WHITESPACE_PRUNING.md).
+
+All 1,344 tests pass, including the captured binary-policy integrations; mypy
+checks 68 Python files, and all 69 packaged Python/C++ sources match the wheel.
+Independent validation covers 21 controls and 84 actual public-filter runs.
+Strict mode retains the behavior-changing line controls even with the separate
+input assumption. A real `.incbin` control observes changed comment bytes and
+remains retained in every mode, with zero masks or audits. EOF, CRLF, spliced
+comment delimiters, macro spacing, stringification gaps, byte columns and header
+ambiguity controls pass. Frozen evidence is under ignored
+`benchmarks/directive_layout/2026-11-08/` and
+`benchmarks/layout_directive_review/2026-11-08/`.
+
+A targeted actual replay completes all 44 runs over the 11 formerly unsupported
+originals and their 39 changed files. Both default profiles remove zero wholes.
+With the existing input assumption, strict lines remove one whole (`fc76b596…`,
+`exportfs.h` documentation); the line-number assumption removes ten. The
+27-file `62451ae…` stays retained in every profile because `mm/memblock.c` has a
+positive source-copy consumer; its other 26 files receive partial masks in the
+assumed profiles. All 65 published masks retain their mandatory/stage audits,
+and independent checks find no dropped prior masks. These are targeted replay
+results, not a recomputed 515-candidate total.
+
+The run takes 102.93 seconds with 698.4 MiB sampled combined RSS and 178.5 MiB
+cgroup peak, under the 896 MiB hard / 832 MiB RSS limits, with no OOM or swap.
+All original patches and 77 distinct historical source coordinates are checked,
+and the 69 frozen package sources remain unchanged. No positive consumer or
+operational failure is waived. The evidence is in the `preflight/` directory
+under the directive-layout root.
+
+The completed same-order 515-original replay uses fresh masks, all four existing
+profiles, the shared production reader/provider and the same resource limits:
+
+| Mode | `d87c33c` baseline | After directive repair | Additional wholes |
+| --- | ---: | ---: | ---: |
+| Default strict | 0 | 0 | 0 |
+| Default line-number mode | 0 | 0 | 0 |
+| Existing input assumption, strict lines | 168 | 169 | 1 |
+| Existing input plus line-number assumptions | 369 | 379 | 10 |
+
+Strict/line profiles publish 248 / 514 file masks and retain 12 / 19 additional
+partial commits. No previous whole ID or mask is dropped, and default outputs
+remain identical. The whole totals cover 32.82% / 73.59% of the selected 515, or
+0.63% / 1.42% of the original 26,670 legacy survivors. The incremental gains are
+only 0.00375 / 0.03750 percentage points of that larger cohort. These are
+stage-specific, assumption-qualified measurements, not a regenerated complete
+pipeline rate or a false-removal bound. The former 172/381 historical sets are
+no longer a syntax-support ceiling: new accepted IDs include formerly
+unsupported directive-comment files.
+
+The worker completes in 950.80 seconds (951.75 including its monitor), versus
+936.75 in the preceding local run. This does not demonstrate a speedup. Peak
+sampled combined RSS is 816.6 MiB and cgroup peak 559.6 MiB, within the unchanged
+832 / 896 MiB limits, with no OOM or swap. Python/Git shared-page accounting and
+host cache state limit comparisons between these sequential experiments. The
+worker is reaped, and all 69 production hashes still match the frozen tests/wheel.
+Each authorized replay runs once; no guard override or timeout retry is used.
+
+Independent final verification rereads all 515 originals and all 762 published
+mask/audit events, reconstructs every materialized patch, checks strict/line
+coverage and confirms zero dropped prior masks or removals. A fresh bounded
+native Git oracle verifies all 66,526 historical unknown-consumer source
+coordinates and all 478 unique path/SHA evidence pairs against regular blobs,
+using 862 literal tree queries and 478 freshly hashed blobs. It completes in
+72.76 seconds, exits successfully and reaps its worker without OOM or swap.
+All source/test hashes still match the completed test and wheel checks. This
+establishes evidence provenance and implementation consistency, not the truth
+of the explicit input/line assumptions or a bound on false removals.

@@ -172,7 +172,10 @@ class LayoutComparer:
             return None
         try:
             text = source.decode("utf-8", errors="strict")
-            if preprocessor_directive_text(text, strict_multiline=True) is None:
+            # Only validate comment/header context here. The located lexer
+            # keeps directives intact across comment-internal newlines; the
+            # normalizer's line-preserving output is not consumed by layout.
+            if preprocessor_directive_text(text) is None:
                 return None
             return self._token_digest(text)
         except (UnicodeError, CTokenizationError):
@@ -180,7 +183,7 @@ class LayoutComparer:
 
     def _token_digest(self, source: str) -> _LayoutFact | None:
         body_digest = sha256(b"kpatch:pp-layout:body:v2\0")
-        line_digest = sha256(b"kpatch:pp-layout:lines:v1\0")
+        line_digest = sha256(b"kpatch:pp-layout:lines:v2\0")
         mapper, cursor = _SpliceMap(source), _PhysicalCursor(source)
         count = 0
         after_newline = False
@@ -191,7 +194,14 @@ class LayoutComparer:
                 return None
             body_digest.update(_token_frame(span, after_newline=after_newline))
             after_newline = span.token.kind in _SEMANTIC_NEWLINES
-            if span.token.kind not in _SEMANTIC_NEWLINES:
+            if span.token.kind is CTokenKind.DIRECTIVE_NEWLINE:
+                # #line anchors the next logical line at the directive's end,
+                # which can move across a trailing comment or splice while
+                # every real token keeps its original physical coordinates.
+                # The start line also treats a synthetic EOF newline like LF.
+                cursor.advance(mapper.physical(span.start, right_bias=True))
+                line_digest.update(pack(">I", cursor.line))
+            elif span.token.kind not in _SEMANTIC_NEWLINES:
                 cursor.advance(mapper.physical(span.start, right_bias=True))
                 first_line, first_column = cursor.line, cursor.column
                 cursor.advance(mapper.physical(span.end, right_bias=False))

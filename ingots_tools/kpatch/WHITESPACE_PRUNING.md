@@ -19,9 +19,23 @@ Each span identifies its token and whether logical whitespace or a comment
 precedes it. The comparison hashes token kinds, spellings and gaps, plus every
 real token's physical start/end line and UTF-8 byte column. It maps token starts
 after a removed splice and token ends before that splice. Directive boundaries
-and optional ordinary newline tokens remain significant; their columns and
-trailing trivia do not. An explicit newline already separates tokens, so the
+and optional ordinary newline tokens remain significant. Each directive-ending
+newline's physical start line is also hashed, including a synthetic EOF newline;
+its column is not. An explicit newline already separates tokens, so the
 gap immediately following it is normalized; all other gaps remain significant.
+
+Block comments can span physical lines inside a directive without ending that
+directive. The layout comparison validates comment/header context, then uses
+the complete located token stream rather than the normalizer's line-preserving
+text. Line-based CPP consumers keep their stricter normalization checks. This
+follows [GCC's comment and splice processing](https://gcc.gnu.org/onlinedocs/cpp/Initial-processing.html).
+
+The directive-ending line matters even when all real token positions match:
+adding a trailing splice to `#line 100` while removing the next blank line
+changes a later `__LINE__` from 101 to 100 with GCC. Strict comparison retains
+this change. Mapping the terminator after any removed splice also covers
+multiline comments, GNU line markers and EOF, while keeping an implicit final
+newline equivalent to an explicit LF on the same line.
 
 Angle header names are atomic, with their exact internal bytes preserved.
 The lexer advances past the whole header instead of emitting its contents as
@@ -43,7 +57,7 @@ Git source reads continue to use the pipeline's shared bounded blob reader.
 
 Invalid UTF-8, NUL, BOM, trigraph spellings, bare CR, GNU whitespace-before-newline
 splices, unsupported tokens, unclosed complete-source comments/literals and
-ambiguous multiline directive comments retain the edit. Ordinary unchanged
+ambiguous header/comment contexts retain the edit. Ordinary unchanged
 standard splices are supported. C++ raw literals, header-unit imports,
 `__has_include`, `__has_include_next`, `__has_embed` and `#embed` require lexical
 contexts this implementation does not model, so they also retain changes.
@@ -85,8 +99,9 @@ retained, even when a particular build might not observe the difference.
 
 The default remains strict. The separate `--whitespace-line-numbers-lossy`
 option, with mandatory `--whitespace-report`, permits only the physical line
-coordinates to differ. Token kinds/spellings, logical gaps, directive boundaries,
-physical byte columns, supported-input checks and resource limits still apply.
+coordinates, including directive-ending lines, to differ. Token kinds/spellings,
+logical gaps, directive boundaries, physical byte columns, supported-input checks
+and resource limits still apply.
 It does not enable other lossy source-pruning rules.
 
 The cached complete fact has a framed token/gap/column digest and a separate
