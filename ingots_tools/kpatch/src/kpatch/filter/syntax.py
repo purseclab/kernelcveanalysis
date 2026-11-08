@@ -1,7 +1,7 @@
 """Small Tree-sitter analyses shared by source equivalence and use filtering."""
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 
 from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
@@ -34,6 +34,14 @@ class Definition:
     end: int
     line: int
     end_line: int
+    introduced_names: frozenset[str] = frozenset()
+    tag_names: frozenset[str] = frozenset()
+    scope_names: frozenset[str] = frozenset()
+    external_linkage: bool = False
+
+    @property
+    def names(self) -> frozenset[str]:
+        return self.introduced_names | {self.name}
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +213,190 @@ def definitions(source: bytes, tree: Tree) -> tuple[Definition, ...]:
             node.start_point.row + 1, node.start_point.row + node_text(node).rstrip(b"\r\n").count(b"\n") + 1,
         ))
     return tuple(found)
+
+
+_FILE_SCOPE_CONDITIONALS = frozenset({"preproc_if", "preproc_ifdef", "preproc_else", "preproc_elif"})
+_PLACEMENT_EFFECT = re.compile(rb"\b__(?:init|exit|attribute|section|used|visible|alias|weak|constructor)\w*\b|\b(?:_Pragma|__pragma|asm|__asm|__asm__)\b")
+_TAG_KINDS = frozenset({"struct_specifier", "union_specifier", "enum_specifier"})
+
+
+@dataclass(frozen=True, slots=True)
+class _TagDeclaration:
+    kind: str
+    name: str
+    start: int
+    scope: tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _TagDependencies:
+    introduced: frozenset[str]
+    bindings: frozenset[str]
+
+
+def _conditional_scope(node: Node) -> tuple[tuple[int, int], ...] | None:
+    scope: list[tuple[int, int]] = []
+    parent = node.parent
+    while parent is not None:
+        if parent.type in {"preproc_elifdef", "preproc_elifndef"}:
+            return None
+        if parent.type in {"preproc_if", "preproc_ifdef", "preproc_elif"}:
+            alternative = parent.child_by_field_name("alternative")
+            arm = (alternative.start_byte if alternative is not None
+                   and alternative.start_byte <= node.start_byte < alternative.end_byte else parent.start_byte)
+            scope.append((parent.start_byte, arm))
+            if len(scope) > 128:
+                return None
+        parent = parent.parent
+    return tuple(reversed(scope))
+
+
+def _global_tag(node: Node) -> bool:
+    parent = node.parent
+    while parent is not None:
+        if parent.type in {"compound_statement", "parameter_list", "ERROR", "preproc_def", "preproc_function_def"}:
+            return False
+        parent = parent.parent
+    return True
+
+
+def _tag_declarations(tree: Tree) -> dict[tuple[str, str], list[_TagDeclaration]]:
+    declarations: dict[tuple[str, str], list[_TagDeclaration]] = {}
+    for node in nodes(tree.root_node):
+        if node.type not in _TAG_KINDS or node.has_error or not _global_tag(node):
+            continue
+        name, scope = node.child_by_field_name("name"), _conditional_scope(node)
+        if name is not None and scope is not None:
+            text = node_text(name).decode()
+            declarations.setdefault((node.type, text), []).append(_TagDeclaration(node.type, text, node.start_byte, scope))
+    return declarations
+
+
+def _escaping_tags(node: Node, declarations: dict[tuple[str, str], list[_TagDeclaration]]) -> _TagDependencies | None:
+    scope = _conditional_scope(node)
+    if scope is None:
+        return None
+    introduced: set[str] = set()
+    bindings: set[str] = set()
+    for tag in nodes(node):
+        if tag.type not in _TAG_KINDS or not _global_tag(tag):
+            continue
+        name = tag.child_by_field_name("name")
+        if name is None:
+            continue
+        if re.fullmatch(rb"[A-Za-z_][A-Za-z_0-9]*", node_text(name)) is None:
+            return None
+        text = node_text(name).decode()
+        bindings.add(text)
+        prior = declarations.get((tag.type, text), ())
+        if not any(item.start < node.start_byte and scope[:len(item.scope)] == item.scope for item in prior):
+            introduced.add(text)
+    return _TagDependencies(frozenset(introduced), frozenset(bindings))
+
+
+def _file_scope(node: Node) -> bool:
+    parent = node.parent
+    while parent is not None and parent.type in _FILE_SCOPE_CONDITIONALS:
+        parent = parent.parent
+    return parent is not None and parent.type == "translation_unit"
+
+
+def _prototype_declarator(node: Node) -> bool:
+    """Permit pointer return types, excluding function-pointer objects."""
+    for _ in range(16):
+        if node.type == "function_declarator":
+            name = node.child_by_field_name("declarator")
+            return name is not None and name.type == "identifier"
+        if node.type not in {"pointer_declarator", "attributed_declarator"}:
+            return False
+        child = node.child_by_field_name("declarator")
+        if child is None:
+            return False
+        node = child
+    return False
+
+
+def unused_definitions(source: bytes, tree: Tree) -> tuple[Definition, ...]:
+    """Standalone declaration groups, with every escaping name represented.
+
+    Global functions still require the caller's repository-wide use/export
+    checks. Enum groups include all enumerators: removing an individual entry
+    could change subsequent values or the underlying enum representation.
+    """
+    found = list(definitions(source, tree))
+    covered = {item.start for item in found}
+    for node in nodes(tree.root_node):
+        if node.start_byte in covered or node.has_error or not _file_scope(node):
+            continue
+        if _PLACEMENT_EFFECT.search(node_text(node)):
+            continue
+        names: set[str] = set()
+        name: Node | None = None
+        if node.type == "function_definition":
+            if re.search(rb"(?m)^[ \t]*#", node_text(node)):
+                continue
+            declarator = node.child_by_field_name("declarator")
+            name = declarator_name(declarator) if declarator is not None else None
+            if name is not None and node_text(name) in {
+                b"main", b"_start", b"start_kernel", b"init_module", b"cleanup_module", b"secondary_start_kernel",
+            }:
+                continue
+        elif node.type == "declaration":
+            declarators = node.children_by_field_name("declarator")
+            if len(declarators) != 1 or not _prototype_declarator(declarators[0]):
+                continue
+            name = declarator_name(declarators[0])
+        elif node.type == "type_definition":
+            declarators = node.children_by_field_name("declarator")
+            if len(declarators) != 1:
+                continue
+            name = declarator_name(declarators[0])
+        elif node.type in {"union_specifier", "enum_specifier"}:
+            if node.child_by_field_name("body") is None:
+                continue
+            name = node.child_by_field_name("name")
+            if node.type == "enum_specifier":
+                enumerators = [child.child_by_field_name("name") for child in nodes(node) if child.type == "enumerator"]
+                names.update(node_text(child).decode() for child in enumerators if child is not None)
+                if name is None and enumerators:
+                    name = enumerators[0]
+        else:
+            continue
+        if name is None or re.fullmatch(rb"[A-Za-z_][A-Za-z_0-9]*", node_text(name)) is None:
+            continue
+        # Nested tag definitions escape prototypes/typedefs independently of
+        # their apparent outer name and need their own declaration-site model.
+        if any(child != node and child.type in {"struct_specifier", "union_specifier", "enum_specifier"}
+               and child.child_by_field_name("body") is not None for child in nodes(node)):
+            continue
+        found.append(Definition(node_text(name).decode(), node.type, node.start_byte, node.end_byte,
+                                node.start_point.row + 1,
+                                node.start_point.row + node_text(node).rstrip(b"\r\n").count(b"\n") + 1,
+                                frozenset(names)))
+    declarations = _tag_declarations(tree)
+    by_start = {(node.start_byte, node.type): node for node in nodes(tree.root_node)
+                if node.type in {"function_definition", "declaration", "type_definition", *_TAG_KINDS}}
+    result: list[Definition] = []
+    for item in found:
+        definition_node = by_start.get((item.start, item.kind))
+        if definition_node is None:
+            result.append(item)
+            continue
+        body = definition_node.child_by_field_name("body") if item.kind == "function_definition" else None
+        if body is not None and any(tag.type in _TAG_KINDS and tag.start_byte < body.start_byte
+                                    and tag.child_by_field_name("body") is not None for tag in nodes(definition_node)):
+            continue
+        introduced = _escaping_tags(definition_node, declarations)
+        region = source[item.start:body.start_byte] if body is not None else node_text(definition_node)
+        tokens = tokenize_c_source(region.decode())
+        if introduced is not None and tokens is not None:
+            result.append(replace(item, introduced_names=item.introduced_names | introduced.introduced,
+                                  tag_names=introduced.bindings,
+                                  scope_names=frozenset(token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER),
+                                  external_linkage=(item.kind == "function_definition"
+                                                    and not any(child.type == "storage_class_specifier" and node_text(child) == b"static"
+                                                                for child in definition_node.children))))
+    return tuple(result)
 
 
 def declaration_names(tree: Tree) -> frozenset[bytes]:

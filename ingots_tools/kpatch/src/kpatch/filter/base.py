@@ -245,7 +245,7 @@ class _CachedSourceInputRoles:
             read = context.file_reader.read_file if context.file_reader is not None else context.repo.read_file
             self._index = RawInputIndex(context.repo, read)
             self._repo, self._reader = context.repo, context.file_reader
-        if context.input_role_policy is not None:
+        if context.input_role_policy is not None or context.full_input_inventory:
             return self._index.lookup(revision, path)
         return self._index.veto_observation(revision, path)
 
@@ -259,6 +259,9 @@ class FilterContext:
     reference_index: "ReferenceIndex | None" = None
     input_roles: SourceInputRoleProvider = field(default_factory=_CachedSourceInputRoles, repr=False, compare=False)
     input_role_policy: SourceInputAssumptionPolicy | None = field(default=None, repr=False, compare=False)
+    # Configuration checks need actual positive witnesses, rather than the
+    # source-only shortcut that retains on the first unrelated unknown operand.
+    full_input_inventory: bool = field(default=False, repr=False, compare=False)
 
     @classmethod
     def from_db_range(

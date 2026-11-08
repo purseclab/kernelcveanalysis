@@ -3,8 +3,9 @@
 Implemented in the existing opt-in `--source-pruning` pipeline. Its order stays
 merge → config → ifdef → dead code → whitespace → final comparison. The final
 comparison is still `RenameFilter`; there is no extra stage or progress bar.
-Identifier substitutions and source reorders require `--source-pruning-lossy`
-and an audit report. BTF/CO-RE and kallsyms can make names observable; source
+Consistent identifier and prototype-parameter names are compared with cosmetic
+BTF/debug differences accepted. Function-body binding renames and source
+reorders require `--source-pruning-lossy` and an audit report. Source
 permutations can change observable function and callsite addresses. Default
 filtering retains reorders. The API requires both `lossy=True` and an
 `on_pruned` callback to accept them.
@@ -36,11 +37,27 @@ containing `##` no longer blocks an otherwise eligible unused definition.
 Actual assembly, implicit function-name constructs, macro stringification and
 token pasting still retain the candidate. Ambiguous parser tokens also retain it.
 
-This fixes a guard; it does not replace the reference proof. Both revisions
-still need the existing spelling/reference/configuration checks. The 64 KiB
-file limit, prefix/suffix guards, macro/type restrictions, and bounded partial
-function analysis remain. Enumerators, generated declarations, global functions
-and recursive whole-program dead-code elimination have not been added.
+Both revisions still need spelling/reference/configuration checks. The current
+inventory includes global functions, standalone prototypes, typedefs, unions
+and whole enums in addition to static functions, macros and structures. All
+introduced names and enum members are tracked; a used enumerator retains its
+whole group. Files are bounded to 2 MiB. Exports, callbacks, registrations and
+known escaping macro effects remain uses or barriers. General recursive
+whole-program dead-code elimination remains future work.
+
+Global function definitions require a supplied kernel configuration; analysis
+without one retains public function entries. Return types and declarations may
+introduce file-scope tags, so those escaping names are checked independently of
+the apparently unused function or typedef. Known macro-created tags, GNU
+`__real_`/`__wrap_` references and build-glue symbol references also retain
+affected definitions.
+
+Configured consumers now use the restored build/include model, including
+headers and non-C include fragments. Ordinary host-tool/documentation mentions
+do not keep a kernel definition live. Incomplete macro/include discovery may
+be assumed only in existing audited source-lossy mode. The existing audited
+line-number option also applies to unused-definition removals; moved column
+observers remain checked.
 
 ## Independent helper reordering
 
@@ -133,12 +150,15 @@ include/spelling context even in lossy mode; failed context checks run before
 expensive global location queries. External/generated input closure remains a
 separate model limitation.
 
-This remains an experimental C-source model. Kbuild input closure is currently
-unknown, so parser absence and captured configuration do not authorize masks.
-Explicit complete CPP context is required for configuration projection.
+This remains a modeled Linux build/source analysis. Configured absence can
+authorize masks under that model without a complete external-input certificate.
+Known compiled/include/raw consumers and operational failures retain changes.
+An exclusive modeled CPP context is required for configuration projection;
+ambiguous, forced-header and additional-only contexts remain incomplete.
 Compiler keyword macros, generated or forced includes, command-line definitions,
-arbitrary preprocessing tricks, external modules and debug/BTF observability
-need stronger compiler-aware analysis. A file can also be embedded as raw data
+arbitrary preprocessing tricks and external modules need stronger
+compiler-aware analysis. Cosmetic debug/BTF names are outside the selected
+relevance scope. A file can also be embedded as raw data
 by assembly or consumed by a generator; even comment equivalence then needs a
 complete input-role contract. It is not a whole-build proof. Include ordering, field/enum ordering, other switch ordering, statement
 ordering, file moves, call-dependent helpers and semantic refactors remain work.

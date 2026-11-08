@@ -16,8 +16,10 @@ See [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md) for sample estimates,
 pruning criteria, and the proposed AST comparison approach.
 
 Experimental unused-definition filters are available through
-`filter config --source-pruning`. Identifier renames and bounded source reorders
-require the separate lossy mode; numeric constant folding requires `--constant-branches`.
+`filter config --source-pruning`. Consistent renames and prototype parameter
+names are compared under the kernel source model; function-body binding renames
+and bounded source reorders use the separate lossy mode. Numeric constant
+folding requires `--constant-branches`.
 Target hardware inventory and general policy
 reachability remain future work. A narrow,
 opt-in compiler-backed policy stage is available through `kpatch policy` and
@@ -27,21 +29,28 @@ in [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md#compiler-backed-policy-protot
 The policy profile can pin a raw installed seccomp filter using
 `seccomp.filter_file` and `filter_sha256`. The ARM64 prototype resolves native
 and compat syscall slots from compiler facts and requires universal denial.
-Opaque callers and incomplete assembly/type-use coverage retain changes;
-service-inclusive findings remain candidates. BTF-enabled targets retain policy
-candidates until emitted metadata equivalence can be established. See the
+Caller checks distinguish compatible indirect calls and explicit assembly
+transfers from unrelated header callbacks and ordinary ARM64 instructions.
+Service-inclusive findings remain candidates. BTF/debug metadata differences
+are accepted and recorded; they no longer veto runtime policy pruning. See the
 [capture and review results](FUTURE_PRUNING_WORK.md#exact-seccomp-capture-and-entry-proof-review--resumed-2026-11-07).
 
-Lossy source pruning recognizes consistent identifier substitutions and lexical
-function-prototype, parameter and local-variable renames. Types, bounds,
+Policy exclusion preserves functional registration effects emitted through
+inline helpers, including callbacks executed at boot. It checks their call
+closure separately from runtime reachability. Cross-translation-unit LTO
+emission remains unsupported.
+
+Source pruning recognizes consistent identifier substitutions and ordinary
+function-prototype parameter names. Lossy mode adds lexical function-body
+parameter and local-variable renames. Types, bounds,
 attributes and implementation-reserved names stay observable. The separate
 `--source-pruning-lossy --source-pruning-report decisions.jsonl` mode enables
 comparisons and records their risks in JSONL. It can also assume explicitly
 listed model or budget gaps in macro discovery; observed macro hazards and
 search/read failures still retain the change. Missing macro bindings can change
-runtime behavior, so these assumptions are recorded as lossy. Renaming tags, members, types or
-symbols can change BTF, BPF CO-RE relocation and kallsyms behavior; source
-references alone do not establish equivalence. See
+runtime behavior, so these assumptions are recorded as lossy. Cosmetic
+BTF/debug names are outside the chosen relevance scope; exports, runtime
+registrations and known macro effects remain relevant. See
 [the source-pruning progress notes](FUTURE_PRUNING_WORK.md#source-pruning-correctness-and-binding-work).
 
 - Detect hardware and driver features present on the target device, rather than
@@ -151,21 +160,43 @@ first-parent-patch / ordered-parent-ID representation as `extract`.
 
 ### Configuration evidence
 
-A base kernel config does not establish complete build inputs. Vendor modules,
-forced includes, generated sources and raw-byte consumers can introduce other
-inputs. Until that evidence is complete, the normal configuration stage retains
-files, clears stale exclusive preprocessor modes and skips Kbuild/include
-preparation. The config still supplies architecture data to source analysis.
+Normal `--config` runs prune regular C/header/assembly edits absent from the
+modeled build on both revisions. Kbuild objects, active include consumers,
+normalized literal includes and forced-header inputs contribute positive
+membership. Known raw generators/assembly consumers and failed inventories
+retain the affected changes. Exclusive modeled built-in/module contexts enable
+`#if` pruning; ambiguous contexts and observed compiler overrides of modeled
+macros remain incomplete. Such overrides preserve source membership while
+preventing configuration-only branch removal.
 
-`--config-observations` explicitly requests advisory Kbuild modes and requires
-`--config` plus complete source history. It adds full-history/include scans;
-those observations do not authorize configuration or `#if` exclusions. The
-Python equivalents are `ConfigFilter(..., collect_observations=True)` and
-`filter_commit_time_range(..., config_observations=True)`. Worker settings apply
-only to that optional analysis. See the
+`--config-observations` selects diagnostic-only configuration decisions and
+retains configured-out files. Both modes need complete source history and use
+`--workers`. The Python diagnostic equivalents are
+`ConfigFilter(..., collect_observations=True)` and
+`filter_commit_time_range(..., config_observations=True)`.
+
+The configured model assumes ordinary Linux build rules; it does not require a
+complete producer manifest. Additional vendor/module/compiler inputs can be
+protected with `--build-inputs inputs.json`:
+
+```json
+{"schema_version":1,"inputs":[
+  {"path":"drivers/example/device.c","mode":"m","origin":"observed vendor module"}
+]}
+```
+
+These entries add positive membership and include consumers. Missing entries
+never prove absence. Actual target inventories can differ from the base config;
+keep the chosen config and positive-input manifest with the results. See the
 [build-input and live-device findings](FUTURE_PRUNING_WORK.md#configuration-observations-and-live-module-closure--2026-11-07).
 
 ### Experimental source pruning
+
+The separate `--preprocess-build-context FILE --preprocess-report JSONL` options
+add compiler-expanded input comparison after source filtering, without needing
+a policy profile. `--preprocess-cache FILE` reuses dependency-checked results.
+See [TARGET_PREPROCESSING.md](TARGET_PREPROCESSING.md) for inputs, scope and
+examples.
 
 Add `--source-pruning` to `filter config` to run configuration, preprocessor
 masking, `DeadCodeFilter`, whitespace cleanup, and finally `RenameFilter`
@@ -194,10 +225,9 @@ Source filters require regular Git file modes on every existing side. When
 patch metadata omits a mode, an exact historical tree lookup must establish it.
 Symlink target text is retained even when it resembles C tokens or comments.
 
-The default source stage retains identifier renames. With
-`--source-pruning-lossy --source-pruning-report decisions.jsonl`, it uses
-Tree-sitter C and complete parent/child token comparison to recognize consistent
-identifier substitutions while preserving structure, values, and order. It
+The source stage uses Tree-sitter C and complete parent/child token comparison
+to recognize consistent identifier substitutions and ordinary prototype
+parameter-name changes while preserving structure, values, and order. It
 checks references outside the changed files and retains
 exports, meaningful string changes, implicit function-name uses, and observed
 macro hazards. Macro discovery preserves known bindings even when another
@@ -265,23 +295,25 @@ Rename comparison uses these complete-source views instead of reintroducing
 discarded edits. Rejected candidates publish no new masks. See
 [FILTER_MASKING.md](FILTER_MASKING.md) for the API and invariants.
 
-Kbuild object membership and possible include edges supply positive evidence;
-parser absence does not prove that a file is unused. Complete compiler and
-build-input closure is currently unknown, so those contexts retain unlisted
-files and do not authorize configuration-based code masks. Forced inputs,
-assembler data and generated inputs require the ongoing build-tracing work.
+Kbuild and include membership define the selected kernel build model. Unknown
+external build rules remain a scope assumption rather than a universal veto.
+Known positive inputs and operational failures still retain affected changes.
 
-The unused-definition stage considers changes confined to static functions,
-simple macros, or standalone named structures. It searches for references in
-both revisions, including unchanged consumers. Configuration and preprocessor
-guards are used only with explicit complete context. It can remove a qualifying file from a mixed commit, or
+The unused-definition stage considers static/global functions, standalone
+prototypes, simple macros, typedefs and whole named structures/unions/enums.
+Every enumerator or introduced type name participates in reference checks.
+Global function definitions require the configured kernel model; without a
+configuration, public function entries remain live.
+It searches both revisions, including unchanged configured consumers. Ordinary
+host-tool and documentation mentions are outside the kernel runtime model;
+configured include/build inputs and linker references remain relevant.
+It can remove a qualifying file from a mixed commit, or
 mask individual unused functions while retaining other changes in the file.
 The partial-function fallback is limited to eight candidates per file;
 macros and types keep their more restrictive grouped checks. Whitespace cleanup
 then removes comment-only remnants before rename detection.
 Address-taking, strings, build metadata, and ambiguous references count as uses.
-Unused-definition analysis retains files larger than 64 KiB to bound parsing
-cost; rename comparison has a 2 MiB file limit. Named nested type definitions
+Both unused-definition and rename analysis have a 2 MiB file limit. Named nested type definitions
 and enumerators inside structures are retained because their names can escape
 the enclosing definition. Definitions containing preprocessor directives or
 pragmas are retained because their translation-time effects can escape the
@@ -290,14 +322,16 @@ The opaque-construct guard uses syntax tokens, so `asm` in an include path,
 comment, or string no longer blocks an otherwise eligible unused definition.
 Actual assembly, implicit function-name tokens, and macro stringification or
 token pasting still block pruning.
-Source-only absence checks also retain contexts with raw line splices that can
-hide references. Before masking a definition, the stage checks moved LINE/COLUMN
-aliases in the remaining code, preserving original byte and line coordinates.
+Source-only absence checks inspect possible hidden references and actual macro
+effects. Before masking a definition, the stage checks moved LINE/COLUMN
+aliases in the remaining code. The existing line-number-lossy option can waive
+line movement, with its mandatory audit; column checks remain active. Incomplete
+macro/include discovery requires the audited source-lossy option.
 
 Global-reference renames require a closed include and preprocessing spelling
 context in both modes. This prerequisite runs before expensive global position
-queries. The lossy flag retains its documented metadata and macro-discovery
-assumptions for other eligible comparisons.
+queries. The lossy flag retains its documented macro-discovery and function-body
+binding assumptions for other eligible comparisons.
 
 This is an experimental C-source reference model, not a whole-build proof.
 Arbitrary nested token pasting, generated/forced includes, external modules,
@@ -321,8 +355,9 @@ see [source-input assumptions](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
 Consumer revision updates stream bounded raw diffs and batch only candidate
 source paths for marker discovery, preserving complete facts across large
 non-consumer changes. Read and protocol failures still retain the candidate.
-Identifier renames with debug/BTF-name risks require the explicit lossy mode. Layout and
-field-specific reachability are not inferred from absence of field accesses.
+Cosmetic identifier names in debug/BTF metadata are accepted under the chosen
+relevance scope. Layout and field-specific reachability are not inferred from
+absence of field accesses.
 
 The stages share a bounded lazy reference index and Git blob reader. Exact
 revision facts are cached in Git's `kpatch-references-v8.sqlite`; child revisions
@@ -353,9 +388,9 @@ against the NUL-delimited changed-path list before updating the shared graph.
 
 ### Execution and progress display
 
-Only `--config-observations` performs history/include preparation and computes
-advisory modes before consuming the upstream commit stream. Normal config
-filtering skips that preparation. The remaining stages are lazy:
+Configuration filtering prepares history/include decisions before consuming
+the upstream commit stream, in both normal and observation-only modes.
+The remaining stages are lazy:
 commits pass through them without materializing each intermediate result.
 Each stage currently owns a separate Rich progress display. Nested generators
 can therefore show downstream bars before those stages receive input; later
@@ -420,21 +455,20 @@ risk. Unknown syntax, token/gap changes and byte-column changes remain retained.
 Reports and caches are validated together against source/build inputs, Git
 metadata, databases and SQLite sidecars before any output is initialized.
 
-### Parallel configuration observations
+### Parallel configuration filtering
 
-Advisory observation analysis defaults to four workers when explicitly enabled:
+Configuration analysis defaults to four workers:
 
 ```console
 uv run kpatch filter --repo linux --db all_commits --dest filtered \
-  --start 07-01-2026 --end 08-01-2026 config --config kernel.config --config-observations --workers 4
+  --start 07-01-2026 --end 08-01-2026 config --config kernel.config --workers 4
 ```
 
 `--workers 1` selects the serial reference path. The worker count must be
 positive. Only the Kbuild/config history-decision phase is parallel; history
 projection, global include indexing, `#if`/whitespace filtering, and the final
-output writer stay centralized. Without `--config-observations` there is no
-parallel Kbuild phase. The Python APIs default to one worker and require
-`collect_observations=True` or `config_observations=True` respectively; use
+output writer stay centralized. `--config-observations` uses the same analysis
+but retains modeled-absent files. The Python APIs default to one worker; use
 an `if __name__ == "__main__":` entry point when spawning from scripts.
 
 - The coordinator prepares the complete selected history and global include

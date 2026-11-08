@@ -529,8 +529,16 @@ class ReferenceIndex:
 def spelling_guards(name: str) -> frozenset[str]:
     """Also treat common prefix/suffix token-paste spellings as potential uses."""
 
-    guards = {name}
+    # GNU ld --wrap redirects these spellings without a literal C use of
+    # the original identifier. Both bindings remain functional references.
+    guards = {name, f"__real_{name}", f"__wrap_{name}"}
     for position in range(1, len(name)):
         prefix, suffix = name[:position], name[position:]
         guards.update(part for part in (prefix, suffix) if len(part) >= (len(name) + 1) // 2)
+    # cleanup.h constructs these declarations and callback names from the
+    # family argument of DEFINE_CLASS/DEFINE_GUARD/scoped_guard. The family
+    # can be shorter than half the emitted identifier, yet is a real use.
+    family = re.fullmatch(r"class_(.+)_(?:constructor|destructor|t)", name)
+    if family is not None:
+        guards.add(family[1])
     return frozenset(guards)

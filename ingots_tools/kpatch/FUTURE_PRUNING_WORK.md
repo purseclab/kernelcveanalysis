@@ -1,6 +1,82 @@
 # Future pruning work
 
-## Latest verified checkpoint — 2026-11-08
+## Configured build, unused definitions and compiler filtering — 2026-11-08
+
+These changes extend existing filters. Configured-build exclusion and
+preprocessing checks were already present; the former had become effectively
+diagnostic-only, and the latter did not provide general expanded-input
+equivalence across affected compilation units.
+
+| Filter | Current behavior | Remaining scope |
+| --- | --- | --- |
+| Configured build | Normal configuration runs exclude regular source/header/assembly changes absent from the modeled build on both revisions. Literal includes, forced headers, observed raw consumers and supplied vendor inputs preserve positive membership. | The model assumes ordinary kernel build rules; it does not infer target hardware or exhaust arbitrary external build scripts. |
+| Target preprocessing | A separate compiler stage compares expanded tokens and semantic pragmas for every affected recorded consumer, using real parent/child sources. Redundant includes, equivalent guards and unused macro changes can qualify. | Needs a prepared compiler context and complete commands for modeled live consumers. Build-epoch changes, unsupported overlays and failed compilation retain changes. |
+| Unused definitions | The Tree-sitter/reference stage now covers global functions/prototypes, typedefs, unions and complete enum groups, in addition to its existing definitions. References in configured-out consumers can be disregarded under the build model. | This is zero-reference pruning, not general interprocedural dead-code elimination. Exports, callbacks, escaping names and actual preprocessing effects remain relevant. |
+| Policy gates | Compiler proofs can follow denied syscall entries into closed static helpers. Target-specific callback compatibility and ARM64 assembly classification avoid treating every unrelated callback or instruction as an unknown entry. | Direct app scope remains separate from service-mediated reachability. Unsupported calls, real address escapes and incomplete facts retain changes. |
+
+Cosmetic BTF/debug metadata is outside the selected relevance scope. It no
+longer provides a blanket veto on runtime policy exclusion or ordinary
+identifier/prototype-name equivalence. Structure layout, expanded values,
+semantic pragmas, registrations and real compiler/preprocessing effects remain
+relevant.
+
+Positive vendor/module inputs can be supplied through `--build-inputs FILE`.
+Each entry records a repository-relative source path, `y`/`m` mode and origin.
+Entries add consumers; an omitted entry never proves absence. The same inputs
+reach configuration, source-reference and target-preprocessing analysis.
+`--config-observations` remains an explicit diagnostic-only mode.
+
+The new compiler stage is independent of a policy profile:
+`--preprocess-build-context FILE --preprocess-report JSONL`, with optional
+`--preprocess-cache FILE`. Its dependency index bootstraps the recorded build
+once and updates affected units from revision deltas. A native 130-unit control
+indexes 130 baseline units, recompiles one dirty unit and compares that one
+consumer. A fresh run using its persistent cache performs zero new compiler
+extractions and records 131 cache hits. This demonstrates incremental behavior;
+it is not a kernel-population yield measurement. See
+[target preprocessing](TARGET_PREPROCESSING.md) for cache budgets and limits.
+
+The real original `fde591dad109` policy candidate is excluded in **direct app**
+scope using the captured Android app seccomp filter and a prepared historical
+source/compiler context. The service-inclusive control remains a candidate and
+publishes no masks. This finding uses the explicit unresolved-input assumption
+and its audit; it does not claim exact identity with the distributed Android
+kernel binary. One successful candidate does not establish a population rate.
+The final compiler-worker refresh takes 56.55 s in direct-app scope and 19.46 s
+for the retained service-inclusive control. It reuses recorded full raw-input
+observations after rechecking their 178 source coordinates; it is not a cold
+inventory timing. Results and frozen identities are saved in
+`benchmarks/policy_runtime_recovery/2026-11-08/final-emission-complete/`.
+
+Runtime exclusion also checks positive compilation effects in the transitive
+helper closure. Native controls demonstrate that an inline helper can emit a
+boot-time callback even when its syscall never runs; adding its call or changing
+its controlling constant must retain the patch. The final worker inventories
+header helpers as well as the main source, preserving those registrations while
+accepting local type/debug changes and ordinary local alternative-patch records.
+Cross-translation-unit LTO emission remains unsupported.
+
+All **1,480 tests pass**, including the captured binary SELinux policy. Mypy
+passes all 71 Python files, and all 72 Python/C++ package sources match the
+built wheel. The complete test run records unchanged source/test hashes.
+Verification artifacts are in
+`benchmarks/runtime_relevance_checkpoint/2026-11-08/final/`.
+
+Historical sample percentages below remain opportunity estimates, not new
+automatic pruning rates. Large configuration and unused-definition replays are
+reported only after their complete original-patch runs finish; preparation
+timeouts provide no exclusion count.
+
+Large configuration and unused-definition replays remain incomplete. The
+seven-original strict source replay retains all seven; its lossy profiles have
+no completed gain measurement. The 500-original configuration replay has not
+finished preparation, so its zero published decisions are not a zero-removal
+result. Include-hint transport is the remaining measured performance problem:
+whole-line output exceeded 1 GB; matched fragments reduce payload but still
+produce millions of repeated path/line records. These checkpoint results do
+not establish a new population pruning percentage.
+
+## Previous whitespace checkpoint — 2026-11-08
 
 The current 515-original whitespace replay removes **zero whole commits without
 the explicit input-role assumption**, including in line-number mode. Recognized
@@ -109,12 +185,14 @@ unknown; untracked forced inputs and raw-data consumers remain model limits.
 ## Implementation status
 
 `filter config --source-pruning` now enables experimental Tree-sitter rename
-comparison and a lazy revision-specific reference index. The default pipeline
-is unchanged. This implements a subset of the opportunities below: consistent
-renames and changes confined to eligible definitions without found active uses.
-General reordering, type/layout dependencies, target hardware detection, and
-policy-aware reachability remain future work. A narrow same-file static-helper
-reorder rule is now implemented.
+comparison and a lazy revision-specific reference index. Source pruning remains
+opt-in. It covers consistent renames and changes confined to eligible
+definitions without found active uses. Normal configuration exclusions are
+active again. Separate opt-in compiler stages handle expanded-input equivalence
+and narrow capability/SELinux/seccomp gates. General reordering, type/layout
+dependencies, target hardware detection and broader interprocedural policy
+reachability remain future work. Narrow same-file static-helper and immediate
+return-case reorder rules require the audited source-lossy mode.
 
 The [masking update](FILTER_MASKING.md) preserves original patch coordinates,
 distinguishes ignored edits from excluded code, and runs dead-code pruning

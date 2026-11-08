@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from ..diff import Diff
 from ..git import GitRepo
 from .git_output import GitGrepRow, iter_git_grep_rows, iter_git_records
+from .include_hints import INCLUDE_HINT_PATTERN, literal_include_hints, needs_normalization
 from .whitespace.c_lexer import preprocessor_directive_text
 
 
@@ -36,7 +37,7 @@ class _SourceIncludeSnapshot(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    version: Literal[2] = 2
+    version: Literal[3] = 3
     srcarch: str
     paths: list[str]
     tracked_path_count: int
@@ -44,6 +45,7 @@ class _SourceIncludeSnapshot(BaseModel):
     uncertain_sources: list[int]
     opaque_sources: list[int]
     nonfile_sources: list[int]
+    normalization_sources: list[int]
 
     @model_validator(mode="after")
     def validate_graph(self) -> Self:
@@ -54,13 +56,16 @@ class _SourceIncludeSnapshot(BaseModel):
             raise ValueError("snapshot path vocabulary contains duplicates")
         if len(self.adjacency) != path_count:
             raise ValueError("snapshot adjacency must have one row per path")
-        for indices in (self.uncertain_sources, self.opaque_sources, self.nonfile_sources):
+        for indices in (self.uncertain_sources, self.opaque_sources, self.nonfile_sources,
+                        self.normalization_sources):
             if len(set(indices)) != len(indices) or any(index < 0 or index >= path_count for index in indices):
                 raise ValueError("uncertain source ID is outside the path vocabulary")
         if not set(self.opaque_sources).issubset(self.uncertain_sources):
             raise ValueError("opaque sources must also be uncertain")
         if not set(self.nonfile_sources).issubset(self.opaque_sources):
             raise ValueError("nonfile sources must also be opaque")
+        if not set(self.normalization_sources).issubset(self.uncertain_sources):
+            raise ValueError("normalization sources must also be uncertain")
         for target_ids in self.adjacency:
             if any(target_id < 0 or target_id >= self.tracked_path_count for target_id in target_ids):
                 raise ValueError("snapshot target ID is outside the tracked vocabulary")
@@ -98,7 +103,7 @@ class SourceIncludeIndex:
     """
 
     def __init__(self, srcarch: str, tracked_paths: Iterable[str] = ()):
-        self.srcarch = srcarch
+        self._srcarch = srcarch
         # Store a canonical string per path so edges do not retain a fresh copy
         # of both source and target for every include in the repository.
         self._tracked_paths: dict[str, str] = {}
@@ -109,10 +114,30 @@ class SourceIncludeIndex:
         self._uncertain_sources: set[str] = set()
         self._opaque_sources: set[str] = set()
         self._nonfile_sources: set[str] = set()
+        self._normalization_sources: set[str] = set()
         self._sorted_uncertain_sources: tuple[str, ...] | None = None
         self._resolution_uncertain = False
         self.generation = 0
+        self._resolution_epoch = 0
         self.add_paths(tracked_paths)
+
+    @property
+    def resolution_epoch(self) -> int:
+        """Changes to path resolution or source opacity, excluding new edges."""
+
+        return self._resolution_epoch
+
+    @property
+    def srcarch(self) -> str:
+        return self._srcarch
+
+    @srcarch.setter
+    def srcarch(self, value: str) -> None:
+        if value != self._srcarch:
+            self._srcarch = value
+            self._global_targets.clear()
+            self.generation += 1
+            self._resolution_epoch += 1
 
     @classmethod
     def from_repository(
@@ -139,6 +164,7 @@ class SourceIncludeIndex:
                     path = raw_path.decode("utf-8")
                     out._mark_uncertain(path, opaque=True)
                     out._nonfile_sources.add(path)
+                    out._resolution_epoch += 1
                     continue
                 path = raw_path.decode("utf-8")
                 out.add_paths((path,))
@@ -151,15 +177,14 @@ class SourceIncludeIndex:
         # line would duplicate the reference bootstrap's much smaller row set.
         candidates: set[str] = set(out._opaque_sources)
         with closing(iter_git_records(
-            repo, ["grep", "-l", "-z", "-a", "-F", "-e", "#", "-e", "%", "-e", "?", "-e", "\\", commit, "--"],
+            repo, ["grep", "--threads=1", "-l", "-z", "-a", "-F", "-e", "#", "-e", "%", "-e", "?", "-e", "\\", commit, "--"],
             b"\0", (0, 1),
         )) as marker_paths:
             for raw_path in marker_paths:
                 if not raw_path.startswith(prefix) or len(raw_path) == len(prefix):
                     raise ValueError("Unexpected Git grep path prefix")
                 candidates.add(raw_path[len(prefix):].decode("utf-8"))
-        pattern = r'^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]'
-        patterns = ["-e", pattern]
+        patterns = ["-e", INCLUDE_HINT_PATTERN]
         matcher = "-P" if prefer_pcre else "-E"
         if reference_names:
             # Minimal covering substrings avoid overlapping alternatives.
@@ -170,7 +195,8 @@ class SourceIncludeIndex:
             # tracked path; compilers can accept NUL with warnings, so Git's
             # binary classification cannot establish absence either.
         arguments = [
-            "grep", *(["--threads=16"] if prefer_pcre else []),
+            "grep", "--threads=1",
+            *([] if reference_names else ["--only-matching"]),
             "-n", "-z", "-a", matcher, *patterns, commit, "--",
         ]
         with closing(_iter_git_grep(repo, arguments)) as rows:
@@ -179,11 +205,9 @@ class SourceIncludeIndex:
                     raise ValueError("Unexpected Git grep path prefix")
                 path = row.path[len(prefix):].decode("utf-8")
                 line = row.contents
+                out.add_line(path, line.decode("utf-8", errors="replace"))
                 if any(marker in line for marker in (b"#", b"%", b"?", b"\\")):
                     candidates.add(path)
-                    # A matching line can be inside a comment. Exact-buffer
-                    # analysis verifies this positive hint before using it.
-                    out.add_line(path, line.decode("utf-8", errors="replace"))
                 if reference_hit is not None:
                     reference_hit(path, row.line, line)
         # A marker is not proof of a complete include inventory. Keep every
@@ -213,6 +237,7 @@ class SourceIncludeIndex:
             uncertain_sources=sorted(path_ids[source] for source in self.uncertain_sources),
             opaque_sources=sorted(path_ids[source] for source in self._opaque_sources),
             nonfile_sources=sorted(path_ids[source] for source in self._nonfile_sources),
+            normalization_sources=sorted(path_ids[source] for source in self._normalization_sources),
         )
 
     def write_snapshot(self, path: Path) -> None:
@@ -231,12 +256,19 @@ class SourceIncludeIndex:
             paths[path_id]: paths[path_id]
             for path_id in range(snapshot.tracked_path_count)
         }
+        if out._tracked_paths:
+            out._resolution_epoch += 1
         for source_id, target_ids in enumerate(snapshot.adjacency):
             for target_id in target_ids:
                 out._add_edge(paths[source_id], paths[target_id])
         for source_id in snapshot.uncertain_sources:
             out._mark_uncertain(paths[source_id], opaque=source_id in snapshot.opaque_sources)
         out._nonfile_sources = {paths[source_id] for source_id in snapshot.nonfile_sources}
+        if out._nonfile_sources:
+            out._resolution_epoch += 1
+        out._normalization_sources = {paths[source_id] for source_id in snapshot.normalization_sources}
+        if out._normalization_sources:
+            out._resolution_epoch += 1
         return out
 
     def add_paths(self, paths: Iterable[str]) -> None:
@@ -246,6 +278,7 @@ class SourceIncludeIndex:
                 # A new path can resolve a miss or supersede a fallback target.
                 self._global_targets.clear()
                 self.generation += 1
+                self._resolution_epoch += 1
                 if self._targets and not self._resolution_uncertain:
                     self._resolution_uncertain = True
                     self._sorted_uncertain_sources = None
@@ -256,9 +289,11 @@ class SourceIncludeIndex:
             self._uncertain_sources.add(source)
             self._sorted_uncertain_sources = None
             self.generation += 1
+            self._resolution_epoch += 1
         if opaque and source not in self._opaque_sources:
             self._opaque_sources.add(source)
             self.generation += 1
+            self._resolution_epoch += 1
 
     @property
     def uncertain_sources(self) -> tuple[str, ...]:
@@ -268,6 +303,12 @@ class SourceIncludeIndex:
                 candidates, key=lambda path: (not path.endswith((".c", ".S", ".s")), path)
             ))
         return self._sorted_uncertain_sources
+
+    @property
+    def normalization_sources(self) -> frozenset[str]:
+        """Recognized split filename forms needing bounded full-buffer hints."""
+
+        return frozenset(self._normalization_sources)
 
     def has_path(self, path: str) -> bool:
         return path in self._tracked_paths and path not in self._nonfile_sources
@@ -371,12 +412,29 @@ class SourceIncludeIndex:
             self._sorted_includers.pop(target, None)
             self.generation += 1
 
+    def observe_targets(self, source: str, targets: Iterable[str]) -> None:
+        """Add normalized positive edges discovered from an exact source blob."""
+
+        source = self._tracked_paths.get(source, source)
+        for target in targets:
+            self._add_edge(source, self._tracked_paths.get(target, target))
+
     def add_line(self, source: str, line: str) -> None:
-        target = self.target_from_line(source, line)
-        if target is not None:
-            self._add_edge(self._tracked_paths.get(source, source), target)
-        elif _INPUT_DIRECTIVE_RE.match(line):
+        for hint in literal_include_hints(line):
+            target = self.target_from_line(source, hint)
+            if target is not None:
+                self._add_edge(self._tracked_paths.get(source, source), target)
+        if needs_normalization(line):
+            self._mark_normalization(source)
+        elif _INPUT_DIRECTIVE_RE.match(line) and self.target_from_line(source, line) is None:
             self._mark_uncertain(source)
+
+    def _mark_normalization(self, source: str) -> None:
+        self._mark_uncertain(source)
+        if source not in self._normalization_sources:
+            self._normalization_sources.add(source)
+            self.generation += 1
+            self._resolution_epoch += 1
 
     def _alias_source(self, first: str, second: str) -> None:
         """Keep include candidates reachable across a pure source rename."""
@@ -391,6 +449,9 @@ class SourceIncludeIndex:
             opaque = first in self._opaque_sources or second in self._opaque_sources
             self._mark_uncertain(first, opaque=opaque)
             self._mark_uncertain(second, opaque=opaque)
+        if first in self._normalization_sources or second in self._normalization_sources:
+            self._mark_normalization(first)
+            self._mark_normalization(second)
 
     def add_diff(self, diff: Diff) -> None:
         for diff_file in diff.files:
@@ -413,6 +474,7 @@ class SourceIncludeIndex:
                         self._nonfile_sources.discard(path)
                     if was_nonfile != (path in self._nonfile_sources):
                         self.generation += 1
+                        self._resolution_epoch += 1
 
             if (
                 diff_file.old_file is not None
@@ -427,6 +489,10 @@ class SourceIncludeIndex:
                         self.add_line(diff_file.file, line[1:])
                     elif line.startswith("-"):
                         self.add_line(old_source, line[1:])
+                    elif line.startswith(" "):
+                        self.add_line(old_source, line[1:])
+                        if old_source != diff_file.file:
+                            self.add_line(diff_file.file, line[1:])
 
     def includers(self, target: str) -> tuple[str, ...]:
         cached = self._sorted_includers.get(target)

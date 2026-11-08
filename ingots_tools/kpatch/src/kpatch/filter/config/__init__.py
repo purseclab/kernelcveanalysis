@@ -1,5 +1,6 @@
 from collections.abc import Callable, Generator, Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import subprocess
 from typing import ClassVar
 
 from ..base import (
@@ -19,6 +20,8 @@ from ..config_filter import (
 )
 from ..source_filter import SourceIncludeIndex
 from ..masking import MaskReason, SourceSide
+from ..input_role_models import InputInventoryState
+from ..source_modes import regular_source_change
 from ...diff import Diff, DiffFile, DiffFileType
 from ...git import GitCommit, StructuredCommits
 from .decisions import changed_paths, decide_commit
@@ -69,17 +72,16 @@ def _walk_history(
 
 
 class ConfigFilter(StreamingCommitFilter):
-    """Retain unclosed inputs, optionally collecting Kbuild observations.
+    """Filter configured inputs using the modeled Kbuild/include relationships.
 
-    The available model does not establish a complete build-input universe.
-    Diagnostic preparation is therefore opt-in and never implied by retention.
+    Explicit observation mode records the same decisions without applying them.
     """
 
     name: ClassVar[str] = "Filtering kernel configuration"
 
     @property
     def requires_complete_history(self) -> bool:
-        return self.collect_observations
+        return True
 
     def __init__(
         self, config: KernelConfig, workers: int = 1, *, collect_observations: bool = False,
@@ -252,33 +254,71 @@ class ConfigFilter(StreamingCommitFilter):
             raise
         self._prepared_context = context_key
 
+    @staticmethod
+    def _known_input_veto(
+        commit: FilteredCommit, file: DiffFile, context: FilterContext,
+    ) -> bool:
+        """Preserve observed raw consumers and operationally incomplete scans."""
+
+        versions: list[tuple[str, str]] = []
+        parent = commit.original.parent
+        if file.change_type is not DiffFileType.NEW:
+            if parent is None:
+                return True
+            versions.append((parent.commit_id, file.old_file or file.file))
+        if file.change_type is not DiffFileType.DELETE:
+            versions.append((commit.original.commit_id, file.file))
+        full_context = replace(context, full_input_inventory=True)
+        try:
+            for revision, path in versions:
+                observed = context.input_roles.lookup(full_context, revision, path)
+                if (observed.state is not InputInventoryState.FULL
+                        or observed.consumers or observed.failures):
+                    return True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return True
+        return False
+
     def filter_mutable_commit(
         self, commit: FilteredCommit, context: FilterContext
     ) -> FilteredCommit | None:
         commit.build_modes.clear()
-        if not self.collect_observations:
-            # A stale exclusive mode must never authorize a later exclusion.
-            # Check merges before touching their potentially deferred patch.
-            if commit.original.is_merge:
-                return None
-            return commit if commit.diff.files else None
+        # Merges have no single parent/child view. Reject before deferred parse.
+        if commit.original.is_merge:
+            return None
+        if not commit.diff.files:
+            return None
         self._prepare(context, show_progress=False)
         if self._store is None:
             return None
         decisions = self._store.get_decisions(commit.original.commit_id)
-        if not decisions:
-            return None
-
         retained: list[DiffFile] = []
         modes: dict[tuple[str | None, str], FileBuildModes] = {}
         for diff_file in commit.diff.files:
             key = diff_file_key(diff_file)
             decision = decisions.get(key)
+            if decision is None and self.collect_observations:
+                retained.append(diff_file)
+                continue
             if decision is None:
+                # Only modeled regular source inputs are configuration masks.
+                # Structural/build/data changes remain available to later stages.
+                candidate = (diff_file.change_type in (DiffFileType.DEFAULT, DiffFileType.NEW, DiffFileType.DELETE)
+                             and not diff_file.binary and not diff_file.mode_changed
+                             and diff_file.file.endswith((".c", ".h", ".S", ".s"))
+                             and ".lds" not in diff_file.file
+                             and regular_source_change(diff_file, context.repo,
+                                                       commit.original.parent.commit_id if commit.original.parent else None,
+                                                       commit.original.commit_id))
+                if not candidate or self._known_input_veto(commit, diff_file, context):
+                    retained.append(diff_file)
+                    modes[key] = FileBuildModes(complete=False)
+                    continue
                 commit.mask_file(diff_file, MaskReason.CONFIG)
                 if diff_file.file.endswith((".c", ".h", ".S", ".s")) and ".lds" not in diff_file.file:
                     for side in SourceSide:
-                        if side is SourceSide.OLD and diff_file.change_type in (DiffFileType.NEW, DiffFileType.COPY):
+                        if (side is SourceSide.OLD and diff_file.change_type in (DiffFileType.NEW, DiffFileType.COPY)
+                                or side is SourceSide.NEW and diff_file.change_type is DiffFileType.DELETE):
                             continue
                         commit.mask_code(diff_file, side, (), MaskReason.CONFIG, whole_file=True)
                 continue
@@ -301,13 +341,14 @@ class ConfigFilter(StreamingCommitFilter):
         self._validate_name()
         self._close_preparation()
         try:
-            if self.collect_observations:
-                self._prepare(context, show_progress=show_progress)
-            for commit in commits:
-                result = self.filter_mutable_commit(commit, context)
-                if result is not None:
-                    result.synchronize_diff()
-                    yield result
+            with repository_file_reader(context) as reader:
+                active_context = replace(context, file_reader=reader)
+                self._prepare(active_context, show_progress=show_progress)
+                for commit in commits:
+                    result = self.filter_mutable_commit(commit, active_context)
+                    if result is not None:
+                        result.synchronize_diff()
+                        yield result
         finally:
             self._close_preparation()
 

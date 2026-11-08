@@ -171,6 +171,16 @@ class ClangSyscallTable(_Fact):
     bindings: tuple[ClangSyscallBinding, ...] = ()
 
 
+class ClangEmissionFunction(_Fact):
+    """Definition-local code generation effects, including header callees."""
+
+    name: str
+    usr: str
+    callees: tuple[str, ...] = ()
+    effects: tuple[str, ...] = ()
+    assembly: tuple[str, ...] = ()
+
+
 class TranslationUnitFacts(_Fact):
     complete: bool
     diagnostics: tuple[str, ...] = ()
@@ -186,6 +196,11 @@ class TranslationUnitFacts(_Fact):
     inline_assembly: tuple[ClangInlineAssembly, ...] = ()
     indirect_call_coverage_complete: bool = False
     indirect_calls: tuple[ClangSpan, ...] = ()
+    indirect_target_coverage_complete: bool = False
+    indirect_call_targets: tuple[str, ...] = ()
+    target_architecture: str = ""
+    emission_coverage_complete: bool = False
+    emission_functions: tuple[ClangEmissionFunction, ...] = ()
     compiler_major: int = 0
     compiler_version: str = ""
 
@@ -447,6 +462,22 @@ class ClangAnalyzer:
                                   "file": str(command.file), "arguments": command.frontend_arguments(),
                                   "overlays": [{"path": str(item.path), "contents": item.contents} for item in overlays],
                                   "excluded_spans": [{"path": str(item.path), "start": item.start, "end": item.end} for item in excluded_spans]}).encode() + b"\n"
+            return PreprocessorFingerprint.model_validate_json(self._exchange(request))
+        except (OSError, ValueError, ValidationError, _WorkerFailure) as error:
+            self.close()
+            return PreprocessorFingerprint.failure(f"clang_worker_failure: {error}")
+
+    def preprocess(self, command: CompileCommand, *, overlays: tuple[SourceOverlay, ...] = ()) -> PreprocessorFingerprint:
+        """Compare expanded compiler tokens and pragmas, ignoring debug provenance.
+
+        Unlike policy fingerprints, unused definitions and invocation spelling
+        are irrelevant here. Expanded LINE/COUNTER values and semantic pragmas
+        remain observable. No source masks are applied to compiler inputs.
+        """
+        try:
+            request = json.dumps({"mode": "pp_expanded", "directory": str(command.directory),
+                                  "file": str(command.file), "arguments": command.frontend_arguments(),
+                                  "overlays": [{"path": str(item.path), "contents": item.contents} for item in overlays]}).encode() + b"\n"
             return PreprocessorFingerprint.model_validate_json(self._exchange(request))
         except (OSError, ValueError, ValidationError, _WorkerFailure) as error:
             self.close()

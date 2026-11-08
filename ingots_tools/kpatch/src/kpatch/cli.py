@@ -1,4 +1,5 @@
 from typing import Annotated, cast
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 import random
@@ -22,6 +23,8 @@ from .policy_cli import policy_app
 from .policy_cli import policy_profile_inputs, setools_runtime, validate_policy_outputs
 from .filter.policy_analysis import PolicyFilter
 from .filter.policy_context import PolicyBuildContext
+from .filter.preprocessing import TargetPreprocessorFilter
+from .filter.build_inputs import BuildInputManifest
 from .filter.policy_profile import AnalysisScope, PolicyTargetProfile, SELinuxPolicyEvaluator
 
 app = typer.Typer()
@@ -131,16 +134,17 @@ def get_run_args(ctx: typer.Context) -> RunFilterArgs:
 def run(ctx: typer.Context, filter: CommitFilter):
     run_filter(get_run_args(ctx), filter)
 
-@filter_app.command("config", help="Filter source changes; configuration exclusions require complete build-input evidence.")
+@filter_app.command("config", help="Filter changes using the configured kernel build and optional source/compiler analysis.")
 def filter(
     ctx: typer.Context,
     config: Annotated[Path | None, typer.Option(help="Kernel config file to filter with.")] = None,
+    build_inputs: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="JSON positive source inputs from vendor/module/compiler inventory; requires --config.")] = None,
     config_observations: Annotated[
-        bool, typer.Option(help="Collect advisory Kbuild modes with full-history scans. Does not authorize exclusions. Requires --config."),
+        bool, typer.Option(help="Collect Kbuild observations without configuration exclusions. Requires --config; normal runs prune configured-out code."),
     ] = False,
     workers: Annotated[
         int,
-        typer.Option(min=1, help="Processes for --config-observations only; ignored otherwise."),
+        typer.Option(min=1, help="Processes for configuration history analysis; requires --config."),
     ] = 4,
     source_pruning: Annotated[
         bool, typer.Option("--source-pruning/--no-source-pruning", help="Enable experimental Tree-sitter rename and unreferenced-definition filters."),
@@ -148,7 +152,7 @@ def filter(
     constant_branches: Annotated[
         bool, typer.Option(help="Also fold numeric preprocessor branches with complete source comparison. Adds source scanning cost. Requires --source-pruning."),
     ] = False,
-    source_pruning_lossy: Annotated[bool, typer.Option(help="Also assume incomplete preprocessing discovery, ignore observable rename metadata, and allow code-address changes from source reordering; observed macro hazards still retain. Requires --source-pruning and --source-pruning-report.")] = False,
+    source_pruning_lossy: Annotated[bool, typer.Option(help="Allow function-body binding renames, code-address changes from source reordering, and incomplete preprocessing discovery; observed macro hazards still retain. Requires --source-pruning and --source-pruning-report.")] = False,
     source_pruning_report: Annotated[Path | None, typer.Option(help="JSONL source-pruning decisions, including lossy risk labels.")] = None,
     whitespace_line_numbers_lossy: Annotated[
         bool, typer.Option(help="Ignore physical line-number changes for otherwise equivalent tokens, gaps and byte columns. Can remove runtime-relevant changes. Requires --whitespace-report."),
@@ -158,6 +162,9 @@ def filter(
         bool, typer.Option(help="Assume unsupported raw-input expressions cannot observe affected source changes. Can remove runtime-relevant commits; observed raw consumers and failed scans still retain. Requires --input-role-report."),
     ] = False,
     input_role_report: Annotated[Path | None, typer.Option(help="Mandatory JSONL evidence for --unresolved-inputs-lossy assumptions.")] = None,
+    preprocess_build_context: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Enable target-preprocessed equivalence using a prepared compiler context.")] = None,
+    preprocess_report: Annotated[Path | None, typer.Option(help="JSONL compiler-input decisions; required with --preprocess-build-context.")] = None,
+    preprocess_cache: Annotated[Path | None, typer.Option(help="Persistent expanded-token and dependency cache.")] = None,
     policy_profile: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Pinned SELinux/credential profile for compiler-backed policy filtering.")] = None,
     policy_build_context: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Prepared compiler context JSON for policy analysis.")] = None,
     policy_report: Annotated[Path | None, typer.Option(help="JSONL policy decisions, required with --policy-profile.")] = None,
@@ -168,9 +175,15 @@ def filter(
 ):
     if config_observations and config is None:
         raise typer.BadParameter("--config-observations requires --config")
+    if build_inputs is not None and config is None:
+        raise typer.BadParameter("--build-inputs requires --config")
     kernel_config: KernelConfig | None = None
     if config is not None:
-        kernel_config = KernelConfig(config.read_text())
+        try:
+            additional_inputs = BuildInputManifest.load(build_inputs).inclusion_modes() if build_inputs is not None else {}
+            kernel_config = KernelConfig(config.read_text(), additional_inputs=additional_inputs)
+        except (OSError, ValueError) as error:
+            raise typer.BadParameter(str(error)) from error
         filter = FilterPipeline(
             [
                 MergeCommitFilter(),
@@ -197,6 +210,11 @@ def filter(
         raise typer.BadParameter("--unresolved-inputs-lossy requires --input-role-report to record risky removals")
     if input_role_report is not None and not unresolved_inputs_lossy:
         raise typer.BadParameter("--input-role-report requires --unresolved-inputs-lossy")
+    if preprocess_build_context is None:
+        if preprocess_report is not None or preprocess_cache is not None:
+            raise typer.BadParameter("Preprocessing options require --preprocess-build-context")
+    elif preprocess_report is None:
+        raise typer.BadParameter("--preprocess-build-context requires --preprocess-report")
     if policy_profile is None:
         if (policy_build_context is not None or policy_report is not None or policy_direct_app or policy_cache is not None
                 or setools_python is not None or setools_module_path):
@@ -209,16 +227,25 @@ def filter(
     reports = tuple(path for path in (source_pruning_report, whitespace_report, input_role_report) if path is not None)
     args = get_run_args(ctx)
     protected = (args.db.db, _path_for_db_name(args.destination_db_name)) + tuple(
-        value for value in (config, policy_profile, policy_build_context, setools_python) if value is not None
+        value for value in (config, build_inputs, policy_profile, policy_build_context, preprocess_build_context, setools_python) if value is not None
     ) + tuple(setools_module_path or ())
-    outputs = reports + tuple(path for path in (policy_report, policy_cache) if path is not None)
+    outputs = reports + tuple(path for path in (policy_report, policy_cache, preprocess_report, preprocess_cache) if path is not None)
+    preprocessing_build: PolicyBuildContext | None = None
+    if preprocess_build_context is not None:
+        try:
+            preprocessing_build = PolicyBuildContext.load(preprocess_build_context)
+            validate_policy_outputs(outputs, preprocessing_build, protected)
+            validate_output_paths(outputs, protected=protected,
+                                  protected_roots=repository_input_roots(args.repo.repo))
+        except (OSError, ValueError) as error:
+            raise typer.BadParameter(str(error)) from error
     if reports:
         try:
             if policy_build_context is not None:
-                build = PolicyBuildContext.load(policy_build_context)
-                target = PolicyTargetProfile.load(policy_profile) if policy_profile is not None else None
-                validate_policy_outputs(outputs, build,
-                                        protected + (policy_profile_inputs(target) if target else ()))
+                policy_inputs_build = PolicyBuildContext.load(policy_build_context)
+                policy_inputs_target = PolicyTargetProfile.load(policy_profile) if policy_profile is not None else None
+                validate_policy_outputs(outputs, policy_inputs_build,
+                                        protected + (policy_profile_inputs(policy_inputs_target) if policy_inputs_target else ()))
             # Validate every writable report/cache together before any open.
             validate_output_paths(outputs, protected=protected,
                                   protected_roots=repository_input_roots(args.repo.repo))
@@ -247,32 +274,48 @@ def filter(
         filter.filters[-1] = WhitespaceFilter(
             line_numbers_lossy=whitespace_line_numbers_lossy, on_pruned=whitespace_audit,
         )
-    if policy_profile is None:
+    if policy_profile is None and preprocessing_build is None:
         run(ctx, filter)
         return
-    assert policy_build_context is not None and policy_report is not None
     try:
         import hashlib
 
-        target = PolicyTargetProfile.load(policy_profile)
-        build = PolicyBuildContext.load(policy_build_context)
-        if config is not None and hashlib.sha256(config.read_bytes()).hexdigest() != build.config_sha256:
-            raise ValueError("Config-stage and compiler policy configurations must match")
-        if policy_direct_app:
-            target = target.model_copy(update={"scope": AnalysisScope.DIRECT_APP})
-        validate_policy_outputs(outputs, build, protected + policy_profile_inputs(target))
-        validate_output_paths(outputs, protected=protected,
-                              protected_roots=repository_input_roots(args.repo.repo))
-        evaluator = SELinuxPolicyEvaluator(target.policy_file, enforcing=target.selinux_enforcing,
-                                           cache_path=policy_cache, runtime=setools_runtime(setools_python, setools_module_path))
-        policy_report.parent.mkdir(parents=True, exist_ok=True)
-        with policy_report.open("w") as report:
-            stage = PolicyFilter(target, build, evaluator, cache_path=policy_cache,
-                                 on_decision=lambda decision: print(decision.model_dump_json(), file=report))
-            filter.filters.append(stage)
+        build: PolicyBuildContext | None = None
+        target: PolicyTargetProfile | None = None
+        if policy_profile is not None:
+            assert policy_build_context is not None
+            target = PolicyTargetProfile.load(policy_profile)
+            build = PolicyBuildContext.load(policy_build_context)
+            if policy_direct_app:
+                target = target.model_copy(update={"scope": AnalysisScope.DIRECT_APP})
+            validate_policy_outputs(outputs, build, protected + policy_profile_inputs(target))
+        for compiler_build in (preprocessing_build, build):
+            if compiler_build is not None and config is not None and hashlib.sha256(config.read_bytes()).hexdigest() != compiler_build.config_sha256:
+                raise ValueError("Config-stage and compiler configurations must match")
+        validate_output_paths(outputs, protected=protected, protected_roots=repository_input_roots(args.repo.repo))
+        with ExitStack() as stack:
+            if preprocessing_build is not None:
+                assert preprocess_report is not None
+                preprocess_report.parent.mkdir(parents=True, exist_ok=True)
+                preprocessing_output = stack.enter_context(preprocess_report.open("w"))
+                filter.filters.append(TargetPreprocessorFilter(
+                    preprocessing_build, cache_path=preprocess_cache,
+                    on_decision=lambda decision: print(decision.model_dump_json(), file=preprocessing_output),
+                    additional_inputs=kernel_config.additional_inputs if kernel_config is not None else None,
+                ))
+            if target is not None:
+                assert build is not None and policy_report is not None
+                evaluator = SELinuxPolicyEvaluator(target.policy_file, enforcing=target.selinux_enforcing,
+                                                   cache_path=policy_cache, runtime=setools_runtime(setools_python, setools_module_path))
+                policy_report.parent.mkdir(parents=True, exist_ok=True)
+                policy_output = stack.enter_context(policy_report.open("w"))
+                filter.filters.append(PolicyFilter(
+                    target, build, evaluator, cache_path=policy_cache,
+                    on_decision=lambda decision: print(decision.model_dump_json(), file=policy_output),
+                ))
             run(ctx, filter)
     except (OSError, ValueError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as error:
-        typer.echo(f"Policy filtering failed: {error}", err=True)
+        typer.echo(f"Compiler filtering failed: {error}", err=True)
         raise typer.Exit(1) from error
 
 @filter_app.command("rank", help="Ranks filtered commits with OpenRouter GPT-6 Luna Decisions.")

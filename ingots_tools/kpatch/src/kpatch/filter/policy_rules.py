@@ -7,7 +7,7 @@ from .policy_clang import ClangArgument, ClangConstraint, ClangGuard
 from .policy_profile import AnalysisScope, PolicyTargetProfile, SELinuxDecision, SELinuxPermissionQuery, SELinuxPolicyEvaluator
 
 
-POLICY_RULES_VERSION = "linux-necessary-gates-v2-seccomp-entry"
+POLICY_RULES_VERSION = "linux-necessary-gates-v4-registration-effects"
 
 
 @dataclass(frozen=True, slots=True)

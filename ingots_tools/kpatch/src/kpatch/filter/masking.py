@@ -28,6 +28,7 @@ class MaskReason(StrEnum):
     REORDER = "independent_definition_reorder"
     SWITCH_REORDER = "independent_return_case_reorder"
     POLICY = "policy_unreachable"
+    PREPROCESSED = "equivalent_preprocessed_inputs"
     PROTOTYPE_PARAMETERS = "prototype_parameter_names"
     LOCAL_RENAME = "local_binding_rename_lossy"
     FILE_SELECTION = "file_selection"

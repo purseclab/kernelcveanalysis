@@ -11,7 +11,7 @@ from typing import ClassVar
 
 from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
 from .binding_renames import BindingComparison, compare_bindings
-from .config_filter import BuildInputClosure, KbuildMakefileCache, KbuildState, KernelConfig
+from .config_filter import KbuildMakefileCache, KbuildState, KernelConfig, SourceAnalysisCache
 from .constant_filter import ConstantConditionalFilter
 from .diagnostic_strings import normalize_diagnostic_strings
 from .ifdef_filter import get_active_lines
@@ -20,6 +20,7 @@ from .masking import CodeMask, EditMask, FileIdentity, LineRange, MaskReason, So
 from .pruning_decision import PruningDecision
 from .source_roles import SourceMaskPlan, decorate_source_decision, publish_source_masks, source_role_decision
 from .macro_environment import MacroEnvironmentGuard
+from .macro_lookup import MacroOrigin
 from .reference_index import ReferenceIndex, ReferenceIndexStats, ReferenceSite, spelling_guards
 from .reordering import COLUMN_BUILTINS, LINE_BUILTINS, ReorderMacroGuard, ReorderProof, hunk_reorder_candidate, independent_reorder
 from .switch_reordering import independent_switch_reorder
@@ -29,7 +30,7 @@ from .source_modes import regular_source_change
 from .syntax import (
     MAX_SOURCE_BYTES, Definition, argument_lists, comments, declaration_names, declarator_name, definitions, has_opaque_tokens,
     node_text, outside_definitions, parse_source, recover_static_functions, sensitive_nodes, syntax_tokens,
-    renamed_region_identifiers, unclosed_declaration_names,
+    renamed_region_identifiers, unclosed_declaration_names, unused_definitions,
 )
 from .whitespace.c_lexer import CTokenKind, replace_c_comments, tokenize_c_source
 from .whitespace.whitespace_filter import WhitespaceFilter
@@ -38,6 +39,7 @@ from ..diff import DiffFile, DiffFileType
 
 _NAME_KINDS = frozenset({"identifier", "type_identifier", "field_identifier"})
 _NONSTANDARD_LINEBREAK = re.compile(r"\r(?!\n)|[\v\f\x1c-\x1e\x85\u2028\u2029]")
+_PHASE_TWO_SPLICE = re.compile(rb"\\[^\S\r\n]*(?:\r\n|\n|\r)")
 
 
 @dataclass(slots=True)
@@ -94,8 +96,13 @@ class _SourceFilter(StreamingCommitFilter):
         self._makefiles = KbuildMakefileCache(config) if config is not None else None
         self._site_cache: OrderedDict[tuple[str, str, int], bool] = OrderedDict()
         self._state: KbuildState | None = None
+        self._states: OrderedDict[str, KbuildState] = OrderedDict()
+        self._source_analysis_cache: SourceAnalysisCache | None = None
         self._reorder_macros: ReorderMacroGuard | None = None
         self._macro_environment: MacroEnvironmentGuard | None = None
+        self._environment_assumptions: set[str] = set()
+        self._prototype_cache: OrderedDict[tuple[str, str], tuple[Definition, ...]] = OrderedDict()
+        self._configured_reference_assumed = False
 
     def stats(self) -> SourcePruningStats:
         return replace(self._stats)
@@ -119,7 +126,10 @@ class _SourceFilter(StreamingCommitFilter):
                 self._read_file = None
                 self._index = None
                 self._site_cache.clear()
+                self._prototype_cache.clear()
                 self._state = None
+                self._states.clear()
+                self._source_analysis_cache = None
                 self._reorder_macros = None
                 self._macro_environment = None
 
@@ -181,18 +191,12 @@ class _SourceFilter(StreamingCommitFilter):
         return self._reorder_macros
 
     def _active_site(self, revision: str, site: ReferenceSite, context: FilterContext) -> bool:
-        if self.config is None or ".lds" in site.path or not site.path.endswith((".c", ".S", ".s")):
+        basename = site.path.rsplit("/", 1)[-1]
+        if (self.config is None or ".lds" in site.path
+                or basename in {"Makefile", "Kbuild"}
+                or basename.startswith(("Makefile.", "Kbuild.")) or basename.endswith(".mk")):
             return True
         if self._index is None:
-            return True
-        if self._state is None or self._state.base_commit != revision:
-            self._state = KbuildState(
-                context.repo, self.config, revision, read_file=self._read_file,
-                makefile_cache=self._makefiles, source_includes=self._index.source_includes,
-            )
-        if self._state.build_input_closure is BuildInputClosure.UNKNOWN:
-            # No exclusion is possible, so do not scan/advance the repository
-            # include graph merely to rediscover the same unknown context.
             return True
         if self._index.source_includes is None:
             self._index.bind_includes(
@@ -203,18 +207,31 @@ class _SourceFilter(StreamingCommitFilter):
             return True
         includes = self._index.source_includes
         assert includes is not None
+        if self._source_analysis_cache is None or self._source_analysis_cache.source_includes is not includes:
+            self._states.clear()
+            self._site_cache.clear()
+            self._source_analysis_cache = SourceAnalysisCache(self.config, includes)
+        if revision not in self._states:
+            self._states[revision] = KbuildState(
+                context.repo, self.config, revision, read_file=self._read_file,
+                makefile_cache=self._makefiles, source_includes=includes,
+                source_analysis_cache=self._source_analysis_cache,
+            )
+            if len(self._states) > 2:
+                self._states.popitem(last=False)
+        self._states.move_to_end(revision)
+        self._state = self._states[revision]
+        if self._state.has_input_failures:
+            return True
         key = (revision, site.path, includes.generation)
         if key in self._site_cache:
             self._site_cache.move_to_end(key)
-            return self._site_cache[key]
-        if (self._state is None or self._state.base_commit != revision
-                or self._state.source_includes is not includes):
-            self._state = KbuildState(
-                context.repo, self.config, revision, read_file=self._read_file,
-                makefile_cache=self._makefiles, source_includes=includes,
-            )
-        result = self._state.get(site.path) is not None
-        self._site_cache[key] = result
+            result = self._site_cache[key]
+            self._configured_reference_assumed |= not result
+            return result
+        result = self._state.get(site.path) is not None or self._state.has_input_failures
+        self._configured_reference_assumed |= not result
+        self._site_cache[revision, site.path, includes.generation] = result
         if len(self._site_cache) > 1024:
             self._site_cache.popitem(last=False)
         # Unknown/local preprocessor state in headers is never used to reject a
@@ -230,15 +247,19 @@ class _SourceFilter(StreamingCommitFilter):
         return "\n".join(line if number in active else "" for number, line in enumerate(text.split("\n"), 1)).encode()
 
     def _reference_is_live(self, revision: str, name: str, site: ReferenceSite, context: FilterContext, commit: FilteredCommit) -> bool:
-        if not self._active_site(revision, site, context):
-            return False
         read = self._read_file or context.repo.read_file
         side = SourceSide.NEW if revision == commit.original.commit_id else SourceSide.OLD
         source = commit.code_source(site.path, side, read(revision, site.path))
+        unfiltered = self._effective_source(source).split(b"\n")
+        pattern = rb"\b" + re.escape(name.encode()) + rb"\b"
+        if site.line > len(unfiltered) or re.search(pattern, unfiltered[site.line - 1]) is None:
+            return False
+        if not self._active_site(revision, site, context):
+            return False
         complete = (self._state is not None and self._state.base_commit == revision
                     and self._state.cpp_context_complete(site.path))
-        lines = self._effective_source(source, cpp_complete=complete).split(b"\n")
-        return site.line <= len(lines) and re.search(rb"\b" + re.escape(name.encode()) + rb"\b", lines[site.line - 1]) is not None
+        lines = self._effective_source(source, cpp_complete=True).split(b"\n") if complete else unfiltered
+        return site.line <= len(lines) and re.search(pattern, lines[site.line - 1]) is not None
 
     def _probe_consumers(self, revision: str, roots: frozenset[str], names: frozenset[str], context: FilterContext, commit: FilteredCommit) -> bool:
         """Positive-only shortcut; an incomplete include sample proves no absence."""
@@ -267,13 +288,24 @@ class _SourceFilter(StreamingCommitFilter):
                 inspected += 1
                 try:
                     contents = read(revision, source)
-                except (FileNotFoundError, subprocess.CalledProcessError):
+                except FileNotFoundError:
                     continue
-                for name in names:
-                    for match in re.finditer(rb"\b" + re.escape(name.encode()) + rb"\b", contents):
-                        site = ReferenceSite(source, contents.count(b"\n", 0, match.start()) + 1)
-                        if self._reference_is_live(revision, name, site, context, commit):
-                            return True
+                side = SourceSide.NEW if revision == commit.original.commit_id else SourceSide.OLD
+                contents = commit.code_source(source, side, contents)
+                # Positive discovery must also see names assembled by ordinary
+                # phase-two splices, including GNU's whitespace extension.
+                # Splicing precedes comment recognition in preprocessing.
+                normalized = _PHASE_TWO_SPLICE.sub(b"", contents)
+                effective = self._effective_source(normalized)
+                if not any(re.search(rb"\b" + re.escape(name.encode()) + rb"\b", effective) for name in names):
+                    continue
+                if not self._active_site(revision, ReferenceSite(source, 1), context):
+                    continue
+                complete = self._state is not None and self._state.cpp_context_complete(source)
+                if complete:
+                    effective = self._effective_source(normalized, cpp_complete=True)
+                if any(re.search(rb"\b" + re.escape(name.encode()) + rb"\b", effective) for name in names):
+                    return True
         return False
 
 
@@ -317,7 +349,7 @@ class RenameFilter(_SourceFilter):
                     reorder = ReorderProof(tuple(sorted({name for proof in proofs if proof is not None for name in proof.symbols})),
                                            identifiers, identifiers - protected)
                     return SourceComparison({}, False, reorder, reorder_reason=reason)
-        if self.lossy and all(line_macro_locations(pair.old) == line_macro_locations(pair.new)
+        if all(line_macro_locations(pair.old) == line_macro_locations(pair.new)
                and b"__COUNTER__" not in pair.old + pair.new for pair in pairs):
             binding_proofs = [compare_bindings(pair.old, pair.new, bodies=self.lossy) for pair in pairs]
             if any(binding_proofs) and all(proof is not None or tokenize_c_source(pair.old.decode()) == tokenize_c_source(pair.new.decode())
@@ -541,10 +573,6 @@ class RenameFilter(_SourceFilter):
             if comparison.reorder is not None and (not self.lossy or self.on_pruned is None):
                 return commit
             mapping, diagnostics = comparison.mapping, comparison.diagnostics
-            if mapping and not self.lossy:
-                # Source references do not establish name nonobservability:
-                # BTF/CO-RE, kallsyms and compiler metadata preserve spellings.
-                return commit
             # Raw global-reference searches need a closed spelling/include
             # context even in lossy mode. Establish it before global position
             # queries so an already unsupported rename stops cheaply.
@@ -601,7 +629,7 @@ class RenameFilter(_SourceFilter):
         if diagnostics:
             reason = MaskReason.RENAME_DIAGNOSTICS if mapping else MaskReason.DIAGNOSTIC_WORDING
         uncertainties = self._reorder_macros.assumed_uncertainties if self._reorder_macros is not None else frozenset()
-        lossy = (bool(mapping) or comparison.bindings is not None
+        lossy = (comparison.bindings is not None and comparison.bindings.lossy
                  or comparison.reorder is not None or bool(uncertainties))
         risks: tuple[str, ...] = (
             "preprocessing_inputs_and_compiler_flags_not_fully_pinned",
@@ -635,9 +663,17 @@ class RenameFilter(_SourceFilter):
         return None
 
 
-def _changed_definitions(source: bytes, changed: frozenset[int]) -> tuple[Definition, ...]:
-    items = definitions(source, parse_source(source))
-    return tuple(item for item in items if any(item.line <= line <= item.end_line for line in changed))
+def _changed_definitions(source: bytes, changed: frozenset[int], *, include_external: bool) -> tuple[Definition, ...]:
+    items = unused_definitions(source, parse_source(source))
+    return tuple(item for item in items if (include_external or not item.external_linkage)
+                 and any(item.line <= line <= item.end_line for line in changed))
+
+
+def _group_definitions(items: tuple[Definition, ...]) -> dict[str, tuple[Definition, ...]]:
+    groups: dict[str, list[Definition]] = {}
+    for item in items:
+        groups.setdefault(item.name, []).append(item)
+    return {name: tuple(group) for name, group in groups.items()}
 
 
 def _definition_lines(source: bytes, item: Definition) -> LineRange | None:
@@ -725,6 +761,101 @@ class DeadCodeFilter(_SourceFilter):
 
     name: ClassVar[str] = "Filtering unreferenced definitions"
 
+    def __init__(
+        self, config: KernelConfig | None = None,
+        on_pruned: Callable[[PruningDecision], None] | None = None, *, lossy: bool = False,
+        line_numbers_lossy: bool = False,
+        on_line_numbers_assumed: Callable[[PruningDecision], None] | None = None,
+    ) -> None:
+        if line_numbers_lossy and on_line_numbers_assumed is None:
+            raise ValueError("Unused-code line-number assumptions require a whitespace audit callback")
+        super().__init__(config, on_pruned or on_line_numbers_assumed, lossy=lossy)
+        self.line_numbers_lossy = line_numbers_lossy
+        self.on_line_numbers_assumed = on_line_numbers_assumed
+        self._line_numbers_assumed = False
+
+    @property
+    def _allow_unknown_macros(self) -> bool:
+        return self.lossy
+
+    def _prototype_reference(self, revision: str, name: str, site: ReferenceSite, context: FilterContext) -> bool:
+        """A redundant prototype is not a call/address/export of its function."""
+        key = revision, site.path
+        if key not in self._prototype_cache:
+            source = (self._read_file or context.repo.read_file)(revision, site.path)
+            items = (() if len(source) > MAX_SOURCE_BYTES else
+                     tuple(item for item in unused_definitions(source, parse_source(source)) if item.kind == "declaration"))
+            self._prototype_cache[key] = items if len(items) <= 1024 else ()
+            if len(self._prototype_cache) > 64:
+                self._prototype_cache.popitem(last=False)
+        self._prototype_cache.move_to_end(key)
+        return any(item.name == name and item.line <= site.line <= item.end_line
+                   for item in self._prototype_cache[key])
+
+    def _definition_macros_safe(
+        self, revision: str, names: frozenset[str], tag_names: frozenset[str],
+        scope_names: frozenset[str], context: FilterContext,
+    ) -> bool:
+        return (self._macro_replacements_safe(revision, scope_names, tag_names, context, declarations=True)
+                and self._macro_replacements_safe(revision, names, tag_names, context, declarations=False))
+
+    def _macro_replacements_safe(
+        self, revision: str, names: frozenset[str], tag_names: frozenset[str], context: FilterContext,
+        *, declarations: bool,
+    ) -> bool:
+        """Reject observed expansions with nonlocal preprocessing/code effects.
+
+        Balanced expression/type/inline modifiers may occur in an unused body;
+        rejecting every ordinary kernel macro would defeat configured pruning.
+        Missing discovery remains an explicit lossy assumption, never a way to
+        discard a known opaque or escaping expansion.
+        """
+        guard = self._macro_guard(context)
+        pending, visited = set(names), set[str]()
+        forbidden = {"#", "##", "%:", "%:%:", "asm", "__asm", "__asm__", "_Pragma", "__pragma",
+                     "__COUNTER__", "section", "__section__", "__section", "constructor", "destructor",
+                     "__constructor__", "__destructor__",
+                     "alias", "__alias__", "used", "__used", "__used__", ";", "{", "}"}
+        if declarations:
+            forbidden.update({"struct", "union", "enum"})
+        for _ in range(8):
+            pending.difference_update(visited)
+            if not pending:
+                return True
+            if len(visited | pending) > 256:
+                return False
+            batch = frozenset(pending)
+            pending.clear()
+            for name, observation in guard._lookup(revision, batch).items():
+                if observation.uncertainties:
+                    if not self.lossy or not observation.assumable:
+                        return False
+                    self._environment_assumptions.update(observation.uncertainties)
+                for macro in observation.definitions:
+                    if macro.origin is not MacroOrigin.SOURCE or macro.replacement is None:
+                        return False
+                    if name in tag_names and not macro.function_like:
+                        return False
+                    if name in {"static", "extern"} and not macro.function_like:
+                        return False
+                    tokens = tokenize_c_source(macro.replacement.decode())
+                    if tokens is None or any(token.value in forbidden for token in tokens):
+                        return False
+                    stack: list[str] = []
+                    for token in tokens:
+                        if token.value == "," and not stack:
+                            return False
+                        if token.value in {"(", "[", "{"}:
+                            stack.append({"(": ")", "[": "]", "{": "}"}[token.value])
+                        elif token.value in {")", "]", "}"} and (not stack or stack.pop() != token.value):
+                            return False
+                    if stack:
+                        return False
+                    pending.update(token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER
+                                   and token.value not in macro.parameters and token.value != name)
+            visited.update(batch)
+        return False
+
     def _locations_safe(
         self, commit: FilteredCommit, pair: SourcePair,
         old_items: tuple[Definition, ...], new_items: tuple[Definition, ...],
@@ -741,9 +872,13 @@ class DeadCodeFilter(_SourceFilter):
             return False
         assert commit.original.parent is not None
         guard = self._macro_guard(context)
-        return all(guard.location_independent(revision, positions.lines, LINE_BUILTINS)
-                   and guard.location_independent(revision, positions.columns, COLUMN_BUILTINS)
-                   for revision in (commit.original.parent.commit_id, commit.original.commit_id))
+        revisions = (commit.original.parent.commit_id, commit.original.commit_id)
+        if not all(guard.location_independent(revision, positions.columns, COLUMN_BUILTINS) for revision in revisions):
+            return False
+        if self.line_numbers_lossy and positions.lines:
+            self._line_numbers_assumed = True
+            return True
+        return all(guard.location_independent(revision, positions.lines, LINE_BUILTINS) for revision in revisions)
 
     def _unused(
         self, revision: str, pair: SourcePair, source: bytes,
@@ -753,22 +888,30 @@ class DeadCodeFilter(_SourceFilter):
     ) -> bool:
         if not items:
             return True
+        self._configured_reference_assumed |= any(item.external_linkage for item in items)
         side = SourceSide.NEW if revision == commit.original.commit_id else SourceSide.OLD
         source = commit.code_source(pair.file.old_file or pair.file.file if side is SourceSide.OLD else pair.file.file, side, source)
-        names = frozenset(item.name for item in items)
-        outside = self._effective_source(outside_definitions(source, items))
-        if any(re.search(rb"\b" + re.escape(name.encode()) + rb"\b", outside) for name in names):
+        names = frozenset(name for item in items for name in item.names)
+        external = frozenset(guard for name in names for guard in spelling_guards(name))
+        function_names = frozenset(item.name for item in items if item.kind in {"function_definition", "declaration"})
+        prototypes = tuple(item for item in unused_definitions(source, parse_source(source))
+                           if item.kind == "declaration" and item.name in function_names)
+        outside = self._effective_source(outside_definitions(source, items + prototypes))
+        if any(re.search(rb"\b" + re.escape(name.encode()) + rb"\b", outside) for name in external):
             return False
-        if has_opaque_tokens(parse_source(source)):
+        fragments = tuple(source[item.start:item.end] for item in items)
+        if any(has_opaque_tokens(parse_source(fragment), implicit_names=False) for fragment in fragments):
             return False
-        if re.search(rb"\b(?:__LINE__|__COUNTER__)\b", source):
+        if any(re.search(rb"\b__COUNTER__\b", fragment) for fragment in fragments):
             return False
         if self._macro_environment is None:
             self._macro_environment = MacroEnvironmentGuard(context.repo, self._read_file or context.repo.read_file,
                                                             self.config.srcarch if self.config is not None else "")
         environment = self._macro_environment.inspect(revision, pair.file.file)
-        if not environment.closed:
+        if not environment.closed and (not self.lossy or self.on_pruned is None):
             return False
+        if not environment.closed:
+            self._environment_assumptions.add(environment.reason)
         footprint: set[str] = set()
         for item in items:
             if item.kind in {"preproc_def", "preproc_function_def"}:
@@ -777,39 +920,58 @@ class DeadCodeFilter(_SourceFilter):
             if tokens is None:
                 return False
             footprint.update(token.value for token in tokens if token.kind is CTokenKind.IDENTIFIER)
-        if len(footprint) > 256 or footprint & environment.macros:
+        if len(footprint) > 256:
+            return False
+        tag_names = frozenset(name for item in items for name in item.tag_names)
+        scope_names = frozenset(name for item in items for name in item.scope_names)
+        if footprint and not self._definition_macros_safe(revision, frozenset(footprint), tag_names, scope_names, context):
+            # A known expansion may escape the apparent function/type body.
+            # Incomplete discovery can be audited; an observed binding cannot.
             return False
         if not self._compiler_names_safe(revision, names | frozenset(footprint), context):
             return False
         # Prefix/suffix spellings also retain common token-paste registrations.
-        external = frozenset(guard for name in names for guard in spelling_guards(name))
         if self._index is None or not hasattr(context.repo, "repo"):
+            return False
+        if self._index.source_includes is None:
+            self._index.bind_includes(SourceIncludeIndex.from_repository(
+                context.repo, revision, self.config.srcarch if self.config is not None else "",
+            ), revision)
+        if not self._index.ensure_includes(revision):
             return False
         if self._probe_consumers(revision, frozenset({pair.file.file}), names, context, commit):
             return False
         def is_live(name: str, site: ReferenceSite) -> bool:
             if site.path == pair.file.file and any(item.line <= site.line <= item.end_line for item in items):
                 return False
-            return self._reference_is_live(revision, name, site, context, commit)
+            if not self._reference_is_live(revision, name, site, context, commit):
+                return False
+            return name not in function_names or not self._prototype_reference(revision, name, site, context)
         scope = None if self._index.has_bootstrap(external) else self._index.scope_for((pair.file.file,), revision, max_paths=256 if partial else None)
         if partial and self._index.source_includes is not None and not self._index.has_bootstrap(external):
             if scope is None or len(scope) > 256:
                 return False
-        references = self._index.lookup(revision, external, parent=parent, changed_paths=changed_paths, scope=scope, is_live=is_live)
-        for name, sites in references.items():
-            if sites is None:
-                return False
-            for site in sites:
-                if is_live(name, site):
+        if len(external) > 2048:
+            return False
+        ordered = sorted(external)
+        for offset in range(0, len(ordered), 256):
+            references = self._index.lookup(revision, frozenset(ordered[offset:offset + 256]),
+                                            parent=parent, changed_paths=changed_paths, scope=scope, is_live=is_live)
+            for name, sites in references.items():
+                if sites is None or any(is_live(name, site) for site in sites):
                     return False
         return True
 
     def _prune_file(self, commit: FilteredCommit, file: DiffFile, context: FilterContext) -> _UnusedCodeProof | None:
+        self._environment_assumptions.clear()
+        self._line_numbers_assumed = False
+        self._configured_reference_assumed = False
+        self._macro_guard(context).reset_assumptions()
         whitespace = WhitespaceFilter()
         if all(whitespace.is_chunk_noop(chunk) for chunk in file.chunks):
             return None
         pair = self._pair(commit, file, context)
-        if pair is None or max(len(pair.old), len(pair.new)) > 64 * 1024:
+        if pair is None:
             return None
         raw_sources = SourceVersions(pair.old, pair.new)
         pair = SourcePair(file,
@@ -821,8 +983,10 @@ class DeadCodeFilter(_SourceFilter):
                 sources = (_unconditional_text(pair.old), _unconditional_text(pair.new))
                 if all(all(len(re.findall(rb"\b" + re.escape(section[0].encode()) + rb"\b", source)) > 1 for source in sources) for section in sections):
                     return None
-        old_items = {item.name: item for item in _changed_definitions(pair.old, commit.changed_lines(file, SourceSide.OLD))}
-        new_items = {item.name: item for item in _changed_definitions(pair.new, commit.changed_lines(file, SourceSide.NEW))}
+        old_items = _group_definitions(_changed_definitions(pair.old, commit.changed_lines(file, SourceSide.OLD),
+                                                          include_external=self.config is not None))
+        new_items = _group_definitions(_changed_definitions(pair.new, commit.changed_lines(file, SourceSide.NEW),
+                                                          include_external=self.config is not None))
         if not (old_items or new_items):
             return None
         # Let the cheaper seeded rename check handle name-only definition
@@ -832,8 +996,8 @@ class DeadCodeFilter(_SourceFilter):
         # A reduced patch loaded without its mask history may have shifted new
         # coordinates. Refuse to prove unused code against mismatched sources.
         commit.effective_sources(file, raw_sources)
-        old_outside = replace_c_comments(outside_definitions(pair.old, tuple(old_items.values())).decode())
-        new_outside = replace_c_comments(outside_definitions(pair.new, tuple(new_items.values())).decode())
+        old_outside = replace_c_comments(outside_definitions(pair.old, tuple(item for group in old_items.values() for item in group)).decode())
+        new_outside = replace_c_comments(outside_definitions(pair.new, tuple(item for group in new_items.values() for item in group)).decode())
         whole_file = old_outside is not None and new_outside is not None and old_outside == new_outside
         if not whole_file and old_outside is not None and new_outside is not None:
             old_tokens, new_tokens = tokenize_c_source(old_outside), tokenize_c_source(new_outside)
@@ -845,28 +1009,22 @@ class DeadCodeFilter(_SourceFilter):
         paths = self._index.changed_paths(parent, commit.original.commit_id)
         candidates: list[UnusedDefinition] = []
         for name in sorted(old_items.keys() | new_items.keys()):
-            old_item, new_item = old_items.get(name), new_items.get(name)
-            old_span = _definition_lines(pair.old, old_item) if old_item is not None else None
-            new_span = _definition_lines(pair.new, new_item) if new_item is not None else None
-            if (old_item is not None and old_span is None) or (new_item is not None and new_span is None):
+            old_spans = tuple(_definition_lines(pair.old, item) for item in old_items.get(name, ()))
+            new_spans = tuple(_definition_lines(pair.new, item) for item in new_items.get(name, ()))
+            if any(span is None for span in old_spans + new_spans):
                 continue
-            candidates.append(UnusedDefinition(name, (old_span,) if old_span is not None else (), (new_span,) if new_span is not None else ()))
+            candidates.append(UnusedDefinition(name, tuple(span for span in old_spans if span is not None),
+                                               tuple(span for span in new_spans if span is not None)))
         if whole_file and len(candidates) > 1:
             names = {item.name for item in candidates}
-            old_group = tuple(item for name, item in old_items.items() if name in names)
-            new_group = tuple(item for name, item in new_items.items() if name in names)
+            old_group = tuple(item for name, group in old_items.items() if name in names for item in group)
+            new_group = tuple(item for name, group in new_items.items() if name in names for item in group)
             if (self._unused(parent, pair, pair.old, old_group, context, None, frozenset(), commit)
                     and self._unused(commit.original.commit_id, pair, pair.new, new_group, context, parent, paths, commit)
                     and self._locations_safe(commit, pair, old_group, new_group, context)):
                 masks = tuple(mask for item in candidates for mask in _unused_masks(file, item))
                 return _UnusedCodeProof(tuple(item.name for item in candidates), masks)
         partial_fallback = not whole_file or len(candidates) > 1
-        if partial_fallback:
-            # Partial function pruning exposes mixed rename commits without
-            # issuing separate repository queries for generated macro tables.
-            candidates = [item for item in candidates
-                          if (item.name not in old_items or old_items[item.name].kind == "function_definition")
-                          and (item.name not in new_items or new_items[item.name].kind == "function_definition")]
         if len(candidates) > 8:
             return None
         pruned: list[str] = []
@@ -874,9 +1032,7 @@ class DeadCodeFilter(_SourceFilter):
         preview: FilteredCommit | None = None
         for decision in candidates:
             name = decision.name
-            old_item, new_item = old_items.get(name), new_items.get(name)
-            old_group = (old_item,) if old_item is not None else ()
-            new_group = (new_item,) if new_item is not None else ()
+            old_group, new_group = old_items.get(name, ()), new_items.get(name, ())
             view = preview if preview is not None else commit
             if not self._unused(parent, pair, pair.old, old_group, context, None, frozenset(), view, partial=partial_fallback):
                 continue
@@ -907,10 +1063,27 @@ class DeadCodeFilter(_SourceFilter):
             roles = source_role_decision(commit, file, context)
             if roles.status is SourceRoleStatus.BLOCKED:
                 continue
-            publish_source_masks(commit, context, SourceMaskPlan((roles,), code_masks=proof.masks))
-            decision = PruningDecision(commit.original.commit_id, (file.file,), "unreferenced_definition", proof.names,
-                                       commit.edit_masks, commit.code_masks)
-            self._record(decision, (roles,))
+            uncertainties = self._environment_assumptions | set(self._macro_guard(context).assumed_uncertainties)
+            risks = (("incomplete_macro_discovery_assumed", "unobserved_macro_bindings_can_change_runtime_behavior")
+                     + tuple("macro_discovery_" + reason for reason in sorted(uncertainties))) if uncertainties else ()
+            if self._line_numbers_assumed:
+                risks += ("source_line_number_observations_may_change_runtime_behavior",
+                          "included_macros_may_observe_changed_lines")
+            if self._configured_reference_assumed:
+                risks += ("configured_kernel_reference_scope_assumed",
+                          "unmodeled_compilation_roots_may_reference_definitions")
+            rule = "unreferenced_definition_line_numbers_lossy" if self._line_numbers_assumed else "unreferenced_definition"
+            decision = PruningDecision(commit.original.commit_id, (file.file,), rule, proof.names,
+                                       commit.edit_masks, commit.code_masks + proof.masks,
+                                       lossy=bool(uncertainties) or self._line_numbers_assumed or self._configured_reference_assumed,
+                                       risk_reasons=risks)
+            def record() -> None:
+                if (self._line_numbers_assumed and self.on_line_numbers_assumed is not None
+                        and self.on_line_numbers_assumed is not self.on_pruned):
+                    self.on_line_numbers_assumed(decorate_source_decision(decision, (roles,)))
+                self._record(decision, (roles,))
+            publish_source_masks(commit, context, SourceMaskPlan((roles,), code_masks=proof.masks),
+                                 before_masks=record)
         if commit.diff.files:
             return commit
         self._stats.eliminated_commits += 1
@@ -933,7 +1106,8 @@ def source_pruning_tail(
     ) if constant_branches else ()
     return (
         *constant_stage,
-        DeadCodeFilter(config, on_pruned, lossy=lossy),
+        DeadCodeFilter(config, on_pruned, lossy=lossy, line_numbers_lossy=whitespace_line_numbers_lossy,
+                       on_line_numbers_assumed=whitespace_audit),
         WhitespaceFilter(line_numbers_lossy=whitespace_line_numbers_lossy, on_pruned=whitespace_audit),
         RenameFilter(config, on_pruned, lossy=lossy),
     )

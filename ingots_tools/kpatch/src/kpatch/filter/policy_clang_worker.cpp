@@ -46,6 +46,7 @@ namespace J = llvm::json;
 
 namespace {
 constexpr size_t MaxFunctions = 4096;
+constexpr size_t MaxEmissionFunctions = 16384;
 constexpr size_t MaxBlocks = 4096;
 constexpr size_t MaxSites = 100000;
 constexpr size_t MaxGuards = 128;
@@ -516,7 +517,10 @@ ReadonlyAssembly readonlyTracepoint(FileScopeAsmDecl *D, llvm::StringRef Text, c
 }
 
 class EntryClosureVisitor : public RecursiveASTVisitor<EntryClosureVisitor> {
-  const ASTContext &C;
+  ASTContext &C;
+  const std::set<std::string> &Paths, &Names;
+  std::vector<const FunctionDecl *> Targets;
+  std::vector<QualType> IndirectTypes;
   size_t Nodes = 0, TextBytes = 0;
   bool room() {
     if (inlineAssembly.size() + indirectCalls.size() >= 4096) { complete = false; return false; }
@@ -531,11 +535,37 @@ class EntryClosureVisitor : public RecursiveASTVisitor<EntryClosureVisitor> {
     return true;
   }
 public:
-  explicit EntryClosureVisitor(const ASTContext &C) : C(C) {
+  EntryClosureVisitor(ASTContext &C, const std::set<std::string> &P, const std::set<std::string> &N)
+    : C(C), Paths(P), Names(N) {
     if (C.getLangOpts().CPlusPlus || C.getLangOpts().ObjC || C.getLangOpts().OpenCL) complete = false;
   }
   bool complete = true;
+  bool targetCoverageComplete = true;
   J::Array inlineAssembly, indirectCalls;
+  bool VisitFunctionDecl(FunctionDecl *F) {
+    if (!F->doesThisDeclarationHaveABody() || F->isImplicit()) return true;
+    const auto &SM = C.getSourceManager();
+    const auto L = SM.getExpansionLoc(F->getBeginLoc());
+    if (!Paths.count(pathName(SM.getFilename(L), SM)) || (!Names.empty() && !Names.count(F->getNameAsString()))) return true;
+    if (Targets.size() >= MaxFunctions) { complete = false; return false; }
+    Targets.push_back(F);
+    return true;
+  }
+  J::Array indirectTargets() {
+    std::set<std::string> Matches;
+    size_t Comparisons = 0;
+    for (const auto *F : Targets) for (const auto &Type : IndirectTypes) {
+      if (++Comparisons > MaxSites) { targetCoverageComplete = false; return {}; }
+      // These are possible targets under ordinary, type-compatible C calls.
+      // An old-style/unresolved call type cannot rule out any tracked target.
+      if (Type.isNull() || Type->isFunctionNoProtoType() || C.typesAreCompatible(Type, F->getType())) {
+        Matches.insert(usr(F)); break;
+      }
+    }
+    J::Array Result;
+    for (const auto &Name : Matches) Result.push_back(Name);
+    return Result;
+  }
   bool VisitStmt(Stmt *S) {
     if (++Nodes > 1000000) { complete = false; return false; }
     if (isa<CapturedStmt, BlockExpr, IndirectGotoStmt>(S)) complete = false;
@@ -563,6 +593,8 @@ public:
     if (Call->getDirectCallee()) return true;
     if (!room() || !sourceRange(Call->getSourceRange())) return false;
     indirectCalls.push_back(span(Call->getSourceRange(), C));
+    const auto Type = Call->getCallee()->getType();
+    IndirectTypes.push_back(Type->isPointerType() ? Type->getPointeeType() : QualType());
     return true;
   }
 };
@@ -650,6 +682,93 @@ public:
       complete = metadataComplete = false; effects.insert("body_declaration_not_modeled");
     }
     return true;
+  }
+};
+
+struct EmissionNode {
+  const FunctionDecl *function;
+  std::string identity;
+  std::set<std::string> callees, effects;
+  std::vector<QualType> indirect;
+  std::vector<std::string> assembly;
+};
+
+class EmissionBodyVisitor : public RecursiveASTVisitor<EmissionBodyVisitor> {
+  EmissionNode &Node;
+  size_t &Sites;
+public:
+  EmissionBodyVisitor(EmissionNode &N, size_t &S) : Node(N), Sites(S) {}
+  bool VisitStmt(Stmt *S) {
+    if (++Sites > 1000000) return false;
+    if (const auto *Assembly = dyn_cast<GCCAsmStmt>(S)) Node.assembly.push_back(Assembly->getAsmString());
+    else if (isa<AsmStmt>(S)) Node.effects.insert("unmodeled_assembly");
+    if (isa<CapturedStmt, BlockExpr>(S)) Node.effects.insert("captured_codegen");
+    return true;
+  }
+  bool VisitCallExpr(CallExpr *Call) {
+    if (const auto *Target = Call->getDirectCallee()) Node.callees.insert(usr(Target));
+    else {
+      const auto Type = Call->getCallee()->getType();
+      Node.indirect.push_back(Type->isPointerType() ? Type->getPointeeType() : QualType());
+    }
+    return true;
+  }
+  bool VisitVarDecl(VarDecl *V) {
+    if (V->hasLocalStorage()) return true;
+    if (const auto *Section = V->getAttr<SectionAttr>())
+      Node.effects.insert("sectioned_storage:" + Section->getName().str());
+    if (V->hasAttr<AsmLabelAttr>() || V->hasAttr<AliasAttr>() || V->hasAttr<IFuncAttr>())
+      Node.effects.insert("assembler_named_storage");
+    return true;
+  }
+};
+
+class EmissionVisitor : public RecursiveASTVisitor<EmissionVisitor> {
+  ASTContext &C;
+  size_t Sites = 0;
+  std::vector<EmissionNode> Nodes;
+public:
+  explicit EmissionVisitor(ASTContext &Context) : C(Context) {}
+  bool complete = true;
+  bool VisitFunctionDecl(FunctionDecl *F) {
+    if (!F->doesThisDeclarationHaveABody() || F->isImplicit()) return true;
+    if (Nodes.size() >= MaxEmissionFunctions) { complete = false; return false; }
+    EmissionNode Node{F, usr(F), {}, {}, {}, {}};
+    if (Node.identity.empty()) { complete = false; return false; }
+    EmissionBodyVisitor Body(Node, Sites);
+    if (!Body.TraverseStmt(F->getBody())) { complete = false; return false; }
+    Nodes.push_back(std::move(Node));
+    return true;
+  }
+  J::Array finish(const J::Array &References) {
+    std::set<std::string> Escaped;
+    for (const auto &Reference : References)
+      if (const auto *Object = Reference.getAsObject())
+        if (auto Name = Object->getString("usr")) Escaped.insert(Name->str());
+    size_t Comparisons = 0, Edges = 0, Text = 0;
+    J::Array Result;
+    for (auto &Node : Nodes) {
+      for (const auto &Type : Node.indirect) for (const auto &Target : Nodes) {
+        const auto &Name = Target.identity;
+        if (!Escaped.count(Name)) continue;
+        if (++Comparisons > 500000) { complete = false; return {}; }
+        if (Type.isNull() || Type->isFunctionNoProtoType() || C.typesAreCompatible(Type, Target.function->getType()))
+          Node.callees.insert(Name);
+      }
+      J::Array Calls, Effects, Assembly;
+      Edges += Node.callees.size();
+      if (Edges > MaxSites) { complete = false; return {}; }
+      for (const auto &Name : Node.callees) Calls.push_back(Name);
+      for (const auto &Effect : Node.effects) Effects.push_back(Effect);
+      for (const auto &Code : Node.assembly) {
+        Text += Code.size();
+        if (Code.size() > 16384 || Text > 1024 * 1024) { complete = false; return {}; }
+        Assembly.push_back(Code);
+      }
+      Result.push_back(J::Object{{"name", Node.function->getNameAsString()}, {"usr", Node.identity},
+        {"callees", std::move(Calls)}, {"effects", std::move(Effects)}, {"assembly", std::move(Assembly)}});
+    }
+    return Result;
   }
 };
 
@@ -1024,6 +1143,7 @@ struct FingerprintState {
   std::set<std::string> dependencies;
   size_t tokens = 0, events = 0;
   bool exceeded = false;
+  bool expandedOnly = false;
   std::string uncertainty;
   void atom(llvm::StringRef Kind, llvm::StringRef Value) {
     hash.update(Kind); hash.update(":"); hash.update(std::to_string(Value.size()));
@@ -1079,6 +1199,7 @@ class FingerprintCallbacks : public PPCallbacks {
 public:
   FingerprintCallbacks(Preprocessor &PP, FingerprintState &S) : PP(PP), State(S) {}
   void MacroDefined(const Token &Name, const MacroDirective *D) override {
+    if (State.expandedOnly) return;
     event("define", PP.getSpelling(Name));
     const auto *M = D->getMacroInfo();
     State.atom("function_like", M->isFunctionLike() ? "1" : "0");
@@ -1088,13 +1209,20 @@ public:
     State.atom("end_define", "");
   }
   void MacroUndefined(const Token &Name, const MacroDefinition &, const MacroDirective *) override {
+    if (State.expandedOnly) return;
     event("undef", PP.getSpelling(Name));
   }
-  void MacroExpands(const Token &Name, const MacroDefinition &, SourceRange, const MacroArgs *Args) override {
+  void MacroExpands(const Token &Name, const MacroDefinition &Definition, SourceRange, const MacroArgs *Args) override {
+    auto Spelling = PP.getSpelling(Name);
+    if (State.expandedOnly && Definition.getMacroInfo() && Definition.getMacroInfo()->isBuiltinMacro() &&
+        (Spelling == "__TIME__" || Spelling == "__DATE__" || Spelling == "__TIMESTAMP__")) {
+      State.exceeded = true; State.uncertainty = "volatile_preprocessor_builtin_not_pinned:" + Spelling;
+      return;
+    }
+    if (State.expandedOnly) return;
     // Conservative: also retain invocation inputs even inside excluded code.
     // This catches translation effects such as argument-dependent _Pragma.
     event("expand", PP.getSpelling(Name));
-    auto Spelling = PP.getSpelling(Name);
     if (Spelling == "__LINE__" || Spelling == "__FILE__" || Spelling == "__FILE_NAME__" ||
         Spelling == "__BASE_FILE__" || Spelling == "__INCLUDE_LEVEL__")
       State.location(Name.getLocation(), PP.getSourceManager());
@@ -1105,20 +1233,29 @@ public:
     State.atom("end_expand", "");
   }
   void PragmaDirective(SourceLocation L, PragmaIntroducerKind Introducer) override {
-    auto &SM = PP.getSourceManager(); State.location(L, SM); L = SM.getSpellingLoc(L);
+    auto &SM = PP.getSourceManager();
+    if (!State.expandedOnly) State.location(L, SM);
+    L = SM.getSpellingLoc(L);
     if (Introducer != PIK_HashPragma) {
       State.exceeded = true; State.uncertainty = "pragma_operator_not_modeled"; return;
     }
     if (L.isInvalid() || !L.isFileID()) { State.exceeded = true; return; }
     bool Invalid = false; auto Text = SM.getBufferData(SM.getFileID(L), &Invalid);
     if (Invalid) { State.exceeded = true; return; }
-    size_t Start = SM.getFileOffset(L), End = Start;
-    do {
-      End = Text.find('\n', End);
-      if (End == llvm::StringRef::npos) { End = Text.size(); break; }
-      if (End == 0 || Text[End - 1] != '\\') break;
-      ++End;
-    } while (End < Text.size());
+    size_t Start = SM.getFileOffset(L), End = Text.size();
+    // Use the real compiler lexer for phase-one/two splices and phase-three
+    // comments. A physical newline inside either cannot truncate the pragma.
+    Lexer Raw(SM.getLocForStartOfFile(SM.getFileID(L)), PP.getLangOpts(),
+              Text.begin(), Text.begin() + Start, Text.end());
+    Raw.setParsingPreprocessorDirective(true);
+    for (size_t Count = 0;; ++Count) {
+      if (Count >= MaxSites) { State.exceeded = true; State.uncertainty = "pragma_token_budget"; return; }
+      Token T; Raw.LexFromRawLexer(T);
+      if (T.is(tok::eof)) break;
+      if (T.is(tok::eod)) { End = SM.getFileOffset(T.getLocation()); break; }
+      if (T.is(tok::unknown)) { State.exceeded = true; State.uncertainty = "pragma_lexing_unknown"; return; }
+    }
+    if (End < Start || End > Text.size()) { State.exceeded = true; return; }
     auto Directive = Text.slice(Start, End);
     event("pragma", Directive);
     // Pragma handlers installed by the real parser can expand arguments that
@@ -1142,14 +1279,16 @@ public:
       }
     }
   }
-  void Ident(SourceLocation, llvm::StringRef Text) override { event("ident", Text); }
+  void Ident(SourceLocation, llvm::StringRef Text) override {
+    if (!State.expandedOnly) event("ident", Text);
+  }
   void FileChanged(SourceLocation L, FileChangeReason Reason, SrcMgr::CharacteristicKind, FileID) override {
     auto &SM = PP.getSourceManager();
     if (Reason == EnterFile) {
       L = SM.getExpansionLoc(L);
       if (L.isValid() && L.isFileID()) if (auto File = SM.getFileEntryRefForID(SM.getFileID(L)))
         State.dependencies.insert(pathName(File->getName(), SM));
-    } else if (Reason == RenameFile) {
+    } else if (Reason == RenameFile && !State.expandedOnly) {
       auto P = SM.getPresumedLoc(L);
       if (!P.isValid()) { State.exceeded = true; return; }
       event("line_filename", P.getFilename()); State.atom("line_number", std::to_string(P.getLine()));
@@ -1189,6 +1328,7 @@ J::Object fingerprint(const J::Object &Request, std::vector<std::string> Argumen
         A == "-fpch-preprocess")
       return J::Object{{"complete", false}, {"diagnostics", J::Array{"precompiled_inputs_not_supported"}}};
   FingerprintState State;
+  State.expandedOnly = Request.getString("mode") == std::optional<llvm::StringRef>("pp_expanded");
   if (const auto *Excluded = Request.getArray("excluded_spans")) for (const auto &V : *Excluded) {
     const auto *O = V.getAsObject(); if (!O) return J::Object{{"complete", false}, {"diagnostics", J::Array{"invalid_exclusion"}}};
     auto Path = O->getString("path"); auto Start = O->getInteger("start"), End = O->getInteger("end");
@@ -1234,7 +1374,8 @@ public:
     for (const auto &A : *Args) { auto S = A.getAsString(); if (!S) return J::Object{{"complete", false}, {"diagnostics", J::Array{"invalid_argument"}}}; Strings.push_back(S->str()); }
     std::string Key = Directory->str() + "\n" + File->str();
     for (const auto &S : Strings) Key += "\n" + S;
-    if (Request.getString("mode") == std::optional<llvm::StringRef>("pp_fingerprint")) return fingerprint(Request, Strings, FS);
+    if (Request.getString("mode") == std::optional<llvm::StringRef>("pp_fingerprint") ||
+        Request.getString("mode") == std::optional<llvm::StringRef>("pp_expanded")) return fingerprint(Request, Strings, FS);
     std::vector<std::pair<std::string, std::string>> OverlaySources;
     if (const auto *Overlays = Request.getArray("overlays")) {
       for (const auto &V : *Overlays) if (const auto *O = V.getAsObject()) {
@@ -1301,8 +1442,12 @@ public:
     // This audit intentionally ignores requested paths/function filters. Header
     // bodies can contain machine-code or indirect entrances absent from the
     // tracked function CFGs. Completeness means inventory only, never safety.
-    EntryClosureVisitor EntryClosure(AST->getASTContext());
+    EntryClosureVisitor EntryClosure(AST->getASTContext(), Paths, Names);
     if (!EntryClosure.TraverseDecl(AST->getASTContext().getTranslationUnitDecl())) EntryClosure.complete = false;
+    auto IndirectTargets = EntryClosure.indirectTargets();
+    EmissionVisitor Emission(AST->getASTContext());
+    if (!Emission.TraverseDecl(AST->getASTContext().getTranslationUnitDecl())) Emission.complete = false;
+    auto EmissionFunctions = Emission.finish(Visitor.addressTaken);
     J::Array Dependencies;
     std::set<std::string> SeenPaths;
     const auto &SM = AST->getSourceManager();
@@ -1333,6 +1478,11 @@ public:
             {"inline_assembly", std::move(EntryClosure.inlineAssembly)},
             {"indirect_call_coverage_complete", EntryClosure.complete},
             {"indirect_calls", std::move(EntryClosure.indirectCalls)},
+            {"indirect_target_coverage_complete", EntryClosure.complete && EntryClosure.targetCoverageComplete},
+            {"indirect_call_targets", std::move(IndirectTargets)},
+            {"target_architecture", AST->getASTContext().getTargetInfo().getTriple().getArchName()},
+            {"emission_coverage_complete", Emission.complete && Names.empty()},
+            {"emission_functions", std::move(EmissionFunctions)},
             {"compiler_major", CLANG_VERSION_MAJOR}, {"compiler_version", getClangFullVersion()}};
   }
 };

@@ -13,6 +13,7 @@ import weakref
 from pydantic import TypeAdapter
 
 from ..config_filter import ConfigValue
+from ..include_hints import INCLUDE_HINT_PATTERN
 from ...diff import Diff
 from ...git import GitCommit
 
@@ -72,10 +73,15 @@ _DECISIONS_SCHEMA = """
 _PATCH_LINE_RE = re.compile(
     r"([^\r\n\v\f\x1c-\x1e\x85\u2028\u2029]*)(?:\r\n|[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]|$)"
 )
+_HISTORY_HINT_RE = re.compile(INCLUDE_HINT_PATTERN.replace("[[:space:]]", r"\s"))
+
+
+def _has_include_hint(line: str) -> bool:
+    return line.startswith(("+", "-", " ")) and _HISTORY_HINT_RE.search(line[1:]) is not None
 
 
 def _history_patch_text(patch_text: str) -> str:
-    """Select headers/directives before allocating a full parsed merge patch."""
+    """Select structure and positive hint rows before parsing merge patches."""
 
     if not patch_text.startswith("diff --git "):
         # Retain the general parser's behavior for legacy raw unified diffs.
@@ -97,7 +103,7 @@ def _history_patch_text(patch_text: str) -> str:
             in_header, pending_hunk = False, line
             continue
         elif not in_header:
-            if not line.startswith(("+", "-")) or not line[1:].lstrip().startswith("#"):
+            if not _has_include_hint(line):
                 continue
             if pending_hunk is not None:
                 retained.append(pending_hunk)
@@ -109,7 +115,7 @@ def _history_patch_text(patch_text: str) -> str:
 
 
 def parse_history_diff(patch_text: str) -> Diff:
-    """Parse only the structure and changed directives needed by preparation."""
+    """Keep structure plus positive include hints on both sides and context."""
 
     diff = Diff.parse(_history_patch_text(patch_text))
     diff.text = ""
@@ -120,7 +126,7 @@ def parse_history_diff(patch_text: str) -> Diff:
             chunk.lines = [
                 line
                 for line in chunk.lines
-                if line.startswith(("+", "-")) and line[1:].lstrip().startswith("#")
+                if _has_include_hint(line)
             ]
             if chunk.lines:
                 directives.append(chunk)

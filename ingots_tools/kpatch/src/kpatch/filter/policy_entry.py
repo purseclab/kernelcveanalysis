@@ -16,7 +16,7 @@ from .policy_context import RevisionCompiler
 from .policy_profile import PolicyTargetProfile
 from .policy_rules import GateExclusion
 from .policy_seccomp import Disposition, PinnedSeccompFilter, SyscallTarget
-from .policy_source import caller_closure_complete, execution_spans
+from .policy_source import caller_closure_complete, emission_sensitive_functions, execution_spans
 from .whitespace.c_lexer import tokenize_c_source
 
 
@@ -88,30 +88,56 @@ class Arm64SeccompEntries:
         return GateExclusion("seccomp", "Pinned filter universally denies every configured syscall alias (" + bindings + ")")
 
     def exclusions(self, source: bytes, path: Path, facts: TranslationUnitFacts) -> tuple[SeccompBodyExclusion, ...]:
-        # An opaque sibling call can dispatch through a syscall-table pointer
-        # without spelling the target wrapper or producing a direct reference.
-        if not caller_closure_complete(facts):
-            return ()
         functions = {function.usr: function for function in facts.functions}
-        result: list[SeccompBodyExclusion] = []
+        sensitive = emission_sensitive_functions(facts)
+        if sensitive is None:
+            return ()
+        known = frozenset(function.usr for function in facts.emission_functions)
+        denied: dict[str, GateExclusion] = {}
         for function in functions.values():
-            if not _runtime_body(function, path):
+            if function.usr in sensitive or not _runtime_body(function, path):
                 continue
             wrapper = _syscall_wrapper(source, path, function, facts, self.source_root)
             if wrapper is None:
                 continue
+            chain = tuple(candidate for candidate in functions.values()
+                          if candidate.span.start.path == path
+                          and candidate.span.start.offset == function.span.start.offset)
+            if not caller_closure_complete(facts, chain):
+                continue
             gate = self._denial(wrapper)
-            spans = execution_spans(function, function.body_span, path)
-            if gate is not None and spans:
-                result.append(SeccompBodyExclusion(function, gate, spans))
-        return tuple(result)
+            if gate is not None:
+                denied[function.usr] = gate
+        # A private helper cannot gain an independent entry merely because the
+        # compilation database also contains unrelated translation units. All
+        # compiler-resolved callers must already be denied, with no escape or
+        # compatible opaque call site (including sites in included headers).
+        incoming: dict[str, list[ClangFunction]] = {usr: [] for usr in functions}
+        for caller in functions.values():
+            for call in caller.calls:
+                if call.callee_usr in incoming:
+                    incoming[call.callee_usr].append(caller)
+        helpers = tuple(function for function in functions.values()
+                        if function.usr not in denied and function.usr not in sensitive
+                        and function.is_static and _runtime_body(function, path)
+                        and incoming[function.usr]
+                        and not any(reference.usr == function.usr for reference in facts.address_taken)
+                        and caller_closure_complete(facts, (function,)))
+        for _ in range(min(len(functions), 64)):
+            additions = {function.usr: denied[incoming[function.usr][0].usr] for function in helpers
+                         if function.usr not in denied and all(caller.usr in denied for caller in incoming[function.usr])}
+            if not additions:
+                break
+            denied.update(additions)
+        return tuple(SeccompBodyExclusion(functions[usr], gate, spans) for usr, gate in denied.items()
+                     if (spans := execution_spans(functions[usr], functions[usr].body_span, path, known_functions=known)))
 
 
 def _runtime_body(function: ClangFunction, path: Path) -> bool:
     body = function.body_span
     return (not body.macro and body.start.path == path and body.end.path == path
-            and function.declaration_coverage_complete and not function.body_translation_effects
-            and function.body_metadata_coverage_complete
+            and function.declaration_coverage_complete
+            and not set(function.body_translation_effects).difference({"body_typedef", "body_tag_declaration"})
             and not set(function.unknowns).difference(_RUNTIME_UNKNOWNS))
 
 

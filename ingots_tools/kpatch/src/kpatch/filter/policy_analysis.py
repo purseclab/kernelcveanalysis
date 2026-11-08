@@ -1,7 +1,8 @@
 """Conservative CFG-gated changes, with explicit policy and caller scope.
 
-Only runtime expressions and closed static callees are excluded. Declarations,
-headers, exports, unknown effects and incomplete extraction retain the commit.
+Runtime expressions, local debug/type metadata and closed static callees can be
+excluded. Nonlocal declarations, headers, exports, unknown functional effects
+and incomplete extraction retain the commit.
 Policy masks are published only after every remaining file qualifies on both
 real revisions. A direct-subject finding is never promoted to service closure.
 """
@@ -16,7 +17,7 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict
 
 from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
-from .config_filter import ConfigValue, KernelConfig
+from .config_filter import KernelConfig
 from .input_role_models import SourceRoleDecision, SourceRoleEvidence, SourceRoleStatus
 from .masking import EditMask, FileIdentity, MaskReason, SourceSide
 from .source_roles import INPUT_ROLE_RISK, SourceMaskPlan, publish_source_masks, source_assumption_evidence, source_role_decision
@@ -26,7 +27,7 @@ from .policy_entry import Arm64SeccompEntries
 from .policy_profile import AnalysisScope, PolicyTargetProfile, SELinuxPolicyEvaluator
 from .policy_rules import GateExclusion, LinuxPolicyRules, POLICY_RULES_VERSION
 from .policy_seccomp import PinnedSeccompFilter
-from .policy_source import caller_closure_complete, execution_spans
+from .policy_source import caller_closure_complete, emission_sensitive_functions, execution_spans
 from .whitespace.c_lexer import CTokenKind, tokenize_c_source
 from ..diff import DiffFile, DiffFileType
 
@@ -81,6 +82,10 @@ class PolicyCommitDecision(BaseModel):
     lossy: bool = False
     risk_reasons: tuple[str, ...] = ()
     input_role_evidence: tuple[SourceRoleEvidence, ...] = ()
+    ignored_differences: tuple[str, ...] = ("btf_and_debug_metadata",)
+    reachability_model: str = "ordinary_linux_entries_and_type_compatible_c_calls"
+    scope_assumptions: tuple[str, ...] = ("standard_linux_syscall_dispatch",
+                                          "no_arbitrary_function_pointer_type_punning_or_runtime_text_injection")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,22 +128,31 @@ class LocalPolicyProof:
     do not get an implicit credential-preservation contract.
     """
 
-    def __init__(self, source: bytes, path: Path, facts: TranslationUnitFacts, rules: LinuxPolicyRules,
-                 *, static_closure_complete: bool = False) -> None:
+    def __init__(self, source: bytes, path: Path, facts: TranslationUnitFacts, rules: LinuxPolicyRules) -> None:
         self.source, self.path, self.facts, self.rules = source, path, facts, rules
-        self.static_closure_complete = static_closure_complete
         self.functions = {function.usr: function for function in facts.functions
                           if function.body_span.start.path == path and function.body_span.end.path == path}
         self.incoming: dict[str, list[tuple[ClangFunction, ClangCall]]] = {usr: [] for usr in self.functions}
+        self._roots: dict[str, bool] = {}
+        self._static_closures: dict[str, bool] = {}
+        self._emission_sensitive = emission_sensitive_functions(facts)
+        self._known_emission_functions = frozenset(function.usr for function in facts.emission_functions)
         for caller in self.functions.values():
             for call in caller.calls:
                 if call.callee_usr in self.incoming:
                     self.incoming[call.callee_usr].append((caller, call))
 
     def _root(self, function: ClangFunction) -> bool:
+        if function.usr not in self._roots:
+            self._roots[function.usr] = self._entry_root(function)
+        return self._roots[function.usr]
+
+    def _entry_root(self, function: ClangFunction) -> bool:
         if not function.name.startswith(("__do_sys_", "__se_sys_", "sys_")):
             return False
         if any(reference.usr == function.usr for reference in self.facts.address_taken):
+            return False
+        if not caller_closure_complete(self.facts, (function,)):
             return False
         if any(not call.span.macro or call.span.start.offset != function.span.start.offset
                for _, call in self.incoming[function.usr]):
@@ -150,8 +164,13 @@ class LocalPolicyProof:
                 and tokens[1].value == "(" and tokens[-1].value == ")")
 
     def _closed_static(self, function: ClangFunction) -> bool:
-        if (not self.static_closure_complete or not function.is_static or not self.incoming[function.usr]
-                or not caller_closure_complete(self.facts)):
+        if function.usr not in self._static_closures:
+            self._static_closures[function.usr] = self._static_closure(function)
+        return self._static_closures[function.usr]
+
+    def _static_closure(self, function: ClangFunction) -> bool:
+        if (not function.is_static or not self.incoming[function.usr]
+                or not caller_closure_complete(self.facts, (function,))):
             return False
         if any(ref.usr == function.usr for ref in self.facts.address_taken):
             return False
@@ -291,7 +310,7 @@ class LocalPolicyProof:
         return None
 
     def exclusions(self) -> tuple[SpanExclusion, ...]:
-        if not self.facts.complete or self.facts.unknowns:
+        if not self.facts.complete or self.facts.unknowns or self._emission_sensitive is None:
             return ()
         stable = {usr for usr, function in self.functions.items() if self._root(function)}
         for _ in range(min(len(self.functions), 64)):
@@ -321,14 +340,12 @@ class LocalPolicyProof:
                 break
         result: list[SpanExclusion] = []
         for usr, function in self.functions.items():
-            body = self.source[function.body_span.start.offset:function.body_span.end.offset]
-            tokens = tokenize_c_source(body.decode())
-            declaration_effects = (tokens is None or any(token.value in {"static", "struct", "union", "enum", "typedef", "__attribute__", "asm", "__asm__"}
-                                                        for token in tokens)
-                                   or any(statement.kind == "DeclStmt" for statement in function.statements))
-            if usr in blocked and not function.body_span.macro and not function.unknowns and not declaration_effects:
+            if usr in self._emission_sensitive:
+                continue
+            if usr in blocked and not function.body_span.macro and not function.unknowns:
                 result.extend(_span_exclusion(function, span, blocked[usr], self.source)
-                              for span in execution_spans(function, function.body_span, self.path))
+                              for span in execution_spans(function, function.body_span, self.path,
+                                                          known_functions=self._known_emission_functions))
                 continue
             if usr not in stable or self._unknowns(function):
                 continue
@@ -340,7 +357,8 @@ class LocalPolicyProof:
                 reason = self._gate(function, statement.guards, statement.constraints)
                 if reason is not None:
                     result.extend(_span_exclusion(function, runtime, reason, self.source)
-                                  for runtime in execution_spans(function, span, self.path))
+                                  for runtime in execution_spans(function, span, self.path,
+                                                                known_functions=self._known_emission_functions))
         unique = {(item.start, item.end): item for item in result}
         if len(unique) > _MAX_EXCLUSIONS:
             return ()
@@ -387,6 +405,9 @@ class PolicyFilter(StreamingCommitFilter):
         if (file.change_type is not DiffFileType.DEFAULT or not file.file.endswith(".c")
                 or file.binary or file.mode_changed):
             return PolicyFileDecision(path=file.file, reasons=("unsupported_file_or_header_effects",))
+        if any(argument == "-flto" or argument.startswith("-flto=")
+               for command in self.compiler.commands.values() for argument in command.arguments):
+            return PolicyFileDecision(path=file.file, reasons=("cross_tu_lto_emission_not_modeled",))
         sources = tuple(self.compiler.reader.read_file(revision, file.file) for revision in
                         (commit.original.parent.commit_id, commit.original.commit_id))
         if not any(re.search(rb"\b(?:COMPAT_)?SYSCALL_DEFINE[0-6]\s*\(", source)
@@ -394,11 +415,6 @@ class PolicyFilter(StreamingCommitFilter):
                         or any(re.search(rb"\b" + name.encode() + rb"\s*\(", source) for name in _GATE_NAMES))
                    for source in sources):
             return PolicyFileDecision(path=file.file, reasons=("outside_modeled_entry_gate_subset",))
-        # Optimization can select different emitted types even when every
-        # declaration/type spelling is unchanged (e.g. changing a constant
-        # branch). AST source masks do not certify the runtime BTF graph.
-        if self.rules.config.get("CONFIG_DEBUG_INFO_BTF") is ConfigValue.ENABLED:
-            return PolicyFileDecision(path=file.file, reasons=("emitted_btf_equivalence_unproved",))
         exclusions: list[tuple[SpanExclusion, ...]] = []
         normalized: list[bytes] = []
         fingerprints: list[str | None] = []
@@ -414,8 +430,7 @@ class PolicyFilter(StreamingCommitFilter):
                 reasons.extend(facts.unknowns or facts.diagnostics or ("incomplete_compiler_facts",))
                 return PolicyFileDecision(path=file.file, reasons=tuple(reasons))
             path = self.build_context.source_root / file.file
-            spans = LocalPolicyProof(source, path, facts, self.rules,
-                                     static_closure_complete=self.compiler.is_single_translation_unit()).exclusions()
+            spans = LocalPolicyProof(source, path, facts, self.rules).exclusions()
             if self.seccomp_filter is not None:
                 entries = Arm64SeccompEntries.for_revision(self.compiler, revision, self.rules.config,
                                                            self.profile, self.seccomp_filter)

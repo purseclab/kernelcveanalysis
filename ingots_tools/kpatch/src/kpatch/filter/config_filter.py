@@ -5,6 +5,7 @@ from enum import StrEnum
 from hashlib import sha256
 import posixpath
 import re
+import shlex
 import subprocess
 from typing import Self
 
@@ -13,6 +14,7 @@ from kexploit_utils import Architecture
 from ..git import GitRepo
 from ..diff import Diff
 from .source_filter import IncludeFacts, SourceIncludeIndex
+from .include_hints import literal_include_hints
 
 
 class ConfigValue(StrEnum):
@@ -35,7 +37,14 @@ class KernelConfig:
     raw_values: dict[str, str]
     architecture: Architecture | None
 
-    def __init__(self, config: str):
+    def __init__(self, config: str, *, additional_inputs: Mapping[str, ConfigValue] | None = None):
+        self.additional_inputs: dict[str, ConfigValue] = dict(additional_inputs or {})
+        for path, mode in self.additional_inputs.items():
+            if (not path or posixpath.isabs(path) or posixpath.normpath(path) != path
+                    or path == ".." or path.startswith("../") or any(char in path for char in ("\0", "\n", "\r"))):
+                raise ValueError("Additional input paths must be normalized repository-relative paths")
+            if mode not in (ConfigValue.ENABLED, ConfigValue.MODULE):
+                raise ValueError("Additional inputs require positive y/m modes")
         self.values = {}
         self.raw_values = {}
 
@@ -99,7 +108,7 @@ class KernelConfig:
         return _linux_srcarch(self.architecture)
 
 
-CODE_FILES = [".c", ".S"]
+CODE_FILES = [".c", ".S", ".s"]
 HEADER_FILES = [".h"]
 
 
@@ -111,6 +120,49 @@ def _linux_srcarch(architecture: Architecture | None) -> str:
     if architecture is Architecture.AARCH64:
         return "arm64"
     return ""
+
+
+@dataclass(frozen=True, slots=True)
+class _CppOverride:
+    name: str
+    value: str | None
+
+    def changes_model(self, config: KernelConfig, is_module: bool) -> bool:
+        if self.name in {"IS_ENABLED", "IS_BUILTIN", "IS_MODULE", "IS_REACHABLE"}:
+            return True
+        if self.name.startswith("CONFIG_"):
+            if self.name.endswith("_MODULE"):
+                expected = "1" if config.get(self.name[:-7]) is ConfigValue.MODULE else None
+            else:
+                value = config.get(self.name)
+                expected = config.get_raw(self.name) if value is ConfigValue.ENABLED else None
+                if expected == "y":
+                    expected = "1"
+        else:
+            defaults = {"MODULE": is_module, "__KERNEL__": True, "__cplusplus": False,
+                        "__i386__": config.architecture is Architecture.X86,
+                        "__x86_64__": config.architecture is Architecture.AMD64,
+                        "__arm__": config.architecture is Architecture.ARM,
+                        "__aarch64__": config.architecture is Architecture.AARCH64}
+            if self.name not in defaults:
+                return False
+            if self.name in {"__i386__", "__x86_64__", "__arm__", "__aarch64__"} and config.architecture is None:
+                return True
+            expected = "1" if defaults[self.name] else None
+        return self.value != expected
+
+
+def _cpp_overrides(words: list[str]) -> tuple[_CppOverride, ...]:
+    result: dict[str, _CppOverride] = {}
+    for index, word in enumerate(words):
+        if not word.startswith(("-D", "-U")):
+            continue
+        operand = word[2:] or (words[index + 1] if index + 1 < len(words) else "")
+        name, equals, value = operand.partition("=")
+        if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", name) is None:
+            continue
+        result[name] = _CppOverride(name, None if word.startswith("-U") else value if equals else "1")
+    return tuple(result.values())
 
 
 class KbuildMakefile:
@@ -178,6 +230,8 @@ class KbuildMakefile:
         self._pattern_dependencies: list[tuple[str, list[str]]] = []
         self._external_goals: dict[str, dict[str, ConfigValue]] = {}
         self.included_files: set[str] = set()
+        self.forced_inputs: set[str] = set()
+        self.compiler_overrides: dict[str, tuple[_CppOverride, ...]] = {}
         self._include_reader = include_reader
         self._goals = self._DEFAULT_GOALS if goals is None else goals
 
@@ -188,6 +242,7 @@ class KbuildMakefile:
             # Incoming targets are prerequisites selected by another directory,
             # rather than entries in this directory's composite object lists.
             self._add_goal(goal, mode, set(), expand_composite=False)
+        self._collect_forced_inputs()
 
     @staticmethod
     def _logical_lines(contents: str) -> list[str]:
@@ -236,7 +291,6 @@ class KbuildMakefile:
                 return " ".join(
                     self._replace_make_pattern(word, pattern, replacement)
                     for word in value.split()
-                    if self._make_pattern_stem(word, pattern) is not None
                 )
             if function in ("addprefix", "addsuffix") and len(fields) >= 2:
                 affix, value = fields[0], ",".join(fields[1:])
@@ -682,6 +736,58 @@ class KbuildMakefile:
             # The kernel's top-level build invokes this Kbuild target before
             # compiling objects; its generators affect the configured kernel.
             self._add_goal("prepare", ConfigValue.ENABLED, set(), expand_composite=False)
+        self._collect_forced_inputs()
+
+    def _collect_forced_inputs(self) -> None:
+        if not self._included:
+            return
+        for variable, value in self._variables.items():
+            if not (variable in {"ccflags-y", "subdir-ccflags-y", "asflags-y", "subdir-asflags-y", "KBUILD_CPPFLAGS",
+                                   "KBUILD_CFLAGS", "KBUILD_AFLAGS", "CFLAGS_KERNEL", "CFLAGS_MODULE",
+                                   "AFLAGS_KERNEL", "AFLAGS_MODULE", "ccflags-remove-y", "asflags-remove-y"}
+                    or variable.startswith(("CFLAGS_", "AFLAGS_"))):
+                continue
+            try:
+                tokens = shlex.split(self._expand(value))
+            except ValueError:
+                continue
+            self.compiler_overrides[variable] = _cpp_overrides(tokens)
+            for index, token in enumerate(tokens):
+                option = next((flag for flag in ("-include", "-imacros") if token.startswith(flag)), None)
+                if option is None:
+                    continue
+                requested = token[len(option):].removeprefix("=")
+                if not requested and index + 1 < len(tokens):
+                    requested = tokens[index + 1]
+                if not requested or "$" in requested or requested.startswith("-"):
+                    continue
+                path = self._repository_path(requested)
+                if path:
+                    self._record(requested, ConfigValue.ENABLED)
+                    self.forced_inputs.add(path)
+
+    def cpp_context_unknown(self, file: str, is_module: bool) -> bool:
+        folder = posixpath.dirname(file)
+        object_path = posixpath.splitext(file)[0] + ".o"
+        for variable, overrides in self.compiler_overrides.items():
+            if variable in {"subdir-ccflags-y", "subdir-asflags-y", "KBUILD_CPPFLAGS", "KBUILD_CFLAGS", "KBUILD_AFLAGS"}:
+                applies = not self.folder or folder == self.folder or folder.startswith(self.folder + "/")
+            elif variable in {"CFLAGS_KERNEL", "AFLAGS_KERNEL", "CFLAGS_MODULE", "AFLAGS_MODULE"}:
+                applies = variable.endswith("_MODULE") == is_module and (
+                    not self.folder or folder == self.folder or folder.startswith(self.folder + "/"))
+            elif variable.startswith(("CFLAGS_", "AFLAGS_")):
+                target = variable.split("_", 1)[1]
+                if target.startswith("REMOVE_"):
+                    target = target.removeprefix("REMOVE_")
+                    overrides = tuple(_CppOverride(item.name, None) for item in overrides)
+                applies = self._repository_path(target) == object_path
+            else:
+                applies = folder == self.folder
+                if variable.endswith("-remove-y"):
+                    overrides = tuple(_CppOverride(item.name, None) for item in overrides)
+            if applies and any(override.changes_model(self._config, is_module) for override in overrides):
+                return True
+        return False
 
     def get(self, file: str) -> ConfigValue | None:
         normalized = file.rstrip("/")
@@ -825,8 +931,7 @@ class KbuildDirectory:
         kbuild_contents = self._read_optional(kbuild_path)
         makefile_contents = (
             self._read_optional(makefile_path)
-            if folder
-            and (kbuild_contents is None or folder == architecture_folder)
+            if kbuild_contents is None or folder == architecture_folder
             else None
         )
 
@@ -846,6 +951,7 @@ class KbuildDirectory:
             )
 
         if folder == "" and kbuild_contents is not None:
+            self._add_root_compiler_flags(self._read_optional("Makefile") or "")
             # These values are initialized by the top-level Makefile before it
             # includes the architecture Makefile.  Parsing that very large
             # Makefile is unnecessary for the small declarative subset used
@@ -900,6 +1006,33 @@ class KbuildDirectory:
     def _path(folder: str, filename: str) -> str:
         return posixpath.join(folder, filename) if folder else filename
 
+    def _add_root_compiler_flags(self, contents: str) -> None:
+        """Observe literal global flag changes without parsing root build goals.
+
+        Conditions are deliberately not evaluated: a possible literal override
+        can only make CPP projection incomplete, never exclude an input.
+        """
+
+        flags = KbuildMakefile("", self._config, "", goals=())
+        for line in KbuildMakefile._logical_lines(contents):
+            if line.startswith("\t"):
+                continue
+            match = KbuildMakefile._assignment_re.fullmatch(
+                KbuildMakefile._strip_comment(line).strip()
+            )
+            if match is None:
+                continue
+            variable = match.group("name").removeprefix("export ").removeprefix("override ").strip()
+            if variable not in {"KBUILD_CPPFLAGS", "KBUILD_CFLAGS", "KBUILD_AFLAGS",
+                                "CFLAGS_KERNEL", "CFLAGS_MODULE", "AFLAGS_KERNEL", "AFLAGS_MODULE"}:
+                continue
+            try:
+                overrides = _cpp_overrides(shlex.split(match.group("value")))
+            except ValueError:
+                continue
+            flags.compiler_overrides[variable] = flags.compiler_overrides.get(variable, ()) + overrides
+        self._makefiles.append(flags)
+
     @staticmethod
     def _normalize_path(path: str) -> str:
         normalized = posixpath.normpath(path.removeprefix("./").lstrip("/"))
@@ -910,8 +1043,14 @@ class KbuildDirectory:
             return None
         try:
             return self._read_file(self._commit, path).decode()
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except FileNotFoundError:
             return None
+        except subprocess.CalledProcessError:
+            # Legacy direct readers use git-show failures for missing paths.
+            # A failed read of an existing input is not an empty Makefile.
+            if self._repo.read_file_mode(self._commit, path) is None:
+                return None
+            raise
 
     def _read_include(self, requested_path: str) -> tuple[str, str | None]:
         if requested_path.startswith(("./", "../")):
@@ -973,6 +1112,17 @@ class KbuildDirectory:
         return self.get(file) is not None
 
     @property
+    def configured_inputs(self) -> frozenset[str]:
+        return frozenset(path for makefile in self._makefiles for path in makefile.included_paths)
+
+    def cpp_context_unknown(self, file: str, is_module: bool) -> bool:
+        return any(makefile.cpp_context_unknown(file, is_module) for makefile in self._makefiles)
+
+    @property
+    def forced_inputs(self) -> frozenset[str]:
+        return frozenset(path for makefile in self._makefiles for path in makefile.forced_inputs)
+
+    @property
     def directories(self) -> frozenset[str]:
         return frozenset(
             directory
@@ -1013,8 +1163,9 @@ class _SourceAnalysisKey:
     source: str
     mode: ConfigValue
     contents_sha256: bytes
-    index_generation: int
+    resolution_epoch: int
     possible_modules: bool
+    unresolved_context: bool
 
 
 class SourceAnalysisCache:
@@ -1050,8 +1201,8 @@ class SourceAnalysisCache:
         return self.analyze_facts(source, mode, contents).targets
 
     def analyze_facts(self, source: str, mode: ConfigValue, contents: bytes,
-                      *, possible_modules: bool = False) -> IncludeFacts:
-        key = _SourceAnalysisKey(source, mode, sha256(contents).digest(), self.source_includes.generation, possible_modules)
+                      *, possible_modules: bool = False, unresolved_context: bool = False) -> IncludeFacts:
+        key = _SourceAnalysisKey(source, mode, sha256(contents).digest(), self.source_includes.resolution_epoch, possible_modules, unresolved_context)
         cached = self._entries.get(key)
         if cached is not None:
             self._entries.move_to_end(key)
@@ -1065,11 +1216,31 @@ class SourceAnalysisCache:
             if possible_modules:
                 return get_active_lines(text, self.config, is_module=False) | get_active_lines(text, self.config, is_module=True)
             return get_active_lines(text, self.config, is_module=mode is ConfigValue.MODULE)
-        result = self.source_includes.analyze_source(source, contents, active)
+        result = self.source_includes.analyze_source(source, contents, None if unresolved_context else active)
+        if unresolved_context:
+            result = IncludeFacts(result.targets, unknown=True)
+        if result.unknown:
+            # Unsupported conditional/comment layout cannot erase literal
+            # positives. An unfiltered normalization may only add targets.
+            observed = frozenset(target for line in literal_include_hints(contents.decode("utf-8", errors="replace"))
+                                 if (target := self.source_includes.target_from_line(source, line)) is not None)
+            result = IncludeFacts(result.targets | observed, unknown=True)
         self._entries[key] = result
         if len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class _IncludeContext:
+    modes: frozenset[ConfigValue] = frozenset()
+    unknown: bool = False
+
+    @property
+    def value(self) -> ConfigValue | None:
+        if ConfigValue.ENABLED in self.modes:
+            return ConfigValue.ENABLED
+        return ConfigValue.MODULE if ConfigValue.MODULE in self.modes else None
 
 
 class KbuildState:
@@ -1128,10 +1299,18 @@ class KbuildState:
         self._active_includes_cache: dict[
             tuple[str, ConfigValue], IncludeFacts
         ] = {}
+        self._uncertain_includes_cache: dict[tuple[str, ConfigValue], IncludeFacts] = {}
         self._include_value_cache: dict[str, ConfigValue | None] = {}
         self._include_generation = source_includes.generation if source_includes is not None else 0
-        self._uncertainty_ready = False
-        self._uncertain_mode: ConfigValue | None = None
+        self._source_resolution_epoch = source_includes.resolution_epoch if source_includes is not None else 0
+        self._include_context_cache: dict[str, _IncludeContext] = {}
+        self._source_read_failures: set[str] = set()
+        self._build_read_failed = False
+        self._pending_include_sources: set[str] = set()
+        self._discovery_roots_pending = True
+        self._modeled_sources_cache: frozenset[str] | None = None
+        self._include_discovery_failed = False
+        self._uncertain_configured_inputs: set[str] = set()
 
     @classmethod
     def copy(cls, other: Self) -> Self:
@@ -1171,10 +1350,18 @@ class KbuildState:
         out.delegated = set(other.delegated)
         out._architecture_indexed = other._architecture_indexed
         out._active_includes_cache = dict(other._active_includes_cache)
+        out._uncertain_includes_cache = dict(other._uncertain_includes_cache)
         out._include_value_cache = dict(other._include_value_cache)
         out._include_generation = other._include_generation
-        out._uncertainty_ready = other._uncertainty_ready
-        out._uncertain_mode = other._uncertain_mode
+        out._source_resolution_epoch = other._source_resolution_epoch
+        out._include_context_cache = dict(other._include_context_cache)
+        out._source_read_failures = set(other._source_read_failures)
+        out._build_read_failed = other._build_read_failed
+        out._pending_include_sources = set(other._pending_include_sources)
+        out._discovery_roots_pending = other._discovery_roots_pending
+        out._modeled_sources_cache = other._modeled_sources_cache
+        out._include_discovery_failed = other._include_discovery_failed
+        out._uncertain_configured_inputs = set(other._uncertain_configured_inputs)
 
         return out
 
@@ -1314,20 +1501,21 @@ class KbuildState:
         for folder in owners:
             entry = self.kbuild_cache[folder]
             candidate = entry.resolve(entry.rules.get(file))
+            if candidate is not None and file in entry.rules.forced_inputs:
+                self._uncertain_configured_inputs.add(file)
             if candidate is not None:
                 value = KbuildMakefile._merge_mode(value, candidate)
         return value
 
     def _get_kbuild(self, file: str) -> ConfigValue | None:
-        if posixpath.dirname(file) == "":
-            return None
-
         parent = posixpath.dirname(file)
         cache_entry = self._kbuild_cache_get(parent)
         value: ConfigValue | None = None
         while cache_entry is not None:
             if cache_entry.enabled:
                 candidate = cache_entry.resolve(cache_entry.rules.get(file))
+                if candidate is not None and file in cache_entry.rules.forced_inputs:
+                    self._uncertain_configured_inputs.add(file)
                 if candidate is not None:
                     value = KbuildMakefile._merge_mode(value, candidate)
             cache_entry = cache_entry.parent
@@ -1345,10 +1533,12 @@ class KbuildState:
     ) -> frozenset[str]:
         return self._active_source_facts(source, mode).targets
 
-    def _active_source_facts(self, source: str, mode: ConfigValue) -> IncludeFacts:
+    def _active_source_facts(self, source: str, mode: ConfigValue,
+                             *, unresolved_context: bool = False) -> IncludeFacts:
         self._check_include_generation()
         key = (source, mode)
-        cached = self._active_includes_cache.get(key)
+        cache = self._uncertain_includes_cache if unresolved_context else self._active_includes_cache
+        cached = cache.get(key)
         if cached is not None:
             return cached
 
@@ -1357,99 +1547,262 @@ class KbuildState:
         result: IncludeFacts
         try:
             contents = self._read_file(self.base_commit, source)
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except (FileNotFoundError, subprocess.SubprocessError):
+            self._source_read_failures.add(source)
             result = IncludeFacts(unknown=True)
         else:
-            result = self._source_analysis_cache.analyze_facts(source, mode, contents, possible_modules=True)
+            result = self._source_analysis_cache.analyze_facts(source, mode, contents,
+                                                               unresolved_context=unresolved_context)
 
-        self._active_includes_cache[key] = result
+        cache[key] = result
         return result
 
     def _check_include_generation(self) -> None:
         if self.source_includes is None or self._include_generation == self.source_includes.generation:
             return
         self._include_generation = self.source_includes.generation
-        self._active_includes_cache.clear()
         self._include_value_cache.clear()
-        self._uncertainty_ready = False
-        self._uncertain_mode = None
+        self._include_context_cache.clear()
+        if self._source_resolution_epoch != self.source_includes.resolution_epoch:
+            self._source_resolution_epoch = self.source_includes.resolution_epoch
+            self._active_includes_cache.clear()
+            self._uncertain_includes_cache.clear()
+            self._discovery_roots_pending = True
+            self._modeled_sources_cache = None
 
-    def _collect_uncertain_includes(self) -> None:
-        """Cache the root's unclosed build-input scope, without tree rescans."""
+    def _object_modes(self, file: str) -> frozenset[ConfigValue]:
+        observed = self._get_kbuild(file)
+        supplied = self.config.additional_inputs.get(file)
+        return frozenset(mode for mode in (observed, supplied) if mode is not None)
 
-        if self._uncertainty_ready or self.source_includes is None:
+    def modeled_sources(self) -> frozenset[str]:
+        """Existing positive C/assembly alternatives in selected build goals.
+
+        Tracked path membership selects real alternatives for each object.
+        Additional source positives remain visible even without a local goal.
+        This is the configured source model, not external-consumer closure.
+        """
+        if self._modeled_sources_cache is not None:
+            return self._modeled_sources_cache
+        if self.source_includes is None:
+            raise ValueError("Modeled source inventory requires tracked input paths")
+        selected = {path for path in self.config.additional_inputs if path.endswith(tuple(CODE_FILES))}
+        root = self._kbuild_cache_get("")
+        folders = [""] if root is not None else [entry.path for entry in self.kbuild_cache.values() if entry.enabled]
+        if root is None:
+            # Legacy isolated subdirectory fixtures have no global Kbuild.
+            # Query only their known consumer candidates, never a full tree.
+            for path in self.source_includes.uncertain_sources:
+                if path.endswith(tuple(CODE_FILES)) and self._object_modes(path):
+                    selected.add(path)
+            folders.extend(entry.path for entry in self.kbuild_cache.values() if entry.enabled)
+        visited: set[str] = set()
+        while folders:
+            folder = folders.pop()
+            if folder in visited:
+                continue
+            visited.add(folder)
+            if len(visited) > 65536:
+                self._include_discovery_failed = True
+                raise OSError("Configured directory inventory exceeded 65536 folders")
+            entry = self._kbuild_cache_get(folder)
+            if entry is None or not entry.enabled or entry.path != folder:
+                continue
+            for path in entry.rules.configured_inputs:
+                candidates = (path[:-2] + suffix for suffix in CODE_FILES) if path.endswith(".o") else (path,)
+                for candidate in candidates:
+                    if candidate.endswith(tuple(CODE_FILES)) and self.source_includes.has_path(candidate):
+                        selected.add(candidate)
+            folders.extend(entry.rules.directories - visited)
+        self._modeled_sources_cache = frozenset(selected)
+        return self._modeled_sources_cache
+
+    def _discover_positive_includes(self) -> None:
+        """Read enabled uncertain consumers once, then changed consumers only.
+
+        Observed targets enrich the shared possible-edge index. Unknown operands
+        do not make unrelated tracked files enabled, and absence is still the
+        configured model rather than a complete external-input certificate.
+        """
+        if self.source_includes is None:
             return
-        # Recipes, forced compiler inputs, assembly inputs and unsupported Make
-        # expansions are not closed. No current API accepts a closure certificate.
-        self._uncertain_mode = ConfigValue.ENABLED
-        self._uncertainty_ready = True
+        if self._discovery_roots_pending:
+            self._pending_include_sources.update(self.source_includes.normalization_sources)
+            self._discovery_roots_pending = False
+        if not self._pending_include_sources:
+            return
+        sources = self._pending_include_sources
+        self._pending_include_sources = set()
+        try:
+            self._observe_positive_includes(sources)
+        except (OSError, UnicodeError, subprocess.SubprocessError):
+            self._pending_include_sources.update(sources)
+            self._include_discovery_failed = True
+            raise
 
-    def _get_with_includes(
-        self,
-        file: str,
-        resolving: set[str],
-    ) -> ConfigValue | None:
-        if file in self._include_value_cache:
-            return self._include_value_cache[file]
-        if file in resolving:
-            return None
+    def _observe_positive_includes(self, sources: set[str]) -> None:
+        assert self.source_includes is not None
+        pending: list[tuple[str, ConfigValue, bool]] = []
+        for source in sorted(sources):
+            context = self._include_context(source)
+            pending.extend((source, mode, context.unknown) for mode in context.modes)
+        visited: set[tuple[str, ConfigValue, bool]] = set()
+        observed: dict[str, set[str]] = {}
+        normalization_sources = self.source_includes.normalization_sources
+        while pending:
+            source, mode, uncertain = pending.pop()
+            if (source, mode, uncertain) in visited:
+                continue
+            visited.add((source, mode, uncertain))
+            if len(visited) > 65536:
+                self._include_discovery_failed = True
+                raise OSError("Configured positive include discovery exceeded 65536 input modes")
+            facts = self._active_source_facts(source, mode, unresolved_context=uncertain)
+            observed.setdefault(source, set()).update(facts.targets)
+            pending.extend((target, mode, uncertain or facts.unknown)
+                           for target in facts.targets
+                           if target in normalization_sources)
+        for source, targets in observed.items():
+            self.source_includes.observe_targets(source, targets)
+        # Only reverse edges changed. Preserve exact source analyses; invalidate
+        # inclusion results, whose reachable consumers have just expanded.
+        self._include_generation = self.source_includes.generation
+        self._include_value_cache.clear()
+        self._include_context_cache.clear()
 
-        value = self._get_kbuild(file)
-        if self.source_includes is not None and value is not ConfigValue.ENABLED:
-            resolving.add(file)
-            for source in self.source_includes.includers(file):
-                source_mode = self._get_with_includes(source, resolving)
-                if source_mode is None:
+    def _compiler_context_unknown(self, file: str, modes: set[ConfigValue]) -> bool:
+        entry = self._kbuild_cache_get(posixpath.dirname(file))
+        while entry is not None:
+            if any(entry.rules.cpp_context_unknown(file, mode is ConfigValue.MODULE) for mode in modes):
+                return True
+            entry = entry.parent
+        return False
+
+    def _include_context(self, file: str) -> _IncludeContext:
+        """Solve a finite reverse-include graph, including cyclic components."""
+
+        cached = self._include_context_cache.get(file)
+        if cached is not None:
+            return cached
+        nodes = {file}
+        frontier = [file]
+        outgoing: dict[str, set[str]] = {}
+        anchors: dict[str, _IncludeContext] = {}
+        edge_count = 0
+        while frontier:
+            target = frontier.pop()
+            if target != file and target in self._include_context_cache:
+                anchors[target] = self._include_context_cache[target]
+                continue
+            sources = self.source_includes.includers(target) if self.source_includes is not None else ()
+            for source in sources:
+                outgoing.setdefault(source, set()).add(target)
+                edge_count += 1
+                if source not in nodes:
+                    nodes.add(source)
+                    frontier.append(source)
+                if len(nodes) > 65536 or edge_count > 1048576:
+                    self._include_discovery_failed = True
+                    raise OSError("Configured include closure exceeded node/edge budget")
+
+        modes: dict[str, set[ConfigValue]] = {}
+        uncertain: set[str] = set()
+        pending: list[tuple[str, ConfigValue, bool]] = []
+        for node in sorted(nodes):
+            anchor = anchors.get(node)
+            if anchor is not None:
+                modes[node] = set(anchor.modes)
+                unknown = anchor.unknown
+            else:
+                observed = self._get_kbuild(node)
+                supplied = self.config.additional_inputs.get(node)
+                modes[node] = {mode for mode in (observed, supplied) if mode is not None}
+                unknown = (node in self._uncertain_configured_inputs
+                           or supplied is not None and observed != supplied
+                           or self._compiler_context_unknown(node, modes[node]))
+            if unknown:
+                uncertain.add(node)
+            pending.extend((node, mode, unknown) for mode in modes[node])
+
+        visited: set[tuple[str, ConfigValue, bool]] = set()
+        while pending:
+            source, mode, unknown = pending.pop()
+            unknown |= source in uncertain
+            state = (source, mode, unknown)
+            if state in visited:
+                continue
+            visited.add(state)
+            targets = outgoing.get(source)
+            if not targets:
+                continue
+            facts = self._active_source_facts(source, mode, unresolved_context=unknown)
+            for target in targets:
+                if target not in facts.targets and not facts.unknown:
                     continue
-                facts = self._active_source_facts(source, source_mode)
-                if file not in facts.targets and not facts.unknown:
-                    continue
-                value = KbuildMakefile._merge_mode(value, source_mode)
-                if value is ConfigValue.ENABLED:
-                    break
-            resolving.remove(file)
+                values = {mode}
+                target_unknown = unknown or facts.unknown
+                if target_unknown:
+                    values.add(ConfigValue.ENABLED)
+                added = values - modes[target]
+                modes[target].update(values)
+                became_unknown = target_unknown and target not in uncertain
+                if became_unknown:
+                    uncertain.add(target)
+                pending.extend((target, value, target in uncertain)
+                               for value in (modes[target] if became_unknown else added))
 
-        # A recursive None can come from cutting a cycle whose other path is
-        # still resolving. It is not reusable absence for a later root query.
-        if value is not None or not resolving:
-            self._include_value_cache[file] = value
-        return value
+        for node in nodes:
+            result = _IncludeContext(frozenset(modes[node]), node in uncertain)
+            self._include_context_cache[node] = result
+            self._include_value_cache[node] = result.value
+        return self._include_context_cache[file]
 
     def get(self, file: str) -> ConfigValue | None:
+        """Configured object/include model, retaining operational read failures."""
+
         self._check_include_generation()
-        value = self.object_membership(file)
-        if value is not None:
-            return value
-        if self.source_includes is None:
-            # Without even a tracked input vocabulary, parser absence cannot
-            # authorize removal. Explicit object observations remain available.
+        if self.has_input_failures:
             return ConfigValue.ENABLED
-        if not self.source_includes.has_input(file):
-            return None
-        self._collect_uncertain_includes()
-        return self._uncertain_mode
+        try:
+            self._discover_positive_includes()
+            if self.has_input_failures:
+                return ConfigValue.ENABLED
+            return self._include_context(file).value
+        except (OSError, UnicodeError, subprocess.SubprocessError):
+            self._build_read_failed = True
+            return ConfigValue.ENABLED
 
     @property
     def build_input_closure(self) -> BuildInputClosure:
-        # A future closed status needs a validated compiler/framework input
-        # certificate. There is deliberately no trusted boolean bypass today.
+        """The configured model does not claim every external input is known."""
+
         return BuildInputClosure.UNKNOWN
 
-    def object_membership(self, file: str) -> ConfigValue | None:
-        """Parser object observation; None is not an absence certificate."""
+    @property
+    def has_input_failures(self) -> bool:
+        """Operational reads/budgets failed, independently of modeled unknowns."""
 
-        return self._get_kbuild(file)
+        return self._build_read_failed or self._include_discovery_failed or bool(self._source_read_failures)
+
+    @property
+    def source_read_failures(self) -> frozenset[str]:
+        return frozenset(self._source_read_failures)
+
+    def object_membership(self, file: str) -> ConfigValue | None:
+        return _IncludeContext(self._object_modes(file)).value
 
     def modeled_inclusion(self, file: str) -> ConfigValue | None:
-        """Positive literal-graph observations, without uncertainty fallback."""
-
         self._check_include_generation()
-        return self._get_with_includes(file, set())
+        return self._include_context(file).value
 
     def cpp_context_complete(self, file: str) -> bool:
-        """Whether boolean inclusion also supplies an exclusive CPP context."""
+        """Whether this modeled input has exactly one known CPP build mode."""
 
-        return False
+        self.get(file)
+        if self.has_input_failures:
+            return False
+        context = self._include_context(file)
+        return len(context.modes) == 1 and not context.unknown
 
     def read_file(self, commit: str, path: str) -> bytes:
         return self._read_file(commit, path)
@@ -1507,14 +1860,21 @@ class KbuildState:
             for path in (file.file, file.old_file)
             if path is not None
         }
-        if changed_paths:
-            self._uncertainty_ready = False
-            self._uncertain_mode = None
-            # This cache contains only literal-graph modes, never fallback.
-            # Existing targeted invalidation below remains sufficient for it.
+        self._build_read_failed = False
+        if self._source_read_failures:
+            self._pending_include_sources.update(self._source_read_failures)
+            for path in self._source_read_failures:
+                for mode in (ConfigValue.ENABLED, ConfigValue.MODULE):
+                    self._active_includes_cache.pop((path, mode), None)
+                    self._uncertain_includes_cache.pop((path, mode), None)
+            self._source_read_failures.clear()
+            self._include_context_cache.clear()
+            self._include_value_cache.clear()
         for path in changed_paths:
             self._active_includes_cache.pop((path, ConfigValue.ENABLED), None)
             self._active_includes_cache.pop((path, ConfigValue.MODULE), None)
+            self._uncertain_includes_cache.pop((path, ConfigValue.ENABLED), None)
+            self._uncertain_includes_cache.pop((path, ConfigValue.MODULE), None)
         affected_folders = {
             folder
             for path in changed_paths
@@ -1523,13 +1883,22 @@ class KbuildState:
 
         for path in changed_paths:
             affected_folders.update(self._build_file_owners.get(path, ()))
+        if self.source_includes is not None:
+            self._pending_include_sources.update(changed_paths & self.source_includes.normalization_sources)
+        if affected_folders:
+            self._include_discovery_failed = False
+            self._uncertain_configured_inputs.clear()
+            self._discovery_roots_pending = True
+            self._modeled_sources_cache = None
 
         if affected_folders:
             self._architecture_indexed = False
             self._include_value_cache.clear()
+            self._include_context_cache.clear()
         elif self.source_includes is not None:
             for path in self.source_includes.transitive_targets(changed_paths):
                 self._include_value_cache.pop(path, None)
+                self._include_context_cache.pop(path, None)
 
         # Invalidating a parent also invalidates all of its cached descendants.
         # Reload remains lazy, so an untouched part of the tree incurs no reads.

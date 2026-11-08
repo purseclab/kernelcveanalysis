@@ -38,6 +38,7 @@ class RepositoryFileReader:
         self._paths: OrderedDict[str, None] = OrderedDict()
         self._content_bytes = 0
         self._process_reads = 0
+        self._process_epoch = 0
         repository = getattr(repo, "repo", None)
         self._repository = Path(repository) if repository is not None else None
         if self._repository is not None:
@@ -52,6 +53,12 @@ class RepositoryFileReader:
             stderr=subprocess.DEVNULL,
         )
         self._process_reads = 0
+        self._process_epoch += 1
+
+    @property
+    def cache_epoch(self) -> int | None:
+        """Identity of the active native object view; fallback reads are fresh."""
+        return self._process_epoch if self._process is not None else None
 
     def read_file(self, commit: str, path: str) -> bytes:
         process = self._process
