@@ -1,3 +1,4 @@
+from bisect import bisect_right
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -246,6 +247,16 @@ def preprocessor_directive_text(source: str, *, strict_multiline: bool = False) 
     interpreted as a different include path. This is intended for conservative
     directive inventory, not full macro expansion.
     """
+    return _preprocessor_directive_text(source, strict_multiline, _deny_angle_comment)
+
+
+def _deny_angle_comment(_offset: int) -> bool:
+    return False
+
+
+def _preprocessor_directive_text(
+    source: str, strict_multiline: bool, allows_angle_comment: Callable[[int], bool],
+) -> str | None:
     source = re.sub(r"\\(?:\r\n|\n)", "", source)
     if _unsupported_comment_context(source):
         return None
@@ -266,7 +277,7 @@ def preprocessor_directive_text(source: str, *, strict_multiline: bool = False) 
                 # Newlines inside a directive's comment need different logical
                 # line handling. Do not feed a truncated condition to callers.
                 invalid = True
-            if context.directive and context.angle_open:
+            if context.directive and context.angle_open and not allows_angle_comment(match.start()):
                 invalid = True
             context.after(match.end(), comment=True)
             return " " + "\n" * value.count("\n")
@@ -496,6 +507,71 @@ def iter_c_token_spans(
     closed instead of being interpreted as ordinary strings/comments.
     """
     return _iter_c_tokens(source, ignore_non_directive_newlines, token_limit, _make_span)
+
+
+@dataclass(frozen=True, slots=True)
+class _DefineInterval:
+    start: int
+    end: int
+
+
+def _define_intervals(source: str, ignore_non_directive_newlines: bool, token_limit: int) -> tuple[_DefineInterval, ...]:
+    # Emit ordinary newlines to recognize logical directive starts. They only
+    # enlarge the traversal bound; semantic tokens retain the caller's cap.
+    traversal_limit = token_limit + (source.count("\n") if ignore_non_directive_newlines else 0)
+    found: list[_DefineInterval] = []
+    count = 0
+    at_start, awaiting_keyword, is_define = True, False, False
+    start = 0
+    for span in iter_c_token_spans(source, False, traversal_limit):
+        kind = span.token.kind
+        if not (ignore_non_directive_newlines and kind is CTokenKind.NEWLINE):
+            count += 1
+            if count > token_limit:
+                raise CTokenizationError("define-context token limit exceeded")
+        if kind in {CTokenKind.NEWLINE, CTokenKind.DIRECTIVE_NEWLINE}:
+            if is_define:
+                found.append(_DefineInterval(start, span.start))
+            at_start, awaiting_keyword, is_define = True, False, False
+            continue
+        if awaiting_keyword:
+            is_define = kind is CTokenKind.IDENTIFIER and span.token.value == "define"
+            awaiting_keyword = False
+        elif at_start and kind is CTokenKind.PUNCTUATOR and span.token.value in {"#", "%:"}:
+            awaiting_keyword, start = True, span.start
+        at_start = False
+    return tuple(found)
+
+
+@dataclass(slots=True)
+class _DefineCommentContext:
+    source: str
+    ignore_non_directive_newlines: bool
+    token_limit: int
+    intervals: tuple[_DefineInterval, ...] | None = None
+
+    def allows(self, offset: int) -> bool:
+        if self.intervals is None:
+            # The source is original text. The normalizer and token stream
+            # each splice that original once, giving the same logical offsets.
+            self.intervals = _define_intervals(self.source, self.ignore_non_directive_newlines, self.token_limit)
+        index = bisect_right(self.intervals, offset, key=lambda interval: interval.start) - 1
+        return index >= 0 and offset < self.intervals[index].end
+
+
+def layout_comment_context_supported(
+    source: str, *, ignore_non_directive_newlines: bool, token_limit: int,
+) -> bool:
+    """Validate layout comments, admitting angles only in proven definitions.
+
+    Definition discovery is lazy and must finish before granting any interval.
+    The public line-based normalizer keeps its original conservative behavior.
+    """
+    context = _DefineCommentContext(source, ignore_non_directive_newlines, token_limit)
+    try:
+        return _preprocessor_directive_text(source, False, context.allows) is not None
+    except CTokenizationError:
+        return False
 
 
 def tokenize_c_source(

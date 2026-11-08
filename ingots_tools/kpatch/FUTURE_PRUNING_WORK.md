@@ -5,19 +5,18 @@
 The current 515-original whitespace replay removes **zero whole commits without
 the explicit input-role assumption**, including in line-number mode. Recognized
 raw consumers and unresolved input roles retain changes by default. With
-`--unresolved-inputs-lossy` and its mandatory report, strict lines remove **169**;
-also enabling the audited line-number assumption removes **379**. These are
-**0.63% / 1.42% of the original 26,670 legacy survivors**, not additional
+`--unresolved-inputs-lossy` and its mandatory report, strict lines remove **175**;
+also enabling the audited line-number assumption removes **394**. These are
+**0.66% / 1.48% of the original 26,670 legacy survivors**, not additional
 whole-pipeline rates. Neither assumption has a measured false-removal bound.
 
-The latest layout repair preserves directive-ending lines and supports multiline
-directive comments, adding **1 / 10 whole removals** over `d87c33c` without new
-flags or assumptions. The preceding streaming index update recovered **65 / 140**
-over `7491d42`; these are successive gains under the same assumptions, with no
-dropped prior masks or removals in the paired replays. All **1,344 tests** pass,
-mypy checks 68 Python sources, and 69 packaged Python/C++ sources match the wheel.
-See [the latest layout results](#directive-ending-lines-and-multiline-comments--2026-11-08),
-[the preceding streaming results](#exact-streaming-consumer-updates--2026-11-08)
+The latest precision change proves lexical macro-definition comment context,
+adding **6 / 15 whole removals** over `51d0aad` without new flags or assumptions.
+It preserves directive-ending lines, token gaps/columns and observed consumer
+barriers. All **1,362 tests** pass, mypy checks 68 Python sources, and 69 packaged
+Python/C++ sources match the wheel. See
+[the latest results](#macro-definition-comment-precision--2026-11-08),
+[the preceding directive repair](#directive-ending-lines-and-multiline-comments--2026-11-08)
 and [the assumption contract](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
 
 The following checkpoint and later experiment sections preserve historical
@@ -2929,3 +2928,135 @@ using 862 literal tree queries and 478 freshly hashed blobs. It completes in
 All source/test hashes still match the completed test and wheel checks. This
 establishes evidence provenance and implementation consistency, not the truth
 of the explicit input/line assumptions or a bound on false removals.
+
+## Macro-definition comment precision — 2026-11-08
+
+The previous layout validity check treated a `<` in a numeric shift or
+comparison inside `#define` as a possible header opener. Comments after it then
+made the complete file unsupported, even when the patch only changed wording.
+Macro replacement comments are consumed while defining the macro, before later
+expansion can give the resulting tokens an include/header role.
+
+Layout now admits such comments only inside complete lexical `#define` /
+`%:define` intervals from the shared lexer. Discovery is lazy on the first
+ambiguity, finishes before granting any range and reuses that result for the
+rest of the scan. The normalizer and lexer each splice the original text once;
+logical-character offsets then agree. The private admission callback shares
+the existing validator, while its public line-based API always denies these
+angles and keeps its old signature and behavior.
+
+The proof counts semantic tokens under the selected ordinary-newline mode and
+includes directive/synthetic-EOF terminators. Extra ordinary-newline traversal
+is bounded by the original LF count, without increasing the semantic cap.
+Only completed layout facts are cached. Token/gap/location, raw-input and all
+other unsupported-context guards remain in force; no flag or assumption is added.
+
+Two compiled boundaries prevent a broader shortcut. An included `HAS` alias for
+`__has_include` makes an actual `#if HAS(<foo/*x*/bar.h>)` change runtime from
+1 to 2 when x becomes y, under both GCC and Clang. A leading-comment construction
+also exposes a second apparent splice after the first pass: incorrectly
+splicing twice shifts a later definition interval over that same unsafe `#if`.
+Both cases remain retained in all four public filter modes. The macro-body
+variant is constant 2 to 2 and can qualify. Header/import/conditional/pragma and
+computed contexts keep their existing angle/comment refusal.
+
+Independent review passes 34 compiled controls and 136 public-filter mode runs,
+including the prior directive-ending-line, raw `.incbin`, byte-column, gap,
+CRLF and EOF cases. Seventy-four comparisons against the previous public
+normalizer match exact output/None behavior in both strict modes. Eighteen
+additional focused tests cover typed offsets, exact-once splicing, complete
+discovery, mixed contexts, lazy/empty/failure caching and both token-budget
+modes. Evidence is in ignored `benchmarks/define_layout_review/2026-11-08/`
+and `benchmarks/whitespace_recovery_options/2026-11-08/angle-context-review/`.
+
+All 1,362 full-suite tests pass, including the captured binary SELinux policy;
+mypy checks 68 Python sources, and the wheel matches all 69 packaged Python/C++
+sources. All 142 source/test paths remain byte-identical across verification.
+
+Before the actual policy replay, the complete original-source census covers
+24 originals / 32 changed files, including every companion file. It predicts
+11 strict / 23 line-assumed whole candidates from previously unsupported files.
+Exact historical Make/source evidence already blocks two strict and four
+line-mode originals, leaving conditional ceilings of nine / nineteen. These
+are candidate ceilings, not accepted removals or a low-risk estimate. Consumer
+evidence must be tied to each exact revision: a later `fs.h` generator spelling
+cannot be projected backward into an earlier source tree. The separate forecast
+is in ignored `benchmarks/define_body_policy_forecast/2026-11-08/`.
+
+The actual 24-original / four-mode preflight completes all 96 fresh views.
+Default profiles remove zero wholes. Existing input assumptions permit six
+strict / fifteen line-mode whole removals, with 10 / 20 file masks and one
+retained partial in each profile. Against the previous implementation's exact
+24 rows, gains are six / fifteen wholes and seven / sixteen masks, with no drops.
+Independent verification reconstructs every resulting patch, checks all 30
+stage/mandatory-audit pairs and freshly verifies all 63 distinct historical
+changed-source coordinates (64 sides / 32 file pairs).
+
+All four previously known positive-consumer originals remain retained, with
+their six observed paths unmasked in every profile. The additional three
+strict / four line-mode misses from the forecast also have FULL observed
+positive header-install consumers (`tools/lib/perf/Makefile` or
+`tools/lib/api/Makefile`), including conservative basename matches. They have no
+layout/hunk/mode mismatch or operational failure. These observations are
+retention evidence, not a proof that each comment changes runtime. None of
+these positives is waived to improve the count.
+
+The worker takes 147.41 seconds (148.58 including its monitor), with 731.8 MiB
+sampled combined RSS and 180.0 MiB cgroup peak under the unchanged 896 MiB hard /
+832 MiB RSS limits, no OOM or swap. All 69 frozen sources remain identical and
+the worker is reaped. These targeted results must not be presented as an updated
+515-candidate total; that separate same-order replay is independently audited.
+The preflight evidence is under ignored
+`benchmarks/define_body_layout/2026-11-08/preflight/`.
+
+The separate full same-order replay completes all 515 originals, preserving the
+four profiles, fresh masks, shared actual reader/provider and resource limits:
+
+| Mode | `51d0aad` baseline | Macro-definition precision | Additional wholes |
+| --- | ---: | ---: | ---: |
+| Default strict | 0 | 0 | 0 |
+| Default line-number mode | 0 | 0 | 0 |
+| Existing input assumption, strict lines | 169 | 175 | 6 |
+| Existing input plus line-number assumptions | 379 | 394 | 15 |
+
+It publishes 255 / 530 file masks in the assumed profiles, including eleven /
+seventeen retained partial commits. All six / fifteen whole additions exactly
+match the targeted replay, with seven / sixteen additional file masks and no
+dropped prior masks or whole IDs. Default outputs remain identical. The totals
+cover 33.98% / 76.50% of the selected 515, or 0.66% / 1.48% of the original
+26,670 legacy survivors. Incremental gains are 0.02250 / 0.05624 percentage points
+of that larger cohort. These are stage-specific results under the existing
+explicit assumptions, not whole-pipeline rates or a false-removal bound.
+
+The worker takes 1,039.99 seconds (1,041.03 including its monitor), versus 950.80
+before: 9.38% longer in these sequential local experiments. New supported files
+require additional proof and consumer queries; this is not a speedup claim.
+Peak sampled combined RSS is 814.5 MiB and cgroup peak 847.8 MiB, below the same
+832 / 896 MiB limits with no OOM or swap. Cgroup memory is higher than the prior
+559.6 MiB run; shared pages and host caches also limit direct comparisons. The
+worker exits successfully and is reaped, all 69 executed sources still match the
+frozen tests/wheel, and neither replay is retried or given a guard override.
+
+Independent final auditing rereads all 515 original identities and all 785
+stage/mandatory mask events, reconstructs every output patch and checks every
+known or previously observed positive-consumer path remains unmasked. Strict
+results remain covered by the line mode; no prior ID or mask is dropped. A fresh
+bounded native oracle verifies all 68,613 historical unknown-source coordinates
+and 479 unique path/SHA pairs against regular Git blobs, using 887 literal tree
+queries and 479 freshly hashed blobs. It finishes in 78.99 seconds, exits zero
+and reaps its worker with no OOM or swap. All 142 source/test hashes still match
+the full suite and package checks. These checks establish evidence provenance
+and implementation consistency, not a false-removal bound for the existing
+explicit assumptions.
+
+A saved-data frontier review finds all 308 measured ambiguous comment sites in
+macro definitions and none in pure-numeric `#if` / `#elif` contexts. The remaining
+`kernel/sched/debug.c` raw-prefix refusal is a real false alarm on an ordinary
+`">R"` string, but removing it in isolation adds zero candidates: the patch also
+changes `#define` to `# define`, affecting token gaps and byte columns. No further
+guard relaxation is shipped for that zero-gain case. The reviewed broader source
+inventories likewise identify no substantial unclaimed exact source-only class;
+matching target/compiler inputs and caller closure remain the useful next
+frontier for policy, hardware and more general unused-code exclusions. This is
+an evidence-scoped assessment, not proof that no other opportunity exists.
+The report is in ignored `benchmarks/source_frontier_after_define/2026-11-08/`.

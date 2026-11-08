@@ -42,6 +42,19 @@ The lexer advances past the whole header instead of emitting its contents as
 additional ordinary tokens. This also prevents a comment-looking filename
 from consuming the following source.
 
+Angle-looking text in a macro definition is a different lexical context.
+Layout can admit its comments only after the shared lexer proves a complete
+leading `#define` or `%:define` interval. This proof is discovered lazily on the
+first ambiguous comment and reused for that scan. Both views splice the
+original source independently once; partial or failed discovery grants nothing.
+The public line-based normalizer keeps its existing conservative behavior.
+
+Other directive contexts remain opaque. For example, an included macro can
+alias `__has_include`, making `#if HAS(<foo/*x*/bar.h>)` inspect a filename whose
+comment-looking bytes affect behavior. Neither a missing literal builtin nor
+an initial `#if` keyword establishes ordinary comparison semantics. Include,
+import, conditional, pragma and computed contexts keep their angle/comment guard.
+
 Code masks blank excluded code at its original physical lines. They are not
 replayed as discarded edits: removing an added inactive line from the comparison
 would hide a subsequent line-number change. Previously established edit masks
@@ -54,6 +67,11 @@ The token budget is enforced while lexing. Its cache contains typed digest
 facts, including failed scans, with at most 512 entries and 16 MiB of represented
 source input. Cached facts do not retain source buffers or token arrays.
 Git source reads continue to use the pipeline's shared bounded blob reader.
+The definition proof emits ordinary newlines to identify logical line starts,
+with a traversal allowance bounded by the original LF count. It separately
+enforces the same semantic-token limit for the selected newline mode, including
+directive terminators and synthetic EOF. Temporary typed intervals are discarded
+after validation; only the complete layout fact enters the cache.
 
 Invalid UTF-8, NUL, BOM, trigraph spellings, bare CR, GNU whitespace-before-newline
 splices, unsupported tokens, unclosed complete-source comments/literals and

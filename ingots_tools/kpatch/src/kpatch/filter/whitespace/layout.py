@@ -17,7 +17,7 @@ from .c_lexer import (
     CTokenSpan,
     CTokenizationError,
     iter_c_token_spans,
-    preprocessor_directive_text,
+    layout_comment_context_supported,
 )
 
 
@@ -175,7 +175,10 @@ class LayoutComparer:
             # Only validate comment/header context here. The located lexer
             # keeps directives intact across comment-internal newlines; the
             # normalizer's line-preserving output is not consumed by layout.
-            if preprocessor_directive_text(text) is None:
+            if not layout_comment_context_supported(
+                text, ignore_non_directive_newlines=self.ignore_non_directive_newlines,
+                token_limit=_MAX_TOKENS,
+            ):
                 return None
             return self._token_digest(text)
         except (UnicodeError, CTokenizationError):
