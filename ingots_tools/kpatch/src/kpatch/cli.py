@@ -1,4 +1,5 @@
 from typing import Annotated, cast
+from dataclasses import replace
 from pathlib import Path
 import random
 import sqlite3
@@ -12,6 +13,7 @@ from .git import GitDb, GitRepo, parse_time, save_commits_to_db, load_commits_fr
 from .filter import WhitespaceFilter, CommitFilter, RunFilterArgs, run_filter,  FilterPipeline, MergeCommitFilter, ConfigFilter, KernelConfig, IfdefFilter, ClassifierFilter, CountFilter
 from .filter.source_pruning import source_pruning_tail
 from .filter.pruning_audit import PruningAudit
+from .filter.source_roles import SourceInputAssumptionPolicy
 from .filter.output_paths import repository_input_roots, validate_output_paths
 from .visualization import show_commit_sunburst
 from .update import update_to_db
@@ -152,6 +154,10 @@ def filter(
         bool, typer.Option(help="Ignore physical line-number changes for otherwise equivalent tokens, gaps and byte columns. Can remove runtime-relevant changes. Requires --whitespace-report."),
     ] = False,
     whitespace_report: Annotated[Path | None, typer.Option(help="JSONL whitespace decisions, required with --whitespace-line-numbers-lossy.")] = None,
+    unresolved_inputs_lossy: Annotated[
+        bool, typer.Option(help="Assume unsupported raw-input expressions cannot observe affected source changes. Can remove runtime-relevant commits; observed raw consumers and failed scans still retain. Requires --input-role-report."),
+    ] = False,
+    input_role_report: Annotated[Path | None, typer.Option(help="Mandatory JSONL evidence for --unresolved-inputs-lossy assumptions.")] = None,
     policy_profile: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Pinned SELinux/credential profile for compiler-backed policy filtering.")] = None,
     policy_build_context: Annotated[Path | None, typer.Option(exists=True, dir_okay=False, help="Prepared compiler context JSON for policy analysis.")] = None,
     policy_report: Annotated[Path | None, typer.Option(help="JSONL policy decisions, required with --policy-profile.")] = None,
@@ -187,6 +193,10 @@ def filter(
         raise typer.BadParameter("--source-pruning-lossy requires --source-pruning-report to record risky removals")
     if whitespace_line_numbers_lossy and whitespace_report is None:
         raise typer.BadParameter("--whitespace-line-numbers-lossy requires --whitespace-report to record risky removals")
+    if unresolved_inputs_lossy and input_role_report is None:
+        raise typer.BadParameter("--unresolved-inputs-lossy requires --input-role-report to record risky removals")
+    if input_role_report is not None and not unresolved_inputs_lossy:
+        raise typer.BadParameter("--input-role-report requires --unresolved-inputs-lossy")
     if policy_profile is None:
         if (policy_build_context is not None or policy_report is not None or policy_direct_app or policy_cache is not None
                 or setools_python is not None or setools_module_path):
@@ -195,7 +205,8 @@ def filter(
         raise typer.BadParameter("--policy-profile requires --policy-build-context and --policy-report")
     source_audit: PruningAudit | None = None
     whitespace_audit: PruningAudit | None = None
-    reports = tuple(path for path in (source_pruning_report, whitespace_report) if path is not None)
+    input_role_audit: PruningAudit | None = None
+    reports = tuple(path for path in (source_pruning_report, whitespace_report, input_role_report) if path is not None)
     args = get_run_args(ctx)
     protected = (args.db.db, _path_for_db_name(args.destination_db_name)) + tuple(
         value for value in (config, policy_profile, policy_build_context, setools_python) if value is not None
@@ -217,8 +228,14 @@ def filter(
             if whitespace_report is not None:
                 whitespace_audit = PruningAudit.create(whitespace_report, args.repo.repo,
                                                       protected + tuple(path for path in outputs if path != whitespace_report))
+            if input_role_report is not None:
+                input_role_audit = PruningAudit.create(input_role_report, args.repo.repo,
+                                                      protected + tuple(path for path in outputs if path != input_role_report))
         except (OSError, ValueError) as error:
             raise typer.BadParameter(str(error)) from error
+    if unresolved_inputs_lossy:
+        assert input_role_audit is not None
+        ctx.obj = replace(args, input_role_policy=SourceInputAssumptionPolicy(input_role_audit))
     if source_pruning:
         filter.filters[-1:] = source_pruning_tail(
             kernel_config, source_audit, lossy=source_pruning_lossy,

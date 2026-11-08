@@ -189,7 +189,7 @@ that a source has only C/C++ preprocessing consumers.
 Immediately before publishing a semantic mask, whitespace, constant branches,
 configured branches, unused definitions, renames and policy exclusions check
 the original parent/path and child/path. Additions and deletions check their
-existing side. A positive consumer, unresolved recognized inventory, failed
+existing side. By default, a positive consumer, unresolved recognized inventory, failed
 scan or exceeded budget retains the candidate without new masks or a pruning
 audit. Policy decisions report `unknown` with
 `raw_input_consumer_or_unresolved_consumer_inventory`. Earlier masks remain
@@ -219,3 +219,13 @@ The shortcut can omit other consumer facts because uncertainty already vetoes
 the mask. A future mode that deliberately ignores uncertainty must use the full
 lookup before considering acceptance; clearing uncertainty from a shortcut
 result would also discard possible positive raw consumers.
+
+The separate `SourceInputAssumptionPolicy` opt-in forces a full recognized
+lookup on both original sides. Typed `RawInputObservation` values separate full,
+incomplete and witness-only states, semantic unknowns and hard failures.
+`SourceRoleDecision` and `SourceMaskPlan` carry this authorization through the
+proof to publication. Only specified semantic unknowns can be assumed; observed
+positive consumers, failed scans and aggregate limits remain barriers. The
+mandatory assumption report is written before any new masks, and every affected
+stage decision includes `lossy=true`, additive risk labels and original-side
+evidence. See [the API, flag and compiled risk controls](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).

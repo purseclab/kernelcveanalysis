@@ -13,11 +13,12 @@ from ..base import (
     FilteredCommit,
     StreamingCommitFilter,
     repository_file_reader,
-    source_role_veto,
 )
 from ...diff import DiffChunk, DiffFile, DiffFileType
-from ..masking import FileIdentity, MaskReason, SourceVersions
+from ..input_role_models import SourceRoleDecision, SourceRoleStatus
+from ..masking import EditMask, FileIdentity, MaskReason, SourceVersions
 from ..pruning_decision import PruningDecision
+from ..source_roles import SourceMaskPlan, decorate_source_decision, publish_source_masks, source_role_decision
 from ..source_modes import regular_source_change
 
 _C_SOURCE_EXTENSIONS = (
@@ -46,6 +47,12 @@ class WhitespaceFilterStats:
     processed_commits: int
     eliminated_commits: int
     pruned_files: int
+
+
+@dataclass(frozen=True, slots=True)
+class _WhitespaceProof:
+    reason: MaskReason
+    roles: SourceRoleDecision
 
 
 class WhitespaceFilter(StreamingCommitFilter):
@@ -119,12 +126,12 @@ class WhitespaceFilter(StreamingCommitFilter):
             return False
         return t_old == t_new
 
-    def _noop_reason(
+    def _noop_proof(
         self,
         commit: FilteredCommit,
         context: FilterContext,
         diff_file: DiffFile,
-    ) -> MaskReason | None:
+    ) -> _WhitespaceProof | None:
         """Classify equivalence or the explicit, audited line-number assumption."""
         # Conservatively retain non-C source, assembly, binary, mode changes, and structural changes
         if not _is_c_source_file(diff_file.file) and (
@@ -203,8 +210,10 @@ class WhitespaceFilter(StreamingCommitFilter):
                 reason = MaskReason.WHITESPACE
             elif self.line_numbers_lossy and self._layout.equivalent_ignoring_line_numbers(old_bytes, new_bytes):
                 reason = MaskReason.WHITESPACE_LINES_LOSSY
-            if reason is not None and not source_role_veto(commit, diff_file, context):
-                return reason
+            if reason is not None:
+                roles = source_role_decision(commit, diff_file, context)
+                if roles.status is not SourceRoleStatus.BLOCKED:
+                    return _WhitespaceProof(reason, roles)
             return None
         except Exception:
             # Conservatively retain on unreadable files or missing git objects
@@ -218,11 +227,12 @@ class WhitespaceFilter(StreamingCommitFilter):
         self._processed_commits += 1
         retained: list[DiffFile] = []
         for diff_file in commit.diff.files:
-            reason = self._noop_reason(commit, context, diff_file)
-            if reason is not None:
+            proof = self._noop_proof(commit, context, diff_file)
+            if proof is not None:
+                mask = EditMask(FileIdentity.of(diff_file), proof.reason, whole_file=True)
+                publish_source_masks(commit, context, SourceMaskPlan((proof.roles,), (mask,)))
                 self._pruned_files += 1
-                commit.mask_file(diff_file, reason)
-                self._record(commit, diff_file, reason)
+                self._record(commit, diff_file, proof)
             else:
                 retained.append(diff_file)
 
@@ -232,21 +242,21 @@ class WhitespaceFilter(StreamingCommitFilter):
 
         return commit
 
-    def _record(self, commit: FilteredCommit, file: DiffFile, reason: MaskReason) -> None:
+    def _record(self, commit: FilteredCommit, file: DiffFile, proof: _WhitespaceProof) -> None:
         if self.on_pruned is None:
             return
-        lossy = reason is MaskReason.WHITESPACE_LINES_LOSSY
+        lossy = proof.reason is MaskReason.WHITESPACE_LINES_LOSSY
         risks = (
             "source_line_number_observations_may_change_runtime_behavior",
             "included_macros_may_observe_changed_lines",
         ) if lossy else ()
         identity = FileIdentity.of(file)
-        self.on_pruned(PruningDecision(
-            commit.original.commit_id, (file.file,), reason.value, (),
+        self.on_pruned(decorate_source_decision(PruningDecision(
+            commit.original.commit_id, (file.file,), proof.reason.value, (),
             tuple(mask for mask in commit.edit_masks if mask.file == identity),
             tuple(mask for mask in commit.code_masks if mask.file == identity),
             lossy, risks,
-        ))
+        ), (proof.roles,)))
 
     def iter_filter_mutable_commits(
         self,

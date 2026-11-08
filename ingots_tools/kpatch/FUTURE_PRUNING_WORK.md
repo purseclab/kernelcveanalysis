@@ -2553,3 +2553,135 @@ The completed replay is in
 `benchmarks/source_raw_roles/2026-11-07/whitespace-replay-final/`; final tests and
 package evidence are in its sibling `verification/`. Earlier interrupted
 attempts and pre-repair verification directories remain separate.
+
+## Audited assumptions for unresolved input expressions — 2026-11-08
+
+The conservative `a58ca20` checkpoint retains all 515 selected whitespace
+candidates. A separate opt-in now addresses that known source of lost yield:
+`--unresolved-inputs-lossy --input-role-report PATH`. It assumes that specified
+unsupported Make/assembly input expressions cannot observe the affected source
+changes. It does not silently alter the default or the existing rename and
+line-number assumptions.
+
+The inspection estimate before implementation was at most 154 whole strict
+removals and 355 with the additional line-number assumption. Those are optimistic
+ceilings derived from the prior witness-only observations, not measured recovery.
+A subsequent full representative inventory found additional positives, including
+an unrelated `device.h` basename consumer, that the shortcut omitted. In that
+revision, six of 226 unique historical strict-pruned paths and eight of 418
+line-mode paths had positive matches. These are revision-local diagnostics, not
+an estimate of how many whole historical commits are safe or removable.
+
+The implementation separates operational scan state, typed semantic unknowns
+and hard failures. Assumed removals require full recognized inventories on both
+original sides, no observed positive raw consumer and no hard failure. It can
+waive only Make operands, assembler operands and bounded Make expression
+expansion. Evidence includes the exact consumer path, line, operand and source
+SHA. Independently discoverable literals survive a capped expansion and later
+rules/ASM still receive inspection. Aggregate references, bytes, paths, files,
+tree rows, revision deltas and native/read/parse failures remain hard barriers.
+
+Nine symlinked PowerPC assembly consumers had previously produced opaque-role
+facts. Generic bounded historical resolution now verifies regular targets and
+refreshes alias facts even when only a target changes. Missing, external,
+cyclic or nonregular targets still block. This uses no test-directory or
+architecture exemption. Alias unknown evidence identifies the actual target
+bytes, and aliases cannot seed the regular-file retention witness.
+
+All six semantic stages carry a typed mask plan to the same publication helper.
+It validates role/evidence consistency, writes the mandatory assumption audit
+before masks, propagates callback failure, and annotates affected stage records
+as lossy. Rename and policy gather every file's role decision before publishing
+any of the operation. Unused-code analysis now uses a private preview so chained
+unused proofs still work while the real commit remains unchanged until audit.
+
+The existing four compiled raw-consumer counterexamples and two mixed-literal /
+129-name expansion controls retain in both modes. An adverse Make-include
+control **is removed only by the explicit assumption**, while GCC and Clang
+both demonstrate runtime exit 7 changing to 8. Thus the mode is intentionally
+lossy and has no measured false-removal bound. No estimate about the low rate
+of real changes is inferred from recovered counts.
+
+Actual preflight uses two complete original kernel commits. Binder `2a8f84b5…`
+is retained by default and whole-pruned under both assumed modes with mandatory
+side evidence. i3c `0d2c022f…` remains retained in all modes because the current
+conservative basename index reports the EISA `device.h` consumer. Both originals'
+parent/child full inventories have no hard failures after alias resolution;
+they retain supported semantic unknowns. The preflight is not a population
+result. Full sample outcomes are recorded separately after completed replay.
+
+The implementation/API and CLI are documented in
+[SOURCE_INPUT_ROLE_ASSUMPTIONS.md](SOURCE_INPUT_ROLE_ASSUMPTIONS.md). Ignored
+artifacts are under `benchmarks/source_role_assumptions/2026-11-07/`,
+`benchmarks/typed_input_role_preflight/2026-11-07/` and
+`benchmarks/input_role_assumption_characterization/2026-11-07/`. Only code and
+durable documentation will be included in the milestone commit.
+
+The population experiment interleaves default strict, default line-number,
+assumed-input strict and assumed-input line-number modes for each unchanged
+original, sharing a bounded reader/provider. All modes use fresh commit masks.
+This measures that paired replay order; it is not an independent CLI throughput
+or unconditional per-profile yield promise. Snapshot/delta budgets and cache
+history can change conservative retention coverage. The audit output is streamed
+rather than retaining every repeated consumer-evidence record in memory.
+
+The completed four-mode replay covers all **515** unchanged originals with
+fresh masks. The results below are whole-commit removals in that selected
+candidate set; the cohort column divides those identities by the original
+26,670 legacy IDs and is not a random-sample extrapolation:
+
+| Mode | Whole removals / 515 | Selected candidates | Original cohort | Additional partial commits |
+| --- | ---: | ---: | ---: | ---: |
+| Default strict | 0 | 0% | 0% | 0 |
+| Default with line-number assumption | 0 | 0% | 0% | 0 |
+| Input assumption, strict line checks | 103 | 20.0% | 0.39% | 9 |
+| Input assumption plus line-number assumption | 229 | 44.47% | 0.86% | 14 |
+
+The 103 are a subset of the 229. Accepted whole identities remain subsets of
+the historical 172/381, respectively. There are 152 and 321 published file
+masks, each with one mandatory input-role audit and one decorated stage audit.
+Every accepted side has a full recognized inventory, no positive match and no
+hard failure. Defaults preserve every original patch and publish no masks or
+audits. These are assumption-qualified removals; the adverse compiled control
+prevents any claim that their false-removal rate is zero or bounded low.
+
+Of the historical strict wholes now retained, 68 hit the unchanged revision-delta
+path budget and one has an observed positive match. The corresponding line-mode
+counts are 145 and seven. These are retained because evidence is incomplete or
+conservatively matched, not because every one is a demonstrated runtime change.
+They identify a concrete next opportunity: stream exact changed-consumer facts
+within separate bounded raw-row and consumer budgets instead of letting
+irrelevant changed paths trigger repeated cold scans. The current measurement
+keeps the existing budget; it has not been widened to achieve these counts.
+
+The paired worker completes in 1,094.73 seconds (1,095.65 including the monitor),
+with 743.7 MiB sampled combined RSS and a 778.8 MiB cgroup peak under the fixed
+896 MiB hard limit, no swap and no OOM events. Its 23 cold inventories, 460
+incremental updates and 1,303 marker queries account for 703.59 seconds of
+inventory scanning. This is the measured four-mode experiment, not a single CLI
+throughput estimate.
+
+A separate completed structural accepted-set replay records all 33 outcomes
+across three modes on eleven original commits. Default source pruning removes
+none. The input-assumption profile removes two diagnostic-wording commits;
+adding the existing audited source-lossy profile also removes two, with different
+identities because the shared index's hard budget history differs. Hrtimer
+reordering and the prototype rename remain retained. No 7/11 or 11/11 recovery,
+profile monotonicity, additive cohort total or new reorder gain is claimed.
+All four accepted records have the required input and source audits.
+
+Final verification passes 1,322 tests, including the captured real SELinux
+policy integrations; mypy checks all 68 Python sources and all 69 packaged
+Python/C++ sources match the wheel. The compiled and independent integration
+controls remain on the same frozen production hashes as the complete replay.
+Population artifacts are in the `population/` directory under the source-role
+assumption evidence root; `structural-replay/` contains the separate small-set
+experiment. Its counts must not be silently added to the paired population run.
+
+Independent final artifact verification covers all 515 original identities and
+473 published masks/audits. A separate bounded native Git oracle verifies every
+one of the 41,232 distinct historical consumer revision/path coordinates and
+all 418 unique path/SHA pairs against actual regular Git blobs. It completes in
+38.81 seconds using 535 batched literal tree queries and 418 blob reads
+(7.97 MB), with no swap or OOM. This verifies evidence provenance, not the truth
+of the deliberately lossy assumption about those unresolved consumers.

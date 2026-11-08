@@ -9,12 +9,13 @@ from .base import (
     StreamingCommitFilter,
     diff_file_key,
     repository_file_reader,
-    source_role_veto,
 )
+from .input_role_models import SourceRoleStatus
+from .source_roles import SourceMaskPlan, publish_source_masks, source_role_decision
 from .config_filter import ConfigValue, KernelConfig
 from .cpp_expression import evaluate_cpp_expression, parse_cpp_integer
 from ..diff import DiffFile, DiffFileType
-from .masking import MaskReason, SourceSide, has_compiler_source_locations, line_ranges, line_macro_locations
+from .masking import CodeMask, FileIdentity, MaskReason, SourceSide, has_compiler_source_locations, line_ranges, line_macro_locations
 from .whitespace.c_lexer import preprocessor_directive_text, replace_c_comments
 from .source_modes import regular_source_change
 from ..git import GitRepo
@@ -572,10 +573,13 @@ class IfdefFilter(StreamingCommitFilter):
                                    if number not in new_active.active)
         if not (old_inactive or new_inactive or old_active.whole_inactive or new_active.whole_inactive):
             return True
-        if source_role_veto(commit, diff_file, context):
+        roles = source_role_decision(commit, diff_file, context)
+        if roles.status is SourceRoleStatus.BLOCKED:
             return True
-        commit.mask_code(diff_file, SourceSide.OLD, old_inactive, MaskReason.IFDEF, whole_file=old_active.whole_inactive)
-        commit.mask_code(diff_file, SourceSide.NEW, new_inactive, MaskReason.IFDEF, whole_file=new_active.whole_inactive)
+        identity = FileIdentity.of(diff_file)
+        codes = (CodeMask(identity, SourceSide.OLD, MaskReason.IFDEF, old_inactive, old_active.whole_inactive),
+                 CodeMask(identity, SourceSide.NEW, MaskReason.IFDEF, new_inactive, new_active.whole_inactive))
+        publish_source_masks(commit, context, SourceMaskPlan((roles,), code_masks=codes))
         return True
 
     def filter_mutable_commit(

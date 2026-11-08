@@ -71,6 +71,10 @@ updates. Per-file parser-budget failures remain cached uncertainties, while
 aggregate inventory failures prevent reuse of an incomplete snapshot.
 An empty observation does not prove that arbitrary scripts or external inputs
 cannot consume this file. See [the shared API](FILTER_MASKING.md#raw-input-consumer-veto).
+The independent [input-role assumption mode](SOURCE_INPUT_ROLE_ASSUMPTIONS.md)
+can waive specified local unsupported expressions after a full recognized
+inventory and a mandatory lossy audit. It does not waive observed consumers,
+failed scans or the whitespace/line-number checks.
 
 Token columns are physical UTF-8 byte columns, as exercised against the installed
 GCC/Clang controls. This is not a claim about every frontend's visual diagnostic

@@ -4,11 +4,11 @@ from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-import subprocess
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
 if TYPE_CHECKING:
-    from .input_roles import RawInputIndex, RawInputObservation
+    from .input_roles import RawInputIndex
+    from .input_role_models import RawInputObservation
     from .reference_index import ReferenceIndex
 
 from rich.progress import (
@@ -26,7 +26,8 @@ from .masking import (
     FileSnapshot, PatchSnapshot, SourceSide, SourceVersions, changed_lines, ignored_lines,
     ambiguous_eof_projection, project_file, replay_sources,
 )
-from ..diff import Diff, DiffFile, DiffFileType
+from .source_roles import SourceInputAssumptionPolicy
+from ..diff import Diff, DiffFile
 from ..git import (
     CommitParent,
     GitCommit,
@@ -108,7 +109,11 @@ class FilteredCommit:
         return tuple(self._code_masks)
 
     def mask_file(self, file: DiffFile, reason: MaskReason) -> None:
-        mask = EditMask(FileIdentity.of(file), reason, whole_file=True)
+        self.apply_edit_mask(EditMask(FileIdentity.of(file), reason, whole_file=True))
+
+    def apply_edit_mask(self, mask: EditMask) -> None:
+        if not (mask.whole_file or mask.old_lines or mask.new_lines):
+            return
         self._edit_masks.append(mask)
         self._file_edits.setdefault(mask.file, []).append(mask)
         self._diff = None
@@ -124,23 +129,22 @@ class FilteredCommit:
         self, file: DiffFile, old_lines: tuple[LineRange, ...],
         new_lines: tuple[LineRange, ...], reason: MaskReason,
     ) -> None:
-        if old_lines or new_lines:
-            mask = EditMask(FileIdentity.of(file), reason, old_lines, new_lines)
-            self._edit_masks.append(mask)
-            self._file_edits.setdefault(mask.file, []).append(mask)
-            self._diff = None
+        self.apply_edit_mask(EditMask(FileIdentity.of(file), reason, old_lines, new_lines))
 
     def mask_code(
         self, file: DiffFile, side: SourceSide, lines: tuple[LineRange, ...],
         reason: MaskReason, *, whole_file: bool = False,
     ) -> None:
-        if lines or whole_file:
-            mask = CodeMask(FileIdentity.of(file), side, reason, lines, whole_file)
-            self._code_masks.append(mask)
-            self._file_codes.setdefault(mask.file, []).append(mask)
-            path = file.old_file or file.file if side is SourceSide.OLD else file.file
-            self._code_paths[side].setdefault(path, []).append(mask)
-            self._diff = None
+        self.apply_code_mask(CodeMask(FileIdentity.of(file), side, reason, lines, whole_file))
+
+    def apply_code_mask(self, mask: CodeMask) -> None:
+        if not (mask.lines or mask.whole_file):
+            return
+        self._code_masks.append(mask)
+        self._file_codes.setdefault(mask.file, []).append(mask)
+        path = mask.file.old_path or mask.file.path if mask.side is SourceSide.OLD else mask.file.path
+        self._code_paths[mask.side].setdefault(path, []).append(mask)
+        self._diff = None
 
     def _ignored(self, file: DiffFile, side: SourceSide, *, include_code: bool = True) -> IgnoredLines:
         identity = FileIdentity.of(file)
@@ -241,6 +245,8 @@ class _CachedSourceInputRoles:
             read = context.file_reader.read_file if context.file_reader is not None else context.repo.read_file
             self._index = RawInputIndex(context.repo, read)
             self._repo, self._reader = context.repo, context.file_reader
+        if context.input_role_policy is not None:
+            return self._index.lookup(revision, path)
         return self._index.veto_observation(revision, path)
 
 
@@ -252,6 +258,7 @@ class FilterContext:
     file_reader: RepositoryFileReader | None = None
     reference_index: "ReferenceIndex | None" = None
     input_roles: SourceInputRoleProvider = field(default_factory=_CachedSourceInputRoles, repr=False, compare=False)
+    input_role_policy: SourceInputAssumptionPolicy | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_db_range(
@@ -277,27 +284,6 @@ class FilterContext:
             structured_commits=structured_commits,
             commits=commits,
         )
-
-
-def source_role_veto(commit: FilteredCommit, file: DiffFile, context: FilterContext) -> bool:
-    """Retain recognized raw consumers or failed scans; empty is no closure proof."""
-
-    versions: list[tuple[str, str]] = []
-    if file.change_type is not DiffFileType.NEW:
-        parent = commit.original.parent
-        if parent is None:
-            return True
-        versions.append((parent.commit_id, file.old_file or file.file))
-    if file.change_type is not DiffFileType.DELETE:
-        versions.append((commit.original.commit_id, file.file))
-    try:
-        for revision, path in versions:
-            observation = context.input_roles.lookup(context, revision, path)
-            if observation.consumers or observation.uncertainties:
-                return True
-    except (OSError, UnicodeError, ValueError, RuntimeError, subprocess.SubprocessError):
-        return True
-    return False
 
 
 @contextmanager

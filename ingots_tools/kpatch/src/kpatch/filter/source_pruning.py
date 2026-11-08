@@ -9,14 +9,16 @@ import re
 import subprocess
 from typing import ClassVar
 
-from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader, source_role_veto
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
 from .binding_renames import BindingComparison, compare_bindings
 from .config_filter import BuildInputClosure, KbuildMakefileCache, KbuildState, KernelConfig
 from .constant_filter import ConstantConditionalFilter
 from .diagnostic_strings import normalize_diagnostic_strings
 from .ifdef_filter import get_active_lines
-from .masking import CodeMask, FileIdentity, LineRange, MaskReason, SourceSide, SourceVersions, has_compiler_source_locations, line_macro_locations, line_ranges
+from .input_role_models import SourceRoleDecision, SourceRoleStatus
+from .masking import CodeMask, EditMask, FileIdentity, LineRange, MaskReason, SourceSide, SourceVersions, has_compiler_source_locations, line_macro_locations, line_ranges
 from .pruning_decision import PruningDecision
+from .source_roles import SourceMaskPlan, decorate_source_decision, publish_source_masks, source_role_decision
 from .macro_environment import MacroEnvironmentGuard
 from .reference_index import ReferenceIndex, ReferenceIndexStats, ReferenceSite, spelling_guards
 from .reordering import COLUMN_BUILTINS, LINE_BUILTINS, ReorderMacroGuard, ReorderProof, hunk_reorder_candidate, independent_reorder
@@ -159,12 +161,10 @@ class _SourceFilter(StreamingCommitFilter):
             return None
         return SourcePair(file, old, new)
 
-    def _record(self, commit: FilteredCommit, files: tuple[str, ...], rule: str, names: tuple[str, ...],
-                *, lossy: bool = False, risks: tuple[str, ...] = ()) -> None:
-        self._stats.pruned_files += len(files)
+    def _record(self, decision: PruningDecision, roles: tuple[SourceRoleDecision, ...]) -> None:
+        self._stats.pruned_files += len(decision.paths)
         if self.on_pruned is not None:
-            self.on_pruned(PruningDecision(commit.original.commit_id, files, rule, names, commit.edit_masks, commit.code_masks,
-                                          lossy, risks))
+            self.on_pruned(decorate_source_decision(decision, roles))
 
     def _compiler_names_safe(self, revision: str, names: frozenset[str], context: FilterContext) -> bool:
         return self._macro_guard(context).compiler_names_safe(revision, names)
@@ -590,11 +590,9 @@ class RenameFilter(_SourceFilter):
                     return commit
         except (OSError, ValueError, UnicodeError, subprocess.CalledProcessError):
             return commit
-        if any(source_role_veto(commit, pair.file, context) for pair in pairs):
+        roles = tuple(source_role_decision(commit, pair.file, context) for pair in pairs)
+        if any(role.status is SourceRoleStatus.BLOCKED for role in roles):
             return commit
-        for analysis in analyses:
-            for mask in analysis.code_masks:
-                commit.mask_code(analysis.pair.file, mask.side, mask.lines, mask.reason)
         reason = MaskReason.RENAME
         symbols = tuple(name.decode() for name in mapping)
         if comparison.reorder is not None:
@@ -623,9 +621,16 @@ class RenameFilter(_SourceFilter):
         if uncertainties:
             risks += ("incomplete_macro_discovery_assumed", "unobserved_macro_bindings_can_change_runtime_behavior")
             risks += tuple("macro_discovery_" + reason for reason in sorted(uncertainties))
-        self._record(commit, tuple(file.file for file in commit.diff.files), reason.value, symbols, lossy=lossy, risks=risks)
-        for file in commit.diff.files:
-            commit.mask_file(file, reason)
+        paths = tuple(pair.file.file for pair in pairs)
+        edits = tuple(EditMask(FileIdentity.of(pair.file), reason, whole_file=True) for pair in pairs)
+        codes = tuple(mask for analysis in analyses for mask in analysis.code_masks)
+        # Replaying the rule's own edit masks would erase the rename/reorder
+        # being verified. Preserve the comparison's input edit context and its
+        # proposed inactive-code context in the existing source audit.
+        decision = PruningDecision(commit.original.commit_id, paths, reason.value, symbols,
+                                   commit.edit_masks, commit.code_masks + codes, lossy, risks)
+        publish_source_masks(commit, context, SourceMaskPlan(roles, edits, codes),
+                             before_masks=lambda: self._record(decision, roles))
         self._stats.eliminated_commits += 1
         return None
 
@@ -655,6 +660,27 @@ class UnusedDefinition:
     name: str
     old_lines: tuple[LineRange, ...]
     new_lines: tuple[LineRange, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _UnusedCodeProof:
+    names: tuple[str, ...]
+    masks: tuple[CodeMask, ...]
+
+
+def _unused_masks(file: DiffFile, item: UnusedDefinition) -> tuple[CodeMask, ...]:
+    identity = FileIdentity.of(file)
+    return tuple(CodeMask(identity, side, MaskReason.DEAD_CODE, lines)
+                 for side, lines in ((SourceSide.OLD, item.old_lines), (SourceSide.NEW, item.new_lines)) if lines)
+
+
+def _mask_preview(commit: FilteredCommit) -> FilteredCommit:
+    preview = FilteredCommit(commit.original, build_modes=commit.build_modes.copy())
+    for edit in commit.edit_masks:
+        preview.apply_edit_mask(edit)
+    for code in commit.code_masks:
+        preview.apply_code_mask(code)
+    return preview
 
 
 def _without_comments(source: bytes) -> bytes:
@@ -778,13 +804,13 @@ class DeadCodeFilter(_SourceFilter):
                     return False
         return True
 
-    def _prune_file(self, commit: FilteredCommit, file: DiffFile, context: FilterContext) -> tuple[str, ...]:
+    def _prune_file(self, commit: FilteredCommit, file: DiffFile, context: FilterContext) -> _UnusedCodeProof | None:
         whitespace = WhitespaceFilter()
         if all(whitespace.is_chunk_noop(chunk) for chunk in file.chunks):
-            return ()
+            return None
         pair = self._pair(commit, file, context)
         if pair is None or max(len(pair.old), len(pair.new)) > 64 * 1024:
-            return ()
+            return None
         raw_sources = SourceVersions(pair.old, pair.new)
         pair = SourcePair(file,
                           commit.code_source(file.old_file or file.file, SourceSide.OLD, pair.old),
@@ -794,15 +820,15 @@ class DeadCodeFilter(_SourceFilter):
             if all(sections):
                 sources = (_unconditional_text(pair.old), _unconditional_text(pair.new))
                 if all(all(len(re.findall(rb"\b" + re.escape(section[0].encode()) + rb"\b", source)) > 1 for source in sources) for section in sections):
-                    return ()
+                    return None
         old_items = {item.name: item for item in _changed_definitions(pair.old, commit.changed_lines(file, SourceSide.OLD))}
         new_items = {item.name: item for item in _changed_definitions(pair.new, commit.changed_lines(file, SourceSide.NEW))}
         if not (old_items or new_items):
-            return ()
+            return None
         # Let the cheaper seeded rename check handle name-only definition
         # changes. Dead-code analysis is useful when other edits remain.
         if old_items.keys() != new_items.keys() and _hunk_rename_candidate(file):
-            return ()
+            return None
         # A reduced patch loaded without its mask history may have shifted new
         # coordinates. Refuse to prove unused code against mismatched sources.
         commit.effective_sources(file, raw_sources)
@@ -815,7 +841,7 @@ class DeadCodeFilter(_SourceFilter):
         assert commit.original.parent is not None
         parent = commit.original.parent.commit_id
         if self._index is None or getattr(context.repo, "repo", None) is None:
-            return ()
+            return None
         paths = self._index.changed_paths(parent, commit.original.commit_id)
         candidates: list[UnusedDefinition] = []
         for name in sorted(old_items.keys() | new_items.keys()):
@@ -832,12 +858,8 @@ class DeadCodeFilter(_SourceFilter):
             if (self._unused(parent, pair, pair.old, old_group, context, None, frozenset(), commit)
                     and self._unused(commit.original.commit_id, pair, pair.new, new_group, context, parent, paths, commit)
                     and self._locations_safe(commit, pair, old_group, new_group, context)):
-                if source_role_veto(commit, file, context):
-                    return ()
-                for item in candidates:
-                    commit.mask_code(file, SourceSide.OLD, item.old_lines, MaskReason.DEAD_CODE)
-                    commit.mask_code(file, SourceSide.NEW, item.new_lines, MaskReason.DEAD_CODE)
-                return tuple(item.name for item in candidates)
+                masks = tuple(mask for item in candidates for mask in _unused_masks(file, item))
+                return _UnusedCodeProof(tuple(item.name for item in candidates), masks)
         partial_fallback = not whole_file or len(candidates) > 1
         if partial_fallback:
             # Partial function pruning exposes mixed rename commits without
@@ -846,25 +868,30 @@ class DeadCodeFilter(_SourceFilter):
                           if (item.name not in old_items or old_items[item.name].kind == "function_definition")
                           and (item.name not in new_items or new_items[item.name].kind == "function_definition")]
         if len(candidates) > 8:
-            return ()
+            return None
         pruned: list[str] = []
+        pending: list[CodeMask] = []
+        preview: FilteredCommit | None = None
         for decision in candidates:
             name = decision.name
             old_item, new_item = old_items.get(name), new_items.get(name)
             old_group = (old_item,) if old_item is not None else ()
             new_group = (new_item,) if new_item is not None else ()
-            if not self._unused(parent, pair, pair.old, old_group, context, None, frozenset(), commit, partial=partial_fallback):
+            view = preview if preview is not None else commit
+            if not self._unused(parent, pair, pair.old, old_group, context, None, frozenset(), view, partial=partial_fallback):
                 continue
-            if not self._unused(commit.original.commit_id, pair, pair.new, new_group, context, parent, paths, commit, partial=partial_fallback):
+            if not self._unused(commit.original.commit_id, pair, pair.new, new_group, context, parent, paths, view, partial=partial_fallback):
                 continue
-            if not self._locations_safe(commit, pair, old_group, new_group, context):
+            if not self._locations_safe(view, pair, old_group, new_group, context):
                 continue
-            if not pruned and source_role_veto(commit, file, context):
-                return ()
-            commit.mask_code(file, SourceSide.OLD, decision.old_lines, MaskReason.DEAD_CODE)
-            commit.mask_code(file, SourceSide.NEW, decision.new_lines, MaskReason.DEAD_CODE)
+            if preview is None:
+                preview = _mask_preview(commit)
+            masks = _unused_masks(file, decision)
+            for mask in masks:
+                preview.apply_code_mask(mask)
+            pending.extend(masks)
             pruned.append(name)
-        return tuple(pruned)
+        return _UnusedCodeProof(tuple(pruned), tuple(pending)) if pruned else None
 
     def filter_mutable_commit(self, commit: FilteredCommit, context: FilterContext) -> FilteredCommit | None:
         self._stats.processed_commits += 1
@@ -872,11 +899,18 @@ class DeadCodeFilter(_SourceFilter):
             return commit
         for file in commit.diff.files:
             try:
-                names = self._prune_file(commit, file, context)
+                proof = self._prune_file(commit, file, context)
             except (OSError, ValueError, UnicodeError, subprocess.CalledProcessError):
-                names = ()
-            if names:
-                self._record(commit, (file.file,), "unreferenced_definition", names)
+                proof = None
+            if proof is None:
+                continue
+            roles = source_role_decision(commit, file, context)
+            if roles.status is SourceRoleStatus.BLOCKED:
+                continue
+            publish_source_masks(commit, context, SourceMaskPlan((roles,), code_masks=proof.masks))
+            decision = PruningDecision(commit.original.commit_id, (file.file,), "unreferenced_definition", proof.names,
+                                       commit.edit_masks, commit.code_masks)
+            self._record(decision, (roles,))
         if commit.diff.files:
             return commit
         self._stats.eliminated_commits += 1

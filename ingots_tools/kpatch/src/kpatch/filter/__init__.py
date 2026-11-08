@@ -1,5 +1,5 @@
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +27,7 @@ from .merge_filter import MergeCommitFilter
 from .score_filter import ScoreFilter
 from .source_pruning import DeadCodeFilter, RenameFilter, source_pruning_tail
 from .policy_analysis import PolicyFilter
+from .source_roles import SourceInputAssumptionPolicy
 from .whitespace import (
     CToken,
     CTokenKind,
@@ -49,6 +50,7 @@ class RunFilterArgs:
     destination_db_name: str
     start_date: datetime | None = None
     end_date: datetime | None = None
+    input_role_policy: SourceInputAssumptionPolicy | None = None
 
 def run_filter(
     args: RunFilterArgs,
@@ -68,6 +70,7 @@ def run_filter(
         args.end_date,
         include_merges=True,
     )
+    context = replace(context, input_role_policy=args.input_role_policy)
     if filter.requires_complete_history and context.structured_commits is None:
         raise ValueError("Filtering requires complete history and structured commit history")
     all_commits = context.commits
@@ -161,6 +164,7 @@ __all__ = [
     "ScoreFilter",
     "SourceNoopFilter",
     "SourceInputRoleProvider",
+    "SourceInputAssumptionPolicy",
     "StreamingCommitFilter",
     "WhitespaceFilter",
     "WhitespaceFilterStats",

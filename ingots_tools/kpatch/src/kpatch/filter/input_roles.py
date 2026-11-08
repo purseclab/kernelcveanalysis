@@ -10,7 +10,6 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
 from hashlib import sha256
 import posixpath
 import re
@@ -20,26 +19,8 @@ from time import perf_counter
 from ..git import GitRepo
 from .config_filter import KbuildMakefile
 from .git_output import iter_git_records
-
-
-class RawInputKind(StrEnum):
-    ASSEMBLER_INCBIN = 'assembler_incbin'
-    ASSEMBLER_INCLUDE = 'assembler_include'
-    MAKE_GENERATOR = 'make_generator'
-
-
-@dataclass(frozen=True, slots=True)
-class RawInputConsumer:
-    path: str
-    line: int
-    kind: RawInputKind
-    target: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RawInputObservation:
-    consumers: tuple[RawInputConsumer, ...] = ()
-    uncertainties: frozenset[str] = frozenset()
+from .input_role_models import (InputInventoryState, RawInputConsumer, RawInputFailure, RawInputFailureKind,
+                                RawInputKind, RawInputObservation, RawInputUnknown, RawInputUnknownKind)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,9 +47,19 @@ class _Reference:
 
 
 @dataclass(frozen=True, slots=True)
+class _Unknown:
+    line: int | None
+    kind: RawInputUnknownKind
+    operand: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class _FileFacts:
     references: tuple[_Reference, ...] = ()
-    uncertainties: frozenset[str] = frozenset()
+    unknowns: tuple[_Unknown, ...] = ()
+    failures: tuple[RawInputFailure, ...] = ()
+    source_sha256: str = ''
+    source_path: str | None = None
 
 
 @dataclass(slots=True)
@@ -76,14 +67,24 @@ class _Snapshot:
     revision: str
     files: dict[str, _FileFacts] = field(default_factory=dict)
     links: dict[str, str] = field(default_factory=dict)
-    uncertainties: set[str] = field(default_factory=set)
+    aliases: set[str] = field(default_factory=set)
+    unknowns: list[RawInputUnknown] = field(default_factory=list)
+    failures: list[RawInputFailure] = field(default_factory=list)
     exact: dict[str, list[RawInputConsumer]] = field(default_factory=lambda: defaultdict(list))
     basenames: dict[str, list[RawInputConsumer]] = field(default_factory=lambda: defaultdict(list))
     inventory_complete: bool = False
 
 
 class _InventoryLimit(ValueError):
-    pass
+    def __init__(self, kind: RawInputFailureKind, path: str | None = None) -> None:
+        self.failure = RawInputFailure(kind, path)
+        super().__init__(kind.value)
+
+
+class _InventoryAbort(Exception):
+    def __init__(self, failure: RawInputFailure) -> None:
+        self.failure = failure
+        super().__init__(failure.kind.value)
 
 
 @dataclass(slots=True)
@@ -102,7 +103,7 @@ class _CachedFacts:
 class _UncertaintyWitness:
     path: str
     source_sha256: bytes
-    uncertainties: frozenset[str]
+    unknowns: tuple[RawInputUnknown, ...]
 
 
 _MAX_FILES = 8192
@@ -145,25 +146,65 @@ def _logical_make(source: str) -> tuple[tuple[int, str], ...]:
     return tuple(zip(starts, KbuildMakefile._logical_lines(source), strict=True))
 
 
-def _expand_make(word: str, variables: dict[str, set[str]], seen: frozenset[str] = frozenset()) -> tuple[tuple[str, ...], bool]:
+def _expand_make(word: str, variables: dict[str, set[str]], seen: frozenset[str] = frozenset()) -> tuple[tuple[str, ...], RawInputUnknownKind | None]:
     for match in _MAKE_VARIABLE.finditer(word):
         name = match[1] or match[2]
         if name in {'src', 'obj', 'srctree'}:
             continue
         values = variables.get(name)
-        if values is None or name in seen or len(seen) >= 8:
-            return (word,), True
+        if values is None or name in seen:
+            return (word,), RawInputUnknownKind.MAKE_OPERAND
+        if len(seen) >= 8:
+            return (word,), RawInputUnknownKind.MAKE_EXPANSION
         output: list[str] = []
-        unknown = False
+        unknown: RawInputUnknownKind | None = None
         for value in sorted(values):
             expanded, uncertain = _expand_make(word[:match.start()] + value + word[match.end():], variables, seen | {name})
             output.extend(expanded)
-            unknown |= uncertain
+            unknown = uncertain or unknown
             if len(output) > 128:
-                raise _InventoryLimit('make_expansion_budget')
+                return tuple(output[:128]), RawInputUnknownKind.MAKE_EXPANSION
         return tuple(output), unknown
     remaining = _MAKE_VARIABLE.sub('', word)
-    return (word,), '$' in remaining
+    return (word,), RawInputUnknownKind.MAKE_OPERAND if '$' in remaining else None
+
+
+def _literal_make_inputs(word: str, variables: dict[str, set[str]]) -> set[str]:
+    """Harvest independent literal operands even when expansion is bounded."""
+    pending = [word]
+    seen: set[str] = set()
+    found: set[str] = set()
+    while pending:
+        value = pending.pop()
+        if value.replace('\\ ', ' ').endswith(_SOURCE_SUFFIXES) and not any(char in value for char in '*?[]%'):
+            found.add(value)
+        for match in _MAKE_VARIABLE.finditer(value):
+            name = match[1] or match[2]
+            if name not in seen and name not in {'src', 'obj', 'srctree'}:
+                seen.add(name)
+                pending.extend(variables.get(name, ()))
+        if len(found) + len(pending) > _MAX_REFERENCES:
+            raise _InventoryLimit(RawInputFailureKind.REFERENCE_BUDGET)
+    return found
+
+
+@dataclass(frozen=True, slots=True)
+class _MakeRule:
+    line: int
+    targets: tuple[str, ...]
+    inputs: tuple[str, ...]
+    unknowns: tuple[_Unknown, ...]
+
+
+def _record_make_rule(rule: _MakeRule, recipe: str, found: list[_Reference], unknowns: list[_Unknown]) -> None:
+    if _COMPILE.search(recipe) and not _RAW_TOOL.search(recipe):
+        return
+    if rule.unknowns and (rule.inputs or _RAW_TOOL.search(recipe) or any(target.endswith(_GENERATED_SUFFIXES) for target in rule.targets)):
+        unknowns.extend(rule.unknowns)
+    if len(found) + len(rule.targets) * len(rule.inputs) + len(unknowns) > _MAX_REFERENCES:
+        raise _InventoryLimit(RawInputFailureKind.REFERENCE_BUDGET)
+    found.extend(_Reference(name, rule.line, RawInputKind.MAKE_GENERATOR, target)
+                 for target in rule.targets for name in rule.inputs)
 
 
 def _make_facts(source: str) -> _FileFacts:
@@ -175,18 +216,12 @@ def _make_facts(source: str) -> _FileFacts:
             values = {'$unresolved_shell_input'} if assignment[2] == '!=' else set(_MAKE_WORD.findall(KbuildMakefile._strip_comment(assignment[3])))
             variables[assignment[1]].update(values)
     found: list[_Reference] = []
-    uncertainty: set[str] = set()
-    pending: tuple[int, tuple[str, ...], tuple[str, ...], bool] | None = None
+    unknowns: list[_Unknown] = []
+    pending: _MakeRule | None = None
     for line_number, logical in logical_lines:
         if logical.startswith('\t'):
-            if pending is not None and (not _COMPILE.search(logical) or _RAW_TOOL.search(logical)):
-                rule_line, rule_targets, inputs, unknown = pending
-                if unknown and (inputs or _RAW_TOOL.search(logical) or any(target.endswith(_GENERATED_SUFFIXES) for target in rule_targets)):
-                    uncertainty.add('unresolved_make_input')
-                if len(found) + len(rule_targets) * len(inputs) > _MAX_REFERENCES:
-                    raise _InventoryLimit('reference_budget')
-                found.extend(_Reference(name, rule_line, RawInputKind.MAKE_GENERATOR, target)
-                             for target in rule_targets for name in inputs)
+            if pending is not None:
+                _record_make_rule(pending, logical, found, unknowns)
             continue
         pending = None
         line = KbuildMakefile._strip_comment(logical).strip()
@@ -195,30 +230,29 @@ def _make_facts(source: str) -> _FileFacts:
         targets, _, prerequisites = line.partition(':')
         prerequisites, inline, recipe = prerequisites.partition(';')
         output = tuple(_MAKE_WORD.findall(targets))
-        inputs_list: list[str] = []
-        unknown = False
+        inputs: set[str] = set()
+        notes: list[_Unknown] = []
         for word in _MAKE_WORD.findall(prerequisites):
+            inputs.update(_literal_make_inputs(word, variables))
             expanded, uncertain = _expand_make(word, variables)
-            unknown |= uncertain or any(char in name for name in expanded for char in '*?[]%')
-            inputs_list.extend(name for name in expanded if name.replace('\\ ', ' ').endswith(_SOURCE_SUFFIXES))
-        inputs = tuple(inputs_list)
-        if output and (inputs or unknown):
-            pending = (line_number, output, inputs, unknown)
-            if inline and (not _COMPILE.search(recipe) or _RAW_TOOL.search(recipe)):
-                if unknown and (inputs or _RAW_TOOL.search(recipe) or any(target.endswith(_GENERATED_SUFFIXES) for target in output)):
-                    uncertainty.add('unresolved_make_input')
-                if len(found) + len(output) * len(inputs) > _MAX_REFERENCES:
-                    raise _InventoryLimit('reference_budget')
-                found.extend(_Reference(name, line_number, RawInputKind.MAKE_GENERATOR, target)
-                             for target in output for name in inputs)
-    return _FileFacts(tuple(found), frozenset(uncertainty))
+            if any(char in name for name in expanded for char in '*?[]%'):
+                uncertain = uncertain or RawInputUnknownKind.MAKE_OPERAND
+            inputs.update(name for name in expanded if name.replace('\\ ', ' ').endswith(_SOURCE_SUFFIXES)
+                          and not any(char in name for char in '*?[]%'))
+            if uncertain is not None:
+                notes.append(_Unknown(line_number, uncertain, word))
+        if output and (inputs or notes):
+            pending = _MakeRule(line_number, output, tuple(sorted(inputs)), tuple(notes))
+            if inline:
+                _record_make_rule(pending, recipe, found, unknowns)
+    return _FileFacts(tuple(found), tuple(unknowns))
 
 
 def _facts(source: bytes, make: bool) -> _FileFacts:
     text = source.decode('utf-8')
     make_facts = _make_facts(text) if make else _FileFacts()
     references = list(make_facts.references)
-    uncertainties = set(make_facts.uncertainties)
+    unknowns = list(make_facts.unknowns)
     positions: list[int] = []
     parts: list[bytes] = []
     offset = 0
@@ -232,21 +266,23 @@ def _facts(source: bytes, make: bool) -> _FileFacts:
     parts.append(source[offset:])
     normalized = b''.join(parts).replace(b'\\"', b'"')
     for match in _ASM_LITERAL.finditer(normalized):
-        if len(references) >= _MAX_REFERENCES:
-            raise _InventoryLimit('reference_budget')
+        if len(references) + len(unknowns) >= _MAX_REFERENCES:
+            raise _InventoryLimit(RawInputFailureKind.REFERENCE_BUDGET)
         line = normalized.count(b'\n', 0, match.start()) + bisect_right(positions, match.start()) + 1
         kind = RawInputKind.ASSEMBLER_INCBIN if match[1] == b'incbin' else RawInputKind.ASSEMBLER_INCLUDE
+        operand = match[2].decode('utf-8')
         if b'\\' in match[2]:
-            uncertainties.add('unresolved_assembler_input')
-        references.append(_Reference(match[2].decode('utf-8'), line, kind))
-    unresolved = any(_ASM_LITERAL.match(normalized, marker.start()) is None
-                     and re.search(rb'(?:^|\n|\\n|"|;|:)[ \t]*$', normalized[:marker.start()])
-                     for marker in _ASM_MARKER.finditer(normalized))
-    if unresolved:
-        uncertainties.add('unresolved_assembler_input')
-    if len(references) > _MAX_REFERENCES:
-        raise _InventoryLimit('reference_budget')
-    return _FileFacts(tuple(references), frozenset(uncertainties))
+            unknowns.append(_Unknown(line, RawInputUnknownKind.ASM_OPERAND, operand))
+        references.append(_Reference(operand, line, kind))
+    for marker in _ASM_MARKER.finditer(normalized):
+        if (_ASM_LITERAL.match(normalized, marker.start()) is None
+                and re.search(rb'(?:^|\n|\\n|"|;|:)[ \t]*$', normalized[:marker.start()])):
+            line = normalized.count(b'\n', 0, marker.start()) + bisect_right(positions, marker.start()) + 1
+            operand = normalized[marker.end():].split(b'\n', 1)[0][:4096].decode('utf-8').strip()
+            unknowns.append(_Unknown(line, RawInputUnknownKind.ASM_OPERAND, operand or None))
+            if len(references) + len(unknowns) > _MAX_REFERENCES:
+                raise _InventoryLimit(RawInputFailureKind.REFERENCE_BUDGET)
+    return _FileFacts(tuple(references), tuple(unknowns))
 
 
 def _normal(path: str) -> str | None:
@@ -273,11 +309,16 @@ def _link_target(path: str, links: dict[str, str]) -> str | None:
 def _index(snapshot: _Snapshot) -> None:
     total = 0
     for path, facts in snapshot.files.items():
-        snapshot.uncertainties.update(facts.uncertainties)
+        total += len(facts.unknowns)
+        if total > _MAX_REFERENCES:
+            raise _InventoryLimit(RawInputFailureKind.REFERENCE_BUDGET)
+        snapshot.unknowns.extend(RawInputUnknown(facts.source_path or path, note.line, note.kind, note.operand, facts.source_sha256)
+                                 for note in facts.unknowns)
+        snapshot.failures.extend(replace(failure, consumer_path=path) for failure in facts.failures)
         for reference in facts.references:
             total += 1
             if total > _MAX_REFERENCES:
-                raise _InventoryLimit('reference_budget')
+                raise _InventoryLimit(RawInputFailureKind.REFERENCE_BUDGET)
             consumer = RawInputConsumer(path, reference.line, reference.kind, reference.target)
             name = reference.name.replace('\\ ', ' ')
             substitutions = {'$(srctree)/': '', '${srctree}/': '', '$(src)/': posixpath.dirname(path) + '/',
@@ -295,7 +336,7 @@ def _index(snapshot: _Snapshot) -> None:
                     if resolved is not None:
                         snapshot.exact[resolved].append(consumer)
                     else:
-                        snapshot.uncertainties.add('unresolved_input_alias')
+                        snapshot.failures.append(RawInputFailure(RawInputFailureKind.INPUT_ALIAS, path, reference.line, candidate))
             basename = posixpath.basename(name)
             if basename and not any(char in basename for char in '$%{}()'):
                 snapshot.basenames[basename].append(consumer)
@@ -345,16 +386,16 @@ class RawInputIndex:
                 unchanged = False
             if unchanged:
                 self._stats = replace(self._stats, witness_hits=self._stats.witness_hits + 1)
-                return self._cache_veto(revision, witness.uncertainties)
+                return self._cache_veto(revision, witness.unknowns)
             self._witness = None
         observed = self.lookup(revision, path)
         if self._witness is not None:
-            self._cache_veto(revision, self._witness.uncertainties)
+            self._cache_veto(revision, self._witness.unknowns)
         return observed
 
-    def _cache_veto(self, revision: str, uncertainties: frozenset[str]) -> RawInputObservation:
-        assert uncertainties
-        observed = RawInputObservation(uncertainties=uncertainties)
+    def _cache_veto(self, revision: str, unknowns: tuple[RawInputUnknown, ...]) -> RawInputObservation:
+        assert unknowns
+        observed = RawInputObservation(InputInventoryState.RETENTION_WITNESS, unknowns=unknowns)
         self._veto_cache[revision] = observed
         self._veto_cache.move_to_end(revision)
         if len(self._veto_cache) > _MAX_VETO_REVISIONS:
@@ -364,7 +405,8 @@ class RawInputIndex:
     def lookup(self, revision: str, path: str) -> RawInputObservation:
         normalized = _normal(path)
         if normalized is None or _FULL_REVISION.fullmatch(revision) is None:
-            return RawInputObservation(uncertainties=frozenset({'unsupported_coordinate'}))
+            return RawInputObservation(InputInventoryState.INCOMPLETE,
+                                       failures=(RawInputFailure(RawInputFailureKind.UNSUPPORTED_COORDINATE),))
         snapshot = self._snapshots.get(revision)
         if snapshot is None:
             snapshot = self._build(revision)
@@ -375,8 +417,9 @@ class RawInputIndex:
             self._stats = replace(self._stats, revision_cache_hits=self._stats.revision_cache_hits + 1)
             self._snapshots.move_to_end(revision)
         consumers = set(snapshot.exact.get(normalized, ())) | set(snapshot.basenames.get(posixpath.basename(normalized), ()))
-        return RawInputObservation(tuple(sorted(consumers, key=lambda item: (item.path, item.line, item.kind, item.target or ''))),
-                                   frozenset(snapshot.uncertainties))
+        return RawInputObservation(InputInventoryState.FULL if snapshot.inventory_complete else InputInventoryState.INCOMPLETE,
+                                   tuple(sorted(consumers, key=lambda item: (item.path, item.line, item.kind, item.target or ''))),
+                                   tuple(dict.fromkeys(snapshot.unknowns)), tuple(dict.fromkeys(snapshot.failures)))
 
     def _markers(self, revision: str, paths: tuple[str, ...]) -> set[str]:
         assert paths
@@ -394,7 +437,7 @@ class RawInputIndex:
                 if _make_path(path) or path.endswith(_SOURCE_SUFFIXES):
                     found.add(path)
                 if len(found) > _MAX_FILES:
-                    raise _InventoryLimit('file_budget')
+                    raise _InventoryLimit(RawInputFailureKind.FILE_BUDGET)
         return found
 
     def _changed_markers(self, revision: str, paths: tuple[str, ...]) -> set[str]:
@@ -404,7 +447,7 @@ class RawInputIndex:
         for path in paths:
             path_size = len(path.encode('utf-8')) + 1
             if path_size > _MARKER_BATCH_BYTES:
-                raise _InventoryLimit('path_budget')
+                raise _InventoryLimit(RawInputFailureKind.PATH_BUDGET)
             if batch and (len(batch) >= _MARKER_BATCH_PATHS or size + path_size > _MARKER_BATCH_BYTES):
                 found.update(self._markers(revision, tuple(batch)))
                 batch.clear()
@@ -415,52 +458,90 @@ class RawInputIndex:
             found.update(self._markers(revision, tuple(batch)))
         return found
 
-    def _read(self, snapshot: _Snapshot, path: str, mode: bytes, budget: _ReadBudget) -> None:
-        if mode == b'000000':
-            snapshot.files.pop(path, None)
-            snapshot.links.pop(path, None)
-            return
-        if mode not in {b'100644', b'100755', b'120000'}:
-            snapshot.files[path] = _FileFacts(uncertainties=frozenset({'nonregular_consumer'}))
-            return
-        source = self.read_file(snapshot.revision, path)
+    def _account(self, path: str, source: bytes, budget: _ReadBudget) -> None:
         budget.files += 1
         budget.input_bytes += len(source)
-        if budget.files > _MAX_FILES or budget.input_bytes > _MAX_BYTES or len(source) > _MAX_FILE_BYTES:
-            raise _InventoryLimit('input_budget')
+        if budget.files > _MAX_FILES:
+            raise _InventoryLimit(RawInputFailureKind.FILE_BUDGET, path)
+        if budget.input_bytes > _MAX_BYTES or len(source) > _MAX_FILE_BYTES:
+            raise _InventoryLimit(RawInputFailureKind.INPUT_BUDGET, path)
         self._stats = replace(self._stats, input_bytes=self._stats.input_bytes + len(source))
-        if mode == b'120000':
-            snapshot.links[path] = source.decode('utf-8')
-            if _make_path(path) or path.endswith(_ASSEMBLY_SUFFIXES):
-                snapshot.files[path] = _FileFacts(uncertainties=frozenset({'nonregular_consumer'}))
-            return
-        snapshot.links.pop(path, None)
+
+    def _store(self, snapshot: _Snapshot, path: str, source: bytes, budget: _ReadBudget, *, alias: bool = False,
+               source_path: str | None = None) -> None:
+        self._account(path, source, budget)
         key = (sha256(source).digest(), _make_path(path))
         cached = self._file_cache.get(key)
         if cached is None:
             try:
                 facts = _facts(source, key[1])
             except _InventoryLimit as error:
-                # This file was fully read, but its parser budget cannot
-                # establish its inputs. Preserve that veto while inventorying
-                # other consumers; only aggregate inventory limits abort scans.
-                facts = _FileFacts(uncertainties=frozenset({str(error)}))
+                facts = _FileFacts(failures=(error.failure,))
+            except UnicodeError as error:
+                facts = _FileFacts(failures=(RawInputFailure(RawInputFailureKind.CONSUMER_PARSE, detail=str(error)),))
+            facts = replace(facts, source_sha256=key[0].hex())
             self._file_cache[key] = _CachedFacts(facts, len(source))
             self._file_cache_bytes += len(source)
-            self._file_cache_references += len(facts.references)
+            self._file_cache_references += len(facts.references) + len(facts.unknowns)
             while (len(self._file_cache) > _MAX_FILE_CACHE or self._file_cache_bytes > _MAX_FILE_CACHE_BYTES
                    or self._file_cache_references > _MAX_REFERENCES):
                 _, evicted = self._file_cache.popitem(last=False)
                 self._file_cache_bytes -= evicted.input_bytes
-                self._file_cache_references -= len(evicted.facts.references)
+                self._file_cache_references -= len(evicted.facts.references) + len(evicted.facts.unknowns)
             self._stats = replace(self._stats, file_parses=self._stats.file_parses + 1)
         else:
             facts = cached.facts
             self._file_cache.move_to_end(key)
             self._stats = replace(self._stats, file_cache_hits=self._stats.file_cache_hits + 1)
-        snapshot.files[path] = facts
-        if facts.uncertainties and self._witness is None:
-            self._witness = _UncertaintyWitness(path, key[0], facts.uncertainties)
+        snapshot.files[path] = replace(facts, source_path=source_path or path)
+        if facts.unknowns and self._witness is None and not alias:
+            unknowns = tuple(RawInputUnknown(path, note.line, note.kind, note.operand, facts.source_sha256) for note in facts.unknowns)
+            self._witness = _UncertaintyWitness(path, key[0], unknowns)
+
+    def _read(self, snapshot: _Snapshot, path: str, mode: bytes, budget: _ReadBudget) -> None:
+        snapshot.aliases.discard(path)
+        if mode == b'000000':
+            snapshot.files.pop(path, None)
+            snapshot.links.pop(path, None)
+            return
+        if mode not in {b'100644', b'100755', b'120000'}:
+            snapshot.files[path] = _FileFacts(failures=(RawInputFailure(RawInputFailureKind.NONREGULAR_CONSUMER),))
+            return
+        try:
+            source = self.read_file(snapshot.revision, path)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise _InventoryAbort(RawInputFailure(RawInputFailureKind.CONSUMER_READ, path, detail=str(error))) from error
+        if mode == b'120000':
+            self._account(path, source, budget)
+            try:
+                snapshot.links[path] = source.decode('utf-8')
+            except UnicodeError as error:
+                snapshot.files[path] = _FileFacts(failures=(RawInputFailure(RawInputFailureKind.CONSUMER_PARSE, detail=str(error)),))
+                return
+            if _make_path(path) or path.endswith(_ASSEMBLY_SUFFIXES):
+                snapshot.aliases.add(path)
+            return
+        snapshot.links.pop(path, None)
+        self._store(snapshot, path, source, budget)
+
+    def _refresh_aliases(self, snapshot: _Snapshot, budget: _ReadBudget) -> None:
+        for path in sorted(snapshot.aliases):
+            target = _link_target(path, snapshot.links)
+            snapshot.files.pop(path, None)
+            if target is None:
+                snapshot.files[path] = _FileFacts(failures=(RawInputFailure(RawInputFailureKind.INPUT_ALIAS),))
+                continue
+            try:
+                mode = self.repo.read_file_mode(snapshot.revision, target)
+                if mode not in {'100644', '100755'}:
+                    kind = RawInputFailureKind.INPUT_ALIAS if mode is None else RawInputFailureKind.NONREGULAR_CONSUMER
+                    snapshot.files[path] = _FileFacts(failures=(RawInputFailure(kind, detail=target),))
+                    continue
+                source = self.read_file(snapshot.revision, target)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                snapshot.files[path] = _FileFacts(failures=(RawInputFailure(RawInputFailureKind.CONSUMER_READ, detail=str(error)),))
+                continue
+            self._store(snapshot, path, source, budget, alias=True, source_path=target)
 
     def _cold(self, snapshot: _Snapshot, budget: _ReadBudget) -> None:
         self._stats = replace(self._stats, repository_scans=self._stats.repository_scans + 1)
@@ -474,7 +555,7 @@ class RawInputIndex:
         with closing(iter_git_records(self.repo, args, b'\0', (0,))) as rows:
             for count, row in enumerate(rows):
                 if count >= _MAX_TREE_ROWS:
-                    raise _InventoryLimit('tree_budget')
+                    raise _InventoryLimit(RawInputFailureKind.TREE_BUDGET)
                 metadata, separator, raw_path = row.partition(b'\t')
                 fields = metadata.split()
                 if (not separator or not raw_path or len(fields) != 3 or len(fields[2]) != len(snapshot.revision)
@@ -486,7 +567,7 @@ class RawInputIndex:
                 elif path.endswith(_SOURCE_SUFFIXES):
                     size = len(raw_path) + 1
                     if size > _MARKER_BATCH_BYTES:
-                        raise _InventoryLimit('path_budget')
+                        raise _InventoryLimit(RawInputFailureKind.PATH_BUDGET)
                     if batch and (len(batch) >= _MARKER_BATCH_PATHS or batch_bytes + size > _MARKER_BATCH_BYTES):
                         flush()
                         batch_bytes = 0
@@ -507,14 +588,16 @@ class RawInputIndex:
                     raise ValueError('invalid_tree_delta')
                 changes[raw_path.decode('utf-8')] = fields[1]
                 if len(changes) > _MAX_CHANGED_PATHS:
-                    raise _InventoryLimit('changed_path_budget')
+                    raise _InventoryLimit(RawInputFailureKind.CHANGED_PATH_BUDGET)
         snapshot.files = anchor.files.copy()
         snapshot.links = anchor.links.copy()
+        snapshot.aliases = anchor.aliases.copy()
         live = tuple(path for path, mode in changes.items() if mode != b'000000')
         markers = self._changed_markers(snapshot.revision, live) if live else set()
         for path, mode in changes.items():
             snapshot.files.pop(path, None)
             snapshot.links.pop(path, None)
+            snapshot.aliases.discard(path)
             if path in markers or _make_path(path) or mode == b'120000':
                 self._read(snapshot, path, mode, budget)
         self._stats = replace(self._stats, incremental_updates=self._stats.incremental_updates + 1)
@@ -529,9 +612,16 @@ class RawInputIndex:
                 self._cold(snapshot, budget)
             else:
                 self._incremental(snapshot, anchor, budget)
+            self._refresh_aliases(snapshot, budget)
             _index(snapshot)
             snapshot.inventory_complete = True
-        except (OSError, ValueError, UnicodeError, subprocess.SubprocessError) as error:
-            snapshot.uncertainties.add(str(error) if isinstance(error, _InventoryLimit) else 'inventory_failure')
+        except (_InventoryLimit, _InventoryAbort) as error:
+            snapshot.failures.append(error.failure)
+        except subprocess.SubprocessError as error:
+            snapshot.failures.append(RawInputFailure(RawInputFailureKind.NATIVE_SCAN, detail=str(error)))
+        except OSError as error:
+            snapshot.failures.append(RawInputFailure(RawInputFailureKind.CONSUMER_READ, detail=str(error)))
+        except (ValueError, UnicodeError) as error:
+            snapshot.failures.append(RawInputFailure(RawInputFailureKind.PROTOCOL, detail=str(error)))
         self._stats = replace(self._stats, scan_seconds=self._stats.scan_seconds + perf_counter() - begun)
         return snapshot

@@ -15,9 +15,11 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader, source_role_veto
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
 from .config_filter import ConfigValue, KernelConfig
-from .masking import MaskReason, SourceSide
+from .input_role_models import SourceRoleDecision, SourceRoleEvidence, SourceRoleStatus
+from .masking import EditMask, FileIdentity, MaskReason, SourceSide
+from .source_roles import INPUT_ROLE_RISK, SourceMaskPlan, publish_source_masks, source_assumption_evidence, source_role_decision
 from .policy_clang import ClangAnalyzer, ClangByteExclusion, ClangCall, ClangConstraint, ClangFunction, ClangGuard, ClangWriteEffect, TranslationUnitFacts
 from .policy_context import PolicyBuildContext, RevisionCompiler
 from .policy_entry import Arm64SeccompEntries
@@ -76,6 +78,9 @@ class PolicyCommitDecision(BaseModel):
     model_version: str = POLICY_RULES_VERSION
     files: tuple[PolicyFileDecision, ...] = ()
     reasons: tuple[str, ...] = ()
+    lossy: bool = False
+    risk_reasons: tuple[str, ...] = ()
+    input_role_evidence: tuple[SourceRoleEvidence, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -476,16 +481,26 @@ class PolicyFilter(StreamingCommitFilter):
                 reasons = ("service_delegation_and_async_scope_not_closed",)
         elif any(file.reasons and file.reasons != ("remaining_reachable_or_unmodeled_changes",) for file in files):
             status = "unknown"
-        if status == "excluded" and any(source_role_veto(commit, file, context) for file in commit.diff.files):
-            status = "unknown"
-            reasons = ("raw_input_consumer_or_unresolved_consumer_inventory",)
+        roles: tuple[SourceRoleDecision, ...] = ()
+        if status == "excluded":
+            roles = tuple(source_role_decision(commit, file, context) for file in commit.diff.files)
+            if any(role.status is SourceRoleStatus.BLOCKED for role in roles):
+                status = "unknown"
+                reasons = ("raw_input_consumer_or_unresolved_consumer_inventory",)
+        assumptions = source_assumption_evidence(roles) if status == "excluded" else ()
         decision = PolicyCommitDecision(commit_id=commit.original.commit_id, status=status, scope=self.profile.scope,
                                         profile_sha256=self.profile.fingerprint, policy_sha256=self.profile.policy_sha256,
-                                        build_context_sha256=self.build_context.fingerprint, files=files, reasons=reasons)
-        if self.on_decision is not None:
-            self.on_decision(decision)
+                                        build_context_sha256=self.build_context.fingerprint, files=files, reasons=reasons,
+                                        lossy=bool(assumptions), risk_reasons=(INPUT_ROLE_RISK,) if assumptions else (),
+                                        input_role_evidence=assumptions)
+
+        def record_decision() -> None:
+            if self.on_decision is not None:
+                self.on_decision(decision)
+
         if status != "excluded":
+            record_decision()
             return commit
-        for file in commit.diff.files:
-            commit.mask_file(file, MaskReason.POLICY)
+        edits = tuple(EditMask(FileIdentity.of(file), MaskReason.POLICY, whole_file=True) for file in commit.diff.files)
+        publish_source_masks(commit, context, SourceMaskPlan(roles, edits), before_masks=record_decision)
         return None

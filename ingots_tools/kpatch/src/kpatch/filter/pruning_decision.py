@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from .masking import CodeMask, EditMask
+from .input_role_models import SourceRoleEvidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,3 +16,4 @@ class PruningDecision:
     code_masks: tuple[CodeMask, ...] = ()
     lossy: bool = False
     risk_reasons: tuple[str, ...] = ()
+    input_role_evidence: tuple[SourceRoleEvidence, ...] = ()

@@ -5,10 +5,12 @@ from dataclasses import dataclass, replace
 import subprocess
 from typing import ClassVar
 
-from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader, source_role_veto
+from .base import FilterContext, FilteredCommit, StreamingCommitFilter, repository_file_reader
 from .constant_conditionals import ConstantConditionalScanner, may_have_numeric_condition
-from .masking import CodeMask, FileIdentity, MaskReason, SourceSide, SourceVersions
+from .input_role_models import SourceRoleDecision, SourceRoleStatus
+from .masking import CodeMask, EditMask, FileIdentity, MaskReason, SourceSide, SourceVersions
 from .pruning_decision import PruningDecision
+from .source_roles import SourceMaskPlan, decorate_source_decision, publish_source_masks, source_role_decision
 from .source_modes import regular_source_change
 from .whitespace.layout import LayoutComparer
 from .whitespace.whitespace_filter import _is_c_source_file
@@ -39,6 +41,7 @@ class ConstantFilterStats:
 class _ConditionalProof:
     masks: tuple[CodeMask, ...]
     reason: MaskReason
+    roles: SourceRoleDecision
 
 
 class ConstantConditionalFilter(StreamingCommitFilter):
@@ -113,14 +116,15 @@ class ConstantConditionalFilter(StreamingCommitFilter):
             reason = MaskReason.CONSTANT_BRANCH
         elif self.line_numbers_lossy and self._layout.equivalent_ignoring_line_numbers(sources.old, sources.new):
             reason = MaskReason.CONSTANT_BRANCH_LINES_LOSSY
-        if reason is not None and not source_role_veto(commit, file, context):
-            return _ConditionalProof(masks, reason)
+        if reason is not None:
+            roles = source_role_decision(commit, file, context)
+            if roles.status is not SourceRoleStatus.BLOCKED:
+                return _ConditionalProof(masks, reason, roles)
         return None
 
-    def _publish(self, commit: FilteredCommit, file: DiffFile, proof: _ConditionalProof) -> None:
-        for mask in proof.masks:
-            commit.mask_code(file, mask.side, mask.lines, mask.reason)
-        commit.mask_file(file, proof.reason)
+    def _publish(self, commit: FilteredCommit, file: DiffFile, proof: _ConditionalProof, context: FilterContext) -> None:
+        edit = EditMask(FileIdentity.of(file), proof.reason, whole_file=True)
+        publish_source_masks(commit, context, SourceMaskPlan((proof.roles,), (edit,), proof.masks))
         self._pruned += 1
         lossy = proof.reason is MaskReason.CONSTANT_BRANCH_LINES_LOSSY
         callback = self.on_line_numbers_assumed if lossy else self.on_pruned
@@ -131,12 +135,12 @@ class ConstantConditionalFilter(StreamingCommitFilter):
             "source_line_number_observations_may_change_runtime_behavior",
             "included_macros_may_observe_changed_lines",
         ) if lossy else ()
-        callback(PruningDecision(
+        callback(decorate_source_decision(PruningDecision(
             commit.original.commit_id, (file.file,), proof.reason.value, (),
             tuple(mask for mask in commit.edit_masks if mask.file == identity),
             tuple(mask for mask in commit.code_masks if mask.file == identity),
             lossy, risks,
-        ))
+        ), (proof.roles,)))
 
     def filter_mutable_commit(self, commit: FilteredCommit, context: FilterContext) -> FilteredCommit | None:
         self._processed += 1
@@ -154,7 +158,7 @@ class ConstantConditionalFilter(StreamingCommitFilter):
             except (OSError, UnicodeError, ValueError, RuntimeError, subprocess.SubprocessError):
                 proof = None
             if proof is not None:
-                self._publish(commit, file, proof)
+                self._publish(commit, file, proof, context)
         if commit.diff.files:
             return commit
         self._eliminated += 1

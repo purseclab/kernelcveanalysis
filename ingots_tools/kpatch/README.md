@@ -313,6 +313,11 @@ generator scripts and computed build rules still need a complete build-input
 manifest. See [the masking API](FILTER_MASKING.md#raw-input-consumer-veto).
 Unresolved inputs currently have a broad retention effect on kernel trees;
 historical pruning measurements made before this veto are not current yields.
+The separate `--unresolved-inputs-lossy --input-role-report PATH` mode can assume
+supported unresolved Make/assembly expressions are irrelevant, after a full
+recognized inventory. Observed raw consumers and scan failures still retain.
+This can remove runtime-relevant changes and has no measured error-rate bound;
+see [source-input assumptions](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
 Identifier renames with debug/BTF-name risks require the explicit lossy mode. Layout and
 field-specific reachability are not inferred from absence of field accesses.
 
