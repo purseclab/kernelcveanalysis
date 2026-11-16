@@ -7,7 +7,19 @@ from kpatch.filter import (
     WhitespaceFilter,
 )
 from kpatch.filter.config_filter import KernelConfig
+from kpatch.filter.input_role_models import InputInventoryState, RawInputObservation
 from kpatch.git import GitCommit, GitRepo, StructuredCommits
+
+
+class FixtureSourceRoles:
+    """Model supplied in-memory CPP buffers without external raw consumers.
+
+    This fixture has no Git tree to scan. Its empty observation is not a
+    certificate of build/input closure; real-Git tests use the default index.
+    """
+
+    def lookup(self, context: FilterContext, revision: str, path: str) -> RawInputObservation:
+        return RawInputObservation(InputInventoryState.FULL)
 
 
 def filter_commits(
@@ -19,7 +31,7 @@ def filter_commits(
     """Apply the configured kernel and preprocessor pipeline for tests."""
 
     structured = StructuredCommits.from_commits(all_commits)
-    context = FilterContext(repo, structured, all_commits)
+    context = FilterContext(repo, structured, all_commits, input_roles=FixtureSourceRoles())
     return FilterPipeline(
         [
             MergeCommitFilter(),

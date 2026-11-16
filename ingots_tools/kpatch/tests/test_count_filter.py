@@ -7,6 +7,9 @@ from kpatch.git import CommitParent, GitCommit, GitRepo
 
 
 class MemoryGitRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self, files: dict[str, str] | None = None):
         self.files = files or {}
 

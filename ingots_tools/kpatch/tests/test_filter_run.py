@@ -22,6 +22,9 @@ from kpatch.git import CommitParent, GitCommit, GitDb, GitRepo, HistoryKind
 
 
 class MemoryRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self) -> None:
         pass
 
@@ -128,7 +131,7 @@ class StreamingFilterRunTests(unittest.TestCase):
             ):
                 run_filter(
                     RunFilterArgs(MemoryRepo(), source, "destination"),
-                    ConfigFilter(KernelConfig("")),
+                    ConfigFilter(KernelConfig(""), collect_observations=True),
                     show_progress=False,
                 )
             save.assert_not_called()

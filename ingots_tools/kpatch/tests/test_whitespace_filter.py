@@ -1,3 +1,4 @@
+from filter_helpers import FixtureSourceRoles
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path
@@ -10,6 +11,9 @@ from kpatch.filter import (
     FilterContext,
     FilteredCommit,
     FilterPipeline,
+    LineRange,
+    MaskReason,
+    SourceSide,
     WhitespaceFilter,
     tokenize_c_source,
 )
@@ -18,6 +22,9 @@ from kpatch.filter.whitespace.c_lexer import replace_c_comments
 
 
 class MemoryGitRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self, files: dict[str, str]):
         self.files = files
 
@@ -161,8 +168,17 @@ class WhitespaceFilterTests(unittest.TestCase):
         commit = self.make_commit("c1", "p0", diff)
         repo = MemoryGitRepo({"p0:drivers/foo.c": old, "c1:drivers/foo.c": new})
         return WhitespaceFilter().filter_commits(
-            [commit], FilterContext(repo), show_progress=False,
+            [commit], FilterContext(repo, input_roles=FixtureSourceRoles()), show_progress=False,
         )
+
+    def test_compiler_location_builtins_retain_whitespace_changes(self) -> None:
+        for builtin in ('__builtin_LINE', '__builtin_COLUMN', '__builtin_FILE', '__builtin_FILE_NAME',
+                        '__builtin_FUNCTION', '__builtin_FUNCSIG', '__builtin_source_location'):
+            with self.subTest(builtin=builtin):
+                old = 'int value(void) { return ' + builtin + '(); }\n'
+                self.assertEqual(len(self.filter_source_change(old, '\n' + old)), 1)
+        old = '#define POSITION __builtin_LINE()\nint value(void) { return POSITION; }\n'
+        self.assertEqual(len(self.filter_source_change(old, old.replace('int value', '\nint value'))), 1)
 
     @staticmethod
     def make_commit(
@@ -199,11 +215,11 @@ class WhitespaceFilterTests(unittest.TestCase):
                 "c1:drivers/foo.c": "int a;\n/* new comment */\nint b;\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         result = WhitespaceFilter().filter_commits([commit], context, show_progress=False)
         self.assertEqual(result, [])
 
-    def test_eliminates_whitespace_formatting_commit(self) -> None:
+    def test_retains_indentation_change_observable_by_included_macro(self) -> None:
         patch = (
             "diff --git a/drivers/foo.c b/drivers/foo.c\n"
             "--- a/drivers/foo.c\n"
@@ -221,9 +237,9 @@ class WhitespaceFilterTests(unittest.TestCase):
                 "c1:drivers/foo.c": "int a;\n\t\tint b;\nint c;\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         result = WhitespaceFilter().filter_commits([commit], context, show_progress=False)
-        self.assertEqual(result, [])
+        self.assertEqual(len(result), 1)
 
     def test_eliminates_comment_edits_without_hunk_opener(self) -> None:
         # Shapes found in sampled balloon, ext4, and netdevice documentation.
@@ -239,7 +255,70 @@ class WhitespaceFilterTests(unittest.TestCase):
             with self.subTest(body=old_body, replacement=new_body):
                 old = "/*\n" + old_body + " */\nint value;\n"
                 new = "/*\n" + new_body + " */\nint value;\n"
-                self.assertEqual(self.filter_source_change(old, new), [])
+                expected = 0 if old_body.count("\n") == new_body.count("\n") else 1
+                self.assertEqual(len(self.filter_source_change(old, new)), expected)
+
+    def test_retains_included_line_alias_after_comment_line_insertion(self) -> None:
+        old = '#include "observer.h"\n/* old */\nint value = LOCATION;\n'
+        new = old.replace('/* old */', '/* old\n * extra */')
+        self.assertEqual(len(self.filter_source_change(old, new)), 1)
+
+    def test_retains_included_column_alias_after_inline_comment_growth(self) -> None:
+        old = '#include "observer.h"\nint value(void) { /*x*/return LOCATION; }\n'
+        new = old.replace('/*x*/', '/*longer*/')
+        self.assertEqual(len(self.filter_source_change(old, new)), 1)
+
+    def test_retains_stringification_gap_changes(self) -> None:
+        for old_argument, new_argument in [('1+ 2', '1 +2'), ('1\\\n+2', '1 \n+2')]:
+            with self.subTest(old_argument=old_argument):
+                prefix = '#include "observer.h"\nconst char *s = S('
+                self.assertEqual(len(self.filter_source_change(
+                    prefix + old_argument + ');\n', prefix + new_argument + ');\n',
+                )), 1)
+
+    def test_retains_cpp_raw_literal_content_disguised_as_comment(self) -> None:
+        old = 'const char *s = R"(a"/*x*/"b)";\n'
+        self.assertEqual(len(self.filter_source_change(old, old.replace('/*x*/', '/*y*/'))), 1)
+
+    def test_accepts_stable_layout_with_direct_observers(self) -> None:
+        for observer in ['__COUNTER__', '__LINE__', '__builtin_LINE()']:
+            with self.subTest(observer=observer):
+                old = '/* old */\nint value = ' + observer + ';\n'
+                self.assertEqual(self.filter_source_change(old, old.replace('/* old */', '/* longer description */')), [])
+
+    def test_invalid_utf8_bytes_do_not_compare_as_replacement_characters(self) -> None:
+        class ByteRepo(GitRepo):
+            def read_file_mode(self, commit: str, path: str) -> str:
+                return "100644"
+
+            def read_file(self, commit: str, path: str) -> bytes:
+                return b'const char *s = "' + (b'\xff' if commit == 'p0' else b'\xfe') + b'";\n'
+
+        patch_text = (
+            'diff --git a/drivers/foo.c b/drivers/foo.c\n'
+            '--- a/drivers/foo.c\n+++ b/drivers/foo.c\n@@ -1 +1 @@\n'
+            '-const char *s = "\ufffd";\n+const char *s = "\ufffd";\n'
+        )
+        result = WhitespaceFilter().filter_commits(
+            [self.make_commit('c1', 'p0', patch_text)], FilterContext(ByteRepo(Path('.')), input_roles=FixtureSourceRoles()),
+            show_progress=False,
+        )
+        self.assertEqual(len(result), 1)
+
+    def test_code_masks_preserve_locations_after_inactive_line_insertion(self) -> None:
+        old = '#include "observer.h"\n#if 0\nint hidden;\n#endif\n/* old */\nint location = LOCATION;\n'
+        new = old.replace('int hidden;\n', 'int hidden;\nint added;\n').replace('/* old */', '/* new */')
+        patch_text = 'diff --git a/drivers/foo.c b/drivers/foo.c\n' + ''.join(unified_diff(
+            old.splitlines(keepends=True), new.splitlines(keepends=True),
+            fromfile='a/drivers/foo.c', tofile='b/drivers/foo.c',
+        ))
+        view = FilteredCommit(self.make_commit('c1', 'p0', patch_text))
+        file = view.diff.files[0]
+        view.mask_code(file, SourceSide.OLD, (LineRange(3, 4),), MaskReason.IFDEF)
+        view.mask_code(file, SourceSide.NEW, (LineRange(3, 5),), MaskReason.IFDEF)
+        repo = MemoryGitRepo({'p0:drivers/foo.c': old, 'c1:drivers/foo.c': new})
+        self.assertIs(WhitespaceFilter().filter_mutable_commit(view, FilterContext(repo, input_roles=FixtureSourceRoles())), view)
+        self.assertEqual(view.edit_masks, ())
 
     def test_eliminates_comment_edit_with_only_closer_in_context(self) -> None:
         old = "/*\n * unchanged\n * old\n */\nint value;\n"
@@ -329,7 +408,7 @@ class WhitespaceFilterTests(unittest.TestCase):
                 "c1:drivers/foo.c": "int a;\nb = 2;\nint c;\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         result = WhitespaceFilter().filter_commits([commit], context, show_progress=False)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].commit_id, "c1")
@@ -360,7 +439,7 @@ class WhitespaceFilterTests(unittest.TestCase):
                 "c1:drivers/code.c": "int y = 2;\nint z;\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         filter_inst = WhitespaceFilter()
         result = filter_inst.filter_commits([commit], context, show_progress=False)
 
@@ -393,7 +472,7 @@ class WhitespaceFilterTests(unittest.TestCase):
                 "c1:arch/arm/entry.S": "/* new */\nnop\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         result = WhitespaceFilter().filter_commits([commit], context, show_progress=False)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].commit_id, "c1")
@@ -414,7 +493,7 @@ class WhitespaceFilterTests(unittest.TestCase):
                 "c1:Documentation/foo.rst": "new\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         result = WhitespaceFilter().filter_commits([commit], context, show_progress=False)
         self.assertEqual(len(result), 1)
 
@@ -448,7 +527,7 @@ class WhitespaceFilterTests(unittest.TestCase):
                 "c2:drivers/new.c": "/* only comments */\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         res = WhitespaceFilter().filter_commits(
             [commit_binary, commit_new],
             context,
@@ -468,7 +547,7 @@ class WhitespaceFilterTests(unittest.TestCase):
         commit = self.make_commit("c1", "p0", patch)
         # Repo does not have the files; read_file will raise FileNotFoundError
         repo = MemoryGitRepo({})
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
         result = WhitespaceFilter().filter_commits([commit], context, show_progress=False)
         self.assertEqual(len(result), 1)
 

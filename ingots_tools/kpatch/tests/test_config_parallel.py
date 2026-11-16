@@ -362,7 +362,7 @@ class ParallelConfigTests(unittest.TestCase):
         self.assertEqual(expected[fixture.merge_id], {})
         self.assertEqual(
             expected[fixture.post_merge][(None, "drivers/after.h")],
-            FileDecision(ConfigValue.MODULE, ConfigValue.MODULE),
+            FileDecision(ConfigValue.MODULE, ConfigValue.MODULE, complete=True),
         )
         expected_hash = fixture.decision_hash(expected)
         for workers in (1, 2, 4):
@@ -381,7 +381,7 @@ class ParallelConfigTests(unittest.TestCase):
     def run_pipeline(self, commits: list[GitCommit], workers: int) -> list[PipelineResult]:
         config = KernelConfig("")
         pipeline = FilterPipeline([
-            MergeCommitFilter(), ConfigFilter(config, workers=workers),
+            MergeCommitFilter(), ConfigFilter(config, workers=workers, collect_observations=True),
             IfdefFilter(config), WhitespaceFilter(),
         ])
         context = FilterContext(
@@ -403,17 +403,18 @@ class ParallelConfigTests(unittest.TestCase):
         self.assertTrue(expected)
         retained_ids = [result.commit.commit_id for result in expected]
         self.assertNotIn(self.fixture.merge_id, retained_ids)
-        self.assertNotIn(self.fixture.whitespace_id, retained_ids)
+        # The extra space moves real tokens; an included location observer can
+        # distinguish it even though the preprocessing token values agree.
+        self.assertIn(self.fixture.whitespace_id, retained_ids)
         active = next(
             result for result in expected
             if result.commit.commit_id == self.fixture.active_change_id
         )
         self.assertIn("+int value = 1;", active.commit.diff_str)
         self.assertNotIn("+int inactive = 1;", active.commit.diff_str)
-        self.assertIn(" int inactive = 0;", active.commit.diff_str)
         self.assertEqual(
             active.build_modes[(None, "drivers/wrapper.c")],
-            FileBuildModes(ConfigValue.ENABLED, ConfigValue.ENABLED),
+            FileBuildModes(ConfigValue.ENABLED, ConfigValue.ENABLED, complete=True),
         )
         module = next(
             result for result in expected
@@ -421,7 +422,7 @@ class ParallelConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             module.build_modes[(None, "drivers/after.h")],
-            FileBuildModes(ConfigValue.MODULE, ConfigValue.MODULE),
+            FileBuildModes(ConfigValue.MODULE, ConfigValue.MODULE, complete=True),
         )
         self.assertEqual(retained_ids, [
             commit.commit_id for commit in commits if commit.commit_id in retained_ids

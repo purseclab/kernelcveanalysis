@@ -7,6 +7,7 @@ import weakref
 from kexploit_utils import Architecture
 
 from kpatch.filter.config_filter import (
+    BuildInputClosure,
     ConfigFilter,
     ConfigValue,
     KbuildDirectory,
@@ -23,6 +24,9 @@ from kpatch.git import GitRepo
 
 
 class MemoryGitRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self, commits: dict[str, dict[str, str]]):
         self.commits = commits
 
@@ -347,7 +351,108 @@ class KbuildMakefileTests(unittest.TestCase):
             makefile.get("arch/arm64/kvm/hyp/shared.c"),
             ConfigValue.ENABLED,
         )
-        self.assertIsNone(makefile.get(f"{folder}/kvm_nvhe.c"))
+        # Prerequisites alone do not prove a link-only recipe: retain the
+        # possible implicit source as well as the observed source alternatives.
+        self.assertEqual(makefile.get(f"{folder}/kvm_nvhe.c"), ConfigValue.ENABLED)
+
+    def test_all_matching_source_patterns_remain_possible(self) -> None:
+        folder = "arch/arm64/kvm/hyp/nvhe"
+        makefile = KbuildMakefile(
+            """
+            obj-y := kvm_nvhe.o
+            $(obj)/kvm_nvhe.o: $(obj)/hyp-init.nvhe.o FORCE
+            $(obj)/%.nvhe.o: $(src)/%.c FORCE
+            $(obj)/%.nvhe.o: $(src)/%.S FORCE
+            """,
+            KernelConfig(""), folder, variables={"src": folder, "obj": folder},
+        )
+        self.assertEqual(makefile.get(f"{folder}/hyp-init.c"), ConfigValue.ENABLED)
+        self.assertEqual(makefile.get(f"{folder}/hyp-init.S"), ConfigValue.ENABLED)
+
+    def test_prerequisite_objects_do_not_replace_implicit_compilation(self) -> None:
+        makefile = self.parse("obj-y += selected.o\nselected.o: helper.o\n")
+        self.assertEqual(makefile.get("drivers/example/selected.c"), ConfigValue.ENABLED)
+        self.assertEqual(makefile.get("drivers/example/helper.c"), ConfigValue.ENABLED)
+
+    def test_generated_data_prerequisites_preserve_implicit_sources(self) -> None:
+        folder = "drivers/example"
+        for prerequisite in ("config_data.gz", "headers.tar.xz", "certificate.x509", "image.so", "included_table.c", "incbin_data"):
+            with self.subTest(prerequisite=prerequisite):
+                makefile = KbuildMakefile(
+                    "obj-m += selected.o\n"
+                    f"$(obj)/selected.o: $(obj)/{prerequisite}\n"
+                    f"$(obj)/{prerequisite}: $(src)/input.txt FORCE\n",
+                    KernelConfig(""), folder, variables={"src": folder, "obj": folder},
+                )
+                self.assertEqual(makefile.get(f"{folder}/selected.c"), ConfigValue.MODULE)
+                self.assertEqual(makefile.get(f"{folder}/selected.S"), ConfigValue.MODULE)
+
+    def test_component_variables_are_expanded_only_at_object_list_level(self) -> None:
+        makefile = self.parse(
+            "obj-y += bundle.o\nbundle-y := part.o\npart-y := other.o\n"
+        )
+        self.assertEqual(makefile.get("drivers/example/part.c"), ConfigValue.ENABLED)
+        self.assertIsNone(makefile.get("drivers/example/other.c"))
+
+    def test_library_and_always_objects_do_not_expand_component_variables(self) -> None:
+        for variable in ("lib-y", "lib-m", "always-y", "always-m"):
+            with self.subTest(variable=variable):
+                makefile = self.parse(
+                    f"{variable} += selected.o\nselected-y := other.o\n"
+                )
+                self.assertEqual(
+                    makefile.get("drivers/example/selected.c"), ConfigValue.ENABLED
+                )
+                self.assertIsNone(makefile.get("drivers/example/other.c"))
+
+    def test_incoming_prerequisite_does_not_expand_component_variables(self) -> None:
+        makefile = KbuildMakefile(
+            "selected-y := other.o\n",
+            KernelConfig(""),
+            "drivers/example",
+            extra_goals={"selected.o": ConfigValue.MODULE},
+        )
+        self.assertEqual(
+            makefile.get("drivers/example/selected.c"), ConfigValue.MODULE
+        )
+        self.assertIsNone(makefile.get("drivers/example/other.c"))
+
+    def test_ramfs_temporary_variable_does_not_hide_selected_member(self) -> None:
+        contents = """
+            obj-y += ramfs.o
+            file-mmu-y := file-nommu.o
+            file-mmu-$(CONFIG_MMU) := file-mmu.o
+            ramfs-objs += inode.o $(file-mmu-y)
+        """
+        for enabled, selected, excluded in (("y", "file-mmu", "file-nommu"), ("n", "file-nommu", "file-mmu")):
+            with self.subTest(mmu=enabled):
+                makefile = self.parse(contents, "CONFIG_MMU=" + enabled)
+                self.assertEqual(makefile.get(f"drivers/example/{selected}.c"), ConfigValue.ENABLED)
+                self.assertIsNone(makefile.get(f"drivers/example/{excluded}.c"))
+
+    def test_empty_component_list_uses_implicit_source(self) -> None:
+        makefile = self.parse("obj-y += selected.o\nselected-y :=\n")
+        self.assertEqual(makefile.get("drivers/example/selected.c"), ConfigValue.ENABLED)
+
+    def test_self_component_keeps_implicit_source(self) -> None:
+        makefile = self.parse("obj-y += selected.o\nselected-y := selected.o\n")
+        self.assertEqual(makefile.get("drivers/example/selected.c"), ConfigValue.ENABLED)
+
+    def test_always_outputs_and_root_prepare_follow_generators(self) -> None:
+        makefile = self.parse(
+            """
+            always-y := generated.h image.lds
+            generated.h: generated.s FORCE
+            generated.s: source.c FORCE
+            """
+        )
+        self.assertEqual(makefile.get("drivers/example/source.c"), ConfigValue.ENABLED)
+        self.assertEqual(makefile.get("drivers/example/image.lds.S"), ConfigValue.ENABLED)
+        root = self.parse(
+            "prepare: generated/offsets.h\ngenerated/offsets.h: arch/test/offsets.s FORCE\n",
+            folder="",
+        )
+        self.assertEqual(root.get("arch/test/offsets.c"), ConfigValue.ENABLED)
 
     def test_non_build_prerequisites_preserve_implicit_object_source(self) -> None:
         makefile = self.parse(
@@ -360,6 +465,39 @@ class KbuildMakefileTests(unittest.TestCase):
         self.assertEqual(
             makefile.get("drivers/example/direct.c"), ConfigValue.ENABLED
         )
+
+    def test_generated_header_prerequisites_preserve_implicit_object_source(self) -> None:
+        folder = "drivers/example"
+        makefile = KbuildMakefile(
+            """
+            obj-y += direct.o
+            $(obj)/direct.o: $(obj)/generated.h FORCE
+            $(obj)/generated.h: $(obj)/generator.s FORCE
+            $(obj)/generator.s: $(src)/generator.c FORCE
+            """,
+            KernelConfig(""), folder, variables={"src": folder, "obj": folder},
+        )
+        self.assertEqual(makefile.get("drivers/example/direct.c"), ConfigValue.ENABLED)
+        self.assertEqual(makefile.get("drivers/example/generator.c"), ConfigValue.ENABLED)
+
+    def test_composite_objects_keep_sources_with_shared_generated_header(self) -> None:
+        folder = "drivers/example"
+        for mode in ("y", "m"):
+            with self.subTest(mode=mode):
+                makefile = KbuildMakefile(
+                    """
+                    obj-$(CONFIG_KVM) += kvm.o
+                    kvm-y += arm.o arch_timer.o
+                    $(addprefix $(obj)/,$(kvm-y)): $(obj)/hyp_constants.h
+                    $(obj)/hyp_constants.h: $(obj)/hyp-constants.s FORCE
+                    $(obj)/hyp-constants.s: $(src)/hyp/hyp-constants.c FORCE
+                    """,
+                    KernelConfig("CONFIG_KVM=" + mode), folder,
+                    variables={"src": folder, "obj": folder},
+                )
+                for source in ("arm.c", "arch_timer.c"):
+                    self.assertEqual(makefile.get("drivers/example/" + source), ConfigValue(mode))
+                self.assertEqual(makefile.get("drivers/example/hyp/hyp-constants.c"), ConfigValue(mode))
 
     def test_recipe_and_define_bodies_are_not_parsed_as_kbuild_rules(self) -> None:
         makefile = self.parse(
@@ -764,8 +902,8 @@ class SourceAnalysisCacheTests(unittest.TestCase):
         with patch(
             "kpatch.filter.ifdef_filter.get_active_lines", wraps=get_active_lines
         ) as evaluate:
-            self.assertTrue(original.file_included("drivers/before.h"))
-            self.assertFalse(original.file_included("drivers/after.h"))
+            self.assertTrue(original.modeled_inclusion("drivers/before.h"))
+            self.assertFalse(original.modeled_inclusion("drivers/after.h"))
             before = original._active_includes_cache[(source, ConfigValue.ENABLED)]
             copied = KbuildState.copy(original)
             self.assertIs(
@@ -778,13 +916,13 @@ class SourceAnalysisCacheTests(unittest.TestCase):
                 copied._include_value_cache, original._include_value_cache
             )
             copied.update_filter_state(make_diff(source, DiffFileType.DEFAULT), "next")
-            self.assertFalse(copied.file_included("drivers/before.h"))
-            self.assertTrue(copied.file_included("drivers/after.h"))
-            self.assertTrue(original.file_included("drivers/before.h"))
-            self.assertFalse(original.file_included("drivers/after.h"))
+            self.assertFalse(copied.modeled_inclusion("drivers/before.h"))
+            self.assertTrue(copied.modeled_inclusion("drivers/after.h"))
+            self.assertTrue(original.modeled_inclusion("drivers/before.h"))
+            self.assertFalse(original.modeled_inclusion("drivers/after.h"))
             copied.update_filter_state(make_diff(source, DiffFileType.DEFAULT), "again")
-            self.assertTrue(copied.file_included("drivers/before.h"))
-            self.assertFalse(copied.file_included("drivers/after.h"))
+            self.assertTrue(copied.modeled_inclusion("drivers/before.h"))
+            self.assertFalse(copied.modeled_inclusion("drivers/after.h"))
             self.assertIs(
                 copied._active_includes_cache[(source, ConfigValue.ENABLED)], before
             )
@@ -893,6 +1031,28 @@ class SourceAnalysisCacheTests(unittest.TestCase):
 
 
 class ConfigFilterTests(unittest.TestCase):
+    """Kbuild/literal observations do not authorize input absence exclusions."""
+
+    def test_deep_directory_uses_exact_enabled_ancestor_goal(self) -> None:
+        files = {
+            "Kbuild": "obj-y += drivers/\n",
+            "drivers/Makefile": "obj-$(CONFIG_INPUT) += input/\nobj-$(CONFIG_SERIO) += input/serio/\n",
+            "drivers/input/Makefile": "obj-y += unrelated.o\nobj-$(CONFIG_INPUT) += input-core.o\n",
+            "drivers/input/serio/Makefile": "obj-y += serio.o\n",
+        }
+        for parent_mode in ("y", "m", "n"):
+            for child_mode in ("y", "m", "n"):
+                with self.subTest(parent=parent_mode, child=child_mode):
+                    state = KbuildState(
+                        MemoryGitRepo({"base": files}),
+                        KernelConfig(f"CONFIG_INPUT={parent_mode}\nCONFIG_SERIO={child_mode}"),
+                        "base",
+                    )
+                    expected = ConfigValue(child_mode) if child_mode != "n" else None
+                    self.assertEqual(state.modeled_inclusion("drivers/input/serio/serio.c"), expected)
+                    unrelated = ConfigValue(parent_mode) if parent_mode != "n" else None
+                    self.assertEqual(state.modeled_inclusion("drivers/input/unrelated.c"), unrelated)
+
     def make_filter(
         self,
         commits: dict[str, dict[str, str]],
@@ -914,8 +1074,8 @@ class ConfigFilterTests(unittest.TestCase):
             }
         )
 
-        self.assertTrue(filter.file_included("drivers/example/selected.c"))
-        self.assertFalse(filter.file_included("drivers/example/excluded.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/selected.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/excluded.c"))
 
     def test_relative_makefile_include_is_resolved_from_its_folder(self) -> None:
         repo = MemoryGitRepo(
@@ -952,7 +1112,7 @@ class ConfigFilterTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            filter.get("drivers/example/selected.c"), ConfigValue.MODULE
+            filter.modeled_inclusion("drivers/example/selected.c"), ConfigValue.MODULE
         )
 
     def test_root_kbuild_selects_only_configured_architecture(self) -> None:
@@ -974,9 +1134,9 @@ class ConfigFilterTests(unittest.TestCase):
             "base",
         )
 
-        self.assertTrue(filter.file_included("arch/arm64/kernel/selected.c"))
-        self.assertFalse(filter.file_included("arch/x86/kernel/excluded.c"))
-        self.assertTrue(filter.file_included("drivers/common.c"))
+        self.assertTrue(filter.modeled_inclusion("arch/arm64/kernel/selected.c"))
+        self.assertFalse(filter.modeled_inclusion("arch/x86/kernel/excluded.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/common.c"))
 
     def test_architecture_makefile_contributes_global_directories(self) -> None:
         filter = ConfigFilter(
@@ -996,7 +1156,7 @@ class ConfigFilterTests(unittest.TestCase):
             "base",
         )
 
-        self.assertTrue(filter.file_included("arch/arm64/lib/insn.c"))
+        self.assertTrue(filter.modeled_inclusion("arch/arm64/lib/insn.c"))
 
     def test_root_global_lists_retain_generic_library(self) -> None:
         filter = ConfigFilter(
@@ -1017,7 +1177,7 @@ class ConfigFilterTests(unittest.TestCase):
             "base",
         )
 
-        self.assertTrue(filter.file_included("lib/generic.c"))
+        self.assertTrue(filter.modeled_inclusion("lib/generic.c"))
 
     def test_source_and_header_includes_inherit_built_source_mode(self) -> None:
         repo = MemoryGitRepo(
@@ -1049,13 +1209,13 @@ class ConfigFilterTests(unittest.TestCase):
         filter = ConfigFilter(repo, KernelConfig("CONFIG_ARM64=y"), "base", index)
 
         self.assertEqual(
-            filter.get("drivers/implementation.c"), ConfigValue.MODULE
+            filter.modeled_inclusion("drivers/implementation.c"), ConfigValue.MODULE
         )
-        self.assertEqual(filter.get("drivers/local.h"), ConfigValue.MODULE)
+        self.assertEqual(filter.modeled_inclusion("drivers/local.h"), ConfigValue.MODULE)
         self.assertEqual(
-            filter.get("include/linux/shared.h"), ConfigValue.MODULE
+            filter.modeled_inclusion("include/linux/shared.h"), ConfigValue.MODULE
         )
-        self.assertTrue(filter.file_included("include/linux/shared.h"))
+        self.assertTrue(filter.modeled_inclusion("include/linux/shared.h"))
 
     def test_parent_generated_target_enables_child_sources(self) -> None:
         filter = self.make_filter(
@@ -1077,8 +1237,8 @@ class ConfigFilterTests(unittest.TestCase):
             }
         )
 
-        self.assertTrue(filter.file_included("drivers/child/code.c"))
-        self.assertTrue(filter.file_included("drivers/child/image.lds.S"))
+        self.assertTrue(filter.modeled_inclusion("drivers/child/code.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/child/image.lds.S"))
 
     def test_generated_goal_crosses_intermediate_directory_without_makefile(self) -> None:
         filter = self.make_filter(
@@ -1097,7 +1257,7 @@ class ConfigFilterTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            filter.get("drivers/intermediate/child/code.c"),
+            filter.modeled_inclusion("drivers/intermediate/child/code.c"),
             ConfigValue.ENABLED,
         )
 
@@ -1121,7 +1281,43 @@ class ConfigFilterTests(unittest.TestCase):
         index.add_line("drivers/wrapper.c", '#include "hidden.c"')
         filter = ConfigFilter(repo, KernelConfig("CONFIG_ARM64=y"), "base", index)
 
-        self.assertFalse(filter.file_included("drivers/hidden.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/hidden.c"))
+
+    def test_unknown_active_include_context_preserves_indexed_positive_edge(self) -> None:
+        repo = MemoryGitRepo({'base': {
+            'drivers/Makefile': 'obj-y += wrapper.o\n',
+            'drivers/wrapper.c': '#include /* first\nsecond */ "local.h"\n',
+            'drivers/local.h': 'struct local;\n',
+        }})
+        index = SourceIncludeIndex('arm64', ('drivers/wrapper.c', 'drivers/local.h'))
+        index.add_line('drivers/wrapper.c', '#include "local.h"')
+        state = KbuildState(repo, KernelConfig('CONFIG_ARM64=y'), 'base', index)
+        facts = state._active_source_facts('drivers/wrapper.c', ConfigValue.ENABLED)
+        self.assertTrue(facts.unknown)
+        self.assertIn('drivers/local.h', facts.targets)
+        self.assertEqual(state.modeled_inclusion('drivers/local.h'), ConfigValue.ENABLED)
+        self.assertIs(state.build_input_closure, BuildInputClosure.UNKNOWN)
+        self.assertFalse(state.cpp_context_complete('drivers/local.h'))
+
+    def test_cyclic_positive_include_observations_do_not_depend_on_query_order(self) -> None:
+        files = {
+            'drivers/Makefile': 'obj-y += core.o\n',
+            'drivers/core.c': '#include "root.h"\n',
+            'drivers/root.h': '#include "a.h"\n',
+            'drivers/a.h': '#ifndef A_H\n#define A_H\n#include "b.h"\n#endif\n',
+            'drivers/b.h': '#ifndef B_H\n#define B_H\n#include "a.h"\n#endif\n',
+        }
+        repo = MemoryGitRepo({'base': files})
+        index = SourceIncludeIndex('arm64', files)
+        for source, text in files.items():
+            for line in text.splitlines():
+                index.add_line(source, line)
+        for order in (('drivers/a.h', 'drivers/b.h'), ('drivers/b.h', 'drivers/a.h')):
+            with self.subTest(order=order):
+                state = KbuildState(repo, KernelConfig('CONFIG_ARM64=y'), 'base', index)
+                for path in order:
+                    self.assertEqual(state.modeled_inclusion(path), ConfigValue.ENABLED)
+                self.assertIs(state.build_input_closure, BuildInputClosure.UNKNOWN)
 
     def test_source_change_invalidates_only_dependent_include_results(self) -> None:
         repo = MemoryGitRepo(
@@ -1147,16 +1343,16 @@ class ConfigFilterTests(unittest.TestCase):
         index.add_line("drivers/wrapper.c", '#include "before.c"')
         index.add_line("drivers/wrapper.c", '#include "after.c"')
         filter = ConfigFilter(repo, KernelConfig("CONFIG_ARM64=y"), "base", index)
-        self.assertTrue(filter.file_included("drivers/before.c"))
-        self.assertFalse(filter.file_included("drivers/after.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/before.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/after.c"))
 
         filter.update_filter_state(
             make_diff("drivers/wrapper.c", DiffFileType.DEFAULT),
             "next",
         )
 
-        self.assertFalse(filter.file_included("drivers/before.c"))
-        self.assertTrue(filter.file_included("drivers/after.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/before.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/after.c"))
 
     def test_source_index_reports_transitive_dependent_targets(self) -> None:
         index = SourceIncludeIndex(
@@ -1188,8 +1384,8 @@ class ConfigFilterTests(unittest.TestCase):
             }
         )
 
-        self.assertTrue(filter.file_included("drivers/example/local.c"))
-        self.assertTrue(filter.file_included("drivers/example/included.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/local.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/included.c"))
 
     def test_architecture_include_can_own_files_in_another_directory(self) -> None:
         filter = ConfigFilter(
@@ -1214,7 +1410,27 @@ class ConfigFilterTests(unittest.TestCase):
             "base",
         )
 
-        self.assertTrue(filter.file_included("virt/kvm/eventfd.c"))
+        self.assertTrue(filter.modeled_inclusion("virt/kvm/eventfd.c"))
+
+    def test_architecture_composite_sources_survive_generated_header_prerequisites(self) -> None:
+        for mode in ("y", "m"):
+            with self.subTest(mode=mode):
+                state = ConfigFilter(
+                    MemoryGitRepo({"base": {
+                        "Kbuild": "obj-y += arch/$(SRCARCH)/\n",
+                        "arch/arm64/Kbuild": "obj-$(CONFIG_KVM) += kvm/\n",
+                        "arch/arm64/kvm/Makefile": (
+                            "obj-$(CONFIG_KVM) += kvm.o\n"
+                            "kvm-y += arm.o arch_timer.o\n"
+                            "$(addprefix $(obj)/,$(kvm-y)): $(obj)/hyp_constants.h\n"
+                            "$(obj)/hyp_constants.h: $(obj)/hyp-constants.s FORCE\n"
+                            "$(obj)/hyp-constants.s: $(src)/hyp/hyp-constants.c FORCE\n"
+                        ),
+                    }}),
+                    KernelConfig("CONFIG_ARM64=y\nCONFIG_KVM=" + mode),
+                    "base",
+                )
+                self.assertEqual(state.modeled_inclusion("arch/arm64/kvm/arch_timer.c"), ConfigValue(mode))
 
     def test_copy_rebuilds_cache_tree_and_shares_makefiles(self) -> None:
         original = self.make_filter(
@@ -1225,7 +1441,7 @@ class ConfigFilterTests(unittest.TestCase):
                 }
             }
         )
-        self.assertTrue(original.file_included("drivers/example/selected.c"))
+        self.assertTrue(original.modeled_inclusion("drivers/example/selected.c"))
         original.delegated.add("drivers/delegated")
 
         copied = ConfigFilter.copy(original)
@@ -1254,10 +1470,10 @@ class ConfigFilterTests(unittest.TestCase):
         )
         copied.delegated.add("drivers/copied-only")
 
-        self.assertTrue(original.file_included("drivers/example/selected.c"))
-        self.assertFalse(original.file_included("drivers/example/replacement.c"))
-        self.assertFalse(copied.file_included("drivers/example/selected.c"))
-        self.assertTrue(copied.file_included("drivers/example/replacement.c"))
+        self.assertTrue(original.modeled_inclusion("drivers/example/selected.c"))
+        self.assertFalse(original.modeled_inclusion("drivers/example/replacement.c"))
+        self.assertFalse(copied.modeled_inclusion("drivers/example/selected.c"))
+        self.assertTrue(copied.modeled_inclusion("drivers/example/replacement.c"))
         self.assertNotIn("drivers/copied-only", original.delegated)
 
     def test_update_to_included_fragment_invalidates_cached_rules(self) -> None:
@@ -1281,15 +1497,15 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/before.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/before.c"))
 
         filter.update_filter_state(
             make_diff("drivers/example/objects.mk", DiffFileType.DEFAULT),
             "next",
         )
 
-        self.assertFalse(filter.file_included("drivers/example/before.c"))
-        self.assertTrue(filter.file_included("drivers/example/after.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/before.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/after.c"))
 
     def test_updates_cached_makefile_contents(self) -> None:
         filter = self.make_filter(
@@ -1304,15 +1520,15 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/before.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/before.c"))
 
         filter.update_filter_state(
             make_diff("drivers/example/Makefile", DiffFileType.DEFAULT),
             "next",
         )
 
-        self.assertFalse(filter.file_included("drivers/example/before.c"))
-        self.assertTrue(filter.file_included("drivers/example/after.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/before.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/after.c"))
 
     def test_deleted_kbuild_falls_back_to_makefile(self) -> None:
         filter = self.make_filter(
@@ -1328,15 +1544,15 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/preferred.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/preferred.c"))
 
         filter.update_filter_state(
             make_diff("drivers/example/Kbuild", DiffFileType.DELETE),
             "next",
         )
 
-        self.assertFalse(filter.file_included("drivers/example/preferred.c"))
-        self.assertTrue(filter.file_included("drivers/example/fallback.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/preferred.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/fallback.c"))
 
     def test_new_kbuild_replaces_cached_makefile(self) -> None:
         filter = self.make_filter(
@@ -1352,15 +1568,15 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/fallback.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/fallback.c"))
 
         filter.update_filter_state(
             make_diff("drivers/example/Kbuild", DiffFileType.NEW),
             "next",
         )
 
-        self.assertTrue(filter.file_included("drivers/example/preferred.c"))
-        self.assertFalse(filter.file_included("drivers/example/fallback.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/preferred.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/fallback.c"))
 
     def test_new_makefile_keeps_parent_owned_direct_object(self) -> None:
         filter = self.make_filter(
@@ -1378,15 +1594,15 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/direct.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/direct.c"))
 
         filter.update_filter_state(
             make_diff("drivers/example/Makefile", DiffFileType.NEW),
             "next",
         )
 
-        self.assertTrue(filter.file_included("drivers/example/direct.c"))
-        self.assertTrue(filter.file_included("drivers/example/local.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/direct.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/local.c"))
 
     def test_parent_update_disables_cached_child(self) -> None:
         filter = self.make_filter(
@@ -1401,14 +1617,14 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/selected.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/selected.c"))
 
         filter.update_filter_state(
             make_diff("drivers/Makefile", DiffFileType.DEFAULT),
             "next",
         )
 
-        self.assertFalse(filter.file_included("drivers/example/selected.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/selected.c"))
 
     def test_makefile_renamed_to_kbuild_keeps_cached_directory(self) -> None:
         filter = self.make_filter(
@@ -1423,7 +1639,7 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/selected.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/selected.c"))
 
         filter.update_filter_state(
             make_diff(
@@ -1434,7 +1650,7 @@ class ConfigFilterTests(unittest.TestCase):
             "next",
         )
 
-        self.assertTrue(filter.file_included("drivers/example/selected.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/selected.c"))
 
     def test_shared_fragment_invalidates_all_owners_only(self) -> None:
         files = {
@@ -1451,8 +1667,8 @@ class ConfigFilterTests(unittest.TestCase):
             }
         )
         for folder in ("first", "second"):
-            self.assertTrue(filter.file_included(f"drivers/{folder}/before.c"))
-        self.assertTrue(filter.file_included("drivers/unrelated/selected.c"))
+            self.assertTrue(filter.modeled_inclusion(f"drivers/{folder}/before.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/unrelated/selected.c"))
         unrelated = filter.kbuild_cache["drivers/unrelated"]
 
         filter.update_filter_state(
@@ -1460,8 +1676,8 @@ class ConfigFilterTests(unittest.TestCase):
         )
 
         for folder in ("first", "second"):
-            self.assertFalse(filter.file_included(f"drivers/{folder}/before.c"))
-            self.assertTrue(filter.file_included(f"drivers/{folder}/after.c"))
+            self.assertFalse(filter.modeled_inclusion(f"drivers/{folder}/before.c"))
+            self.assertTrue(filter.modeled_inclusion(f"drivers/{folder}/after.c"))
         self.assertIs(filter.kbuild_cache["drivers/unrelated"], unrelated)
 
     def test_removed_fragment_dependency_keeps_former_owner_cached(self) -> None:
@@ -1478,11 +1694,11 @@ class ConfigFilterTests(unittest.TestCase):
                 "last": {**next_files, "scripts/objects.mk": "obj-y += after.o\n"},
             }
         )
-        self.assertTrue(filter.file_included("drivers/example/before.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/before.c"))
         filter.update_filter_state(
             make_diff("drivers/example/Makefile", DiffFileType.DEFAULT), "next"
         )
-        self.assertTrue(filter.file_included("drivers/example/local.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/local.c"))
         entry = filter.kbuild_cache["drivers/example"]
 
         filter.update_filter_state(
@@ -1490,7 +1706,7 @@ class ConfigFilterTests(unittest.TestCase):
         )
 
         self.assertIs(filter.kbuild_cache["drivers/example"], entry)
-        self.assertFalse(filter.file_included("drivers/example/after.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/after.c"))
 
     def test_new_optional_fragment_invalidates_its_cached_owner(self) -> None:
         files = {
@@ -1506,13 +1722,13 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertFalse(filter.file_included("drivers/example/selected.c"))
+        self.assertFalse(filter.modeled_inclusion("drivers/example/selected.c"))
 
         filter.update_filter_state(
             make_diff("drivers/example/objects.mk", DiffFileType.NEW), "next"
         )
 
-        self.assertTrue(filter.file_included("drivers/example/selected.c"))
+        self.assertTrue(filter.modeled_inclusion("drivers/example/selected.c"))
 
     def make_cross_directory_filter(self) -> ConfigFilter:
         files = {
@@ -1535,20 +1751,20 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertEqual(filter.get("owners/module/local.c"), ConfigValue.MODULE)
-        self.assertEqual(filter.get("owners/builtin/local.c"), ConfigValue.ENABLED)
-        self.assertEqual(filter.get("owners/unrelated/local.c"), ConfigValue.ENABLED)
-        self.assertIsNone(filter.get("owners/disabled/local.c"))
+        self.assertEqual(filter.modeled_inclusion("owners/module/local.c"), ConfigValue.MODULE)
+        self.assertEqual(filter.modeled_inclusion("owners/builtin/local.c"), ConfigValue.ENABLED)
+        self.assertEqual(filter.modeled_inclusion("owners/unrelated/local.c"), ConfigValue.ENABLED)
+        self.assertIsNone(filter.modeled_inclusion("owners/disabled/local.c"))
         return filter
 
     def test_cross_directory_lookup_merges_modes_and_direct_source_paths(self) -> None:
         filter = self.make_cross_directory_filter()
 
-        self.assertEqual(filter.get("shared/common.c"), ConfigValue.ENABLED)
-        self.assertEqual(filter.get("shared/common.S"), ConfigValue.ENABLED)
-        self.assertEqual(filter.get("shared/direct.c"), ConfigValue.ENABLED)
-        self.assertEqual(filter.get("shared/image.lds.S"), ConfigValue.ENABLED)
-        self.assertIsNone(filter.get("shared/disabled.c"))
+        self.assertEqual(filter.modeled_inclusion("shared/common.c"), ConfigValue.ENABLED)
+        self.assertEqual(filter.modeled_inclusion("shared/common.S"), ConfigValue.ENABLED)
+        self.assertEqual(filter.modeled_inclusion("shared/direct.c"), ConfigValue.ENABLED)
+        self.assertEqual(filter.modeled_inclusion("shared/image.lds.S"), ConfigValue.ENABLED)
+        self.assertIsNone(filter.modeled_inclusion("shared/disabled.c"))
 
     def test_cross_directory_miss_does_not_query_unrelated_cached_rules(self) -> None:
         filter = self.make_cross_directory_filter()
@@ -1557,7 +1773,7 @@ class ConfigFilterTests(unittest.TestCase):
         with patch.object(
             unrelated, "get", side_effect=AssertionError("unrelated rule lookup")
         ):
-            self.assertIsNone(filter.get("shared/missing.c"))
+            self.assertIsNone(filter.modeled_inclusion("shared/missing.c"))
 
     def test_new_intermediate_makefile_preserves_cached_fallback(self) -> None:
         files = {
@@ -1575,7 +1791,7 @@ class ConfigFilterTests(unittest.TestCase):
                 },
             }
         )
-        self.assertIsNone(filter.get("drivers/intermediate/child/selected.c"))
+        self.assertIsNone(filter.modeled_inclusion("drivers/intermediate/child/selected.c"))
         child = filter.kbuild_cache["drivers/intermediate/child"]
         self.assertEqual(child.parent.path, "")
 
@@ -1588,7 +1804,7 @@ class ConfigFilterTests(unittest.TestCase):
         # Fallback lookup must nevertheless see every cached owner's rules.
         self.assertIs(filter.kbuild_cache[child.path], child)
         self.assertEqual(
-            filter.get("drivers/intermediate/child/selected.c"), ConfigValue.ENABLED
+            filter.modeled_inclusion("drivers/intermediate/child/selected.c"), ConfigValue.ENABLED
         )
 
     def test_copied_reverse_indices_remain_independent_after_reload(self) -> None:
@@ -1597,12 +1813,12 @@ class ConfigFilterTests(unittest.TestCase):
         copied.update_filter_state(
             make_diff("owners/builtin/Makefile", DiffFileType.DEFAULT), "next"
         )
-        self.assertEqual(copied.get("owners/builtin/local.c"), ConfigValue.ENABLED)
+        self.assertEqual(copied.modeled_inclusion("owners/builtin/local.c"), ConfigValue.ENABLED)
 
-        self.assertEqual(original.get("shared/common.c"), ConfigValue.ENABLED)
-        self.assertEqual(copied.get("shared/common.c"), ConfigValue.MODULE)
-        self.assertIsNone(copied.get("shared/direct.c"))
-        self.assertEqual(original.get("shared/direct.c"), ConfigValue.ENABLED)
+        self.assertEqual(original.modeled_inclusion("shared/common.c"), ConfigValue.ENABLED)
+        self.assertEqual(copied.modeled_inclusion("shared/common.c"), ConfigValue.MODULE)
+        self.assertIsNone(copied.modeled_inclusion("shared/direct.c"))
+        self.assertEqual(original.modeled_inclusion("shared/direct.c"), ConfigValue.ENABLED)
 
         # Copy again after removal/reinsertion changed cache insertion order.
         reloaded_copy = ConfigFilter.copy(copied)
@@ -1613,9 +1829,9 @@ class ConfigFilterTests(unittest.TestCase):
         reloaded_copy.update_filter_state(
             make_diff("owners/module/Makefile", DiffFileType.DEFAULT), "next"
         )
-        self.assertIsNone(reloaded_copy.get("shared/common.c"))
-        self.assertEqual(copied.get("shared/common.c"), ConfigValue.MODULE)
-        self.assertEqual(original.get("shared/common.c"), ConfigValue.ENABLED)
+        self.assertIsNone(reloaded_copy.modeled_inclusion("shared/common.c"))
+        self.assertEqual(copied.modeled_inclusion("shared/common.c"), ConfigValue.MODULE)
+        self.assertEqual(original.modeled_inclusion("shared/common.c"), ConfigValue.ENABLED)
 
     def test_architecture_fragment_update_reindexes_cross_directory_rules(self) -> None:
         files = {
@@ -1641,14 +1857,14 @@ class ConfigFilterTests(unittest.TestCase):
             KernelConfig("CONFIG_ARM64=y"),
             "base",
         )
-        self.assertTrue(filter.file_included("virt/kvm/before.c"))
+        self.assertTrue(filter.modeled_inclusion("virt/kvm/before.c"))
 
         filter.update_filter_state(
             make_diff("virt/kvm/objects.mk", DiffFileType.DEFAULT), "next"
         )
 
-        self.assertFalse(filter.file_included("virt/kvm/before.c"))
-        self.assertTrue(filter.file_included("virt/kvm/after.c"))
+        self.assertFalse(filter.modeled_inclusion("virt/kvm/before.c"))
+        self.assertTrue(filter.modeled_inclusion("virt/kvm/after.c"))
 
     def test_architecture_makefile_invalidates_root_and_architecture(self) -> None:
         files = {
@@ -1671,15 +1887,15 @@ class ConfigFilterTests(unittest.TestCase):
             KernelConfig("CONFIG_ARM64=y"),
             "base",
         )
-        self.assertTrue(filter.file_included("arch/arm64/before/selected.c"))
-        self.assertFalse(filter.file_included("arch/arm64/after/selected.c"))
+        self.assertTrue(filter.modeled_inclusion("arch/arm64/before/selected.c"))
+        self.assertFalse(filter.modeled_inclusion("arch/arm64/after/selected.c"))
 
         filter.update_filter_state(
             make_diff("arch/arm64/Makefile", DiffFileType.DEFAULT), "next"
         )
 
-        self.assertFalse(filter.file_included("arch/arm64/before/selected.c"))
-        self.assertTrue(filter.file_included("arch/arm64/after/selected.c"))
+        self.assertFalse(filter.modeled_inclusion("arch/arm64/before/selected.c"))
+        self.assertTrue(filter.modeled_inclusion("arch/arm64/after/selected.c"))
 
     def test_source_change_invalidates_transitive_include_results_only(self) -> None:
         files = {
@@ -1704,9 +1920,9 @@ class ConfigFilterTests(unittest.TestCase):
             "base",
             index,
         )
-        self.assertTrue(filter.file_included("drivers/before_leaf.h"))
-        self.assertFalse(filter.file_included("drivers/after_leaf.h"))
-        self.assertTrue(filter.file_included("drivers/unchanged.h"))
+        self.assertTrue(filter.modeled_inclusion("drivers/before_leaf.h"))
+        self.assertFalse(filter.modeled_inclusion("drivers/after_leaf.h"))
+        self.assertTrue(filter.modeled_inclusion("drivers/unchanged.h"))
         unrelated_key = ("drivers/unrelated.c", ConfigValue.ENABLED)
         unchanged = filter._active_includes_cache[unrelated_key]
 
@@ -1718,8 +1934,8 @@ class ConfigFilterTests(unittest.TestCase):
         self.assertNotIn("drivers/after_leaf.h", filter._include_value_cache)
         self.assertIn("drivers/unchanged.h", filter._include_value_cache)
         self.assertIs(filter._active_includes_cache[unrelated_key], unchanged)
-        self.assertFalse(filter.file_included("drivers/before_leaf.h"))
-        self.assertTrue(filter.file_included("drivers/after_leaf.h"))
+        self.assertFalse(filter.modeled_inclusion("drivers/before_leaf.h"))
+        self.assertTrue(filter.modeled_inclusion("drivers/after_leaf.h"))
 
     def test_source_rename_invalidates_both_active_include_modes_only(self) -> None:
         repo = MemoryGitRepo(

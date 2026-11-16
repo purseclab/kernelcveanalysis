@@ -27,6 +27,9 @@ from kpatch.git import CommitParent, GitCommit, GitRepo, StructuredCommits
 
 
 class MemoryRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self) -> None:
         pass
 
@@ -64,6 +67,15 @@ def reference_history_diff(text: str) -> Diff:
 
 
 class HistoryParserTests(unittest.TestCase):
+    def test_raw_directives_survive_when_native_hint_scan_skips_markers(self) -> None:
+        for marker in ('#', '%:', '??='):
+            with self.subTest(marker=marker):
+                lines = [f'-{marker}ifdef CONFIG_OLD', f'+{marker}ifdef CONFIG_NEW', f' {marker}endif']
+                patch_text = ('diff --git a/api.h b/api.h\n--- a/api.h\n+++ b/api.h\n'
+                              '@@ -1,2 +1,2 @@\n' + '\n'.join(lines) + '\n')
+                diff = parse_history_diff(patch_text)
+                self.assertEqual(diff.files[0].chunks[0].lines, lines)
+
     def test_projection_matches_full_parser_for_structural_and_binary_changes(self) -> None:
         ordinary = (
             "diff --git a/one.c b/one.c\n"
@@ -394,7 +406,7 @@ class ConfigHistoryStoreTests(unittest.TestCase):
     def test_preparation_failure_and_success_close_stores(self) -> None:
         commit = make_commit("c", "outside")
         context = FilterContext(MemoryRepo(), StructuredCommits.from_commits([commit]))
-        config_filter = ConfigFilter(KernelConfig(""))
+        config_filter = ConfigFilter(KernelConfig(""), collect_observations=True)
         paths: list[Path] = []
 
         def create_store() -> ConfigHistoryStore:
@@ -419,7 +431,7 @@ class ConfigHistoryStoreTests(unittest.TestCase):
     def test_individual_filter_calls_reuse_store_until_context_changes(self) -> None:
         commit = make_commit("c", "outside")
         context = FilterContext(MemoryRepo(), StructuredCommits.from_commits([commit]))
-        config_filter = ConfigFilter(KernelConfig(""))
+        config_filter = ConfigFilter(KernelConfig(""), collect_observations=True)
         self.assertIsNotNone(
             config_filter.filter_mutable_commit(FilteredCommit.from_commit(commit), context)
         )

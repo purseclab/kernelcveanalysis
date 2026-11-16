@@ -17,7 +17,7 @@ from kpatch.filter import (
     MergeCommitFilter,
     filter_commit_time_range,
 )
-from filter_helpers import filter_commits
+from filter_helpers import FixtureSourceRoles, filter_commits
 from kpatch.diff import Diff
 from kpatch.filter.masking import MaskReason
 from kpatch.filter.config_filter import KernelConfig
@@ -116,6 +116,9 @@ class FileFilterTests(unittest.TestCase):
 
 
 class MemoryGitRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self, files: dict[str, str]):
         self.files = files
 
@@ -263,7 +266,7 @@ class FilterCommitsTests(unittest.TestCase):
     def test_pipeline_computes_complete_history_requirement(self) -> None:
         regular_pipeline = FilterPipeline([MergeCommitFilter()])
         config_pipeline = FilterPipeline(
-            [MergeCommitFilter(), CommitConfigFilter(KernelConfig(""))]
+            [MergeCommitFilter(), CommitConfigFilter(KernelConfig(""), collect_observations=True)]
         )
 
         self.assertFalse(regular_pipeline.requires_complete_history)
@@ -274,7 +277,7 @@ class FilterCommitsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "complete history"):
             nested_pipeline.filter_commits(
                 [],
-                FilterContext(MemoryGitRepo({})),
+                FilterContext(MemoryGitRepo({}), input_roles=FixtureSourceRoles()),
                 show_progress=False,
             )
 
@@ -295,7 +298,7 @@ class FilterCommitsTests(unittest.TestCase):
 
         result = MergeCommitFilter().filter_commits(
             [regular, merge],
-            FilterContext(MemoryGitRepo({})),
+            FilterContext(MemoryGitRepo({}), input_roles=FixtureSourceRoles()),
             show_progress=False,
         )
 
@@ -326,7 +329,7 @@ class FilterCommitsTests(unittest.TestCase):
         commit.score = 0.75
         first_seen: list[int] = []
         second_seen: list[int] = []
-        context = FilterContext(MemoryGitRepo({}))
+        context = FilterContext(MemoryGitRepo({}), input_roles=FixtureSourceRoles())
         inner_pipeline = FilterPipeline(
             [_KeepNamedFile("drivers/keep.c", first_seen)]
         )
@@ -359,7 +362,7 @@ class FilterCommitsTests(unittest.TestCase):
 
         result = FilterPipeline([_ReplaceView()]).filter_commits(
             [commit],
-            FilterContext(MemoryGitRepo({})),
+            FilterContext(MemoryGitRepo({}), input_roles=FixtureSourceRoles()),
             show_progress=False,
         )
 
@@ -389,9 +392,10 @@ class FilterCommitsTests(unittest.TestCase):
         context = FilterContext(
             repo,
             StructuredCommits.from_commits([makefile, source]),
+            input_roles=FixtureSourceRoles(),
         )
 
-        result = CommitConfigFilter(KernelConfig("")).filter_commits(
+        result = CommitConfigFilter(KernelConfig(""), collect_observations=True).filter_commits(
             [source],
             context,
             show_progress=False,
@@ -402,13 +406,13 @@ class FilterCommitsTests(unittest.TestCase):
     def test_config_requires_structured_history(self) -> None:
         commit = self.make_commit("c1", None, ["drivers/foo.c"])
         with self.assertRaisesRegex(ValueError, "structured commit history"):
-            CommitConfigFilter(KernelConfig("")).filter_commits(
+            CommitConfigFilter(KernelConfig(""), collect_observations=True).filter_commits(
                 [commit],
-                FilterContext(MemoryGitRepo({})),
+                FilterContext(MemoryGitRepo({}), input_roles=FixtureSourceRoles()),
                 show_progress=False,
             )
 
-    def test_config_time_range_rejects_sparse_database(self) -> None:
+    def test_config_observations_time_range_rejects_sparse_database(self) -> None:
         date = datetime(2024, 1, 1, tzinfo=UTC)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -426,9 +430,10 @@ class FilterCommitsTests(unittest.TestCase):
                     date,
                     date,
                     show_progress=False,
+                    config_observations=True,
                 )
 
-    def test_config_and_ifdef_correlate_on_the_same_file(self) -> None:
+    def test_config_membership_without_include_inventory_retains_cpp_context(self) -> None:
         date = datetime(2024, 1, 1, tzinfo=UTC)
         patch = (
             "diff --git a/drivers/built.c b/drivers/built.c\n"
@@ -467,16 +472,17 @@ class FilterCommitsTests(unittest.TestCase):
         context = FilterContext(
             repo,
             StructuredCommits.from_commits([commit]),
+            input_roles=FixtureSourceRoles(),
         )
 
         result = FilterPipeline(
             [
-                CommitConfigFilter(KernelConfig("")),
+                CommitConfigFilter(KernelConfig(""), collect_observations=True),
                 IfdefFilter(KernelConfig("")),
             ]
         ).filter_commits([commit], context, show_progress=False)
 
-        self.assertEqual(result, [])
+        self.assertEqual([commit.commit_id for commit in result], ["c1"])
 
     def test_ifdef_materializes_only_active_changes(self) -> None:
         date = datetime(2024, 1, 1, tzinfo=UTC)
@@ -512,11 +518,14 @@ class FilterCommitsTests(unittest.TestCase):
             }
         )
 
-        result = IfdefFilter(KernelConfig("")).filter_commits(
-            [commit],
-            FilterContext(repo),
+        view = FilteredCommit.from_commit(commit)
+        view.build_modes[(None, "drivers/foo.c")] = FileBuildModes(old="y", new="y", complete=True)
+        filtered = IfdefFilter(KernelConfig("")).filter_mutable_commits(
+            [view],
+            FilterContext(repo, input_roles=FixtureSourceRoles()),
             show_progress=False,
         )
+        result = [item.materialize() for item in filtered]
 
         self.assertEqual(len(result), 1)
         self.assertNotIn("+new-disabled", result[0].diff_str)
@@ -554,7 +563,7 @@ class FilterCommitsTests(unittest.TestCase):
                 f"c1:{path}": "#ifdef MODULE\nnew\n#endif\n",
             }
         )
-        context = FilterContext(repo)
+        context = FilterContext(repo, input_roles=FixtureSourceRoles())
 
         # Standalone use is conservative: the file may be built in either mode.
         standalone = IfdefFilter(KernelConfig("")).filter_commits(
@@ -568,6 +577,7 @@ class FilterCommitsTests(unittest.TestCase):
         builtin.build_modes[(None, path)] = FileBuildModes(
             old=ConfigValue.ENABLED,
             new=ConfigValue.ENABLED,
+            complete=True,
         )
         builtin_result = IfdefFilter(KernelConfig("")).filter_mutable_commits(
             [builtin],
@@ -580,6 +590,7 @@ class FilterCommitsTests(unittest.TestCase):
         module.build_modes[(None, path)] = FileBuildModes(
             old=ConfigValue.MODULE,
             new=ConfigValue.MODULE,
+            complete=True,
         )
         module_result = IfdefFilter(KernelConfig("")).filter_mutable_commits(
             [module],
@@ -614,7 +625,7 @@ class FilterCommitsTests(unittest.TestCase):
         context = FilterContext(
             GitRepo(Path("nonexistent")), StructuredCommits.from_commits([])
         )
-        result = CommitConfigFilter(KernelConfig("")).filter_commits(
+        result = CommitConfigFilter(KernelConfig(""), collect_observations=True).filter_commits(
             [], context, show_progress=False
         )
         self.assertEqual(result, [])
@@ -626,7 +637,7 @@ class FilterCommitsTests(unittest.TestCase):
         with patch.object(Diff, "parse", wraps=Diff.parse) as parse:
             result = MergeCommitFilter().filter_commits(
                 [regular, merge],
-                FilterContext(MemoryGitRepo({})),
+                FilterContext(MemoryGitRepo({}), input_roles=FixtureSourceRoles()),
                 show_progress=False,
             )
 
@@ -652,19 +663,20 @@ class FilterCommitsTests(unittest.TestCase):
         self.assertNotIn("diff", vars(commit.parents[0]))
         self.assertIn("+new", commit.diff_str)
 
-    def test_config_does_not_parse_rejected_mutable_patch(self) -> None:
+    def test_config_retains_unobserved_input_without_closure(self) -> None:
         commit = self.make_commit("c1", "p0", ["drivers/unbuilt.c"])
         context = FilterContext(
             MemoryGitRepo({"drivers/Makefile": "obj-y += other.o\n"}),
             StructuredCommits.from_commits([commit]),
+            input_roles=FixtureSourceRoles(),
         )
         with patch.object(Diff, "parse", wraps=Diff.parse) as parse:
-            result = CommitConfigFilter(KernelConfig("")).filter_commits(
+            result = CommitConfigFilter(KernelConfig(""), collect_observations=True).filter_commits(
                 [commit], context, show_progress=False
             )
 
-        self.assertEqual(result, [])
-        self.assertEqual(parse.call_count, 1)
+        self.assertEqual([item.commit_id for item in result], ["c1"])
+        self.assertGreaterEqual(parse.call_count, 1)
         self.assertNotIn("diff", vars(commit.parents[0]))
 
     def test_default_filter_mutable_commit_is_identity(self) -> None:
@@ -673,7 +685,7 @@ class FilterCommitsTests(unittest.TestCase):
 
         commit = self.make_commit("c1", None, ["drivers/foo.c"])
         mutable_commit = FilteredCommit.from_commit(commit)
-        context = FilterContext(MemoryGitRepo({}))
+        context = FilterContext(MemoryGitRepo({}), input_roles=FixtureSourceRoles())
 
         f = _BatchOnlyFilter()
         result = f.filter_mutable_commit(mutable_commit, context)

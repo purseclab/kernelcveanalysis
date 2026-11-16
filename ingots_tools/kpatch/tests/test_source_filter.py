@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 import subprocess
 import tempfile
@@ -9,64 +7,13 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from kpatch.diff import Diff
+from kpatch.filter.git_output import GitGrepRow
+import kpatch.filter.source_filter as source_filter
 from kpatch.filter.source_filter import (
     SourceIncludeIndex,
     _GLOBAL_TARGET_CACHE_SIZE,
-    _iter_git_output,
 )
 from kpatch.git import GitRepo
-
-
-@dataclass
-class GitOutputProcess:
-    stdout: BytesIO
-    exit_code: int = 0
-    running: bool = True
-    killed: bool = False
-
-    def wait(self) -> int:
-        self.running = False
-        return self.exit_code
-
-    def poll(self) -> int | None:
-        return None if self.running else self.exit_code
-
-    def kill(self) -> None:
-        self.killed = True
-
-
-class GitOutputTests(unittest.TestCase):
-    def test_records_cross_chunk_boundaries_and_keep_unterminated_tail(self) -> None:
-        records = [b"a" * 65535, b"b" * 65537, b"tail"]
-        process = GitOutputProcess(BytesIO(b"\0".join(records)))
-        with patch("kpatch.filter.source_filter.subprocess.Popen", return_value=process):
-            result = list(_iter_git_output(GitRepo(Path("unused")), [], b"\0", (0,)))
-
-        self.assertEqual(result, records)
-        self.assertTrue(process.stdout.closed)
-        self.assertFalse(process.running)
-        self.assertFalse(process.killed)
-
-    def test_closing_iterator_terminates_and_reaps_the_process(self) -> None:
-        process = GitOutputProcess(BytesIO(b"first\nsecond\n"))
-        with patch("kpatch.filter.source_filter.subprocess.Popen", return_value=process):
-            output = _iter_git_output(GitRepo(Path("unused")), [], b"\n", (0,))
-            self.assertEqual(next(output), b"first")
-            output.close()
-
-        self.assertTrue(process.stdout.closed)
-        self.assertTrue(process.killed)
-        self.assertFalse(process.running)
-
-    def test_failed_command_is_not_mistaken_for_empty_output(self) -> None:
-        process = GitOutputProcess(BytesIO(), exit_code=128)
-        with patch("kpatch.filter.source_filter.subprocess.Popen", return_value=process):
-            with self.assertRaises(subprocess.CalledProcessError) as raised:
-                list(_iter_git_output(GitRepo(Path("unused")), [], b"\n", (0, 1)))
-
-        self.assertEqual(raised.exception.returncode, 128)
-        self.assertTrue(process.stdout.closed)
-        self.assertFalse(process.running)
 
 
 class SourceIncludeIndexTests(unittest.TestCase):
@@ -104,14 +51,13 @@ class SourceIncludeIndexTests(unittest.TestCase):
             "arm64",
             ("drivers/local.h", "drivers/impl.c", "drivers/entry.S", "drivers/data.inc"),
         )
-        for requested in ("../local.h", "../impl.c", "../entry.S"):
+        for requested in ("../local.h", "../impl.c", "../entry.S", "../data.inc"):
             with self.subTest(requested=requested):
                 self.assertEqual(
                     index.target_from_line("drivers/sub/wrapper.c", f'  # include "{requested}"'),
                     f"drivers/{Path(requested).name}",
                 )
         for line in (
-            '#include "../data.inc"',
             '#include "$(header).h"',
             "#include HEADER",
             "// #include <local.h>",
@@ -258,13 +204,15 @@ class SourceIncludeSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "includes.json"
             index.write_snapshot(path)
-            with patch("kpatch.filter.source_filter._iter_git_output", side_effect=AssertionError("Git must not run")):
+            with patch("kpatch.filter.source_filter.iter_git_records", side_effect=AssertionError("Git must not run")):
                 restored = SourceIncludeIndex.read_snapshot(path)
 
         self.assertEqual(restored.srcarch, index.srcarch)
         self.assertEqual(restored._tracked_paths, index._tracked_paths)
-        self.assertNotIn("untracked.inc", restored._tracked_paths)
-        self.assertNotIn("alias.inc", restored._tracked_paths)
+        self.assertIn("untracked.inc", restored._tracked_paths)
+        self.assertIn("alias.inc", restored._tracked_paths)
+        self.assertEqual(restored.uncertain_sources, index.uncertain_sources)
+        self.assertEqual(restored.normalization_sources, index.normalization_sources)
         self.assertEqual(restored._targets, index._targets)
         for target in index._tracked_paths:
             self.assertEqual(restored.includers(target), index.includers(target))
@@ -322,8 +270,8 @@ class SourceIncludeSnapshotTests(unittest.TestCase):
 
     def test_invalid_snapshot_ids_and_schema_are_rejected(self) -> None:
         valid = (
-            '{"version":1,"srcarch":"arm64","paths":["include/shared.h","untracked.c"],'
-            '"tracked_path_count":1,"adjacency":[[],[0]]}'
+            '{"version":3,"srcarch":"arm64","paths":["include/shared.h","untracked.c"],'
+            '"tracked_path_count":1,"adjacency":[[],[0]],"uncertain_sources":[],"opaque_sources":[],"nonfile_sources":[],"normalization_sources":[]}'
         )
         invalid = [
             valid.replace("[[],[0]]", "[[],[-1]]"),
@@ -337,8 +285,11 @@ class SourceIncludeSnapshotTests(unittest.TestCase):
             valid.replace('"tracked_path_count":1', '"tracked_path_count":3'),
             valid.replace('"tracked_path_count":1', '"tracked_path_count":true'),
             valid.replace('"untracked.c"', '"include/shared.h"'),
-            valid.replace('"include/shared.h"', '"include/shared.inc"'),
-            valid.replace('"version":1', '"version":2'),
+            valid.replace('"version":3', '"version":1'),
+            valid.replace('"uncertain_sources":[]', '"uncertain_sources":[2]'),
+            valid.replace('"opaque_sources":[]', '"opaque_sources":[0]'),
+            valid.replace('"nonfile_sources":[]', '"nonfile_sources":[0]'),
+            valid.replace('"normalization_sources":[]', '"normalization_sources":[0]'),
             valid[:-1] + ',"unexpected":true}',
             "not JSON",
         ]
@@ -379,6 +330,30 @@ class RepositorySourceIncludeIndexTests(unittest.TestCase):
         )
         return self.git("rev-parse", "HEAD").decode().strip()
 
+    def test_default_prefers_pcre_and_unsupported_pcre_falls_back_to_ere(self) -> None:
+        commit = self.commit({'unit.c': '#include "api.h"\n', 'api.h': 'int api;\n'})
+        original = source_filter.iter_git_grep_rows
+        for code in (128, 129):
+            seen: list[str] = []
+            def unavailable(repo: GitRepo, args: list[str]) -> Generator[GitGrepRow, None, None]:
+                matcher = '-P' if '-P' in args else '-E'
+                seen.append(matcher)
+                if matcher == '-P':
+                    raise subprocess.CalledProcessError(code, args)
+                yield from original(repo, args)
+            with self.subTest(code=code), patch.object(source_filter, 'iter_git_grep_rows', unavailable):
+                index = SourceIncludeIndex.from_repository(self.repo, commit, '')
+                self.assertEqual(index.includers('api.h'), ('unit.c',))
+                self.assertEqual(seen, ['-P', '-E'])
+
+    def test_other_native_errors_are_not_reinterpreted_as_ere(self) -> None:
+        commit = self.commit({'unit.c': '#include "api.h"\n', 'api.h': 'int api;\n'})
+        with patch.object(source_filter, 'iter_git_grep_rows', side_effect=subprocess.CalledProcessError(2, ['git'])) as rows:
+            with self.assertRaises(subprocess.CalledProcessError) as failure:
+                SourceIncludeIndex.from_repository(self.repo, commit, '')
+        self.assertEqual(failure.exception.returncode, 2)
+        self.assertEqual(rows.call_count, 1)
+
     def test_repository_snapshot_includes_extra_paths_and_source_assembly(self) -> None:
         commit = self.commit({
             "drivers/wrapper.c": (
@@ -399,10 +374,10 @@ class RepositorySourceIncludeIndexTests(unittest.TestCase):
 
         self.assertEqual(
             index.includers("drivers/local.h"),
-            ("drivers/entry.S", "drivers/wrapper.c"),
+            ("drivers/entry.S", "drivers/wrapper.c", "drivers/ignored.inc"),
         )
         self.assertEqual(index.includers("drivers/removed.c"), ("drivers/wrapper.c",))
-        self.assertEqual(index.includers("drivers/ignored.inc"), ())
+        self.assertEqual(index.includers("drivers/ignored.inc"), ("drivers/wrapper.c",))
         self.assertEqual(
             index.includers("include/linux/shared.h"),
             ("drivers/wrapper.c", "drivers/local.h"),
@@ -433,3 +408,4 @@ class RepositorySourceIncludeIndexTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+from collections.abc import Generator

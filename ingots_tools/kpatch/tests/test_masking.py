@@ -5,8 +5,9 @@ import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 
-from kpatch.filter import FilteredCommit, LineRange, MaskReason, SourceSide, SourceVersions
-from kpatch.git import CommitParent, GitCommit
+from kpatch.filter import FilterContext, FilteredCommit, IfdefFilter, LineRange, MaskReason, SourceSide, SourceVersions
+from kpatch.filter.config_filter import KernelConfig
+from kpatch.git import CommitParent, GitCommit, GitRepo
 
 
 class MaskingTests(unittest.TestCase):
@@ -73,6 +74,14 @@ class MaskingTests(unittest.TestCase):
         self.assertTrue(view.remaining_diff().files[0].mode_changed)
         view.mask_file(file, MaskReason.FILE_SELECTION)
         self.assertEqual(view.remaining_diff().files, [])
+
+    def test_ifdef_retains_locations_evaluated_by_the_compiler(self) -> None:
+        old = '#if 0\nint unused = 1;\n#endif\nint value(void) { return __builtin_LINE(); }\n'
+        new = old.replace('int unused = 1;', 'int unused =\n2;')
+        view = self.view(old, new)
+        result = IfdefFilter(KernelConfig('')).filter_mutable_commit(view, FilterContext(GitRepo(self.path)))
+        self.assertIs(result, view)
+        self.assertEqual(view.code_masks, ())
 
     def test_code_masks_blank_unchanged_code_without_resurrecting_old_lines(self) -> None:
         old = "#if 0\nint old_name = 1;\nint unchanged = old_name;\n#endif\nint active = 1;\n"

@@ -16,6 +16,9 @@ from kpatch.git import CommitParent, GitCommit, GitRepo
 
 
 class MemoryGitRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self, files: dict[str, str]):
         self.files = files
 
@@ -235,6 +238,67 @@ class IfdefFilterUnitTests(unittest.TestCase):
         self.assertIn(2, active)
         self.assertIn(4, active)
 
+    def test_directive_spellings_keep_original_physical_coordinates(self) -> None:
+        for opener, closer in (
+            ("/**/#if CONFIG_DISABLED", "#endif"),
+            ("#/**/if CONFIG_DISABLED", "#endif"),
+            ("%:if CONFIG_DISABLED", "%:endif"),
+            ("#i\\\nf CONFIG_DISABLED", "#en\\\ndif"),
+            ("/* prefix\n*/#if CONFIG_DISABLED", "#endif"),
+        ):
+            with self.subTest(opener=opener):
+                source = opener + "\nint hidden;\n" + closer + "\nint visible;\n"
+                lines = source.splitlines()
+                active = get_active_lines(source, self.config)
+                self.assertNotIn(lines.index("int hidden;") + 1, active)
+                self.assertIn(lines.index("int visible;") + 1, active)
+                self.assertTrue(set(range(1, len(opener.splitlines()) + 1)) <= active)
+
+    def test_local_override_invalidates_captured_configuration(self) -> None:
+        for definition, condition in (
+            ("#undef CONFIG_DISABLED\n#define CONFIG_DISABLED 1", "CONFIG_DISABLED"),
+            ("/**/#define CONFIG_DISABLED 1", "CONFIG_DISABLED"),
+            ("#def\\\nine CONFIG_DISABLED 1", "CONFIG_DISABLED"),
+            ("%:define CONFIG_DISABLED 1", "CONFIG_DISABLED"),
+            ("#define MODULE 1", "defined(MODULE)"),
+            ("#define IS_ENABLED(x) 1", "IS_ENABLED(CONFIG_DISABLED)"),
+            ("#undef __KERNEL__", "!defined(__KERNEL__)"),
+            ("\ufeff#define CONFIG_DISABLED 1", "CONFIG_DISABLED"),
+        ):
+            with self.subTest(definition=definition):
+                source = definition + "\n#if " + condition + "\nint live;\n#endif\n"
+                self.assertEqual(get_active_lines(source, self.config), set(range(1, len(source.splitlines()) + 1)))
+
+    def test_only_possibly_active_overrides_invalidate_configuration(self) -> None:
+        source = ("#if 0\n#define CONFIG_DISABLED 1\n#endif\n"
+                  "#if CONFIG_DISABLED\nint hidden;\n#endif\nint visible;\n")
+        active = get_active_lines(source, self.config)
+        self.assertNotIn(2, active)
+        self.assertNotIn(5, active)
+        self.assertIn(7, active)
+        source = source.replace("#if 0", "#if UNKNOWN_PLATFORM")
+        self.assertEqual(get_active_lines(source, self.config), set(range(1, 8)))
+
+    def test_unsupported_layout_and_conditional_structure_retain_lines(self) -> None:
+        for source in (
+            "#if CONFIG_DISABLED /* starts\nends */\nint possible;\n#endif\n",
+            "#if CONFIG_DISABLED \\ \n || 1\nint possible;\n#endif\n",
+            "\0#if CONFIG_DISABLED\nint possible;\n#endif\n",
+            "#if CONFIG_DISABLED\rint possible;\r#endif\n",
+            "#if CONFIG_DISABLED\nint possible;\n",
+            "#if 0\n#else\n#elif 1\nint possible;\n#endif\n",
+            "#if 0\n#elifdef CONFIG_ENABLED\nint possible;\n#endif\n",
+            "#if 0\nint possible;\n#endif\n\\\n",
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(get_active_lines(source, self.config), set(range(1, len(source.splitlines()) + 1)))
+
+    def test_directive_text_inside_literals_and_comments_does_not_override(self) -> None:
+        source = ('const char *text = "#define CONFIG_DISABLED 1";\n'
+                  '/* #undef CONFIG_ENABLED */\n#if CONFIG_DISABLED\nint hidden;\n#endif\n')
+        self.assertNotIn(4, get_active_lines(source, self.config))
+
+
 
 class DiffTouchesActiveCodeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -386,7 +450,7 @@ class DiffTouchesActiveCodeTests(unittest.TestCase):
             )
         )
 
-    def test_filter_commits_excludes_disabled_ifdef_commit(self) -> None:
+    def test_filter_commits_projects_known_configured_source_mode(self) -> None:
         makefile = "obj-y += foo.o\n"
         old_foo = (
             "int a = 1;\n"
@@ -427,10 +491,10 @@ class DiffTouchesActiveCodeTests(unittest.TestCase):
             "",
         )
 
-        # c1 only modifies dead code inside #ifdef CONFIG_DISABLED
-        # It should be filtered out!
+        # A modeled built-in object supplies its CPP mode without requiring
+        # a complete inventory of every unrelated kernel input.
         res = filter_commits(repo, self.config, [c0, c1], show_progress=False)
-        self.assertEqual([c.commit_id for c in res], [])
+        self.assertEqual(res, [])
 
         # Now let commit c2 modify line 1 ("int a = 1;") which is active
         patch_active = (
@@ -573,7 +637,8 @@ class DiffTouchesActiveCodeTests(unittest.TestCase):
             show_progress=False,
         )
 
-        self.assertEqual(result, [])
+        # Unlisted destinations are unknown build inputs, not proven absent.
+        self.assertEqual(result, [copy])
 
 
 if __name__ == "__main__":

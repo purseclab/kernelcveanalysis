@@ -12,8 +12,8 @@ Since kernel requires patch before issuing cve.
 
 ## Future filtering work
 
-See [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md) for sample estimates,
-pruning criteria, and the proposed AST comparison approach.
+See [PRUNING_NOTES.md](PRUNING_NOTES.md) for a summary of the pruning
+work done, measured results and future work.
 
 Experimental unused-definition filters are available through
 `filter config --source-pruning`. Consistent renames and prototype parameter
@@ -24,7 +24,7 @@ Target hardware inventory and general policy
 reachability remain future work. A narrow,
 opt-in compiler-backed policy stage is available through `kpatch policy` and
 `filter config --policy-profile ...`; see the implementation notes and commands
-in [FUTURE_PRUNING_WORK.md](FUTURE_PRUNING_WORK.md#compiler-backed-policy-prototype).
+in [PRUNING_NOTES.md](PRUNING_NOTES.md#compiler-backed-stages).
 
 The policy profile can pin a raw installed seccomp filter using
 `seccomp.filter_file` and `filter_sha256`. The ARM64 prototype resolves native
@@ -33,7 +33,7 @@ Caller checks distinguish compatible indirect calls and explicit assembly
 transfers from unrelated header callbacks and ordinary ARM64 instructions.
 Service-inclusive findings remain candidates. BTF/debug metadata differences
 are accepted and recorded; they no longer veto runtime policy pruning. See the
-[capture and review results](FUTURE_PRUNING_WORK.md#exact-seccomp-capture-and-entry-proof-review--resumed-2026-11-07).
+[capture and review results](PRUNING_NOTES.md#compiler-backed-stages).
 
 Policy exclusion preserves functional registration effects emitted through
 inline helpers, including callbacks executed at boot. It checks their call
@@ -51,7 +51,7 @@ search/read failures still retain the change. Missing macro bindings can change
 runtime behavior, so these assumptions are recorded as lossy. Cosmetic
 BTF/debug names are outside the chosen relevance scope; exports, runtime
 registrations and known macro effects remain relevant. See
-[the source-pruning progress notes](FUTURE_PRUNING_WORK.md#source-pruning-correctness-and-binding-work).
+[the source-pruning progress notes](PRUNING_NOTES.md#work-done).
 
 - Detect hardware and driver features present on the target device, rather than
   relying only on enabled kernel configuration symbols. A configured driver can
@@ -188,14 +188,14 @@ protected with `--build-inputs inputs.json`:
 These entries add positive membership and include consumers. Missing entries
 never prove absence. Actual target inventories can differ from the base config;
 keep the chosen config and positive-input manifest with the results. See the
-[build-input and live-device findings](FUTURE_PRUNING_WORK.md#configuration-observations-and-live-module-closure--2026-11-07).
+[build-input and live-device findings](PRUNING_NOTES.md#work-done).
 
 ### Experimental source pruning
 
 The separate `--preprocess-build-context FILE --preprocess-report JSONL` options
 add compiler-expanded input comparison after source filtering, without needing
 a policy profile. `--preprocess-cache FILE` reuses dependency-checked results.
-See [TARGET_PREPROCESSING.md](TARGET_PREPROCESSING.md) for inputs, scope and
+See [PRUNING_NOTES.md](PRUNING_NOTES.md#compiler-backed-stages) for inputs, scope and
 examples.
 
 Add `--source-pruning` to `filter config` to run configuration, preprocessor
@@ -219,7 +219,7 @@ without reads or masks, bounding extra work on tree-wide edits.
 line-number differences and records their risks. Constant folding is off by
 default because its measured additional yield is small and its cost is material;
 see the measured coverage and cost in
-[the constant-branch notes](FUTURE_PRUNING_WORK.md#numeric-preprocessor-branches-and-source-file-modes--2026-11-07).
+[the constant-branch notes](PRUNING_NOTES.md#measured-results-honest-summary).
 
 Source filters require regular Git file modes on every existing side. When
 patch metadata omits a mode, an exact historical tree lookup must establish it.
@@ -242,7 +242,7 @@ replacements for free expression identifiers. Calls, registration/init/section
 effects, file moves, and statement/include/field/enum reorders remain excluded.
 The decision uses complete masked source views after dead-code pruning, and
 records an `independent_definition_reorder` edit mask. See
-[UNUSED_CODE_AND_REORDER_PRUNING.md](UNUSED_CODE_AND_REORDER_PRUNING.md).
+[PRUNING_NOTES.md](PRUNING_NOTES.md).
 
 All source reorders assume code-address observations are irrelevant. An unchanged
 callee can inspect its return address, and unchanged code can compare helper
@@ -285,7 +285,7 @@ API contract, not strict program equivalence. Included/generated macro overrides
 remain a compiler-analysis limitation. The stage removes a whole commit only
 when all remaining edits qualify; it does not erase individual changed log lines
 from a commit that also changes behavior. See
-[DIAGNOSTIC_STRING_PRUNING.md](DIAGNOSTIC_STRING_PRUNING.md) for the inspection
+[PRUNING_NOTES.md](PRUNING_NOTES.md) for the inspection
 estimate, measured yield, and validation.
 
 Stages preserve an immutable original patch and record typed edit masks or
@@ -293,7 +293,7 @@ code masks. Edit masks retain parent text when reconstructing a source;
 code masks blank proven-irrelevant regions, including unchanged lines.
 Rename comparison uses these complete-source views instead of reintroducing
 discarded edits. Rejected candidates publish no new masks. See
-[FILTER_MASKING.md](FILTER_MASKING.md) for the API and invariants.
+[PRUNING_NOTES.md](PRUNING_NOTES.md#masking-framework) for the API and invariants.
 
 Kbuild and include membership define the selected kernel build model. Unknown
 external build rules remain a scope assumption rather than a universal veto.
@@ -347,14 +347,14 @@ The index is lazy, bounded and updated from revision deltas; ordinary C compiler
 dependencies do not themselves veto pruning. An empty observation is not proof
 that every build or external consumer has been found. For example, arbitrary
 generator scripts and computed build rules still need a complete build-input
-manifest. See [the masking API](FILTER_MASKING.md#raw-input-consumer-veto).
+manifest. See [the masking API](PRUNING_NOTES.md#masking-framework).
 Unresolved inputs currently have a broad retention effect on kernel trees;
 historical pruning measurements made before this veto are not current yields.
 The separate `--unresolved-inputs-lossy --input-role-report PATH` mode can assume
 supported unresolved Make/assembly expressions are irrelevant, after a full
 recognized inventory. Observed raw consumers and scan failures still retain.
 This can remove runtime-relevant changes and has no measured error-rate bound;
-see [source-input assumptions](SOURCE_INPUT_ROLE_ASSUMPTIONS.md).
+see [source-input assumptions](PRUNING_NOTES.md#flags).
 Consumer revision updates stream bounded raw diffs and batch only candidate
 source paths for marker discovery, preserving complete facts across large
 non-consumer changes. Read and protocol failures still retain the candidate.
@@ -437,7 +437,7 @@ Strict decoding and unsupported syntax retain changes. Source reads reuse the
 pipeline's bounded Git blob cache; layout facts have a separate bounded cache.
 Recognized raw assembly and generator consumers veto acceptance even when the
 C preprocessing tokens and locations match.
-See [WHITESPACE_PRUNING.md](WHITESPACE_PRUNING.md) for the checks and limits.
+See [PRUNING_NOTES.md](PRUNING_NOTES.md) for the checks and limits.
 
 The fix applies to subsequent runs. Regenerate existing filtered databases from
 raw commits to apply the corrected pruning decisions.

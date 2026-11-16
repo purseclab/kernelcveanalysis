@@ -24,6 +24,7 @@ from kpatch.filter import (
     WhitespaceFilter,
 )
 from kpatch.filter.base import (
+    FileBuildModes,
     StreamingCommitFilter,
     filter_progress,
     repository_file_reader,
@@ -120,6 +121,9 @@ class FailingFilter(StreamingCommitFilter):
 
 
 class MemoryGitRepo(GitRepo):
+    def read_file_mode(self, commit: str, path: str) -> str:
+        return "100644"
+
     def __init__(self) -> None:
         pass
 
@@ -359,7 +363,7 @@ class PipelineStreamingTests(unittest.TestCase):
 
         commit = make_commit("one")
         context = FilterContext(BuildRepo(), StructuredCommits.from_commits([commit]), [commit])
-        config_filter = ConfigFilter(KernelConfig(""))
+        config_filter = ConfigFilter(KernelConfig(""), collect_observations=True)
         ifdef_filter = IfdefFilter(KernelConfig(""))
         whitespace_filter = WhitespaceFilter()
         pipeline = FilterPipeline(
@@ -429,12 +433,15 @@ class PipelineStreamingTests(unittest.TestCase):
         ifdef_filter = IfdefFilter(KernelConfig(""))
         whitespace_filter = WhitespaceFilter()
         pipeline = FilterPipeline([ifdef_filter, whitespace_filter])
+        view = FilteredCommit(commit, build_modes={
+            (file.old_file, file.file): FileBuildModes('y', 'y', complete=True) for file in commit.diff.files
+        })
         with (
             patch.object(RepositoryFileReader, "read_file", side_effect=OSError("read failed")) as read_file,
             patch.object(RepositoryFileReader, "close", autospec=True) as close_reader,
         ):
-            result = pipeline.filter_commits([commit], self.context, False)
-            self.assertEqual(result, [commit])
+            result = pipeline.filter_mutable_commits([view], self.context, False)
+            self.assertEqual(result, [view])
             self.assertGreater(read_file.call_count, 1)
             self.assertEqual(close_reader.call_count, 1)
         self.assertIsNone(ifdef_filter._read_file)

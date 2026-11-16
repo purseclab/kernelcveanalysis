@@ -54,6 +54,73 @@ class DiagnosticStringTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.assertFalse(self.equivalent(old, old.replace('"old"', '"new"')))
 
+    def test_internal_logger_overrides_block_dependent_calls(self) -> None:
+        cases = [
+            ('__printk_index_emit', 'pr_info("old")'),
+            ('printk_index_wrap', 'pr_info("old")'),
+            ('printk', 'pr_info("old")'),
+            ('dev_printk_index_emit', 'dev_err(dev, "old")'),
+            ('printk_index_subsys_emit', 'dev_err(dev, "old")'),
+            ('_dev_err', 'dev_err_once(dev, "old")'),
+            ('dev_err', 'dev_err_ratelimited(dev, "old")'),
+            ('unlikely', 'pr_info_once("old")'),
+            ('__ONCE_LITE_IF', 'pr_info_once("old")'),
+            ('___ratelimit', 'pr_info_ratelimited("old")'),
+            ('DEFAULT_RATELIMIT_BURST', 'dev_warn_ratelimited(dev, "old")'),
+        ]
+        for name, call in cases:
+            old = f'#define {name}(...) observe(__VA_ARGS__)\nvoid run(void) {{ {call}; }}'
+            with self.subTest(name=name, call=call):
+                self.assertFalse(self.equivalent(old, old.replace('"old"', '"new"')))
+
+    def test_comments_splices_and_digraphs_cannot_hide_helper_overrides(self) -> None:
+        directives = [
+            '#/**/define __printk_index_emit(...) observe(__VA_ARGS__)\n',
+            '#define/**/__printk_index_emit(...) observe(__VA_ARGS__)\n',
+            '%:define __printk_index_emit(...) observe(__VA_ARGS__)\n',
+            '#de\\\nfine __printk_index_emit(...) observe(__VA_ARGS__)\n',
+            '#define __printk_index_\\\nemit(...) observe(__VA_ARGS__)\n',
+            '#undef __printk_index_emit\n',
+        ]
+        for directive in directives:
+            old = directive + 'void run(void) { pr_info("old"); }'
+            with self.subTest(directive=directive):
+                self.assertFalse(self.equivalent(old, old.replace('"old"', '"new"')))
+
+    def test_backend_c_shadowing_is_distinct_from_ordinary_local_names(self) -> None:
+        old = 'void run(int (*_printk)(char *)) { pr_info("old"); }'
+        self.assertFalse(self.equivalent(old, old.replace('"old"', '"new"')))
+        old = 'typedef int (*logger)(char *); void run(void) { logger first, _printk; pr_info("old"); }'
+        self.assertFalse(self.equivalent(old, old.replace('"old"', '"new"')))
+        old = 'void run(int file, int line, char *fmt) { pr_info("old"); }'
+        self.assertTrue(self.equivalent(old, old.replace('"old"', '"new"')))
+        old = '#include "api.h"\nvoid run(void) { int size=sizeof(&_printk); pr_info("old"); }'
+        self.assertTrue(self.equivalent(old, old.replace('"old"', '"new"')))
+
+    def test_macro_generated_backend_bindings_are_not_standard_logging(self) -> None:
+        sources = [
+            '#define CB(name) int (*name)(char *) = custom\nvoid run(void) { CB(_printk); pr_info("old"); }',
+            '#define CB(name) int (*name)(char *)\nvoid run(CB(_printk)) { pr_info("old"); }',
+            '#define CB int (*_printk)(char *) = custom\nvoid run(void) { CB; pr_info("old"); }',
+            '#define BACKEND _printk\nvoid run(void) { int (*BACKEND)(char *)=custom; pr_info("old"); }',
+            '#define CB(a,b) int (*a##b)(char *)=custom\nvoid run(void) { CB(_print,k); pr_info("old"); }',
+        ]
+        for old in sources:
+            with self.subTest(source=old):
+                self.assertFalse(self.equivalent(old, old.replace('"old"', '"new"')))
+
+    def test_macro_formals_and_literal_operator_text_do_not_create_bindings(self) -> None:
+        old = '#define ID(_printk) (_printk)\nvoid run(void) { pr_info("old"); }'
+        self.assertTrue(self.equivalent(old, old.replace('"old"', '"new"')))
+        old = '#define TEXT "# ## %:"\nvoid run(void) { pr_info("old"); }'
+        self.assertTrue(self.equivalent(old, old.replace('"old"', '"new"')))
+
+    def test_plain_pr_override_does_not_override_once_forwarding(self) -> None:
+        old = '#define pr_info(...) consume(__VA_ARGS__)\nvoid run(void) { pr_info_once("old"); }'
+        self.assertTrue(self.equivalent(old, old.replace('"old"', '"new"')))
+        old = '#define unlikely(x) (x)\nvoid run(void) { pr_info("old"); }'
+        self.assertTrue(self.equivalent(old, old.replace('"old"', '"new"')))
+
     def test_unsupported_literals_and_macro_arguments_are_retained(self) -> None:
         formats = ['L"old"', '"old\\x01"', '"old\\001"', '"old\\0"',
                    '"old\\\n text"', '"old %q"', '"old %n"', 'FMT "old"']

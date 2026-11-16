@@ -346,10 +346,10 @@ class RepositoryFileReaderTests(unittest.TestCase):
                 self.assertFalse(reader._paths)
                 self.assertEqual(reader._content_bytes, 0)
 
-    def test_rotation_preserves_oid_and_path_cache(self) -> None:
+    def test_rotation_expires_oid_and_path_cache(self) -> None:
         oid, data = _oid(1), b"obj-y += source.o\n"
         first = BatchProcess(BytesIO(_contents(oid, data)))
-        second = BatchProcess(BytesIO(_info(oid, data)))
+        second = BatchProcess(BytesIO(_contents(oid, data)))
         with (
             patch("kpatch.filter.repository_file._PROCESS_MAX_READS", 1),
             patch(
@@ -360,7 +360,7 @@ class RepositoryFileReaderTests(unittest.TestCase):
         ):
             initial = reader.read_file("first", "Makefile")
             self.assertEqual(popen.call_count, 1)
-            self.assertIs(reader.read_file("second", "Makefile"), initial)
+            self.assertEqual(reader.read_file("second", "Makefile"), initial)
             self.assertEqual(reader._content_bytes, len(data))
             self.assertEqual(list(reader._contents), [oid])
             self.assertEqual(list(reader._paths), ["Makefile"])
@@ -369,16 +369,16 @@ class RepositoryFileReaderTests(unittest.TestCase):
             self.assertTrue(first.stdout.closed)
             self.assertFalse(second.stdout.closed)
         self.assertEqual(first.commands(), [b"contents first:Makefile"])
-        self.assertEqual(second.commands(), [b"info second:Makefile"])
+        self.assertEqual(second.commands(), [b"contents second:Makefile"])
         self.assertTrue(second.stdout.closed)
         self.assertFalse(reader._contents)
         self.assertFalse(reader._paths)
 
-    def test_rotation_miss_reads_info_contents_and_body_from_new_process(self) -> None:
+    def test_rotation_miss_reads_contents_and_body_from_new_process(self) -> None:
         before, after = b"before", b"after"
         first = BatchProcess(BytesIO(_contents(_oid(1), before)))
         second = BatchProcess(BytesIO(
-            _info(_oid(2), after) + _contents(_oid(2), after)
+            _contents(_oid(2), after)
         ))
         with (
             patch("kpatch.filter.repository_file._PROCESS_MAX_READS", 1),
@@ -393,7 +393,7 @@ class RepositoryFileReaderTests(unittest.TestCase):
             self.assertEqual(popen.call_count, 2)
             self.assertEqual(reader._process_reads, 1)
             self.assertEqual(second.commands(), [
-                b"info second:source.c", b"contents " + _oid(2),
+                b"contents second:source.c",
             ])
         self.assertEqual(first.commands(), [b"contents first:source.c"])
         self.assertTrue(second.stdout.closed)
@@ -405,11 +405,11 @@ class RepositoryFileReaderTests(unittest.TestCase):
                 + _info(_oid(2), b"2") + _contents(_oid(2), b"2")
             ), timeout=True),
             BatchProcess(BytesIO(
-                _info(_oid(3), b"3") + _contents(_oid(3), b"3")
+                _contents(_oid(3), b"3")
                 + _info(_oid(4), b"4") + _contents(_oid(4), b"4")
             )),
             BatchProcess(BytesIO(
-                _info(_oid(5), b"5") + _contents(_oid(5), b"5")
+                _contents(_oid(5), b"5")
             )),
         ]
         started: list[BatchProcess] = []
@@ -438,7 +438,7 @@ class RepositoryFileReaderTests(unittest.TestCase):
                 self.assertLessEqual(reader._process_reads, 2)
                 self.assertEqual(len(started), (number + 1) // 2)
             self.assertFalse(processes[-1].stdout.closed)
-        self.assertEqual([len(p.commands()) for p in processes], [3, 4, 2])
+        self.assertEqual([len(p.commands()) for p in processes], [3, 3, 1])
         self.assertTrue(all(p.stdin.closed and p.stdout.closed for p in processes))
         self.assertEqual(processes[0].waits, [5, None])
         self.assertEqual(processes[1].waits, [5])
