@@ -6,6 +6,7 @@ import os
 import platform
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -27,6 +28,9 @@ SNAPSHOT_LAUNCH_FLAGS = (
     "--vhost_user_vsock=false",
 )
 SNAPSHOT_TIMEOUT_SEC = 600
+# How far ahead of the present a restored snapshot's overlay mtime is set (see
+# HostCuttlefishBackend.protect_snapshot_overlays).
+OVERLAY_MTIME_LEAD_SEC = 24 * 60 * 60
 # Executables whose contents determine whether a snapshot can be restored.
 FINGERPRINTED_BINARIES = ("run_cvd", "assemble_cvd", "snapshot_util_cvd")
 
@@ -72,6 +76,8 @@ class HostCuttlefishBackend:
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
         command = self.build_start_command(record, snapshot_dir=snapshot_dir)
+        if snapshot_dir is not None:
+            self.protect_snapshot_overlays(snapshot_dir)
         self._run_command(
             command,
             record=record,
@@ -131,6 +137,28 @@ class HostCuttlefishBackend:
         if snapshot_dir is not None:
             command.append(f"--snapshot_path={snapshot_dir}")
         return command
+
+    @staticmethod
+    def protect_snapshot_overlays(snapshot_dir: Path) -> list[Path]:
+        """Stop assemble_cvd from replacing the snapshot's disk overlays on restore.
+
+        Restore copies the snapshot's qcow2 overlays (which hold every guest disk write)
+        with their mtimes, then rebuilds the disk. With ``--kernel_path`` it re-repacks
+        boot/vendor_boot/super, so the rebuilt composite disk is newer than the copied
+        overlay and ``DiskBuilder::BuildOverlayIfNecessary`` replaces it with an empty
+        one. The restored guest RAM then runs on a disk without its writes and hits
+        dm-verity corruption once it re-reads anything from disk. The regenerated
+        components are content-identical where the guest reads them, so the overlay is
+        still valid; a future mtime makes assemble_cvd keep it. crosvm resets the
+        mtime to the present on the guest's first write.
+        """
+        future = time.time() + OVERLAY_MTIME_LEAD_SEC
+        overlays = sorted(snapshot_dir.glob("instances/cvd-*/*overlay.img"))
+        for overlay in overlays:
+            os.utime(overlay, (future, future))
+        if not overlays:
+            LOGGER.warning("snapshot %s contains no disk overlays", snapshot_dir)
+        return overlays
 
     def _build_start_command(self, record: InstanceRecord) -> list[str]:
         return self.build_start_command(record)

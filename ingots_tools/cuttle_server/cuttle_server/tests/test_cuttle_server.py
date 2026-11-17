@@ -1,9 +1,11 @@
 import asyncio
 import json
+import os
 import platform
 import sqlite3
 import subprocess
 import tempfile
+import time
 import unittest
 from collections.abc import Sequence
 from datetime import timedelta
@@ -1643,6 +1645,28 @@ class HostSnapshotBackendTests(unittest.TestCase):
 
         self.assertFalse([arg for arg in command if "snapshot" in arg])
         self.assertFalse([arg for arg in command if "vhost_user_vsock" in arg])
+
+    def test_restore_dates_snapshot_overlays_after_the_rebuilt_disk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot_dir = Path(tmp)
+            instance_dir = snapshot_dir / "instances" / "cvd-3"
+            instance_dir.mkdir(parents=True)
+            for name in ("overlay.img", "ap_overlay.img", "os_composite.img"):
+                (instance_dir / name).write_bytes(b"x")
+                os.utime(instance_dir / name, (1_000_000, 1_000_000))
+
+            protected = HostCuttlefishBackend.protect_snapshot_overlays(snapshot_dir)
+
+            self.assertEqual(
+                [path.name for path in protected], ["ap_overlay.img", "overlay.img"]
+            )
+            now = time.time()
+            for path in protected:
+                self.assertGreater(path.stat().st_mtime, now + 3600)
+            self.assertEqual(
+                (instance_dir / "os_composite.img").stat().st_mtime, 1_000_000
+            )
+            self.assertEqual((instance_dir / "overlay.img").read_bytes(), b"x")
 
     def test_restore_requires_a_snapshot_enabled_instance(self):
         record = self._record(Path("/cf"), Path("/rt"), snapshots=False)

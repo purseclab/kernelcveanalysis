@@ -286,3 +286,35 @@ Further work:
   snapshot limit if disk use becomes a problem.
 - Optional: build `run_cvd` from `google/android-cuttlefish` with the OpenWrt network reset made
   non-fatal, to allow restoring without the Wi-Fi access point VM.
+
+## Production test (2026-11-17, arm_desktop, deployed server)
+
+- Through the deployed server and `cuttle-cli`: start with `--snapshots`, create (7 s, 11.9 GiB), restore, list, show,
+  delete, per-user name uniqueness and cross-template restore rejection all behave as designed.
+- **Bug (fixed in the working tree, not deployed):** restoring with a template kernel (`--kernel_path`) silently threw
+  away the guest's disk. After restore the guest rebooted with
+  `reboot: Restarting system with command 'dm-verity device corrupted'` (`device-mapper: verity: 7:632: data block
+  2354 is corrupted`, a loop-mounted APEX on `/data`), run_cvd's post-resume hook failed (`Can't find service:
+  bluetooth_manager`) and the instance went to `crashed`.
+  - Cause (Cuttlefish `assemble_cvd`, not crosvm or cuttle_server): restore copies the snapshot's `overlay.img` (the
+    qcow2 holding all guest disk writes) and keeps its mtime. With `--kernel_path` it then re-repacks
+    `boot_repacked.img`, `vendor_boot_repacked.img` and `super.img`. That makes `os_composite.img` newer than the
+    copied overlay, so `DiskBuilder::BuildOverlayIfNecessary` logs `Overlay is out of date` and creates an
+    **empty** overlay. The restored RAM then runs on a disk without its writes. The decision is mtime-only
+    (`disk_builder.cpp`), and upstream android-cuttlefish has the same logic.
+  - It was **not** time dependent: early snapshots also lost their disk. They only looked fine because the guest page
+    cache still held everything that was read. With `echo 3 > /proc/sys/vm/drop_caches` after restore, a 25 s
+    snapshot crashes the same way. Late snapshots fail by themselves because by then artd/dexopt has evicted APEX
+    pages, which are then re-read from the blank disk. The old marker check (`cat` of a small file) read from page
+    cache and could not detect this. Default-kernel templates are not affected, because nothing is repacked.
+  - Fix: before `launch_cvd --snapshot_path`, `HostCuttlefishBackend.protect_snapshot_overlays` sets the snapshot's
+    `instances/cvd-*/*overlay.img` mtime to now + 1 day, so assemble_cvd keeps the overlay. The rebuilt components
+    are content-identical (`super.img` and the vbmeta images are byte-identical). Only the boot images and GPT GUIDs
+    differ, and the running guest never re-reads those. crosvm resets the mtime to the present on the first write.
+  - Verified with the updated `snapshot_cycle_test.sh`, which now also writes 256 MB of random data, deletes it after
+    the snapshot, and checks its hash after restore and `drop_caches`. With `SNAPSHOT_DELAY=200`: PASS on
+    r4 + 7.1.3.a and r1 + 7.1.1.a. Without the fix, the same check fails on a 25 s snapshot.
+  - Minor, not fixed: assemble_cvd also recreates `pstore`, `hwcomposer-pmem` and `access-kregistry` blank on
+    restore. No visible effect so far.
+- Possible race (seen once): the first restore failed with "Instance directory files in use ... Observed PIDs: <server>"
+  because the server was reading the instance's logcat for the `/logs` poll while assemble_cvd ran its lsof check.
