@@ -7,9 +7,13 @@ from urllib import error, parse, request
 from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CreateSnapshotRequest,
     InstanceListResponse,
     InstanceLogsView,
     InstanceView,
+    RestoreSnapshotRequest,
+    SnapshotListResponse,
+    SnapshotView,
     TemplateListResponse,
     TemplateView,
 )
@@ -81,6 +85,59 @@ class CuttleApiClient:
             path = f"{path}?async_start=true"
         data = self._request_json("POST", path)
         return InstanceView.model_validate(data)
+
+    def create_snapshot(
+        self, instance_name: str, request_body: CreateSnapshotRequest
+    ) -> SnapshotView:
+        quoted_name = parse.quote(instance_name, safe="")
+        data = self._request_json(
+            "POST",
+            f"/v1/instances/by-name/{quoted_name}/snapshots",
+            request_body.model_dump(mode="json"),
+        )
+        return SnapshotView.model_validate(data)
+
+    def restore_snapshot(
+        self,
+        instance_name: str,
+        request_body: RestoreSnapshotRequest,
+        *,
+        async_start: bool = False,
+    ) -> InstanceView:
+        quoted_name = parse.quote(instance_name, safe="")
+        path = f"/v1/instances/by-name/{quoted_name}/restore"
+        if async_start:
+            path = f"{path}?async_start=true"
+        data = self._request_json(
+            "POST",
+            path,
+            request_body.model_dump(mode="json"),
+        )
+        return InstanceView.model_validate(data)
+
+    def list_snapshots(
+        self, *, instance: str | None = None, template: str | None = None
+    ) -> SnapshotListResponse:
+        filters = {
+            key: value
+            for key, value in (("instance", instance), ("template", template))
+            if value is not None
+        }
+        path = "/v1/snapshots"
+        if filters:
+            path = f"{path}?{parse.urlencode(filters)}"
+        data = self._request_json("GET", path)
+        return SnapshotListResponse.model_validate(data)
+
+    def get_snapshot(self, snapshot_name: str) -> SnapshotView:
+        quoted_name = parse.quote(snapshot_name, safe="")
+        data = self._request_json("GET", f"/v1/snapshots/by-name/{quoted_name}")
+        return SnapshotView.model_validate(data)
+
+    def delete_snapshot(self, snapshot_name: str) -> SnapshotView:
+        quoted_name = parse.quote(snapshot_name, safe="")
+        data = self._request_json("DELETE", f"/v1/snapshots/by-name/{quoted_name}")
+        return SnapshotView.model_validate(data)
 
     def stop_instance(self, instance_id: str) -> InstanceView:
         quoted_id = parse.quote(instance_id, safe="")

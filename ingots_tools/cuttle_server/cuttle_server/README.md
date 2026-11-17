@@ -65,6 +65,7 @@ reconcile_interval_sec = 30
 base_instance_num = 0
 max_instances = 10
 docker_image = "cuttlefish-host:latest"
+snapshot_root = "/var/lib/cuttlefish_snapshots"
 ```
 
 - Relative paths are resolved relative to the config directory.
@@ -77,6 +78,7 @@ docker_image = "cuttlefish-host:latest"
 - `cvd_start_timeout_sec` bounds the `cvd start --daemon` subprocess so failed launches do not hang forever.
 - `reconcile_interval_sec` controls how often the server's background cleanup task checks for expired instances.
 - `base_instance_num` reserves the first `N` Cuttlefish instance numbers for manually launched devices. When set to `N`, the server allocates from `N + 1` through `N + max_instances`.
+- `snapshot_root` is where snapshot data is stored (default `/var/lib/cuttlefish_snapshots`). It is deliberately outside the instance runtime root so stopping or expiring an instance never removes its snapshots. The server creates it on startup when any template supports snapshots, so the directory (or its parent) must be writable by the server user. Snapshots are large (about the guest's RAM plus its disk overlays; roughly 6 GB each in practice), so size this volume accordingly.
 - `docker_image` is the default prebuilt image for Docker-backed templates. Run `./setup.sh` to build the provided default image; the server itself does not build or pull images automatically.
 
 ### Host TAP Capacity
@@ -184,6 +186,7 @@ apps = [
   "/srv/apps/two.xapk",
   "/srv/apps/three.apkm",
 ]
+snapshot_supported = false
 ```
 
 - `name` is the template identifier used as `template_name`.
@@ -193,6 +196,7 @@ apps = [
 - A Docker template may set `docker_image` to override the server default. A Docker template must resolve an image from one of those locations.
 - `kernel_path` and `initrd_path` are optional. When omitted, the server does not pass the corresponding Cuttlefish launch argument, allowing the image defaults such as `boot.img` to be used.
 - Relative `kernel_path`, `initrd_path`, and `apps` entries are resolved relative to the template file.
+- `snapshot_supported` (default `false`) allows instances of this template to be launched with snapshot support (`cuttle-cli start --snapshots`) and snapshotted. It requires `backend = "host"`, `command_mode = "legacy"`, and a runtime that ships `bin/snapshot_util_cvd`; the server refuses to load the template otherwise. See [Snapshots](#snapshots).
 - `apps` are parsed, validated, persisted, returned by the API, and auto-installed in order during startup unless disabled per request.
 - Supported app payloads are `.apk`, `.xapk`, and `.apkm`. Bundle formats are unpacked server-side; embedded APK splits are installed together and bundled OBB files are copied into `/sdcard/Android/obb/...`.
 
@@ -208,6 +212,11 @@ Implemented endpoints:
 - `POST /v1/instances/{instance_id}/stop`
 - `POST /v1/instances/by-name/{instance_name}/stop`
 - `POST /v1/instances/by-name/{instance_name}/restart`
+- `POST /v1/instances/by-name/{instance_name}/snapshots`
+- `POST /v1/instances/by-name/{instance_name}/restore`
+- `GET /v1/snapshots`
+- `GET /v1/snapshots/by-name/{snapshot_name}`
+- `DELETE /v1/snapshots/by-name/{snapshot_name}`
 - `GET /v1/templates`
 - `GET /v1/templates/{template_name}`
 - `POST /v1/admin/reconcile`
@@ -229,7 +238,8 @@ Create request shape:
     "cpus": 6,
     "selinux": false,
     "load_apps": false,
-    "unmanaged": true
+    "unmanaged": true,
+    "snapshots_enabled": false
   }
 }
 ```
@@ -243,8 +253,37 @@ Notes:
 - Instance views include `adb_port` once the launch succeeds. Clients should connect to `<same-host-as-http-server>:<adb_port>`.
 - `overrides.load_apps` defaults to `true`. Set it to `false` to skip template APK installation for that instance.
 - `overrides.unmanaged` defaults to `false`. When true, clients persist the endpoint for external ADB forwarding and exclude it from local daemon connect/disconnect management, including after restart.
+- `overrides.snapshots_enabled` defaults to `false`. It launches the instance with snapshot support and is rejected for templates without `snapshot_supported`.
 - `POST /v1/instances?async_start=true` returns after recording the instance in `starting` state and completes launch in the background.
 - `POST /v1/instances/by-name/{instance_name}/restart?async_start=true` stops an active instance, records it in `starting` state, and completes its relaunch in the background.
+
+## Snapshots
+
+A snapshot saves a running instance's memory, device state, and disks so the instance can later be put back exactly as it was: processes, open files and kernel state included.
+
+Setup: set `snapshot_supported = true` on the template (host backend, legacy command mode) and make sure `snapshot_root` is writable. The Cuttlefish runtime must also ship a `crosvm` that can snapshot and restore arm64 guests; see `SNAPSHOT_PROGRESS.md` for the patched build used for the challenge7 runtimes.
+
+Launching: `cuttle-cli start <template> --snapshots` adds `--snapshot_compatible --gpu_mode=guest_swiftshader --vhost_user_vsock=false` to the launch command. These are required: the GPU must be 2D SwiftShader, and vsock must be crosvm's built-in device because the default vhost-user vsock process cannot save its state. Instances launched without `--snapshots` cannot be snapshotted.
+
+Endpoints:
+
+- `POST /v1/instances/by-name/{instance_name}/snapshots` with `{"snapshot_name": "..."}` snapshots an `active` instance that was launched with snapshot support. It runs synchronously (the guest is paused for a few seconds) and returns the snapshot view.
+- `POST /v1/instances/by-name/{instance_name}/restore` with `{"snapshot_name": "..."}` restores a snapshot into an instance and returns the instance view. It accepts `?async_start=true` like restart.
+- `GET /v1/snapshots?instance=<name-or-id>&template=<template>` lists snapshots; both filters are optional.
+- `GET /v1/snapshots/by-name/{snapshot_name}` and `DELETE /v1/snapshots/by-name/{snapshot_name}` show and delete one snapshot. Either accepts a snapshot id in place of the name.
+
+Ownership follows the same rules as instances. A snapshot belongs to the owner of the instance it was taken from (including when the admin takes it), names are unique per owner, non-admin users only see their own snapshots, and the admin sees all of them. A name that several users share is ambiguous for the admin, who must then use the snapshot id. A failed snapshot is kept as a `failed` record with its `failure_reason` until its name is reused or it is deleted. Snapshots that were still being created when the server stopped are marked failed on the next startup.
+
+Restore rules. Cuttlefish bakes the original instance's absolute paths, instance number, network device names and vsock CID into a snapshot, so a snapshot can only be restored into the instance it was taken from (same instance number and runtime directory). `restore` checks that:
+
+- the snapshot is `ready` and belongs to the instance's owner;
+- the instance uses the same template and backend and was launched with snapshot support;
+- the snapshot's instance number and runtime directory match the instance;
+- the Cuttlefish host tools (`run_cvd`, `assemble_cvd`, `snapshot_util_cvd` and `crosvm`) are unchanged since the snapshot was taken, because the saved device state is not stable across versions.
+
+An `active` or `crashed` instance is stopped first (a stop failure is kept as a warning, as in restart). A `stopped` or `expired` instance is brought back under its old name and id, provided its instance number and name are still free. The runtime directory is recreated from the snapshot, the lease is reset, and template apps are not installed again because the restored guest already has them. Restoring does not modify the snapshot, so it can be restored repeatedly. Deleting a snapshot is refused while a restore is reading it.
+
+Runtime directory names must stay short: Cuttlefish creates Unix sockets under them, and socket paths are limited to 108 characters.
 
 ## Runtime Behavior
 
@@ -306,6 +345,9 @@ timeout and force-removes the container when necessary.
 
 ## Current Limitations
 
+- Snapshots are implemented only for the host backend in `legacy` command mode. Restoring a snapshot into a different instance (for example a new Docker container, where every instance has the same paths) is not supported yet.
+- A snapshot can only be restored into the instance it was taken from, and only while the Cuttlefish host tools are unchanged.
+- Snapshot creation is synchronous and holds the server's instance lock while the guest is paused.
 - Authorization is still a single shared bearer token; user identity is a separate header, not a signed credential.
 - The admin user can see all instances; stop-by-name is ambiguous for admin if multiple users have the same explicit active name.
 - `webrtc_port` is returned as `null`; the first Docker backend version deliberately disables WebRTC.

@@ -8,6 +8,9 @@ from cuttle_types import CuttlefishBackendKind, CvdCommandMode
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 
+DEFAULT_SNAPSHOT_ROOT = Path("/var/lib/cuttlefish_snapshots")
+
+
 class ConfigError(ValueError):
     pass
 
@@ -25,6 +28,10 @@ class ServerConfigFile(BaseModel):
     base_instance_num: int = Field(default=0, ge=0)
     max_instances: int = Field(default=10, ge=1)
     docker_image: str | None = Field(default=None, min_length=1)
+    # Directory that holds snapshot data. It is deliberately outside
+    # `instance_runtime_root` so that stopping or expiring an instance never
+    # removes its snapshots.
+    snapshot_root: Path = DEFAULT_SNAPSHOT_ROOT
 
 
 class TemplateConfigFile(BaseModel):
@@ -38,6 +45,9 @@ class TemplateConfigFile(BaseModel):
     initrd_path: Path | None = None
     selinux: bool
     apps: list[Path] = Field(default_factory=list)
+    # Whether instances of this template can be launched with snapshot support
+    # (`cuttle-cli start --snapshots`) and snapshotted.
+    snapshot_supported: bool = False
 
     @field_validator("apps")
     @classmethod
@@ -63,6 +73,7 @@ class InstanceTemplate:
     apps: tuple[Path, ...]
     backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
     docker_image: str | None = None
+    snapshot_supported: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +91,7 @@ class CuttlefishSettings:
     max_instances: int
     templates: dict[str, InstanceTemplate]
     docker_image: str | None = None
+    snapshot_root: Path = DEFAULT_SNAPSHOT_ROOT
 
 
 def load_settings(config_dir: Path) -> CuttlefishSettings:
@@ -130,6 +142,7 @@ def load_settings(config_dir: Path) -> CuttlefishSettings:
         base_instance_num=main_config.base_instance_num,
         max_instances=main_config.max_instances,
         docker_image=main_config.docker_image,
+        snapshot_root=main_config.snapshot_root,
         templates=templates,
     )
 
@@ -144,6 +157,7 @@ def _load_main_config(main_config_path: Path, config_dir: Path) -> ServerConfigF
     return parsed.model_copy(
         update={
             "database_path": _resolve_path(parsed.database_path, config_dir),
+            "snapshot_root": _resolve_path(parsed.snapshot_root, config_dir),
         }
     )
 
@@ -188,6 +202,9 @@ def _load_template(template_path: Path) -> InstanceTemplate:
         if not app.exists():
             raise ConfigError(f"template {parsed.name!r} app does not exist: {app}")
 
+    if parsed.snapshot_supported:
+        _validate_snapshot_support(parsed, runtime_root)
+
     return InstanceTemplate(
         name=parsed.name,
         runtime_root=runtime_root,
@@ -200,7 +217,28 @@ def _load_template(template_path: Path) -> InstanceTemplate:
         initrd_path=initrd_path,
         selinux=parsed.selinux,
         apps=apps,
+        snapshot_supported=parsed.snapshot_supported,
     )
+
+
+def _validate_snapshot_support(parsed: TemplateConfigFile, runtime_root: Path) -> None:
+    """Reject templates that claim snapshot support the server cannot deliver."""
+    if parsed.backend != CuttlefishBackendKind.HOST:
+        raise ConfigError(
+            f"template {parsed.name!r} sets snapshot_supported, but snapshots are "
+            "only implemented for the host backend"
+        )
+    if parsed.command_mode != CvdCommandMode.LEGACY:
+        raise ConfigError(
+            f"template {parsed.name!r} sets snapshot_supported, which requires "
+            'command_mode = "legacy"'
+        )
+    snapshot_binary = runtime_root / "bin" / "snapshot_util_cvd"
+    if not snapshot_binary.exists():
+        raise ConfigError(
+            f"template {parsed.name!r} sets snapshot_supported but its runtime has "
+            f"no snapshot_util_cvd binary: {snapshot_binary}"
+        )
 
 
 def _read_toml(path: Path) -> dict[str, object]:

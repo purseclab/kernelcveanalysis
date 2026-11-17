@@ -23,7 +23,12 @@ from kdebug.daemon import (
     normalize_target,
     start_daemon,
 )
-from kdebug.frida_core import FRIDA_SERVER_REMOTE_PATH, FridaManager, bootstrap_frida
+from kdebug.frida_core import (
+    FRIDA_SERVER_REMOTE_PATH,
+    FRIDA_SERVER_START_TIMEOUT_SEC,
+    FridaManager,
+    bootstrap_frida,
+)
 from kdebug.lldb_core import LLDB_SERVER_REMOTE_PATH, LLDBManager
 from kdebug.main import app
 
@@ -471,7 +476,30 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(str(upload_file.call_args.args[1]), FRIDA_SERVER_REMOTE_PATH)
         run_adb.assert_called_once()
         shell_text.assert_called_once()
+        start_command = shell_text.call_args.args[0]
+        self.assertIn("nohup", start_command)
+        self.assertIn("</dev/null", start_command)
+        self.assertEqual(
+            shell_text.call_args.kwargs["timeout"], FRIDA_SERVER_START_TIMEOUT_SEC
+        )
         self.assertEqual(fake_frida.manager.addresses, ["127.0.0.1:27042"])
+
+    def test_bootstrap_frida_reports_start_timeout(self):
+        from libadb import AdbClient
+
+        adb = AdbClient("127.0.0.1:5555")
+
+        with tempfile.NamedTemporaryFile() as tmp, patch.object(
+            adb, "upload_file"
+        ), patch.object(adb, "run_adb"), patch.object(
+            adb,
+            "shell_text",
+            side_effect=subprocess.TimeoutExpired(cmd="adb", timeout=20.0),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                bootstrap_frida(adb, frida_server_path=Path(tmp.name))
+
+        self.assertIn("timed out", str(ctx.exception))
 
     def test_bootstrap_frida_can_skip_server_sync(self):
         from libadb import AdbClient

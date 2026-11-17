@@ -1,17 +1,22 @@
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import Annotated, Protocol
 
 from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CreateSnapshotRequest,
     CuttlefishBackendKind,
     InstanceListResponse,
     InstanceLogsView,
     InstanceView,
     RenewLeaseRequest,
+    RestoreSnapshotRequest,
+    SnapshotListResponse,
+    SnapshotView,
     TemplateListResponse,
     TemplateView,
 )
@@ -79,6 +84,29 @@ def build_request_identity(
         user_id=normalized_user_id,
         is_admin=normalized_user_id == admin_user_id,
     )
+
+
+@contextmanager
+def translate_manager_errors() -> Iterator[None]:
+    """Map server manager errors onto HTTP errors."""
+    try:
+        yield
+    except NotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except AuthorizationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except CapacityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except InstanceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
 
 
 async def reconcile_expired_instances_periodically(
@@ -351,6 +379,90 @@ def create_app(settings: CuttlefishSettings) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+
+    @app.post(
+        "/v1/instances/by-name/{instance_name}/snapshots",
+        response_model=SnapshotView,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_snapshot(
+        instance_name: str,
+        request: CreateSnapshotRequest,
+        identity: Annotated[RequestIdentity, Depends(require_identity)],
+    ) -> SnapshotView:
+        with translate_manager_errors():
+            return server_manager.create_snapshot(
+                identity.user_id,
+                identity.is_admin,
+                instance_name,
+                request,
+            )
+
+    @app.post(
+        "/v1/instances/by-name/{instance_name}/restore",
+        response_model=InstanceView,
+    )
+    def restore_snapshot(
+        instance_name: str,
+        request: RestoreSnapshotRequest,
+        identity: Annotated[RequestIdentity, Depends(require_identity)],
+        async_start: Annotated[
+            bool,
+            Query(
+                description=(
+                    "Return after stopping the instance and recording it in "
+                    "starting state, then complete the restore in the background."
+                )
+            ),
+        ] = False,
+    ) -> InstanceView:
+        with translate_manager_errors():
+            return server_manager.restore_snapshot(
+                identity.user_id,
+                identity.is_admin,
+                instance_name,
+                request,
+                start_async=async_start,
+            )
+
+    @app.get("/v1/snapshots", response_model=SnapshotListResponse)
+    def list_snapshots(
+        identity: Annotated[RequestIdentity, Depends(require_identity)],
+        instance: Annotated[
+            str | None,
+            Query(description="Only snapshots of this instance (name or id)."),
+        ] = None,
+        template: Annotated[
+            str | None,
+            Query(description="Only snapshots of instances from this template."),
+        ] = None,
+    ) -> SnapshotListResponse:
+        return server_manager.list_snapshots(
+            identity.user_id,
+            identity.is_admin,
+            instance=instance,
+            template_name=template,
+        )
+
+    @app.get("/v1/snapshots/by-name/{snapshot_name}", response_model=SnapshotView)
+    def get_snapshot(
+        snapshot_name: str,
+        identity: Annotated[RequestIdentity, Depends(require_identity)],
+    ) -> SnapshotView:
+        with translate_manager_errors():
+            return server_manager.get_snapshot_by_name(
+                identity.user_id, identity.is_admin, snapshot_name
+            )
+
+    @app.delete("/v1/snapshots/by-name/{snapshot_name}", response_model=SnapshotView)
+    def delete_snapshot(
+        snapshot_name: str,
+        identity: Annotated[RequestIdentity, Depends(require_identity)],
+    ) -> SnapshotView:
+        with translate_manager_errors():
+            return server_manager.delete_snapshot_by_name(
+                identity.user_id, identity.is_admin, snapshot_name
+            )
 
     @app.post("/v1/admin/reconcile", response_model=InstanceListResponse)
     def reconcile_expired_instances(

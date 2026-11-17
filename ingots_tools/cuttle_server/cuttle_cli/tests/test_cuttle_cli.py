@@ -11,11 +11,17 @@ from click.testing import Result
 from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CreateSnapshotRequest,
+    CuttlefishBackendKind,
     CvdCommandMode,
     InstanceListResponse,
     InstanceLogsView,
     InstanceState,
     InstanceView,
+    RestoreSnapshotRequest,
+    SnapshotListResponse,
+    SnapshotState,
+    SnapshotView,
     TemplateListResponse,
     TemplateSummary,
     TemplateView,
@@ -88,6 +94,32 @@ def make_instance(
         adb_serial=None,
         webrtc_port=None,
         expires_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        failure_reason=failure_reason,
+    )
+
+
+def make_snapshot(
+    *,
+    snapshot_name: str = "snap1",
+    snapshot_id: str = "snap-id-1",
+    state: SnapshotState = SnapshotState.READY,
+    owner_id: str = "alice",
+    instance_name: str = "demo",
+    size_bytes: int | None = 5 * 1024**3,
+    failure_reason: str | None = None,
+) -> SnapshotView:
+    return SnapshotView(
+        snapshot_id=snapshot_id,
+        snapshot_name=snapshot_name,
+        owner_id=owner_id,
+        state=state,
+        source_instance_id="inst-1",
+        source_instance_name=instance_name,
+        template_name="phone",
+        backend=CuttlefishBackendKind.HOST,
+        instance_num=3,
+        size_bytes=size_bytes,
+        created_at=datetime(2026, 11, 17, 12, 30, 5, tzinfo=timezone.utc),
         failure_reason=failure_reason,
     )
 
@@ -211,6 +243,84 @@ class CliConfigTests(unittest.TestCase):
         self.assertEqual(settings.server_port, 8001)
         self.assertEqual(settings.auth_token, "override-token")
         self.assertEqual(settings.user_id, "bob")
+
+
+class CuttleApiSnapshotTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = CuttleApiClient(
+            server_host="example.com",
+            server_port=8000,
+            auth_token="secret-token",
+            user_id="alice",
+        )
+
+    def test_create_snapshot_posts_the_name_to_the_instance(self) -> None:
+        snapshot = make_snapshot()
+        with patch.object(
+            CuttleApiClient, "_request_json", return_value=snapshot.model_dump(mode="json")
+        ) as request_json:
+            created = self.client.create_snapshot(
+                "demo/name", CreateSnapshotRequest(snapshot_name="snap1")
+            )
+
+        self.assertEqual(created, snapshot)
+        request_json.assert_called_once_with(
+            "POST",
+            "/v1/instances/by-name/demo%2Fname/snapshots",
+            {"snapshot_name": "snap1"},
+        )
+
+    def test_restore_snapshot_posts_the_snapshot_and_requests_async_start(self) -> None:
+        instance = make_instance()
+        with patch.object(
+            CuttleApiClient, "_request_json", return_value=instance.model_dump(mode="json")
+        ) as request_json:
+            restored = self.client.restore_snapshot(
+                "demo",
+                RestoreSnapshotRequest(snapshot_name="snap 1"),
+                async_start=True,
+            )
+
+        self.assertEqual(restored, instance)
+        request_json.assert_called_once_with(
+            "POST",
+            "/v1/instances/by-name/demo/restore?async_start=true",
+            {"snapshot_name": "snap 1"},
+        )
+
+    def test_list_snapshots_sends_only_the_given_filters(self) -> None:
+        response = SnapshotListResponse(snapshots=[make_snapshot()])
+        with patch.object(
+            CuttleApiClient, "_request_json", return_value=response.model_dump(mode="json")
+        ) as request_json:
+            unfiltered = self.client.list_snapshots()
+            filtered = self.client.list_snapshots(instance="my demo", template="phone")
+
+        self.assertEqual(unfiltered, response)
+        self.assertEqual(filtered, response)
+        self.assertEqual(
+            [call.args for call in request_json.call_args_list],
+            [
+                ("GET", "/v1/snapshots"),
+                ("GET", "/v1/snapshots?instance=my+demo&template=phone"),
+            ],
+        )
+
+    def test_get_and_delete_snapshot_use_the_quoted_name(self) -> None:
+        snapshot = make_snapshot()
+        with patch.object(
+            CuttleApiClient, "_request_json", return_value=snapshot.model_dump(mode="json")
+        ) as request_json:
+            self.client.get_snapshot("a/b")
+            self.client.delete_snapshot("a/b")
+
+        self.assertEqual(
+            [call.args for call in request_json.call_args_list],
+            [
+                ("GET", "/v1/snapshots/by-name/a%2Fb"),
+                ("DELETE", "/v1/snapshots/by-name/a%2Fb"),
+            ],
+        )
 
 
 class CuttleClientTests(unittest.TestCase):
@@ -352,6 +462,109 @@ class CuttleClientTests(unittest.TestCase):
         self.assertEqual(chunks, ["booting\n", "done\n"])
         ensure_daemon.assert_called_once_with(self.settings)
         refresh.assert_called_once_with("example.com:6520")
+
+    def test_start_requests_snapshot_support_only_when_asked(self) -> None:
+        self.api.start_instance.return_value = CreateInstanceResponse(
+            instance=make_instance()
+        )
+        self.api.get_instance_logs.return_value = make_logs()
+        self.api.adb_target.return_value = "example.com:6520"
+
+        with patch("cuttle_cli.client.ensure_managed_daemon_running"):
+            self.client.start("phone", snapshots=True)
+            self.client.start("phone")
+
+        with_snapshots, without = (
+            call.args[0] for call in self.api.start_instance.call_args_list
+        )
+        self.assertTrue(with_snapshots.overrides.snapshots_enabled)
+        self.assertFalse(without.overrides.snapshots_enabled)
+
+    def test_restore_snapshot_waits_for_startup_and_refreshes_adb(self) -> None:
+        starting = make_instance(state=InstanceState.STARTING)
+        active = make_instance()
+        logs = make_logs(start_log="restoring\ndone\n")
+        self.api.restore_snapshot.return_value = starting
+        self.api.get_instance.return_value = active
+        self.api.get_instance_logs.side_effect = [
+            make_logs(state=InstanceState.STARTING, start_log="restoring\n"),
+            logs,
+        ]
+        self.api.adb_target.return_value = "example.com:6520"
+        chunks: list[str] = []
+
+        with patch("cuttle_cli.client.ensure_managed_daemon_running"), patch(
+            "cuttle_cli.client.refresh_adb_connection"
+        ) as refresh, patch("cuttle_cli.client.time.sleep"):
+            result = self.client._restore_snapshot_with_progress(
+                "demo", "snap1", on_log_chunk=chunks.append
+            )
+
+        self.api.restore_snapshot.assert_called_once_with(
+            "demo",
+            RestoreSnapshotRequest(snapshot_name="snap1"),
+            async_start=True,
+        )
+        self.assertEqual(result, StartResult(active, logs, "example.com:6520"))
+        self.assertEqual(chunks, ["restoring\n", "done\n"])
+        refresh.assert_called_once_with("example.com:6520")
+
+    def test_restore_snapshot_does_not_refresh_failed_or_unmanaged_instances(
+        self,
+    ) -> None:
+        self.api.adb_target.return_value = "example.com:6520"
+        self.api.get_instance_logs.return_value = make_logs()
+        for instance in (
+            make_instance(state=InstanceState.CRASHED, failure_reason="boom"),
+            make_instance(unmanaged=True),
+        ):
+            self.api.restore_snapshot.return_value = instance
+            with patch("cuttle_cli.client.ensure_managed_daemon_running"), patch(
+                "cuttle_cli.client.refresh_adb_connection"
+            ) as refresh:
+                self.client.restore_snapshot("demo", "snap1")
+            refresh.assert_not_called()
+
+    def test_restore_snapshot_reports_active_instance_when_adb_refresh_fails(
+        self,
+    ) -> None:
+        self.api.restore_snapshot.return_value = make_instance()
+        self.api.get_instance_logs.return_value = make_logs()
+        self.api.adb_target.return_value = "example.com:6520"
+
+        with patch("cuttle_cli.client.ensure_managed_daemon_running"), patch(
+            "cuttle_cli.client.refresh_adb_connection",
+            side_effect=CliError("adb offline"),
+        ):
+            with self.assertRaisesRegex(
+                CliError, "restored instance demo is active at example.com:6520"
+            ):
+                self.client.restore_snapshot("demo", "snap1")
+
+    def test_snapshot_methods_delegate_to_the_api(self) -> None:
+        snapshot = make_snapshot()
+        self.api.create_snapshot.return_value = snapshot
+        self.api.list_snapshots.return_value = SnapshotListResponse(
+            snapshots=[snapshot]
+        )
+        self.api.get_snapshot.return_value = snapshot
+        self.api.delete_snapshot.return_value = snapshot
+
+        self.assertEqual(self.client.create_snapshot("demo", "snap1"), snapshot)
+        self.assertEqual(
+            self.client.list_snapshots(instance="demo", template="phone"), [snapshot]
+        )
+        self.assertEqual(self.client.show_snapshot("snap1"), snapshot)
+        self.assertEqual(self.client.delete_snapshot("snap1"), snapshot)
+
+        self.api.create_snapshot.assert_called_once_with(
+            "demo", CreateSnapshotRequest(snapshot_name="snap1")
+        )
+        self.api.list_snapshots.assert_called_once_with(
+            instance="demo", template="phone"
+        )
+        self.api.get_snapshot.assert_called_once_with("snap1")
+        self.api.delete_snapshot.assert_called_once_with("snap1")
 
     def test_restart_returns_failed_start_without_refreshing_adb(self) -> None:
         crashed = make_instance(
@@ -563,12 +776,13 @@ class CliCommandTests(unittest.TestCase):
             selinux: bool | None,
             load_apps: bool | None,
             unmanaged: bool,
+            snapshots: bool,
             on_log_chunk: Callable[[str], None],
         ) -> StartResult:
             self.assertEqual(template_name, "phone")
             self.assertEqual(
-                (name, cpus, selinux, load_apps, unmanaged),
-                ("demo", 6, None, False, True),
+                (name, cpus, selinux, load_apps, unmanaged, snapshots),
+                ("demo", 6, None, False, True, False),
             )
             on_log_chunk("booting\n")
             on_log_chunk("done\n")
@@ -763,6 +977,159 @@ class CliCommandTests(unittest.TestCase):
         client.show_template.assert_called_once_with("phone")
         self.assertIn("command_mode=legacy", list_result.output)
         self.assertIn("runtime_root: /cf", show_result.output)
+
+    def test_start_passes_the_snapshots_flag(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client._start_with_progress.return_value = StartResult(
+            make_instance(), make_logs(), "example.com:6520"
+        )
+
+        result = self.invoke(client, ["start", "phone", "--snapshots"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(client._start_with_progress.call_args.kwargs["snapshots"])
+
+    def test_snapshot_create_delegates_and_renders(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client.create_snapshot.return_value = make_snapshot()
+
+        result = self.invoke(client, ["snapshot", "create", "demo", "snap1"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        client.create_snapshot.assert_called_once_with("demo", "snap1")
+        self.assertIn("created snapshot snap1 (snap-id-1) of demo", result.output)
+        self.assertIn("size=5.0 GiB", result.output)
+
+    def test_snapshot_create_surfaces_server_errors(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client.create_snapshot.side_effect = CliError(
+            "server returned 400: instance demo is not active"
+        )
+
+        result = self.invoke(client, ["snapshot", "create", "demo", "snap1"])
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("instance demo is not active", result.output)
+
+    def test_snapshot_list_renders_a_table_and_passes_filters(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client.list_snapshots.return_value = [
+            make_snapshot(),
+            make_snapshot(
+                snapshot_name="broken",
+                snapshot_id="snap-id-2",
+                state=SnapshotState.FAILED,
+                size_bytes=None,
+            ),
+        ]
+
+        result = self.invoke(
+            client,
+            ["snapshot", "list", "--instance", "demo", "--template", "phone"],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        client.list_snapshots.assert_called_once_with(instance="demo", template="phone")
+        lines = result.output.splitlines()
+        self.assertEqual(lines[0].split(), [
+            "snapshot_name", "snapshot_id", "state", "instance",
+            "template", "owner", "size", "created",
+        ])
+        self.assertIn("snap1", lines[1])
+        self.assertIn("ready", lines[1])
+        self.assertIn("5.0 GiB", lines[1])
+        self.assertIn("2026-11-17 12:30:05 UTC", lines[1])
+        self.assertIn("failed", lines[2])
+
+    def test_snapshot_list_with_nothing_says_so(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client.list_snapshots.return_value = []
+
+        result = self.invoke(client, ["snapshot", "list"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("No snapshots.", result.output)
+        client.list_snapshots.assert_called_once_with(instance=None, template=None)
+
+    def test_snapshot_show_prints_details_including_failure_reason(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client.show_snapshot.return_value = make_snapshot(
+            state=SnapshotState.FAILED, failure_reason="crosvm exploded"
+        )
+
+        result = self.invoke(client, ["snapshot", "show", "snap1"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        client.show_snapshot.assert_called_once_with("snap1")
+        for expected in (
+            "name: snap1",
+            "state: failed",
+            "failure_reason: crosvm exploded",
+            "source_instance: demo (inst-1)",
+            "instance_num: 3",
+        ):
+            self.assertIn(expected, result.output)
+
+    def test_snapshot_delete_delegates_and_renders(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client.delete_snapshot.return_value = make_snapshot()
+
+        result = self.invoke(client, ["snapshot", "delete", "snap1"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        client.delete_snapshot.assert_called_once_with("snap1")
+        self.assertIn("deleted snapshot snap1 (snap-id-1)", result.output)
+
+    def test_snapshot_restore_streams_logs_and_reports_the_instance(self) -> None:
+        client = Mock(spec=CuttleClient)
+
+        def restore(
+            instance_name: str,
+            snapshot_name: str,
+            *,
+            on_log_chunk: Callable[[str], None],
+        ) -> StartResult:
+            self.assertEqual((instance_name, snapshot_name), ("demo", "snap1"))
+            on_log_chunk("restoring\n")
+            return StartResult(make_instance(), make_logs(), "example.com:6520")
+
+        client._restore_snapshot_with_progress.side_effect = restore
+
+        result = self.invoke(client, ["snapshot", "restore", "demo", "snap1"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("restoring\n", result.output)
+        self.assertIn("restored demo (inst-1) from snapshot snap1", result.output)
+        self.assertIn("adb=example.com:6520", result.output)
+
+    def test_failed_snapshot_restore_prints_diagnostics_and_exits_nonzero(self) -> None:
+        client = Mock(spec=CuttleClient)
+        crashed = make_instance(state=InstanceState.CRASHED, failure_reason="boom")
+        client._restore_snapshot_with_progress.return_value = StartResult(
+            crashed, make_logs(kernel_log="kernel says no\n"), None
+        )
+
+        result = self.invoke(client, ["snapshot", "restore", "demo", "snap1"])
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("failed to restore demo: boom", result.output)
+        self.assertIn("kernel says no", result.output)
+
+    def test_template_commands_show_snapshot_support(self) -> None:
+        client = Mock(spec=CuttleClient)
+        client.list_templates.return_value = [
+            TemplateSummary(
+                template_name="phone", cpus=4, selinux=False, snapshot_supported=True
+            )
+        ]
+        template = make_template().model_copy(update={"snapshot_supported": True})
+        client.show_template.return_value = template
+
+        list_result = self.invoke(client, ["templates", "list"])
+        show_result = self.invoke(client, ["templates", "show", "phone"])
+
+        self.assertIn("snapshots=True", list_result.output)
+        self.assertIn("snapshot_supported: True", show_result.output)
 
     def test_daemon_commands_delegate(self) -> None:
         client = Mock(spec=CuttleClient)

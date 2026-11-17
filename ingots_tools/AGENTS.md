@@ -146,4 +146,5 @@ The project uses `uv` for dependency management.
 *   `object_db/`: Shared kernel object database models and extraction utilities.
 *   `primitives/`: Structured exploit primitive library and metadata.
 *   `scripts/`: Standalone utility scripts.
+*   `skills/`: Contains skills for using all tools. When wirting skills, DO NOT place them in the folder containing the python code. Place them as a subfolder of this `skills/` folder instead.
 *   `SYNTHESIS_TODO.md`: Roadmap for exploit synthesis features.

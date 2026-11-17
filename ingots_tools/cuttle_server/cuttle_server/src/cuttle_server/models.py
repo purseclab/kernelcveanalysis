@@ -9,6 +9,8 @@ from cuttle_types import (
     CvdCommandMode,
     InstanceState,
     InstanceView,
+    SnapshotState,
+    SnapshotView,
     TemplateSummary,
     TemplateView,
 )
@@ -36,6 +38,8 @@ class ResolvedLaunchConfig(BaseModel):
     backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
     docker_image: str | None = None
     cvd_binary: Path
+    # Launched with `--snapshot_compatible` and the flags it requires.
+    snapshot_compatible: bool = False
 
 
 TERMINAL_STATES = frozenset(
@@ -44,6 +48,11 @@ TERMINAL_STATES = frozenset(
 ACTIVE_STATES = frozenset(
     {InstanceState.STARTING, InstanceState.ACTIVE, InstanceState.STOPPING}
 )
+
+
+# Snapshots that occupy their name and their data directory. A failed snapshot
+# holds neither and may be replaced by a new snapshot with the same name.
+LIVE_SNAPSHOT_STATES = frozenset({SnapshotState.CREATING, SnapshotState.READY})
 
 
 class InstanceRecord(BaseModel):
@@ -92,6 +101,7 @@ def instance_view_from_record(record: InstanceRecord) -> InstanceView:
         apps=record.config.apps,
         load_apps=record.config.load_apps,
         unmanaged=record.config.unmanaged,
+        snapshots_enabled=record.config.snapshot_compatible,
         command_mode=record.config.command_mode,
         backend=record.config.backend,
         docker_image=record.config.docker_image,
@@ -112,6 +122,7 @@ def template_summary_from_template(template: "InstanceTemplate") -> TemplateSumm
         selinux=template.selinux,
         command_mode=template.command_mode,
         backend=template.backend,
+        snapshot_supported=template.snapshot_supported,
     )
 
 
@@ -127,4 +138,56 @@ def template_view_from_template(template: "InstanceTemplate") -> TemplateView:
         command_mode=template.command_mode,
         backend=template.backend,
         docker_image=template.docker_image,
+        snapshot_supported=template.snapshot_supported,
+    )
+
+
+class SnapshotRecord(BaseModel):
+    """A snapshot of one instance, persisted in the server database.
+
+    Cuttlefish bakes the original instance's absolute paths, instance number and
+    network device names into a snapshot, so the source instance's identity
+    (`instance_num`, `runtime_dir`) is part of the record and is what a restore
+    target must match.
+    """
+
+    snapshot_id: str
+    snapshot_name: str
+    owner_id: str
+    state: SnapshotState
+    source_instance_id: str
+    source_instance_name: str
+    template_name: str
+    backend: CuttlefishBackendKind
+    instance_num: int = Field(ge=1)
+    # The source instance's runtime directory (Cuttlefish's HOME).
+    runtime_dir: Path
+    # Where the snapshot data lives, under the configured snapshot root.
+    snapshot_dir: Path
+    # Identifies the host tools that took the snapshot; a restore must use the
+    # same ones because the saved device state is not stable across versions.
+    host_tools_fingerprint: str
+    size_bytes: int | None = None
+    created_at: datetime
+    failure_reason: str | None = None
+
+    @property
+    def is_failed(self) -> bool:
+        return self.state == SnapshotState.FAILED
+
+
+def snapshot_view_from_record(record: SnapshotRecord) -> SnapshotView:
+    return SnapshotView(
+        snapshot_id=record.snapshot_id,
+        snapshot_name=record.snapshot_name,
+        owner_id=record.owner_id,
+        state=record.state,
+        source_instance_id=record.source_instance_id,
+        source_instance_name=record.source_instance_name,
+        template_name=record.template_name,
+        backend=record.backend,
+        instance_num=record.instance_num,
+        size_bytes=record.size_bytes,
+        created_at=record.created_at,
+        failure_reason=record.failure_reason,
     )

@@ -375,6 +375,23 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
             str(record.config.runtime_root / "bin" / "launch_cvd"),
         )
 
+    def test_snapshot_operations_are_rejected_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_record(Path(tmp))
+            backend = DockerCuttlefishBackend(server_host="127.0.0.1", client=Mock())
+
+            with self.assertRaisesRegex(RuntimeError, "docker backend"):
+                backend.take_snapshot(record, Path(tmp) / "snap")
+            with self.assertRaisesRegex(RuntimeError, "docker backend"):
+                backend.host_tools_fingerprint(record)
+            with self.assertRaisesRegex(RuntimeError, "docker backend"):
+                backend.build_start_command(record, snapshot_dir=Path(tmp) / "snap")
+            with self.assertRaisesRegex(RuntimeError, "docker backend"):
+                backend.start_instance(record, snapshot_dir=Path(tmp) / "snap")
+            record.config.snapshot_compatible = True
+            with self.assertRaisesRegex(RuntimeError, "docker backend"):
+                backend.build_start_command(record)
+
     def test_wait_for_boot_returns_on_boot_completed_marker(self):
         container = Mock()
         container.status = "running"

@@ -52,6 +52,7 @@ cuttle-cli start <template-name> --selinux true
 cuttle-cli start <template-name> --selinux false
 cuttle-cli start <template-name> --no-load-apps
 cuttle-cli start <template-name> --unmanaged
+cuttle-cli start <template-name> --snapshots
 ```
 
 Guidance:
@@ -62,6 +63,7 @@ Guidance:
 - Use `--unmanaged` only when explicitly requested. It prevents the local daemon
   from connecting or disconnecting that instance's ADB endpoint and persists
   across restart.
+- Use `--snapshots` only when the task needs snapshots of that instance. It is only available for templates whose `templates list` line shows `snapshots=True`, and snapshots cannot be taken of an instance that was launched without it.
 - Success output includes the effective instance name, instance id, state, and `adb=<host:port>` when available.
 
 ### Stop instances
@@ -104,10 +106,30 @@ Guidance:
   unchanged target after a successful restart. Unmanaged instances remain
   untouched.
 
+### Snapshots
+
+Snapshot a running instance that was started with `--snapshots`, and put it back later:
+
+```bash
+cuttle-cli snapshot create <instance-name> <snapshot-name>
+cuttle-cli snapshot list [--instance <instance-name>] [--template <template-name>]
+cuttle-cli snapshot show <snapshot-name>
+cuttle-cli snapshot restore <instance-name> <snapshot-name>
+cuttle-cli snapshot delete <snapshot-name>
+```
+
+Guidance:
+
+- A snapshot saves memory, process and disk state, so a restore returns the guest to exactly that moment. Restoring does not modify the snapshot; it can be restored repeatedly.
+- `snapshot restore` can only restore a snapshot into the instance it was taken from. It stops a running instance first, and also revives a stopped or expired instance under its old name. Use the instance named in `snapshot list`'s `instance` column.
+- Restore keeps the instance's ADB target and refreshes the managed `adb connect` the same way `restart` does. A restored guest keeps its old process ids, but live network connections and anything that depends on the wall clock may need to reconnect.
+- Snapshots are scoped per user, like instances. The admin user sees all of them.
+- Snapshots are large (about 6 GB each). Delete ones you no longer need.
+
 ## Daemon behavior
 
-`cuttle-cli start`, `cuttle-cli restart`, `cuttle-cli list`, and `cuttle-cli stop`
-automatically ensure the managed daemon is running.
+`cuttle-cli start`, `cuttle-cli restart`, `cuttle-cli snapshot restore`, `cuttle-cli list`, and
+`cuttle-cli stop` automatically ensure the managed daemon is running.
 
 Use explicit daemon commands only when the task is about daemon state or ADB sync behavior:
 

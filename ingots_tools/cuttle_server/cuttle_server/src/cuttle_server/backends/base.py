@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Sequence
 
 from cuttle_types import CuttlefishBackendKind
@@ -36,9 +37,15 @@ class BackendReconcileFailure:
 class CuttlefishBackend(Protocol):
     kind: CuttlefishBackendKind
 
-    def build_start_command(self, record: InstanceRecord) -> list[str]: ...
+    def build_start_command(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> list[str]: ...
 
-    def start_instance(self, record: InstanceRecord) -> LaunchResult: ...
+    def start_instance(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> LaunchResult:
+        """Start the instance, restoring `snapshot_dir` when it is given."""
+        ...
 
     def stop_instance(self, record: InstanceRecord) -> None: ...
 
@@ -47,3 +54,15 @@ class CuttlefishBackend(Protocol):
     def reconcile(
         self, records: Sequence[InstanceRecord]
     ) -> list[BackendReconcileFailure]: ...
+
+    def take_snapshot(self, record: InstanceRecord, snapshot_dir: Path) -> None:
+        """Snapshot the running instance into `snapshot_dir`.
+
+        `snapshot_dir` must not exist yet. On failure nothing is left behind at
+        `snapshot_dir` and the instance keeps running.
+        """
+        ...
+
+    def host_tools_fingerprint(self, record: InstanceRecord) -> str:
+        """Identify the host tools whose snapshots a restore can load."""
+        ...

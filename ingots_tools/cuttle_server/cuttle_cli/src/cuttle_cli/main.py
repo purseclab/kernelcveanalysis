@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Never
 
 import typer
-from cuttle_types import InstanceLogsView, TemplateSummary
+from cuttle_types import InstanceLogsView, SnapshotView, TemplateSummary
 from typing_extensions import Annotated
 
 from .client import CliError, CuttleClient, StopManyResult
@@ -15,8 +16,14 @@ from .daemon import render_daemon_identity
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 templates_app = typer.Typer(add_completion=False, no_args_is_help=True)
 daemon_app = typer.Typer(add_completion=False, no_args_is_help=True)
+snapshot_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Create, list, restore and delete instance snapshots.",
+)
 app.add_typer(templates_app, name="templates")
 app.add_typer(daemon_app, name="daemon")
+app.add_typer(snapshot_app, name="snapshot")
 
 
 @dataclass
@@ -89,6 +96,16 @@ def start(
             help="Do not manage this instance's ADB connection with the local daemon.",
         ),
     ] = False,
+    snapshots: Annotated[
+        bool,
+        typer.Option(
+            "--snapshots",
+            help=(
+                "Launch with snapshot support so the instance can be snapshotted. "
+                "Only available for templates that support snapshots."
+            ),
+        ),
+    ] = False,
 ) -> None:
     client = _client_from_ctx(ctx)
     try:
@@ -99,6 +116,7 @@ def start(
             selinux=selinux,
             load_apps=load_apps,
             unmanaged=unmanaged,
+            snapshots=snapshots,
             on_log_chunk=_echo_log_chunk,
         )
     except CliError as exc:
@@ -274,6 +292,158 @@ def stop(
     _render_stop_many(result)
 
 
+@snapshot_app.command("create")
+def create_snapshot(
+    ctx: typer.Context,
+    instance_name: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Effective name of the instance to snapshot. It must be running and "
+                "started with --snapshots."
+            )
+        ),
+    ],
+    snapshot_name: Annotated[str, typer.Argument(help="Name for the new snapshot.")],
+) -> None:
+    """Snapshot a running instance (its memory and disks)."""
+    try:
+        snapshot = _client_from_ctx(ctx).create_snapshot(instance_name, snapshot_name)
+    except CliError as exc:
+        _exit_with_error(exc)
+    typer.echo(
+        f"created snapshot {snapshot.snapshot_name} ({snapshot.snapshot_id}) "
+        f"of {snapshot.source_instance_name} size={_format_size(snapshot.size_bytes)}"
+    )
+
+
+@snapshot_app.command("list")
+def list_snapshots(
+    ctx: typer.Context,
+    instance: Annotated[
+        str | None,
+        typer.Option("--instance", help="Only snapshots of this instance (name or id)."),
+    ] = None,
+    template: Annotated[
+        str | None,
+        typer.Option("--template", help="Only snapshots of instances from this template."),
+    ] = None,
+) -> None:
+    """List your snapshots (all snapshots for the admin user)."""
+    try:
+        snapshots = _client_from_ctx(ctx).list_snapshots(
+            instance=instance, template=template
+        )
+    except CliError as exc:
+        _exit_with_error(exc)
+
+    if not snapshots:
+        typer.echo("No snapshots.")
+        return
+
+    headers = (
+        "snapshot_name",
+        "snapshot_id",
+        "state",
+        "instance",
+        "template",
+        "owner",
+        "size",
+        "created",
+    )
+    rows = [
+        (
+            snapshot.snapshot_name,
+            snapshot.snapshot_id,
+            snapshot.state.value,
+            snapshot.source_instance_name,
+            snapshot.template_name,
+            snapshot.owner_id,
+            _format_size(snapshot.size_bytes),
+            _format_timestamp(snapshot.created_at),
+        )
+        for snapshot in snapshots
+    ]
+    widths = [
+        max(len(header), *(len(row[index]) for row in rows))
+        for index, header in enumerate(headers)
+    ]
+    typer.echo(_format_columns(headers, widths))
+    for row in rows:
+        typer.echo(_format_columns(row, widths))
+
+
+@snapshot_app.command("show")
+def show_snapshot(
+    ctx: typer.Context,
+    snapshot_name: Annotated[str, typer.Argument(help="Snapshot name or id.")],
+) -> None:
+    """Show the details of one snapshot."""
+    try:
+        snapshot = _client_from_ctx(ctx).show_snapshot(snapshot_name)
+    except CliError as exc:
+        _exit_with_error(exc)
+    _echo_snapshot_details(snapshot)
+
+
+@snapshot_app.command("delete")
+def delete_snapshot(
+    ctx: typer.Context,
+    snapshot_name: Annotated[str, typer.Argument(help="Snapshot name or id.")],
+) -> None:
+    """Delete a snapshot and its data."""
+    try:
+        snapshot = _client_from_ctx(ctx).delete_snapshot(snapshot_name)
+    except CliError as exc:
+        _exit_with_error(exc)
+    typer.echo(f"deleted snapshot {snapshot.snapshot_name} ({snapshot.snapshot_id})")
+
+
+@snapshot_app.command("restore")
+def restore_snapshot(
+    ctx: typer.Context,
+    instance_name: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Effective name of the instance to restore into. A running instance "
+                "is stopped first; a stopped or expired one is brought back."
+            )
+        ),
+    ],
+    snapshot_name: Annotated[str, typer.Argument(help="Snapshot name to restore.")],
+) -> None:
+    """Restore a snapshot into its instance, stopping the instance first if running.
+
+    Cuttlefish can only restore a snapshot into the instance (same instance number
+    and runtime directory) it was taken from, so INSTANCE_NAME must be that instance.
+    """
+    try:
+        result = _client_from_ctx(ctx)._restore_snapshot_with_progress(
+            instance_name,
+            snapshot_name,
+            on_log_chunk=_echo_log_chunk,
+        )
+    except CliError as exc:
+        _exit_with_error(exc)
+
+    _echo_restart_stop_warning(result.logs)
+    if not result.is_active:
+        _echo_cuttlefish_diagnostic_logs(result.logs)
+        detail = result.instance.failure_reason or "restore failed"
+        typer.echo(
+            f"failed to restore {result.instance.instance_name}: {detail}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"restored {result.instance.instance_name} ({result.instance.instance_id}) "
+        f"from snapshot {snapshot_name} state={result.instance.state.value} "
+        f"adb={result.adb_target or '-'}"
+    )
+
+
 @daemon_app.command("start")
 def start_daemon(ctx: typer.Context) -> None:
     try:
@@ -358,6 +528,7 @@ def show_template(
     typer.echo(f"kernel_path: {template.kernel_path or '<default>'}")
     typer.echo(f"initrd_path: {template.initrd_path or '<default>'}")
     typer.echo(f"selinux: {template.selinux}")
+    typer.echo(f"snapshot_supported: {template.snapshot_supported}")
     if template.apps:
         typer.echo("apps:")
         for app_path in template.apps:
@@ -396,7 +567,41 @@ def _echo_template_summary(template: TemplateSummary) -> None:
         f"{template.template_name}\tcpus={template.cpus}\tselinux={template.selinux}"
         f"\tcommand_mode={template.command_mode.value}"
         f"\tbackend={template.backend.value}"
+        f"\tsnapshots={template.snapshot_supported}"
     )
+
+
+def _echo_snapshot_details(snapshot: SnapshotView) -> None:
+    typer.echo(f"name: {snapshot.snapshot_name}")
+    typer.echo(f"snapshot_id: {snapshot.snapshot_id}")
+    typer.echo(f"state: {snapshot.state.value}")
+    if snapshot.failure_reason:
+        typer.echo(f"failure_reason: {snapshot.failure_reason}")
+    typer.echo(f"owner: {snapshot.owner_id}")
+    typer.echo(
+        f"source_instance: {snapshot.source_instance_name} "
+        f"({snapshot.source_instance_id})"
+    )
+    typer.echo(f"template: {snapshot.template_name}")
+    typer.echo(f"backend: {snapshot.backend.value}")
+    typer.echo(f"instance_num: {snapshot.instance_num}")
+    typer.echo(f"size: {_format_size(snapshot.size_bytes)}")
+    typer.echo(f"created: {_format_timestamp(snapshot.created_at)}")
+
+
+def _format_timestamp(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _format_size(size_bytes: int | None) -> str:
+    if size_bytes is None:
+        return "-"
+    size = float(size_bytes)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024 or unit == "GiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    raise AssertionError("unreachable")
 
 
 def _echo_log_chunk(log_chunk: str) -> None:

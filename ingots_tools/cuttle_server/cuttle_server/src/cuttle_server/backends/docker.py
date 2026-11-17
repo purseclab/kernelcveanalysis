@@ -40,6 +40,7 @@ INSTANCE_ID_LABEL = "cuttle_server.instance_id"
 OWNER_ID_LABEL = "cuttle_server.owner_id"
 TEMPLATE_LABEL = "cuttle_server.template"
 BACKEND_LABEL = "cuttle_server.backend"
+SNAPSHOTS_UNSUPPORTED_MESSAGE = "snapshots are not supported by the docker backend"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,8 +81,12 @@ class DockerCuttlefishBackend:
             self._client = docker.from_env()
         return self._client
 
-    def build_start_command(self, record: InstanceRecord) -> list[str]:
+    def build_start_command(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> list[str]:
         config = record.config
+        if snapshot_dir is not None or config.snapshot_compatible:
+            raise RuntimeError(SNAPSHOTS_UNSUPPORTED_MESSAGE)
         # The runtime root is mounted at its host path, so host paths are
         # valid inside the container too.
         if config.command_mode == CvdCommandMode.LEGACY:
@@ -119,7 +124,17 @@ class DockerCuttlefishBackend:
     def _vsock_guest_cid(record: InstanceRecord) -> int:
         return DOCKER_VSOCK_CID_BASE + record.instance_num - 1
 
-    def start_instance(self, record: InstanceRecord) -> LaunchResult:
+    def take_snapshot(self, record: InstanceRecord, snapshot_dir: Path) -> None:
+        raise RuntimeError(SNAPSHOTS_UNSUPPORTED_MESSAGE)
+
+    def host_tools_fingerprint(self, record: InstanceRecord) -> str:
+        raise RuntimeError(SNAPSHOTS_UNSUPPORTED_MESSAGE)
+
+    def start_instance(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> LaunchResult:
+        if snapshot_dir is not None:
+            raise RuntimeError(SNAPSHOTS_UNSUPPORTED_MESSAGE)
         image = record.config.docker_image
         if image is None:
             raise RuntimeError("docker-backed instance does not define docker_image")

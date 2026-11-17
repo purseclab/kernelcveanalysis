@@ -1,0 +1,43 @@
+diff --git a/devices/src/irqchip/kvm/aarch64.rs b/devices/src/irqchip/kvm/aarch64.rs
+index fa0de347b..38861f230 100644
+--- a/devices/src/irqchip/kvm/aarch64.rs
++++ b/devices/src/irqchip/kvm/aarch64.rs
+@@ -506,9 +506,27 @@ fn set_cpu_vgic_regs(
+     Ok(())
+ }
+ 
++/// Offsets (within the distributor frame, or the redistributor SGI frame) of the
++/// "clear" register banks: GIC*_ICENABLER, GIC*_ICPENDR and GIC*_ICACTIVER.
++/// Reading them returns the same state as the matching "set" bank, but KVM's
++/// userspace write handlers treat them as write-1-to-clear. Restoring every offset
++/// in order would therefore disable/unpend/deactivate everything that the preceding
++/// ISENABLER/ISPENDR/ISACTIVER writes just restored.
++fn is_gic_clear_reg(frame_offset: u32) -> bool {
++    matches!(frame_offset, 0x180..=0x1ff | 0x280..=0x2ff | 0x380..=0x3ff)
++}
++
++const GICR_SGI_FRAME_OFFSET: u32 = 0x10000;
++
+ fn set_redist_regs(vgic: &SafeDescriptor, mpidr: u64, data: &[u32]) -> anyhow::Result<()> {
+     let mut offset = 0;
+     for val in data.iter() {
++        if offset >= GICR_SGI_FRAME_OFFSET as u64
++            && is_gic_clear_reg((offset - GICR_SGI_FRAME_OFFSET as u64) as u32)
++        {
++            offset += 4;
++            continue;
++        }
+         // SAFETY:
+         // Safe because we are specifying REDIST REGS, which is 32 bits.
+         unsafe {
+@@ -523,6 +541,10 @@ fn set_redist_regs(vgic: &SafeDescriptor, mpidr: u64, data: &[u32]) -> anyhow::R
+ fn set_dist_regs(vgic: &SafeDescriptor, data: &[u32]) -> anyhow::Result<()> {
+     let mut offset = 0;
+     for val in data.iter() {
++        if is_gic_clear_reg(offset as u32) {
++            offset += 4;
++            continue;
++        }
+         // SAFETY:
+         // Safe because we are specifying DIST REGS, which is 32 bits.
+         unsafe { set_kvm_device_attr_u32(vgic, KVM_DEV_ARM_VGIC_GRP_DIST_REGS, offset, val)? };

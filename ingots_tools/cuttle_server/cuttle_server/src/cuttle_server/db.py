@@ -5,7 +5,7 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from .models import ACTIVE_STATES, InstanceRecord
+from .models import ACTIVE_STATES, InstanceRecord, SnapshotRecord
 
 
 class InstanceDb:
@@ -51,6 +51,30 @@ class InstanceDb:
 
                 CREATE INDEX IF NOT EXISTS idx_instances_instance_num
                     ON instances(instance_num);
+
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    snapshot_id TEXT PRIMARY KEY,
+                    snapshot_name TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    source_instance_id TEXT NOT NULL,
+                    source_instance_name TEXT NOT NULL,
+                    template_name TEXT NOT NULL,
+                    backend TEXT NOT NULL,
+                    instance_num INTEGER NOT NULL,
+                    runtime_dir TEXT NOT NULL,
+                    snapshot_dir TEXT NOT NULL,
+                    host_tools_fingerprint TEXT NOT NULL,
+                    size_bytes INTEGER,
+                    created_at TEXT NOT NULL,
+                    failure_reason TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_snapshots_owner
+                    ON snapshots(owner_id);
+
+                CREATE INDEX IF NOT EXISTS idx_snapshots_source_instance
+                    ON snapshots(source_instance_id);
                 """
             )
             self._migrate_legacy_unique_instance_num()
@@ -205,6 +229,127 @@ class InstanceDb:
                 tuple(ACTIVE_STATES),
             ).fetchall()
         return {int(row["instance_num"]) for row in rows}
+
+    def upsert_snapshot(self, record: SnapshotRecord) -> None:
+        with self._lock:
+            connection = self._require_connection()
+            connection.execute(
+                """
+                INSERT INTO snapshots (
+                    snapshot_id,
+                    snapshot_name,
+                    owner_id,
+                    state,
+                    source_instance_id,
+                    source_instance_name,
+                    template_name,
+                    backend,
+                    instance_num,
+                    runtime_dir,
+                    snapshot_dir,
+                    host_tools_fingerprint,
+                    size_bytes,
+                    created_at,
+                    failure_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(snapshot_id) DO UPDATE SET
+                    snapshot_name = excluded.snapshot_name,
+                    owner_id = excluded.owner_id,
+                    state = excluded.state,
+                    source_instance_id = excluded.source_instance_id,
+                    source_instance_name = excluded.source_instance_name,
+                    template_name = excluded.template_name,
+                    backend = excluded.backend,
+                    instance_num = excluded.instance_num,
+                    runtime_dir = excluded.runtime_dir,
+                    snapshot_dir = excluded.snapshot_dir,
+                    host_tools_fingerprint = excluded.host_tools_fingerprint,
+                    size_bytes = excluded.size_bytes,
+                    created_at = excluded.created_at,
+                    failure_reason = excluded.failure_reason
+                """,
+                (
+                    record.snapshot_id,
+                    record.snapshot_name,
+                    record.owner_id,
+                    record.state.value,
+                    record.source_instance_id,
+                    record.source_instance_name,
+                    record.template_name,
+                    record.backend.value,
+                    record.instance_num,
+                    str(record.runtime_dir),
+                    str(record.snapshot_dir),
+                    record.host_tools_fingerprint,
+                    record.size_bytes,
+                    record.created_at.isoformat(),
+                    record.failure_reason,
+                ),
+            )
+            connection.commit()
+
+    def get_snapshot(self, snapshot_id: str) -> SnapshotRecord | None:
+        with self._lock:
+            connection = self._require_connection()
+            row = connection.execute(
+                "SELECT * FROM snapshots WHERE snapshot_id = ?",
+                (snapshot_id,),
+            ).fetchone()
+        return self._row_to_snapshot(row) if row else None
+
+    def list_snapshots(self, owner_id: str | None = None) -> list[SnapshotRecord]:
+        with self._lock:
+            connection = self._require_connection()
+            if owner_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM snapshots ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM snapshots
+                    WHERE owner_id = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (owner_id,),
+                ).fetchall()
+        return [self._row_to_snapshot(row) for row in rows]
+
+    def list_snapshots_by_name(
+        self,
+        snapshot_name: str,
+        owner_id: str | None = None,
+    ) -> list[SnapshotRecord]:
+        with self._lock:
+            connection = self._require_connection()
+            if owner_id is None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM snapshots
+                    WHERE snapshot_name = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (snapshot_name,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM snapshots
+                    WHERE owner_id = ? AND snapshot_name = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (owner_id, snapshot_name),
+                ).fetchall()
+        return [self._row_to_snapshot(row) for row in rows]
+
+    def delete_snapshot(self, snapshot_id: str) -> None:
+        with self._lock:
+            connection = self._require_connection()
+            connection.execute(
+                "DELETE FROM snapshots WHERE snapshot_id = ?",
+                (snapshot_id,),
+            )
+            connection.commit()
 
     def _require_connection(self) -> sqlite3.Connection:
         if self._connection is None:
@@ -399,6 +544,27 @@ class InstanceDb:
             connection.execute(
                 "ALTER TABLE instances ADD COLUMN backend_runtime_id TEXT"
             )
+
+    def _row_to_snapshot(self, row: sqlite3.Row) -> SnapshotRecord:
+        return SnapshotRecord.model_validate(
+            {
+                "snapshot_id": row["snapshot_id"],
+                "snapshot_name": row["snapshot_name"],
+                "owner_id": row["owner_id"],
+                "state": row["state"],
+                "source_instance_id": row["source_instance_id"],
+                "source_instance_name": row["source_instance_name"],
+                "template_name": row["template_name"],
+                "backend": row["backend"],
+                "instance_num": row["instance_num"],
+                "runtime_dir": row["runtime_dir"],
+                "snapshot_dir": row["snapshot_dir"],
+                "host_tools_fingerprint": row["host_tools_fingerprint"],
+                "size_bytes": row["size_bytes"],
+                "created_at": row["created_at"],
+                "failure_reason": row["failure_reason"],
+            }
+        )
 
     def _row_to_record(self, row: sqlite3.Row) -> InstanceRecord:
         return InstanceRecord.model_validate(

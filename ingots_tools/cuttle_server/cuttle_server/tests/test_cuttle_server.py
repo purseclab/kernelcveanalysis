@@ -1,5 +1,6 @@
 import asyncio
 import json
+import platform
 import sqlite3
 import subprocess
 import tempfile
@@ -11,10 +12,13 @@ from unittest.mock import Mock, patch
 
 from cuttle_types import (
     CreateInstanceRequest,
+    CreateSnapshotRequest,
     CuttlefishBackendKind,
     CvdCommandMode,
     InstanceState,
     RenewLeaseRequest,
+    RestoreSnapshotRequest,
+    SnapshotState,
 )
 from cuttle_server.backends import (
     BackendLogs,
@@ -23,16 +27,19 @@ from cuttle_server.backends import (
     LaunchResult,
 )
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from cuttle_server.api import (
     build_request_identity,
+    create_app,
     reconcile_expired_instances_periodically,
     validate_authorization_header,
     validate_user_id_header,
 )
 from cuttle_server.config import (
     ConfigError,
+    CuttlefishSettings,
     InstanceTemplate,
     load_settings,
 )
@@ -43,6 +50,7 @@ from cuttle_server.server_manager import (
     AuthorizationError,
     CuttlefishServerManager,
     InstanceError,
+    NotFoundError,
 )
 
 
@@ -203,6 +211,91 @@ class ConfigLoadingTests(unittest.TestCase):
         template = settings.templates["phone"]
         self.assertEqual(template.command_mode, CvdCommandMode.LEGACY)
         self.assertEqual(template.cvd_binary, install_dir.resolve() / "bin" / "cvd")
+
+    def _write_snapshot_config(
+        self,
+        root: Path,
+        *,
+        template_extra: str,
+        main_extra: str = "",
+        snapshot_util: bool = True,
+    ) -> Path:
+        install_dir = root / "cf"
+        bin_dir = install_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "launch_cvd").write_text("")
+        (bin_dir / "stop_cvd").write_text("")
+        if snapshot_util:
+            (bin_dir / "snapshot_util_cvd").write_text("")
+        (root / "templates").mkdir()
+        (root / "cuttle_server.toml").write_text(
+            'auth_token = "secret-token"\n'
+            'admin_user_id = "admin"\n'
+            'database_path = "data/cuttlefish.db"\n'
+            f"{main_extra}"
+        )
+        (root / "templates" / "default.toml").write_text(
+            'name = "phone"\n'
+            f'runtime_root = "{install_dir}"\n'
+            "cpus = 4\n"
+            "selinux = false\n"
+            f"{template_extra}"
+        )
+        return root
+
+    def test_load_settings_reads_snapshot_support_and_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._write_snapshot_config(
+                Path(tmp),
+                template_extra='command_mode = "legacy"\nsnapshot_supported = true\n',
+                main_extra='snapshot_root = "/srv/snapshots"\n',
+            )
+            settings = load_settings(root)
+
+        self.assertTrue(settings.templates["phone"].snapshot_supported)
+        self.assertEqual(settings.snapshot_root, Path("/srv/snapshots"))
+
+    def test_load_settings_defaults_to_no_snapshots_and_standard_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._write_snapshot_config(
+                Path(tmp), template_extra='command_mode = "legacy"\n'
+            )
+            settings = load_settings(root)
+
+        self.assertFalse(settings.templates["phone"].snapshot_supported)
+        self.assertEqual(settings.snapshot_root, Path("/var/lib/cuttlefish_snapshots"))
+
+    def test_load_settings_rejects_snapshot_support_without_legacy_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._write_snapshot_config(
+                Path(tmp), template_extra="snapshot_supported = true\n"
+            )
+            (root / "cf" / "bin" / "cvd").write_text("")
+            with self.assertRaisesRegex(ConfigError, 'command_mode = "legacy"'):
+                load_settings(root)
+
+    def test_load_settings_rejects_snapshot_support_for_docker_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._write_snapshot_config(
+                Path(tmp),
+                template_extra=(
+                    'command_mode = "legacy"\nbackend = "docker"\n'
+                    'docker_image = "cuttlefish-host:latest"\n'
+                    "snapshot_supported = true\n"
+                ),
+            )
+            with self.assertRaisesRegex(ConfigError, "only implemented for the host"):
+                load_settings(root)
+
+    def test_load_settings_rejects_snapshot_support_without_snapshot_util(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._write_snapshot_config(
+                Path(tmp),
+                template_extra='command_mode = "legacy"\nsnapshot_supported = true\n',
+                snapshot_util=False,
+            )
+            with self.assertRaisesRegex(ConfigError, "snapshot_util_cvd"):
+                load_settings(root)
 
     def test_load_settings_validates_default_cvd_binary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -877,18 +970,43 @@ class FakeBackend:
         self.stop_calls: list[str] = []
         self.start_error: RuntimeError | None = None
         self.stop_error: RuntimeError | None = None
+        # Snapshot directory passed to each start (None for a normal start).
+        self.start_snapshot_dirs: list[Path | None] = []
+        self.snapshot_calls: list[tuple[str, Path]] = []
+        self.snapshot_error: RuntimeError | None = None
+        self.fingerprint = "fingerprint-1"
 
-    def build_start_command(self, record: InstanceRecord) -> list[str]:
-        return ["launch", record.instance_id]
+    def build_start_command(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> list[str]:
+        command = ["launch", record.instance_id]
+        if record.config.snapshot_compatible:
+            command.append("--snapshots")
+        if snapshot_dir is not None:
+            command.append(f"--snapshot_path={snapshot_dir}")
+        return command
 
-    def start_instance(self, record: InstanceRecord) -> LaunchResult:
+    def take_snapshot(self, record: InstanceRecord, snapshot_dir: Path) -> None:
+        self.snapshot_calls.append((record.instance_id, snapshot_dir))
+        if self.snapshot_error is not None:
+            raise self.snapshot_error
+        snapshot_dir.mkdir(parents=True)
+        (snapshot_dir / "memory").write_bytes(b"x" * 4096)
+
+    def host_tools_fingerprint(self, record: InstanceRecord) -> str:
+        return self.fingerprint
+
+    def start_instance(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> LaunchResult:
         self.start_calls.append(record.instance_id)
+        self.start_snapshot_dirs.append(snapshot_dir)
         if self.start_error is not None:
             raise self.start_error
         record.runtime_dir.mkdir(parents=True, exist_ok=True)
         (record.runtime_dir / "cvd-start.log").write_text("started\n")
         return LaunchResult(
-            launch_command=self.build_start_command(record),
+            launch_command=self.build_start_command(record, snapshot_dir=snapshot_dir),
             adb_port=6520 + record.instance_num - 1,
             adb_serial=None,
             webrtc_port=None,
@@ -934,7 +1052,9 @@ class FailingAppLoader:
         raise RuntimeError("install failed")
 
 
-class ServerManagerTests(unittest.TestCase):
+class ManagerFixture:
+    """Builds a server manager over a fake host backend and temp directories."""
+
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
@@ -949,6 +1069,7 @@ class ServerManagerTests(unittest.TestCase):
                 "server_port": 8000,
                 "database_path": self.root / "db.sqlite",
                 "instance_runtime_root": self.root / "instances",
+                "snapshot_root": self.root / "snapshots",
                 "instance_timeout_sec": 60,
                 "cvd_start_timeout_sec": 120,
                 "reconcile_interval_sec": 30,
@@ -966,7 +1087,19 @@ class ServerManagerTests(unittest.TestCase):
                         initrd_path=Path("/initrd"),
                         selinux=True,
                         apps=(Path("/app-one.apk"), Path("/app-two.apk")),
-                    )
+                    ),
+                    "snap": InstanceTemplate(
+                        name="snap",
+                        runtime_root=Path("/cf-legacy"),
+                        command_mode=CvdCommandMode.LEGACY,
+                        cvd_binary=Path("/cf-legacy/bin/cvd"),
+                        cpus=2,
+                        kernel_path=None,
+                        initrd_path=None,
+                        selinux=True,
+                        apps=(Path("/app-one.apk"),),
+                        snapshot_supported=True,
+                    ),
                 },
             },
         )()
@@ -982,6 +1115,8 @@ class ServerManagerTests(unittest.TestCase):
         self.db.close()
         self.tempdir.cleanup()
 
+
+class ServerManagerTests(ManagerFixture, unittest.TestCase):
     def test_unnamed_instances_fall_back_to_instance_id(self):
         created = self.manager.create_instance(
             "alice",
@@ -1454,3 +1589,725 @@ class ServerManagerTests(unittest.TestCase):
         )
 
         self.assertIsNone(renewed.expires_at)
+
+
+class HostSnapshotBackendTests(unittest.TestCase):
+    def _record(self, runtime_root: Path, runtime_dir: Path, *, snapshots: bool):
+        config = ResolvedLaunchConfig(
+            template_name="phone",
+            cpus=4,
+            selinux=True,
+            runtime_root=runtime_root,
+            kernel_path=None,
+            initrd_path=None,
+            apps=[],
+            command_mode=CvdCommandMode.LEGACY,
+            cvd_binary=runtime_root / "bin" / "cvd",
+            snapshot_compatible=snapshots,
+        )
+        record = type("Record", (), {})()
+        record.instance_num = 3
+        record.instance_id = "inst-1"
+        record.runtime_dir = runtime_dir
+        record.config = config
+        return record
+
+    def test_snapshot_instances_launch_with_required_flags(self):
+        record = self._record(Path("/cf"), Path("/rt"), snapshots=True)
+
+        command = HostCuttlefishBackend().build_start_command(record)
+
+        self.assertEqual(
+            command[-3:],
+            [
+                "--snapshot_compatible",
+                "--gpu_mode=guest_swiftshader",
+                "--vhost_user_vsock=false",
+            ],
+        )
+
+    def test_restore_adds_snapshot_path_to_the_same_flags(self):
+        record = self._record(Path("/cf"), Path("/rt"), snapshots=True)
+
+        command = HostCuttlefishBackend().build_start_command(
+            record, snapshot_dir=Path("/snapshots/abc")
+        )
+
+        self.assertIn("--snapshot_compatible", command)
+        self.assertEqual(command[-1], "--snapshot_path=/snapshots/abc")
+
+    def test_plain_instances_get_no_snapshot_flags(self):
+        record = self._record(Path("/cf"), Path("/rt"), snapshots=False)
+
+        command = HostCuttlefishBackend().build_start_command(record)
+
+        self.assertFalse([arg for arg in command if "snapshot" in arg])
+        self.assertFalse([arg for arg in command if "vhost_user_vsock" in arg])
+
+    def test_restore_requires_a_snapshot_enabled_instance(self):
+        record = self._record(Path("/cf"), Path("/rt"), snapshots=False)
+
+        with self.assertRaisesRegex(RuntimeError, "snapshot support"):
+            HostCuttlefishBackend().build_start_command(
+                record, snapshot_dir=Path("/snapshots/abc")
+            )
+
+    def test_take_snapshot_runs_snapshot_util_in_the_instance_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp) / "runtime"
+            record = self._record(Path("/cf"), runtime_dir, snapshots=True)
+
+            with patch("cuttle_server.backends.host.subprocess.run") as run:
+                HostCuttlefishBackend().take_snapshot(record, Path("/snapshots/abc"))
+
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                "/cf/bin/snapshot_util_cvd",
+                "--subcmd=snapshot_take",
+                "--snapshot_path=/snapshots/abc",
+                "--auto_suspend",
+            ],
+        )
+        self.assertEqual(run.call_args.kwargs["env"]["HOME"], str(runtime_dir))
+        self.assertEqual(run.call_args.kwargs["cwd"], runtime_dir)
+
+    def test_failed_snapshot_tries_to_resume_the_instance_and_reports_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = self._record(Path("/cf"), Path(tmp) / "runtime", snapshots=True)
+            calls: list[list[str]] = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                if "--subcmd=snapshot_take" in command:
+                    raise subprocess.CalledProcessError(1, command)
+
+            with patch("cuttle_server.backends.host.subprocess.run", fake_run):
+                with self.assertRaisesRegex(RuntimeError, "snapshot command failed"):
+                    HostCuttlefishBackend().take_snapshot(
+                        record, Path("/snapshots/abc")
+                    )
+
+        self.assertEqual(
+            calls[-1], ["/cf/bin/snapshot_util_cvd", "--subcmd=resume"]
+        )
+
+    def test_fingerprint_changes_when_crosvm_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp) / "cf"
+            native = runtime_root / "bin" / f"{platform.machine()}-linux-musl"
+            native.mkdir(parents=True)
+            for name in ("run_cvd", "assemble_cvd", "snapshot_util_cvd"):
+                (runtime_root / "bin" / name).write_bytes(name.encode())
+            (native / "crosvm").write_bytes(b"crosvm-1")
+            record = self._record(runtime_root, Path(tmp) / "rt", snapshots=True)
+            backend = HostCuttlefishBackend()
+
+            before = backend.host_tools_fingerprint(record)
+            self.assertEqual(before, backend.host_tools_fingerprint(record))
+            (native / "crosvm").write_bytes(b"crosvm-2")
+            after = backend.host_tools_fingerprint(record)
+
+        self.assertNotEqual(before, after)
+
+
+class SnapshotManagerTests(ManagerFixture, unittest.TestCase):
+    def _start(
+        self,
+        user: str = "alice",
+        name: str | None = "demo",
+        *,
+        snapshots: bool = True,
+        template: str = "snap",
+    ):
+        return self.manager.create_instance(
+            user,
+            CreateInstanceRequest(
+                template_name=template,
+                instance_name=name,
+                overrides={"snapshots_enabled": snapshots},
+            ),
+        ).instance
+
+    def _snapshot(
+        self,
+        instance: str = "demo",
+        name: str = "snap1",
+        *,
+        user: str = "alice",
+        is_admin: bool = False,
+    ):
+        return self.manager.create_snapshot(
+            user,
+            is_admin,
+            instance,
+            CreateSnapshotRequest(snapshot_name=name),
+        )
+
+    def _restore(
+        self,
+        instance: str = "demo",
+        name: str = "snap1",
+        *,
+        user: str = "alice",
+        is_admin: bool = False,
+    ):
+        return self.manager.restore_snapshot(
+            user,
+            is_admin,
+            instance,
+            RestoreSnapshotRequest(snapshot_name=name),
+        )
+
+    # -- launching ---------------------------------------------------
+
+    def test_snapshots_require_a_template_that_supports_them(self):
+        with self.assertRaisesRegex(InstanceError, "does not support snapshots"):
+            self._start(template="phone")
+
+    def test_snapshot_launch_is_recorded_on_the_instance(self):
+        enabled = self._start("alice", "on", snapshots=True)
+        disabled = self._start("alice", "off", snapshots=False)
+
+        self.assertTrue(enabled.snapshots_enabled)
+        self.assertIn("--snapshots", enabled.launch_command)
+        self.assertFalse(disabled.snapshots_enabled)
+        self.assertNotIn("--snapshots", disabled.launch_command)
+
+    # -- creating ----------------------------------------------------
+
+    def test_create_snapshot_records_source_and_stores_data_under_snapshot_root(self):
+        instance = self._start()
+
+        snapshot = self._snapshot()
+
+        self.assertEqual(snapshot.state, SnapshotState.READY)
+        self.assertEqual(snapshot.snapshot_name, "snap1")
+        self.assertEqual(snapshot.owner_id, "alice")
+        self.assertEqual(snapshot.source_instance_id, instance.instance_id)
+        self.assertEqual(snapshot.source_instance_name, "demo")
+        self.assertEqual(snapshot.template_name, "snap")
+        self.assertEqual(snapshot.instance_num, instance.instance_num)
+        self.assertGreater(snapshot.size_bytes or 0, 0)
+        record = self.db.get_snapshot(snapshot.snapshot_id)
+        assert record is not None
+        self.assertTrue(record.snapshot_dir.is_relative_to(self.root / "snapshots"))
+        self.assertTrue(record.snapshot_dir.is_dir())
+        self.assertEqual(record.runtime_dir, instance.runtime_dir)
+        self.assertEqual(record.host_tools_fingerprint, "fingerprint-1")
+        self.assertEqual(
+            self.backend.snapshot_calls,
+            [(instance.instance_id, record.snapshot_dir)],
+        )
+
+    def test_create_snapshot_requires_an_active_snapshot_enabled_instance(self):
+        self._start("alice", "plain", snapshots=False)
+        self._start("alice", "on")
+
+        with self.assertRaisesRegex(InstanceError, "--snapshots"):
+            self._snapshot("plain")
+        self.manager.stop_instance_by_name("alice", False, "on")
+        with self.assertRaisesRegex(InstanceError, "is not active"):
+            self._snapshot("on")
+        self.assertEqual(self.backend.snapshot_calls, [])
+
+    def test_snapshot_names_are_unique_per_owner(self):
+        self._start("alice", "demo")
+        self._start("bob", "demo")
+        self._snapshot("demo", "snap1", user="alice")
+
+        with self.assertRaisesRegex(InstanceError, "already in use"):
+            self._snapshot("demo", "snap1", user="alice")
+        bobs = self._snapshot("demo", "snap1", user="bob")
+
+        self.assertEqual(bobs.owner_id, "bob")
+
+    def test_failed_snapshot_is_recorded_and_its_name_can_be_reused(self):
+        self._start()
+        self.backend.snapshot_error = RuntimeError("crosvm exploded")
+
+        with self.assertRaisesRegex(InstanceError, "crosvm exploded"):
+            self._snapshot()
+
+        failed = self.manager.list_snapshots("alice", False).snapshots
+        self.assertEqual([s.state for s in failed], [SnapshotState.FAILED])
+        self.assertIn("crosvm exploded", failed[0].failure_reason or "")
+        self.assertEqual(list((self.root / "snapshots").glob("*")), [])
+
+        self.backend.snapshot_error = None
+        retry = self._snapshot()
+
+        self.assertEqual(retry.state, SnapshotState.READY)
+        remaining = self.manager.list_snapshots("alice", False).snapshots
+        self.assertEqual([s.snapshot_id for s in remaining], [retry.snapshot_id])
+
+    def test_admin_snapshot_of_another_users_instance_belongs_to_that_user(self):
+        self._start("alice", "demo")
+
+        snapshot = self._snapshot("demo", "snap1", user="admin", is_admin=True)
+
+        self.assertEqual(snapshot.owner_id, "alice")
+        visible = self.manager.list_snapshots("alice", False).snapshots
+        self.assertEqual([s.snapshot_id for s in visible], [snapshot.snapshot_id])
+
+    # -- listing / visibility / deleting -----------------------------
+
+    def test_list_scopes_to_the_user_and_admin_sees_everything(self):
+        self._start("alice", "a")
+        self._start("bob", "b")
+        mine = self._snapshot("a", "mine", user="alice")
+        theirs = self._snapshot("b", "theirs", user="bob")
+
+        alice = self.manager.list_snapshots("alice", False).snapshots
+        admin = self.manager.list_snapshots("admin", True).snapshots
+
+        self.assertEqual([s.snapshot_id for s in alice], [mine.snapshot_id])
+        self.assertEqual(
+            {s.snapshot_id for s in admin}, {mine.snapshot_id, theirs.snapshot_id}
+        )
+
+    def test_list_filters_by_source_instance_and_template(self):
+        a = self._start("alice", "a")
+        self._start("alice", "b")
+        first = self._snapshot("a", "one")
+        second = self._snapshot("b", "two")
+
+        by_name = self.manager.list_snapshots("alice", False, instance="a").snapshots
+        by_id = self.manager.list_snapshots(
+            "alice", False, instance=a.instance_id
+        ).snapshots
+        by_template = self.manager.list_snapshots(
+            "alice", False, template_name="snap"
+        ).snapshots
+        other_template = self.manager.list_snapshots(
+            "alice", False, template_name="phone"
+        ).snapshots
+
+        self.assertEqual([s.snapshot_id for s in by_name], [first.snapshot_id])
+        self.assertEqual([s.snapshot_id for s in by_id], [first.snapshot_id])
+        self.assertEqual(
+            {s.snapshot_id for s in by_template},
+            {first.snapshot_id, second.snapshot_id},
+        )
+        self.assertEqual(other_template, [])
+
+    def test_get_enforces_visibility_by_name_and_by_id(self):
+        self._start("alice", "demo")
+        snapshot = self._snapshot()
+
+        with self.assertRaises(NotFoundError):
+            self.manager.get_snapshot_by_name("bob", False, "snap1")
+        with self.assertRaises(AuthorizationError):
+            self.manager.get_snapshot_by_name("bob", False, snapshot.snapshot_id)
+        shown = self.manager.get_snapshot_by_name("admin", True, "snap1")
+
+        self.assertEqual(shown.snapshot_id, snapshot.snapshot_id)
+
+    def test_admin_lookup_of_a_name_shared_by_users_is_ambiguous(self):
+        self._start("alice", "demo")
+        self._start("bob", "demo")
+        self._snapshot("demo", "snap1", user="alice")
+        self._snapshot("demo", "snap1", user="bob")
+
+        with self.assertRaisesRegex(InstanceError, "ambiguous"):
+            self.manager.get_snapshot_by_name("admin", True, "snap1")
+
+    def test_delete_removes_data_and_record(self):
+        self._start()
+        snapshot = self._snapshot()
+        record = self.db.get_snapshot(snapshot.snapshot_id)
+        assert record is not None
+
+        self.manager.delete_snapshot_by_name("alice", False, "snap1")
+
+        self.assertFalse(record.snapshot_dir.exists())
+        self.assertIsNone(self.db.get_snapshot(snapshot.snapshot_id))
+        with self.assertRaises(NotFoundError):
+            self.manager.get_snapshot_by_name("alice", False, "snap1")
+
+    def test_delete_is_refused_while_a_restore_is_reading_the_snapshot(self):
+        self._start()
+        snapshot = self._snapshot()
+        self.manager._restoring_snapshot_ids.add(snapshot.snapshot_id)
+
+        with self.assertRaisesRegex(InstanceError, "being restored"):
+            self.manager.delete_snapshot_by_name("alice", False, "snap1")
+
+        self.assertIsNotNone(self.db.get_snapshot(snapshot.snapshot_id))
+
+    def test_snapshot_data_outside_the_snapshot_root_is_never_deleted(self):
+        self._start()
+        snapshot = self._snapshot()
+        record = self.db.get_snapshot(snapshot.snapshot_id)
+        assert record is not None
+        precious = self.root / "precious"
+        precious.mkdir()
+        record.snapshot_dir = precious
+        self.db.upsert_snapshot(record)
+
+        with self.assertRaisesRegex(InstanceError, "outside the snapshot root"):
+            self.manager.delete_snapshot_by_name("alice", False, "snap1")
+
+        self.assertTrue(precious.is_dir())
+
+    def test_snapshots_interrupted_by_a_server_restart_are_marked_failed(self):
+        self._start()
+        snapshot = self._snapshot()
+        record = self.db.get_snapshot(snapshot.snapshot_id)
+        assert record is not None
+        record.state = SnapshotState.CREATING
+        self.db.upsert_snapshot(record)
+
+        self.manager.initialize()
+
+        reloaded = self.db.get_snapshot(snapshot.snapshot_id)
+        assert reloaded is not None
+        self.assertEqual(reloaded.state, SnapshotState.FAILED)
+        self.assertIn("server restart", reloaded.failure_reason or "")
+        self.assertFalse(record.snapshot_dir.exists())
+
+    # -- restoring ---------------------------------------------------
+
+    def test_restore_stops_a_running_instance_and_restarts_it_from_the_snapshot(self):
+        created = self._start()
+        snapshot = self._snapshot()
+        record = self.db.get_snapshot(snapshot.snapshot_id)
+        assert record is not None
+        (created.runtime_dir / "scratch").write_text("state after snapshot")
+
+        restored = self._restore()
+
+        self.assertEqual(restored.state, InstanceState.ACTIVE)
+        self.assertEqual(restored.instance_id, created.instance_id)
+        self.assertEqual(restored.instance_num, created.instance_num)
+        self.assertEqual(restored.runtime_dir, created.runtime_dir)
+        self.assertEqual(restored.adb_port, created.adb_port)
+        self.assertTrue(restored.snapshots_enabled)
+        self.assertIn(f"--snapshot_path={record.snapshot_dir}", restored.launch_command)
+        self.assertEqual(self.backend.stop_calls, [created.instance_id])
+        self.assertEqual(self.backend.start_snapshot_dirs, [None, record.snapshot_dir])
+        self.assertFalse((created.runtime_dir / "scratch").exists())
+        # The restored guest already has its apps; they are not installed again.
+        self.assertEqual(self.app_loader.loaded_instance_ids, [created.instance_id])
+        # Restoring leaves the snapshot intact and releases it.
+        self.assertTrue(record.snapshot_dir.is_dir())
+        self.assertEqual(self.manager._restoring_snapshot_ids, set())
+
+    def test_restore_resets_the_lease(self):
+        self._start()
+        self._snapshot()
+
+        restored = self._restore()
+
+        assert restored.expires_at is not None
+        self.assertGreater(restored.expires_at, utc_now() + timedelta(seconds=30))
+
+    def test_restore_revives_a_stopped_instance_without_stopping_it_again(self):
+        created = self._start()
+        self._snapshot()
+        self.manager.stop_instance_by_name("alice", False, "demo")
+        self.assertFalse(created.runtime_dir.exists())
+
+        restored = self._restore()
+
+        self.assertEqual(restored.state, InstanceState.ACTIVE)
+        self.assertEqual(restored.instance_name, "demo")
+        self.assertEqual(self.backend.stop_calls, [created.instance_id])
+        self.assertEqual(len(self.backend.start_calls), 2)
+
+    def test_restore_revives_an_expired_instance(self):
+        created = self._start()
+        self._snapshot()
+        record = self.db.get(created.instance_id)
+        assert record is not None
+        record.expires_at = utc_now() - timedelta(seconds=1)
+        self.db.upsert(record)
+        self.manager.reconcile_expired_instances()
+        expired = self.db.get(created.instance_id)
+        assert expired is not None
+        self.assertEqual(expired.state, InstanceState.EXPIRED)
+
+        restored = self._restore()
+
+        self.assertEqual(restored.state, InstanceState.ACTIVE)
+
+    def test_restore_into_a_stopped_instance_fails_if_its_slot_was_taken(self):
+        created = self._start()
+        self._snapshot()
+        self.manager.stop_instance_by_name("alice", False, "demo")
+        newcomer = self._start("bob", "other")
+        self.assertEqual(newcomer.instance_num, created.instance_num)
+
+        with self.assertRaisesRegex(InstanceError, "instance number"):
+            self._restore()
+
+        stopped = self.db.get(created.instance_id)
+        assert stopped is not None
+        self.assertEqual(stopped.state, InstanceState.STOPPED)
+
+    def test_restore_into_a_different_instance_is_rejected(self):
+        self._start("alice", "first")
+        self._start("alice", "second")
+        self._snapshot("first", "snap1")
+
+        with self.assertRaisesRegex(InstanceError, "instance number and runtime"):
+            self._restore("second", "snap1")
+
+        self.assertEqual(self.backend.stop_calls, [])
+
+    def test_restore_is_rejected_when_the_host_tools_changed(self):
+        self._start()
+        self._snapshot()
+        self.backend.fingerprint = "fingerprint-2"
+
+        with self.assertRaisesRegex(InstanceError, "host tools changed"):
+            self._restore()
+
+        self.assertEqual(self.backend.stop_calls, [])
+
+    def test_restore_rejects_snapshots_that_are_not_ready(self):
+        self._start()
+        self.backend.snapshot_error = RuntimeError("nope")
+        with self.assertRaises(InstanceError):
+            self._snapshot()
+        self.backend.snapshot_error = None
+
+        with self.assertRaisesRegex(InstanceError, "not ready"):
+            self._restore()
+
+    def test_restore_rejects_instances_that_are_starting(self):
+        created = self._start()
+        self._snapshot()
+        record = self.db.get(created.instance_id)
+        assert record is not None
+        record.state = InstanceState.STARTING
+        self.db.upsert(record)
+
+        with self.assertRaisesRegex(InstanceError, "starting"):
+            self._restore()
+
+    def test_restore_enforces_visibility(self):
+        self._start("alice", "demo")
+        self._snapshot()
+
+        with self.assertRaises(NotFoundError):
+            self._restore(user="bob")
+        restored = self._restore(user="admin", is_admin=True)
+
+        self.assertEqual(restored.state, InstanceState.ACTIVE)
+
+    def test_failed_restore_crashes_the_instance_but_keeps_the_snapshot(self):
+        created = self._start()
+        snapshot = self._snapshot()
+        self.backend.start_error = RuntimeError("restore blew up")
+
+        with self.assertRaisesRegex(InstanceError, "restore blew up"):
+            self._restore()
+
+        crashed = self.db.get(created.instance_id)
+        assert crashed is not None
+        self.assertEqual(crashed.state, InstanceState.CRASHED)
+        self.assertIn("restore blew up", crashed.failure_reason or "")
+        self.assertEqual(self.manager._restoring_snapshot_ids, set())
+        kept = self.db.get_snapshot(snapshot.snapshot_id)
+        assert kept is not None
+        self.assertEqual(kept.state, SnapshotState.READY)
+        self.assertTrue(kept.snapshot_dir.is_dir())
+
+        # The instance can be restored again once the problem is gone.
+        self.backend.start_error = None
+        self.assertEqual(self._restore().state, InstanceState.ACTIVE)
+
+
+class SnapshotApiTests(unittest.TestCase):
+    """Drives the snapshot endpoints through a real FastAPI app."""
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        root = Path(self.tempdir.name)
+        self.backend = FakeBackend()
+        self.settings = CuttlefishSettings(
+            server_host="127.0.0.1",
+            server_port=8000,
+            auth_token="tok",
+            admin_user_id="admin",
+            database_path=root / "db.sqlite",
+            instance_runtime_root=root / "instances",
+            instance_timeout_sec=None,
+            cvd_start_timeout_sec=120,
+            reconcile_interval_sec=3600,
+            base_instance_num=0,
+            max_instances=5,
+            snapshot_root=root / "snapshots",
+            templates={
+                "snap": InstanceTemplate(
+                    name="snap",
+                    runtime_root=Path("/cf-legacy"),
+                    command_mode=CvdCommandMode.LEGACY,
+                    cvd_binary=Path("/cf-legacy/bin/cvd"),
+                    cpus=2,
+                    kernel_path=None,
+                    initrd_path=None,
+                    selinux=True,
+                    apps=(),
+                    snapshot_supported=True,
+                ),
+                "plain": InstanceTemplate(
+                    name="plain",
+                    runtime_root=Path("/cf"),
+                    command_mode=CvdCommandMode.CVD,
+                    cvd_binary=Path("/cf/bin/cvd"),
+                    cpus=2,
+                    kernel_path=None,
+                    initrd_path=None,
+                    selinux=True,
+                    apps=(),
+                ),
+            },
+        )
+        patches = [
+            patch("cuttle_server.api.HostCuttlefishBackend", return_value=self.backend),
+            patch(
+                "cuttle_server.api.DockerCuttlefishBackend",
+                return_value=FakeBackend(CuttlefishBackendKind.DOCKER),
+            ),
+        ]
+        for started in patches:
+            started.start()
+            self.addCleanup(started.stop)
+        self.client = TestClient(create_app(self.settings))
+        self.client.__enter__()
+        self.addCleanup(self.client.__exit__, None, None, None)
+        self.addCleanup(self.tempdir.cleanup)
+
+    @staticmethod
+    def headers(user: str = "alice") -> dict[str, str]:
+        return {"Authorization": "Bearer tok", "X-User-Id": user}
+
+    def _start(self, name: str = "demo", user: str = "alice", template: str = "snap"):
+        return self.client.post(
+            "/v1/instances",
+            headers=self.headers(user),
+            json={
+                "template_name": template,
+                "instance_name": name,
+                "overrides": {"snapshots_enabled": True},
+            },
+        )
+
+    def test_snapshot_lifecycle_over_http(self) -> None:
+        started = self._start()
+        self.assertEqual(started.status_code, 201, started.text)
+        self.assertTrue(started.json()["instance"]["snapshots_enabled"])
+
+        created = self.client.post(
+            "/v1/instances/by-name/demo/snapshots",
+            headers=self.headers(),
+            json={"snapshot_name": "snap1"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        body = created.json()
+        self.assertEqual(body["state"], "ready")
+        self.assertEqual(body["source_instance_name"], "demo")
+
+        listed = self.client.get("/v1/snapshots", headers=self.headers())
+        self.assertEqual([s["snapshot_name"] for s in listed.json()["snapshots"]], ["snap1"])
+        shown = self.client.get("/v1/snapshots/by-name/snap1", headers=self.headers())
+        self.assertEqual(shown.json()["snapshot_id"], body["snapshot_id"])
+
+        restored = self.client.post(
+            "/v1/instances/by-name/demo/restore",
+            headers=self.headers(),
+            json={"snapshot_name": "snap1"},
+        )
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["state"], "active")
+        self.assertIsNotNone(self.backend.start_snapshot_dirs[-1])
+
+        deleted = self.client.delete(
+            "/v1/snapshots/by-name/snap1", headers=self.headers()
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        gone = self.client.get("/v1/snapshots/by-name/snap1", headers=self.headers())
+        self.assertEqual(gone.status_code, 404)
+
+    def test_list_filters_are_query_parameters(self) -> None:
+        self._start("a")
+        self._start("b")
+        for instance, name in (("a", "one"), ("b", "two")):
+            self.client.post(
+                f"/v1/instances/by-name/{instance}/snapshots",
+                headers=self.headers(),
+                json={"snapshot_name": name},
+            )
+
+        by_instance = self.client.get(
+            "/v1/snapshots", params={"instance": "a"}, headers=self.headers()
+        )
+        by_template = self.client.get(
+            "/v1/snapshots", params={"template": "plain"}, headers=self.headers()
+        )
+
+        self.assertEqual(
+            [s["snapshot_name"] for s in by_instance.json()["snapshots"]], ["one"]
+        )
+        self.assertEqual(by_template.json()["snapshots"], [])
+
+    def test_errors_map_to_http_status_codes(self) -> None:
+        self._start()
+        create = "/v1/instances/by-name/demo/snapshots"
+
+        no_token = self.client.get("/v1/snapshots")
+        missing_instance = self.client.post(
+            "/v1/instances/by-name/nope/snapshots",
+            headers=self.headers(),
+            json={"snapshot_name": "snap1"},
+        )
+        other_users_instance = self.client.post(
+            create, headers=self.headers("bob"), json={"snapshot_name": "snap1"}
+        )
+        first = self.client.post(
+            create, headers=self.headers(), json={"snapshot_name": "snap1"}
+        )
+        duplicate = self.client.post(
+            create, headers=self.headers(), json={"snapshot_name": "snap1"}
+        )
+        empty_name = self.client.post(
+            create, headers=self.headers(), json={"snapshot_name": ""}
+        )
+        missing_snapshot = self.client.post(
+            "/v1/instances/by-name/demo/restore",
+            headers=self.headers(),
+            json={"snapshot_name": "nope"},
+        )
+        unsupported = self._start("p", template="plain")
+
+        self.assertEqual(no_token.status_code, 401)
+        self.assertEqual(missing_instance.status_code, 404)
+        self.assertEqual(other_users_instance.status_code, 404)
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn("already in use", duplicate.json()["detail"])
+        self.assertEqual(empty_name.status_code, 422)
+        self.assertEqual(missing_snapshot.status_code, 404)
+        self.assertEqual(unsupported.status_code, 400)
+        self.assertIn("does not support snapshots", unsupported.json()["detail"])
+
+    def test_snapshots_are_private_to_their_owner_but_visible_to_admin(self) -> None:
+        self._start()
+        self.client.post(
+            "/v1/instances/by-name/demo/snapshots",
+            headers=self.headers(),
+            json={"snapshot_name": "snap1"},
+        )
+
+        bob = self.client.get("/v1/snapshots", headers=self.headers("bob"))
+        bob_show = self.client.get(
+            "/v1/snapshots/by-name/snap1", headers=self.headers("bob")
+        )
+        admin = self.client.get("/v1/snapshots", headers=self.headers("admin"))
+
+        self.assertEqual(bob.json()["snapshots"], [])
+        self.assertEqual(bob_show.status_code, 404)
+        self.assertEqual([s["owner_id"] for s in admin.json()["snapshots"]], ["alice"])

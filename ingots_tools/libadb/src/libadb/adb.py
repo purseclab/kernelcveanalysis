@@ -93,12 +93,19 @@ class AdbClient:
     def disconnect_args(self) -> list[str]:
         return ["adb", "disconnect", self.remote_addr]
 
-    def run_adb(self, *args: str, check: bool = True, text: bool = False) -> subprocess.CompletedProcess:
+    def run_adb(
+        self,
+        *args: str,
+        check: bool = True,
+        text: bool = False,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess:
         return subprocess.run(
             self.adb_args(*args),
             check=check,
             capture_output=True,
             text=text,
+            timeout=timeout,
         )
 
     def connect(self) -> subprocess.CompletedProcess:
@@ -153,23 +160,43 @@ class AdbClient:
         root: bool = False,
         check: bool = True,
         text: bool = False,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess:
         remote_command = f"su root sh -c {quote(command)}" if root else command
-        return self.run_adb("shell", remote_command, check=check, text=text)
+        return self.run_adb("shell", remote_command, check=check, text=text, timeout=timeout)
 
-    def shell_bytes(self, command: str, root: bool = False) -> bytes:
-        result = self.run_shell(command, root=root, check=False, text=False)
+    def shell_bytes(
+        self,
+        command: str,
+        root: bool = False,
+        timeout: float | None = None,
+    ) -> bytes:
+        result = self.run_shell(command, root=root, check=False, text=False, timeout=timeout)
         if result.returncode != 0:
             raise AdbCommandError(command, result.stdout or b"", result.stderr or b"")
         return result.stdout or b""
 
-    def shell_text(self, command: str, root: bool = False) -> str:
-        return self.shell_bytes(command, root=root).decode("utf-8", errors="replace")
+    def shell_text(
+        self,
+        command: str,
+        root: bool = False,
+        timeout: float | None = None,
+    ) -> str:
+        return self.shell_bytes(command, root=root, timeout=timeout).decode(
+            "utf-8", errors="replace"
+        )
 
-    def run_adb_command(self, command: str, root: bool = False) -> Optional[str]:
+    def run_adb_command(
+        self,
+        command: str,
+        root: bool = False,
+        timeout: float | None = None,
+    ) -> Optional[str]:
         """Executes an ADB command and returns its output."""
         try:
-            result = self.run_shell(command, root=root, check=True, text=True)
+            result = self.run_shell(
+                command, root=root, check=True, text=True, timeout=timeout
+            )
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
             print(f"Error executing ADB command `{command}`, root={root}: {e.stderr}")

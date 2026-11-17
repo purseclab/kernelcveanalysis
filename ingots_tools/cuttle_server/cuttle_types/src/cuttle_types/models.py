@@ -12,6 +12,9 @@ class LaunchOverrides(BaseModel):
     selinux: bool | None = None
     load_apps: bool | None = None
     unmanaged: bool = False
+    # Launch with the flags Cuttlefish needs to take snapshots. Only allowed for
+    # templates that set `snapshot_supported`.
+    snapshots_enabled: bool = False
 
 
 class CreateInstanceRequest(BaseModel):
@@ -57,6 +60,7 @@ class InstanceView(BaseModel):
     apps: list[Path]
     load_apps: bool
     unmanaged: bool = False
+    snapshots_enabled: bool = False
     command_mode: CvdCommandMode = CvdCommandMode.CVD
     backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
     docker_image: str | None = None
@@ -96,6 +100,7 @@ class TemplateSummary(BaseModel):
     selinux: bool
     command_mode: CvdCommandMode = CvdCommandMode.CVD
     backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
+    snapshot_supported: bool = False
 
 
 class TemplateView(BaseModel):
@@ -109,7 +114,41 @@ class TemplateView(BaseModel):
     command_mode: CvdCommandMode = CvdCommandMode.CVD
     backend: CuttlefishBackendKind = CuttlefishBackendKind.HOST
     docker_image: str | None = None
+    snapshot_supported: bool = False
 
 
 class TemplateListResponse(BaseModel):
     templates: list[TemplateSummary]
+
+
+class SnapshotState(str, Enum):
+    CREATING = "creating"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class CreateSnapshotRequest(BaseModel):
+    snapshot_name: str = Field(min_length=1, max_length=128)
+
+
+class RestoreSnapshotRequest(BaseModel):
+    snapshot_name: str = Field(min_length=1, max_length=128)
+
+
+class SnapshotView(BaseModel):
+    snapshot_id: str
+    snapshot_name: str
+    owner_id: str
+    state: SnapshotState
+    source_instance_id: str
+    source_instance_name: str
+    template_name: str
+    backend: CuttlefishBackendKind
+    instance_num: int
+    size_bytes: int | None
+    created_at: datetime
+    failure_reason: str | None
+
+
+class SnapshotListResponse(BaseModel):
+    snapshots: list[SnapshotView]

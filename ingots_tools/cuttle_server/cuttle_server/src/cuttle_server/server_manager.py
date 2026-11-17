@@ -1,22 +1,29 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import threading
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Mapping
 from uuid import UUID
 
 from cuttle_types import (
     CreateInstanceRequest,
     CreateInstanceResponse,
+    CreateSnapshotRequest,
     CuttlefishBackendKind,
     InstanceListResponse,
     InstanceLogsView,
     InstanceState,
     InstanceView,
     RenewLeaseRequest,
+    RestoreSnapshotRequest,
+    SnapshotListResponse,
+    SnapshotState,
+    SnapshotView,
     TemplateListResponse,
     TemplateView,
 )
@@ -28,9 +35,12 @@ from .db import InstanceDb
 from .models import (
     ACTIVE_STATES,
     InstanceRecord,
+    LIVE_SNAPSHOT_STATES,
     ResolvedLaunchConfig,
+    SnapshotRecord,
     TERMINAL_STATES,
     instance_view_from_record,
+    snapshot_view_from_record,
     template_summary_from_template,
     template_view_from_template,
     utc_now,
@@ -38,6 +48,16 @@ from .models import (
 
 LOGGER = logging.getLogger(__name__)
 RESTART_STOP_WARNING_PREFIX = "restart stop warning: "
+# Instances in these states can be the target of a snapshot restore. A running
+# (or crashed) instance is stopped first; a stopped or expired one is revived.
+RESTORABLE_INSTANCE_STATES = frozenset(
+    {
+        InstanceState.ACTIVE,
+        InstanceState.CRASHED,
+        InstanceState.STOPPED,
+        InstanceState.EXPIRED,
+    }
+)
 
 
 class InstanceError(Exception):
@@ -71,6 +91,9 @@ class CuttlefishServerManager:
         self.backends = dict(backends)
         self.app_loader = app_loader or CuttlefishAppLoader()
         self.lock = threading.RLock()
+        # Snapshots that an in-flight restore is reading. They must not be
+        # deleted until the restoring instance has finished starting.
+        self._restoring_snapshot_ids: set[str] = set()
 
         missing_backends = {
             template.backend
@@ -83,7 +106,19 @@ class CuttlefishServerManager:
 
     def initialize(self) -> None:
         self.settings.instance_runtime_root.mkdir(parents=True, exist_ok=True)
+        if any(
+            template.snapshot_supported
+            for template in self.settings.templates.values()
+        ):
+            try:
+                self.settings.snapshot_root.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"cannot create snapshot_root {self.settings.snapshot_root}: "
+                    f"{exc}. Create it and make it writable by the server user."
+                ) from exc
         self.db.initialize()
+        self._fail_interrupted_snapshots()
 
     def create_instance(
         self,
@@ -140,10 +175,32 @@ class CuttlefishServerManager:
         self._complete_instance_start(record)
         return CreateInstanceResponse(instance=instance_view_from_record(record))
 
-    def _complete_instance_start(self, record: InstanceRecord) -> None:
+    def _complete_instance_start(
+        self,
+        record: InstanceRecord,
+        *,
+        restore_snapshot: SnapshotRecord | None = None,
+    ) -> None:
+        try:
+            self._start_and_activate(record, restore_snapshot)
+        finally:
+            if restore_snapshot is not None:
+                with self.lock:
+                    self._restoring_snapshot_ids.discard(restore_snapshot.snapshot_id)
+
+    def _start_and_activate(
+        self,
+        record: InstanceRecord,
+        restore_snapshot: SnapshotRecord | None,
+    ) -> None:
         backend = self._backend_for(record)
         try:
-            launch_result = backend.start_instance(record)
+            launch_result = backend.start_instance(
+                record,
+                snapshot_dir=(
+                    restore_snapshot.snapshot_dir if restore_snapshot else None
+                ),
+            )
         except Exception as exc:
             record.state = InstanceState.CRASHED
             record.failure_reason = str(exc)
@@ -157,7 +214,8 @@ class CuttlefishServerManager:
         record.backend_runtime_id = launch_result.backend_runtime_id
         self.db.upsert(record)
 
-        if record.config.load_apps and record.config.apps:
+        # A restored instance already has its apps installed.
+        if restore_snapshot is None and record.config.load_apps and record.config.apps:
             try:
                 self.app_loader.load_apps(record)
             except Exception as exc:
@@ -168,9 +226,13 @@ class CuttlefishServerManager:
         record.failure_reason = None
         self.db.upsert(record)
 
-    def _complete_instance_start_in_background(self, record: InstanceRecord) -> None:
+    def _complete_instance_start_in_background(
+        self,
+        record: InstanceRecord,
+        restore_snapshot: SnapshotRecord | None = None,
+    ) -> None:
         try:
-            self._complete_instance_start(record)
+            self._complete_instance_start(record, restore_snapshot=restore_snapshot)
         except InstanceError:
             return
 
@@ -285,40 +347,7 @@ class CuttlefishServerManager:
                     f"instance {record.effective_instance_name} has no ADB port"
                 )
 
-            record.state = InstanceState.STOPPING
-            self.db.upsert(record)
-
-            stop_warning: str | None = None
-            try:
-                self._backend_for(record).stop_instance(record)
-            except Exception as exc:
-                stop_warning = f"{RESTART_STOP_WARNING_PREFIX}{exc}"
-
-            try:
-                if record.runtime_dir.exists():
-                    shutil.rmtree(record.runtime_dir)
-            except Exception as exc:
-                detail = f"restart runtime dir cleanup failed: {exc}"
-                if stop_warning is not None:
-                    detail = f"{stop_warning}; {detail}"
-                record.state = InstanceState.CRASHED
-                record.failure_reason = detail
-                self.db.upsert(record)
-                raise InstanceError(detail) from exc
-
-            record.state = InstanceState.STARTING
-            record.launch_command = self._build_launch_command(record)
-            record.adb_serial = None
-            record.webrtc_port = None
-            record.backend_runtime_id = None
-            record.expires_at = self._resolve_expiration_deadline(
-                self.settings.instance_timeout_sec
-            )
-            record.failure_reason = None
-            self.db.upsert(record)
-
-            if stop_warning is not None:
-                self._write_restart_stop_warning(record, stop_warning)
+            self._reset_for_relaunch(record, stop_first=True)
 
         if start_async:
             thread = threading.Thread(
@@ -332,6 +361,57 @@ class CuttlefishServerManager:
         self._complete_instance_start(record)
         return instance_view_from_record(record)
 
+    def _reset_for_relaunch(
+        self,
+        record: InstanceRecord,
+        *,
+        stop_first: bool,
+        snapshot_dir: Path | None = None,
+    ) -> None:
+        """Clear `record` so it can be launched again in the same slot.
+
+        Stops the instance first when `stop_first` is set (a stop failure is kept
+        as a warning), removes its runtime directory, and leaves the record in
+        STARTING with a fresh lease. The caller holds `self.lock` and then calls
+        `_complete_instance_start`.
+        """
+        stop_warning: str | None = None
+        if stop_first:
+            record.state = InstanceState.STOPPING
+            self.db.upsert(record)
+            try:
+                self._backend_for(record).stop_instance(record)
+            except Exception as exc:
+                stop_warning = f"{RESTART_STOP_WARNING_PREFIX}{exc}"
+
+        try:
+            if record.runtime_dir.exists():
+                shutil.rmtree(record.runtime_dir)
+        except Exception as exc:
+            detail = f"restart runtime dir cleanup failed: {exc}"
+            if stop_warning is not None:
+                detail = f"{stop_warning}; {detail}"
+            record.state = InstanceState.CRASHED
+            record.failure_reason = detail
+            self.db.upsert(record)
+            raise InstanceError(detail) from exc
+
+        record.state = InstanceState.STARTING
+        record.launch_command = self._build_launch_command(
+            record, snapshot_dir=snapshot_dir
+        )
+        record.adb_serial = None
+        record.webrtc_port = None
+        record.backend_runtime_id = None
+        record.expires_at = self._resolve_expiration_deadline(
+            self.settings.instance_timeout_sec
+        )
+        record.failure_reason = None
+        self.db.upsert(record)
+
+        if stop_warning is not None:
+            self._write_restart_stop_warning(record, stop_warning)
+
     def list_instances(self, user_id: str, is_admin: bool) -> InstanceListResponse:
         owner_id = None if is_admin else user_id
         return InstanceListResponse(
@@ -340,6 +420,330 @@ class CuttlefishServerManager:
                 for record in self.db.list_instances(owner_id)
             ]
         )
+
+    # ------------------------------------------------------------------
+    # Snapshots
+    # ------------------------------------------------------------------
+
+    def create_snapshot(
+        self,
+        user_id: str,
+        is_admin: bool,
+        instance_name: str,
+        request: CreateSnapshotRequest,
+    ) -> SnapshotView:
+        with self.lock:
+            instance = self._get_record_by_name(user_id, is_admin, instance_name)
+            if instance.state != InstanceState.ACTIVE:
+                raise InstanceError(
+                    f"instance {instance.effective_instance_name} is not active"
+                )
+            if not instance.config.snapshot_compatible:
+                raise InstanceError(
+                    f"instance {instance.effective_instance_name} was not started "
+                    "with snapshot support; start it with --snapshots"
+                )
+
+            # Snapshots belong to the instance's owner, so an admin snapshotting
+            # someone else's instance produces a snapshot that user can see.
+            owner_id = instance.owner_id
+            for existing in self.db.list_snapshots_by_name(
+                request.snapshot_name, owner_id=owner_id
+            ):
+                if existing.state in LIVE_SNAPSHOT_STATES:
+                    raise InstanceError(
+                        f"snapshot name already in use for user {owner_id}: "
+                        f"{request.snapshot_name}"
+                    )
+                self._remove_snapshot(existing)
+
+            backend = self._backend_for(instance)
+            try:
+                fingerprint = backend.host_tools_fingerprint(instance)
+            except Exception as exc:
+                raise InstanceError(
+                    f"cannot snapshot instance {instance.effective_instance_name}: {exc}"
+                ) from exc
+
+            snapshot_id = str(uuid.uuid4())
+            record = SnapshotRecord(
+                snapshot_id=snapshot_id,
+                snapshot_name=request.snapshot_name,
+                owner_id=owner_id,
+                state=SnapshotState.CREATING,
+                source_instance_id=instance.instance_id,
+                source_instance_name=instance.effective_instance_name,
+                template_name=instance.config.template_name,
+                backend=instance.config.backend,
+                instance_num=instance.instance_num,
+                runtime_dir=instance.runtime_dir,
+                snapshot_dir=(
+                    self.settings.snapshot_root / self._runtime_dir_name(snapshot_id)
+                ),
+                host_tools_fingerprint=fingerprint,
+                created_at=utc_now(),
+            )
+            self.db.upsert_snapshot(record)
+
+            try:
+                backend.take_snapshot(instance, record.snapshot_dir)
+            except Exception as exc:
+                self._remove_snapshot_dir(record.snapshot_dir)
+                record.state = SnapshotState.FAILED
+                record.failure_reason = str(exc)
+                self.db.upsert_snapshot(record)
+                raise InstanceError(
+                    f"failed to snapshot instance {instance.effective_instance_name}: "
+                    f"{exc}"
+                ) from exc
+
+            record.size_bytes = _disk_usage_bytes(record.snapshot_dir)
+            record.state = SnapshotState.READY
+            self.db.upsert_snapshot(record)
+            return snapshot_view_from_record(record)
+
+    def list_snapshots(
+        self,
+        user_id: str,
+        is_admin: bool,
+        *,
+        instance: str | None = None,
+        template_name: str | None = None,
+    ) -> SnapshotListResponse:
+        records = self.db.list_snapshots(None if is_admin else user_id)
+        if instance is not None:
+            records = [
+                record
+                for record in records
+                if instance in (record.source_instance_id, record.source_instance_name)
+            ]
+        if template_name is not None:
+            records = [
+                record for record in records if record.template_name == template_name
+            ]
+        return SnapshotListResponse(
+            snapshots=[snapshot_view_from_record(record) for record in records]
+        )
+
+    def get_snapshot_by_name(
+        self, user_id: str, is_admin: bool, snapshot_name: str
+    ) -> SnapshotView:
+        record = self._get_snapshot_by_name(user_id, is_admin, snapshot_name)
+        return snapshot_view_from_record(record)
+
+    def delete_snapshot_by_name(
+        self, user_id: str, is_admin: bool, snapshot_name: str
+    ) -> SnapshotView:
+        with self.lock:
+            record = self._get_snapshot_by_name(user_id, is_admin, snapshot_name)
+            if record.state == SnapshotState.CREATING:
+                raise InstanceError(
+                    f"snapshot {record.snapshot_name} is still being created"
+                )
+            if record.snapshot_id in self._restoring_snapshot_ids:
+                raise InstanceError(
+                    f"snapshot {record.snapshot_name} is being restored"
+                )
+            self._remove_snapshot(record)
+            return snapshot_view_from_record(record)
+
+    def restore_snapshot(
+        self,
+        user_id: str,
+        is_admin: bool,
+        instance_name: str,
+        request: RestoreSnapshotRequest,
+        *,
+        start_async: bool = False,
+    ) -> InstanceView:
+        """Restore a snapshot into an instance.
+
+        A running instance is stopped first; a stopped or expired one is revived.
+        Cuttlefish only restores a snapshot into the instance number and runtime
+        directory it was taken in, so the instance must match the snapshot.
+        """
+        with self.lock:
+            record = self._get_record_by_name(user_id, is_admin, instance_name)
+            snapshot = self._get_snapshot_for_instance(
+                user_id, is_admin, record, request.snapshot_name
+            )
+            self._check_restore_compatible(record, snapshot)
+
+            self._reset_for_relaunch(
+                record,
+                stop_first=record.state
+                in {InstanceState.ACTIVE, InstanceState.CRASHED},
+                snapshot_dir=snapshot.snapshot_dir,
+            )
+            self._restoring_snapshot_ids.add(snapshot.snapshot_id)
+
+        if start_async:
+            thread = threading.Thread(
+                target=self._complete_instance_start_in_background,
+                args=(record, snapshot),
+                daemon=True,
+            )
+            thread.start()
+            return instance_view_from_record(record)
+
+        self._complete_instance_start(record, restore_snapshot=snapshot)
+        return instance_view_from_record(record)
+
+    def _check_restore_compatible(
+        self, instance: InstanceRecord, snapshot: SnapshotRecord
+    ) -> None:
+        name = instance.effective_instance_name
+        if snapshot.state != SnapshotState.READY:
+            raise InstanceError(
+                f"snapshot {snapshot.snapshot_name} is not ready "
+                f"(state: {snapshot.state.value})"
+            )
+        if instance.state not in RESTORABLE_INSTANCE_STATES:
+            raise InstanceError(
+                f"instance {name} is {instance.state.value}; wait for it to finish "
+                "starting or stopping before restoring"
+            )
+        if snapshot.owner_id != instance.owner_id:
+            raise InstanceError(
+                f"snapshot {snapshot.snapshot_name} belongs to {snapshot.owner_id}, "
+                f"not to the owner of instance {name}"
+            )
+        if (
+            instance.config.template_name != snapshot.template_name
+            or instance.config.backend != snapshot.backend
+        ):
+            raise InstanceError(
+                f"snapshot {snapshot.snapshot_name} was taken from template "
+                f"{snapshot.template_name} ({snapshot.backend.value} backend), but "
+                f"instance {name} uses {instance.config.template_name} "
+                f"({instance.config.backend.value} backend)"
+            )
+        if not instance.config.snapshot_compatible:
+            raise InstanceError(
+                f"instance {name} was not started with snapshot support"
+            )
+        if (
+            instance.instance_num != snapshot.instance_num
+            or instance.runtime_dir != snapshot.runtime_dir
+        ):
+            raise InstanceError(
+                f"snapshot {snapshot.snapshot_name} was taken from instance "
+                f"{snapshot.source_instance_name} (instance number "
+                f"{snapshot.instance_num}). Cuttlefish can only restore a snapshot "
+                "into the instance number and runtime directory it was taken in, "
+                f"which instance {name} does not match"
+            )
+        try:
+            fingerprint = self._backend_for(instance).host_tools_fingerprint(instance)
+        except Exception as exc:
+            raise InstanceError(f"cannot check snapshot compatibility: {exc}") from exc
+        if fingerprint != snapshot.host_tools_fingerprint:
+            raise InstanceError(
+                f"the Cuttlefish host tools changed since snapshot "
+                f"{snapshot.snapshot_name} was taken, so it can no longer be restored"
+            )
+        if instance.is_terminal:
+            # A stopped or expired instance gives up its slot, which another
+            # instance may have taken in the meantime.
+            if instance.instance_num in self.db.list_active_instance_numbers():
+                raise InstanceError(
+                    f"instance number {instance.instance_num} is in use by another "
+                    f"instance, so {name} cannot be restored right now"
+                )
+            if instance.instance_name is not None and self.db.has_active_instance_name(
+                instance.owner_id, instance.instance_name
+            ):
+                raise InstanceError(
+                    f"instance name already in use for user {instance.owner_id}: "
+                    f"{instance.instance_name}"
+                )
+
+    def _get_snapshot_by_name(
+        self, user_id: str, is_admin: bool, snapshot_name: str
+    ) -> SnapshotRecord:
+        matches = self.db.list_snapshots_by_name(
+            snapshot_name,
+            owner_id=None if is_admin else user_id,
+        )
+        live = [match for match in matches if match.state in LIVE_SNAPSHOT_STATES]
+        if is_admin and (len(live) > 1 or (not live and len(matches) > 1)):
+            raise InstanceError("snapshot name is ambiguous for admin; use snapshot_id")
+        if live:
+            return live[0]
+        if matches:
+            return matches[0]
+
+        fallback = self.db.get_snapshot(snapshot_name)
+        if fallback is not None:
+            self._ensure_snapshot_visible(fallback, user_id, is_admin)
+            return fallback
+        raise NotFoundError(f"snapshot {snapshot_name} does not exist")
+
+    def _get_snapshot_for_instance(
+        self,
+        user_id: str,
+        is_admin: bool,
+        instance: InstanceRecord,
+        snapshot_name: str,
+    ) -> SnapshotRecord:
+        """Find `snapshot_name` among the snapshots of the instance's owner.
+
+        Restricting to the owner keeps an admin's lookup unambiguous when several
+        users reuse the same snapshot name.
+        """
+        matches = [
+            match
+            for match in self.db.list_snapshots_by_name(
+                snapshot_name, owner_id=instance.owner_id
+            )
+            if match.state in LIVE_SNAPSHOT_STATES
+        ]
+        if matches:
+            return matches[0]
+        return self._get_snapshot_by_name(user_id, is_admin, snapshot_name)
+
+    @staticmethod
+    def _ensure_snapshot_visible(
+        record: SnapshotRecord, user_id: str, is_admin: bool
+    ) -> None:
+        if not is_admin and record.owner_id != user_id:
+            raise AuthorizationError(
+                f"snapshot {record.snapshot_id} does not belong to user {user_id}"
+            )
+
+    def _remove_snapshot(self, record: SnapshotRecord) -> None:
+        self._remove_snapshot_dir(record.snapshot_dir)
+        self.db.delete_snapshot(record.snapshot_id)
+
+    def _remove_snapshot_dir(self, snapshot_dir: Path) -> None:
+        # The path comes from the database; never delete outside the snapshot root.
+        if not snapshot_dir.is_relative_to(self.settings.snapshot_root):
+            raise InstanceError(
+                f"refusing to remove {snapshot_dir}: outside the snapshot root "
+                f"{self.settings.snapshot_root}"
+            )
+        try:
+            if snapshot_dir.exists():
+                shutil.rmtree(snapshot_dir)
+        except OSError as exc:
+            raise InstanceError(
+                f"failed to remove snapshot data {snapshot_dir}: {exc}"
+            ) from exc
+
+    def _fail_interrupted_snapshots(self) -> None:
+        """Mark snapshots that were being created when the server stopped as failed."""
+        for record in self.db.list_snapshots():
+            if record.state != SnapshotState.CREATING:
+                continue
+            try:
+                self._remove_snapshot_dir(record.snapshot_dir)
+            except InstanceError:
+                LOGGER.exception(
+                    "failed to remove partial snapshot data %s", record.snapshot_dir
+                )
+            record.state = SnapshotState.FAILED
+            record.failure_reason = "interrupted by a server restart"
+            self.db.upsert_snapshot(record)
 
     def list_templates(self) -> TemplateListResponse:
         return TemplateListResponse(
@@ -417,8 +821,14 @@ class CuttlefishServerManager:
 
         self.db.upsert(record)
 
-    def _build_launch_command(self, record: InstanceRecord) -> list[str]:
-        return list(self._backend_for(record).build_start_command(record))
+    def _build_launch_command(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> list[str]:
+        return list(
+            self._backend_for(record).build_start_command(
+                record, snapshot_dir=snapshot_dir
+            )
+        )
 
     def _backend_for(self, record: InstanceRecord) -> CuttlefishBackend:
         try:
@@ -545,6 +955,10 @@ class CuttlefishServerManager:
         template = self.settings.templates.get(request.template_name)
         if template is None:
             raise InstanceError(f"unknown template: {request.template_name}")
+        if request.overrides.snapshots_enabled and not template.snapshot_supported:
+            raise InstanceError(
+                f"template {template.name} does not support snapshots"
+            )
 
         return ResolvedLaunchConfig(
             template_name=template.name,
@@ -568,4 +982,17 @@ class CuttlefishServerManager:
             backend=template.backend,
             docker_image=template.docker_image,
             cvd_binary=template.cvd_binary,
+            snapshot_compatible=request.overrides.snapshots_enabled,
         )
+
+
+def _disk_usage_bytes(path: Path) -> int:
+    """Disk space used by the files under `path`; sparse files count as allocated."""
+    total = 0
+    for directory, _, file_names in os.walk(path):
+        for file_name in file_names:
+            try:
+                total += os.lstat(os.path.join(directory, file_name)).st_blocks * 512
+            except OSError:
+                continue
+    return total

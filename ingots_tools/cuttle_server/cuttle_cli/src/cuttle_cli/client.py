@@ -7,10 +7,13 @@ from pathlib import Path
 
 from cuttle_types import (
     CreateInstanceRequest,
+    CreateSnapshotRequest,
     InstanceLogsView,
     InstanceState,
     InstanceView,
     LaunchOverrides,
+    RestoreSnapshotRequest,
+    SnapshotView,
     TemplateSummary,
     TemplateView,
 )
@@ -100,6 +103,7 @@ class CuttleClient:
         selinux: bool | None = None,
         load_apps: bool | None = None,
         unmanaged: bool = False,
+        snapshots: bool = False,
     ) -> StartResult:
         return self._start(
             template_name,
@@ -108,6 +112,7 @@ class CuttleClient:
             selinux=selinux,
             load_apps=load_apps,
             unmanaged=unmanaged,
+            snapshots=snapshots,
             on_log_chunk=None,
         )
 
@@ -120,6 +125,7 @@ class CuttleClient:
         selinux: bool | None = None,
         load_apps: bool | None = None,
         unmanaged: bool = False,
+        snapshots: bool = False,
         on_log_chunk: Callable[[str], None],
     ) -> StartResult:
         return self._start(
@@ -129,6 +135,7 @@ class CuttleClient:
             selinux=selinux,
             load_apps=load_apps,
             unmanaged=unmanaged,
+            snapshots=snapshots,
             on_log_chunk=on_log_chunk,
         )
 
@@ -141,6 +148,7 @@ class CuttleClient:
         selinux: bool | None,
         load_apps: bool | None,
         unmanaged: bool,
+        snapshots: bool,
         on_log_chunk: Callable[[str], None] | None,
     ) -> StartResult:
         ensure_managed_daemon_running(self.settings)
@@ -153,6 +161,7 @@ class CuttleClient:
                     selinux=selinux,
                     load_apps=load_apps,
                     unmanaged=unmanaged,
+                    snapshots_enabled=snapshots,
                 ),
             ),
             async_start=True,
@@ -182,26 +191,81 @@ class CuttleClient:
             async_start=True,
         )
         result = self._wait_for_start(instance, on_log_chunk=on_log_chunk)
-        if result.is_active and not result.instance.unmanaged:
-            if result.adb_target is None:
-                raise CliError(
-                    f"restarted instance {result.instance.instance_name} "
-                    "does not expose an ADB target"
-                )
-            try:
-                refresh_adb_connection(result.adb_target)
-            except CliError as exc:
-                stop_warning = result.logs.stop_log.strip()
-                warning_detail = (
-                    f"; previous stop warning: {stop_warning}"
-                    if stop_warning.startswith("restart stop warning:")
-                    else ""
-                )
-                raise CliError(
-                    f"restarted instance {result.instance.instance_name} is active at "
-                    f"{result.adb_target}, but {exc}{warning_detail}"
-                ) from exc
+        self._refresh_adb_after_relaunch(result, "restarted")
         return result
+
+    def restore_snapshot(self, instance_name: str, snapshot_name: str) -> StartResult:
+        return self._restore_snapshot(instance_name, snapshot_name, on_log_chunk=None)
+
+    def _restore_snapshot_with_progress(
+        self,
+        instance_name: str,
+        snapshot_name: str,
+        *,
+        on_log_chunk: Callable[[str], None],
+    ) -> StartResult:
+        return self._restore_snapshot(
+            instance_name, snapshot_name, on_log_chunk=on_log_chunk
+        )
+
+    def _restore_snapshot(
+        self,
+        instance_name: str,
+        snapshot_name: str,
+        *,
+        on_log_chunk: Callable[[str], None] | None,
+    ) -> StartResult:
+        ensure_managed_daemon_running(self.settings)
+        instance = self._api.restore_snapshot(
+            instance_name,
+            RestoreSnapshotRequest(snapshot_name=snapshot_name),
+            async_start=True,
+        )
+        result = self._wait_for_start(instance, on_log_chunk=on_log_chunk)
+        self._refresh_adb_after_relaunch(result, "restored")
+        return result
+
+    @staticmethod
+    def _refresh_adb_after_relaunch(result: StartResult, verb: str) -> None:
+        """Reconnect adb after an instance came back on the same ADB target."""
+        if not result.is_active or result.instance.unmanaged:
+            return
+        if result.adb_target is None:
+            raise CliError(
+                f"{verb} instance {result.instance.instance_name} "
+                "does not expose an ADB target"
+            )
+        try:
+            refresh_adb_connection(result.adb_target)
+        except CliError as exc:
+            stop_warning = result.logs.stop_log.strip()
+            warning_detail = (
+                f"; previous stop warning: {stop_warning}"
+                if stop_warning.startswith("restart stop warning:")
+                else ""
+            )
+            raise CliError(
+                f"{verb} instance {result.instance.instance_name} is active at "
+                f"{result.adb_target}, but {exc}{warning_detail}"
+            ) from exc
+
+    def create_snapshot(self, instance_name: str, snapshot_name: str) -> SnapshotView:
+        return self._api.create_snapshot(
+            instance_name, CreateSnapshotRequest(snapshot_name=snapshot_name)
+        )
+
+    def list_snapshots(
+        self, *, instance: str | None = None, template: str | None = None
+    ) -> list[SnapshotView]:
+        return list(
+            self._api.list_snapshots(instance=instance, template=template).snapshots
+        )
+
+    def show_snapshot(self, snapshot_name: str) -> SnapshotView:
+        return self._api.get_snapshot(snapshot_name)
+
+    def delete_snapshot(self, snapshot_name: str) -> SnapshotView:
+        return self._api.delete_snapshot(snapshot_name)
 
     def _wait_for_start(
         self,

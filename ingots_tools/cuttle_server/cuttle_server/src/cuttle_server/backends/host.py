@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import platform
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -14,6 +16,19 @@ from ..models import InstanceRecord
 from .base import BackendLogs, BackendReconcileFailure, LaunchResult
 
 LOGGER = logging.getLogger(__name__)
+
+# Flags a Cuttlefish instance must be launched with to be snapshottable:
+# - the GPU must be 2D SwiftShader, which assemble_cvd's snapshot check enforces;
+# - vsock must be crosvm's built-in device, because the default vhost-user vsock
+#   process cannot save its state (VHOST_USER_PROTOCOL_F_DEVICE_STATE).
+SNAPSHOT_LAUNCH_FLAGS = (
+    "--snapshot_compatible",
+    "--gpu_mode=guest_swiftshader",
+    "--vhost_user_vsock=false",
+)
+SNAPSHOT_TIMEOUT_SEC = 600
+# Executables whose contents determine whether a snapshot can be restored.
+FINGERPRINTED_BINARIES = ("run_cvd", "assemble_cvd", "snapshot_util_cvd")
 
 HOST_TAP_INTERFACE_PREFIXES = (
     "cvd-etap",
@@ -41,18 +56,22 @@ class HostCuttlefishBackend:
         self,
         *,
         start_timeout_sec: int = 120,
+        snapshot_timeout_sec: int = SNAPSHOT_TIMEOUT_SEC,
         sys_class_net_dir: Path = Path("/sys/class/net"),
     ) -> None:
         self.start_timeout_sec = start_timeout_sec
+        self.snapshot_timeout_sec = snapshot_timeout_sec
         self.sys_class_net_dir = sys_class_net_dir
 
-    def start_instance(self, record: InstanceRecord) -> LaunchResult:
+    def start_instance(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> LaunchResult:
         self._validate_tap_interfaces(record.instance_num)
 
         runtime_dir = record.runtime_dir
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        command = self.build_start_command(record)
+        command = self.build_start_command(record, snapshot_dir=snapshot_dir)
         self._run_command(
             command,
             record=record,
@@ -74,8 +93,15 @@ class HostCuttlefishBackend:
             stop_command = [str(config.cvd_binary), "stop"]
         self._run_command(stop_command, record=record, action="stop", timeout_sec=None)
 
-    def build_start_command(self, record: InstanceRecord) -> list[str]:
+    def build_start_command(
+        self, record: InstanceRecord, *, snapshot_dir: Path | None = None
+    ) -> list[str]:
         config = record.config
+        if snapshot_dir is not None and not config.snapshot_compatible:
+            raise RuntimeError(
+                "cannot restore a snapshot into an instance that was not launched "
+                "with snapshot support"
+            )
         if config.command_mode == CvdCommandMode.LEGACY:
             command = [str(config.runtime_root / "bin" / "launch_cvd")]
         else:
@@ -100,10 +126,64 @@ class HostCuttlefishBackend:
         )
         if not config.selinux:
             command.append("--extra_kernel_cmdline=androidboot.selinux=permissive")
+        if config.snapshot_compatible:
+            command.extend(SNAPSHOT_LAUNCH_FLAGS)
+        if snapshot_dir is not None:
+            command.append(f"--snapshot_path={snapshot_dir}")
         return command
 
     def _build_start_command(self, record: InstanceRecord) -> list[str]:
         return self.build_start_command(record)
+
+    def take_snapshot(self, record: InstanceRecord, snapshot_dir: Path) -> None:
+        snapshot_util = record.config.runtime_root / "bin" / "snapshot_util_cvd"
+        command = [
+            str(snapshot_util),
+            "--subcmd=snapshot_take",
+            f"--snapshot_path={snapshot_dir}",
+            # Pause the guest, save it, and resume it.
+            "--auto_suspend",
+        ]
+        try:
+            self._run_command(
+                command,
+                record=record,
+                action="snapshot",
+                timeout_sec=self.snapshot_timeout_sec,
+            )
+        except RuntimeError:
+            # A failure can leave the guest paused; try to let it run again.
+            try:
+                self._run_command(
+                    [str(snapshot_util), "--subcmd=resume"],
+                    record=record,
+                    action="snapshot",
+                    timeout_sec=60,
+                )
+            except RuntimeError:
+                LOGGER.warning(
+                    "failed to resume instance %s after a failed snapshot",
+                    record.instance_id,
+                )
+            raise
+
+    def host_tools_fingerprint(self, record: InstanceRecord) -> str:
+        runtime_root = record.config.runtime_root
+        digest = hashlib.sha256()
+        paths = [runtime_root / "bin" / name for name in FINGERPRINTED_BINARIES]
+        paths.append(self._crosvm_binary(runtime_root))
+        for path in paths:
+            digest.update(f"{path.name}\0".encode())
+            with path.open("rb") as handle:
+                while chunk := handle.read(1 << 20):
+                    digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _crosvm_binary(runtime_root: Path) -> Path:
+        # bin/crosvm is a wrapper that execs bin/<machine>-linux-musl/crosvm.
+        native = runtime_root / "bin" / f"{platform.machine()}-linux-musl" / "crosvm"
+        return native if native.exists() else runtime_root / "bin" / "crosvm"
 
     def _validate_tap_interfaces(self, instance_num: int) -> None:
         suffix = f"{instance_num:02d}"

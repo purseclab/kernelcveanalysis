@@ -24,6 +24,7 @@ class AdbClientTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=True,
+            timeout=None,
         )
 
     def test_run_adb_uses_client_remote_addr(self):
@@ -37,6 +38,7 @@ class AdbClientTests(unittest.TestCase):
             capture_output=True,
             text=False,
             check=True,
+            timeout=None,
         )
 
     def test_run_shell_wraps_root_command(self):
@@ -50,6 +52,7 @@ class AdbClientTests(unittest.TestCase):
             capture_output=True,
             text=False,
             check=False,
+            timeout=None,
         )
 
     def test_shell_text_raises_structured_error(self):

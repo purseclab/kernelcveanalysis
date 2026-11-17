@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import sleep
@@ -12,6 +13,7 @@ FRIDA_SERVER_HOST_PATH = Path(__file__).resolve().parents[2] / "assets" / "frida
 FRIDA_SERVER_REMOTE_PATH = "/data/local/tmp/frida-server"
 FRIDA_SERVER_LOCAL_PORT = 27042
 FRIDA_SERVER_REMOTE_PORT = 27042
+FRIDA_SERVER_START_TIMEOUT_SEC = 20.0
 
 
 @dataclass
@@ -56,13 +58,36 @@ def bootstrap_frida(
 
     if sync_server:
         adb.upload_file(frida_server_path, Path(FRIDA_SERVER_REMOTE_PATH), executable=True)
-    adb.run_adb("forward", f"tcp:{local_port}", f"tcp:{remote_port}", check=True, text=True)
-
-    start_command = (
-        "pidof frida-server >/dev/null 2>&1 || "
-        f"nohup {FRIDA_SERVER_REMOTE_PATH} >/data/local/tmp/frida-server.log 2>&1 &"
+    adb.run_adb(
+        "forward",
+        f"tcp:{local_port}",
+        f"tcp:{remote_port}",
+        check=True,
+        text=True,
+        timeout=FRIDA_SERVER_START_TIMEOUT_SEC,
     )
-    adb.shell_text(start_command, root=True)
+
+    # The remote server must not inherit the adb shell's stdin. adb keeps the
+    # shell session open until every holder of the pty slave closes it, so a
+    # backgrounded daemon that only redirects stdout/stderr still hangs the call.
+    start_command = (
+        "if ! pidof frida-server >/dev/null 2>&1; then "
+        f"nohup {FRIDA_SERVER_REMOTE_PATH} </dev/null "
+        ">/data/local/tmp/frida-server.log 2>&1 & "
+        "fi"
+    )
+    try:
+        adb.shell_text(
+            start_command,
+            root=True,
+            timeout=FRIDA_SERVER_START_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "timed out after "
+            f"{FRIDA_SERVER_START_TIMEOUT_SEC:.0f}s waiting for the device shell to "
+            "start frida-server; verify that `adb shell su root` works on this target"
+        ) from exc
 
     frida = frida_loader()
     address = f"127.0.0.1:{local_port}"
