@@ -3,10 +3,12 @@ from __future__ import annotations
 import io
 import ipaddress
 import logging
+import os
 import shlex
 import socket
 import tarfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -18,12 +20,15 @@ from .base import BackendLogs, BackendReconcileFailure, LaunchResult
 
 LOGGER = logging.getLogger(__name__)
 
-CONTAINER_RUNTIME_ROOT = Path("/opt/cuttlefish")
 CONTAINER_INSTANCE_HOME = Path("/var/lib/cuttlefish")
-CONTAINER_INPUT_ROOT = Path("/cuttlefish-inputs")
+CONTAINER_UID_ENV = "CUTTLE_CONTAINER_UID"
+CONTAINER_GID_ENV = "CUTTLE_CONTAINER_GID"
 CONTAINER_ADB_PORT = 6520
 DOCKER_VSOCK_CID_BASE = 10_000
 DOCKER_STOP_TIMEOUT_SEC = 10
+BOOT_COMPLETED_MARKER = "VIRTUAL_DEVICE_BOOT_COMPLETED"
+BOOT_FAILED_MARKER = "VIRTUAL_DEVICE_BOOT_FAILED"
+BOOT_POLL_INTERVAL_SEC = 1.0
 CONTAINER_CVD_INSTANCE_DIR = (
     CONTAINER_INSTANCE_HOME / "cuttlefish" / "instances" / "cvd-1"
 )
@@ -37,6 +42,18 @@ TEMPLATE_LABEL = "cuttle_server.template"
 BACKEND_LABEL = "cuttle_server.backend"
 
 
+@dataclass(frozen=True, slots=True)
+class ContainerUser:
+    """Host identity that Cuttlefish runs as inside the container."""
+
+    uid: int
+    gid: int
+
+    @classmethod
+    def current_process(cls) -> ContainerUser:
+        return cls(uid=os.getuid(), gid=os.getgid())
+
+
 class DockerCuttlefishBackend:
     """Runs one isolated Cuttlefish instance in each Docker container."""
 
@@ -48,9 +65,13 @@ class DockerCuttlefishBackend:
         server_host: str,
         start_timeout_sec: int = 120,
         client: Any | None = None,
+        container_user: ContainerUser | None = None,
     ) -> None:
         self.server_host = server_host
         self.start_timeout_sec = start_timeout_sec
+        # Cuttlefish runs as the server's own user so that anything it writes
+        # into bind-mounted host paths matches host-mode ownership.
+        self.container_user = container_user or ContainerUser.current_process()
         self._client = client
 
     @property
@@ -61,27 +82,29 @@ class DockerCuttlefishBackend:
 
     def build_start_command(self, record: InstanceRecord) -> list[str]:
         config = record.config
+        # The runtime root is mounted at its host path, so host paths are
+        # valid inside the container too.
         if config.command_mode == CvdCommandMode.LEGACY:
-            command = [str(CONTAINER_RUNTIME_ROOT / "bin" / "launch_cvd")]
+            command = [str(config.runtime_root / "bin" / "launch_cvd")]
         else:
-            command = [str(CONTAINER_RUNTIME_ROOT / "bin" / "cvd"), "start"]
+            command = [str(config.cvd_binary), "start"]
 
         command.extend(
             [
                 "--base_instance_num=1",
                 f"--vsock_guest_cid={self._vsock_guest_cid(record)}",
                 f"--cpus={config.cpus}",
-                "--start_webrtc=false",
+                # The webRTC process is the host end of the guest's display
+                # and audio devices, not just a remote viewer. Without it,
+                # crosvm blocks on the audio server handshake and
+                # SurfaceFlinger aborts because the display never hotplugs.
+                "--start_webrtc=true",
             ]
         )
         if config.kernel_path is not None:
-            command.append(
-                f"--kernel_path={CONTAINER_INPUT_ROOT / 'kernel'}"
-            )
+            command.append(f"--kernel_path={config.kernel_path}")
         if config.initrd_path is not None:
-            command.append(
-                f"--initramfs_path={CONTAINER_INPUT_ROOT / 'initrd'}"
-            )
+            command.append(f"--initramfs_path={config.initrd_path}")
         command.extend(
             [
                 "--daemon=false",
@@ -115,8 +138,10 @@ class DockerCuttlefishBackend:
                 init=True,
                 environment={
                     "HOME": str(CONTAINER_INSTANCE_HOME),
-                    "ANDROID_HOST_OUT": str(CONTAINER_RUNTIME_ROOT),
-                    "ANDROID_PRODUCT_OUT": str(CONTAINER_RUNTIME_ROOT),
+                    "ANDROID_HOST_OUT": str(record.config.runtime_root),
+                    "ANDROID_PRODUCT_OUT": str(record.config.runtime_root),
+                    CONTAINER_UID_ENV: str(self.container_user.uid),
+                    CONTAINER_GID_ENV: str(self.container_user.gid),
                 },
                 volumes=self._build_volumes(record),
                 devices=self._available_devices(),
@@ -144,7 +169,7 @@ class DockerCuttlefishBackend:
                     f"{record.adb_port}"
                 )
             connect_host = self._connect_host(bind_host)
-            self._wait_for_adb_listener(container, connect_host, host_port)
+            self._wait_for_boot(container)
             return LaunchResult(
                 launch_command=command,
                 adb_port=host_port,
@@ -288,25 +313,20 @@ class DockerCuttlefishBackend:
 
     @staticmethod
     def _build_volumes(record: InstanceRecord) -> list[str]:
+        runtime_root = record.config.runtime_root
         volumes = [
-            (
-                f"{record.config.runtime_root}:"
-                f"{CONTAINER_RUNTIME_ROOT}:ro"
-            ),
+            # Mounted read-write at its host path, matching host mode:
+            # Cuttlefish host tools lock and rewrite files in the runtime
+            # root, and some runtimes contain wrappers with absolute paths.
+            f"{runtime_root}:{runtime_root}:rw",
             # A destination-only volume specification asks Docker to create an
             # anonymous volume. Container removal with v=True removes it.
             str(CONTAINER_INSTANCE_HOME),
         ]
-        if record.config.kernel_path is not None:
-            volumes.append(
-                f"{record.config.kernel_path}:"
-                f"{CONTAINER_INPUT_ROOT / 'kernel'}:ro"
-            )
-        if record.config.initrd_path is not None:
-            volumes.append(
-                f"{record.config.initrd_path}:"
-                f"{CONTAINER_INPUT_ROOT / 'initrd'}:ro"
-            )
+        for input_path in (record.config.kernel_path, record.config.initrd_path):
+            if input_path is None or input_path.is_relative_to(runtime_root):
+                continue
+            volumes.append(f"{input_path}:{input_path}:ro")
         return volumes
 
     @staticmethod
@@ -375,31 +395,31 @@ class DockerCuttlefishBackend:
             raise RuntimeError("Docker did not publish the Cuttlefish ADB port")
         return int(bindings[0]["HostPort"])
 
-    def _wait_for_adb_listener(
-        self,
-        container: Any,
-        connect_host: str,
-        host_port: int,
-    ) -> None:
+    def _wait_for_boot(self, container: Any) -> None:
+        """Wait for launch_cvd to report that the guest finished booting.
+
+        A TCP probe of the published ADB port is not a usable readiness
+        signal: Docker's port proxy accepts host-side connections before
+        anything listens inside the container. launch_cvd prints a boot
+        marker to stdout instead, which matches what the host backend
+        waits for when it runs launch_cvd in daemon mode.
+        """
         deadline = time.monotonic() + self.start_timeout_sec
-        last_error: Exception | None = None
         while time.monotonic() < deadline:
-            try:
-                with socket.create_connection(
-                    (connect_host, host_port),
-                    timeout=1.0,
-                ):
-                    return
-            except OSError as exc:
-                last_error = exc
+            logs = self._container_logs(container)
+            if BOOT_FAILED_MARKER in logs:
+                raise RuntimeError("Cuttlefish reported that the guest failed to boot")
+            if BOOT_COMPLETED_MARKER in logs:
+                return
             container.reload()
             if str(container.status) != "running":
                 raise RuntimeError(
-                    f"container exited while waiting for ADB: {container.status}"
+                    f"container exited while waiting for boot: {container.status}"
                 )
-            time.sleep(0.25)
+            time.sleep(BOOT_POLL_INTERVAL_SEC)
         raise TimeoutError(
-            f"timed out waiting for ADB at {connect_host}:{host_port}: {last_error}"
+            f"timed out after {self.start_timeout_sec}s waiting for "
+            f"{BOOT_COMPLETED_MARKER}"
         )
 
     def _find_container(self, record: InstanceRecord) -> Any | None:

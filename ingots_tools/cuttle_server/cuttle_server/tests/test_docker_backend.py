@@ -5,20 +5,23 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from cuttle_types import CuttlefishBackendKind, InstanceState
+from cuttle_types import CuttlefishBackendKind, CvdCommandMode, InstanceState
 
 from cuttle_server.backends.docker import (
     BACKEND_LABEL,
     CONTAINER_ADB_PORT,
-    CONTAINER_INPUT_ROOT,
+    CONTAINER_GID_ENV,
     CONTAINER_INSTANCE_HOME,
     CONTAINER_KERNEL_LOG,
     CONTAINER_LAUNCHER_LOG,
     CONTAINER_LOGCAT,
-    CONTAINER_RUNTIME_ROOT,
+    CONTAINER_UID_ENV,
+    BOOT_COMPLETED_MARKER,
+    BOOT_FAILED_MARKER,
     DOCKER_VSOCK_CID_BASE,
     INSTANCE_ID_LABEL,
     MANAGED_LABEL,
+    ContainerUser,
     DockerCuttlefishBackend,
 )
 from cuttle_server.models import InstanceRecord, ResolvedLaunchConfig
@@ -82,6 +85,7 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
             backend = DockerCuttlefishBackend(
                 server_host="0.0.0.0",
                 client=client,
+                container_user=ContainerUser(uid=1001, gid=1002),
             )
 
             with (
@@ -92,8 +96,8 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
                 ),
                 patch.object(
                     backend,
-                    "_wait_for_adb_listener",
-                ) as wait_for_adb,
+                    "_wait_for_boot",
+                ) as wait_for_boot,
             ):
                 result = backend.start_instance(record)
 
@@ -116,18 +120,42 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
             [
                 (
                     f"{record.config.runtime_root}:"
-                    f"{CONTAINER_RUNTIME_ROOT}:ro"
+                    f"{record.config.runtime_root}:rw"
                 ),
                 str(CONTAINER_INSTANCE_HOME),
                 (
                     f"{record.config.kernel_path}:"
-                    f"{CONTAINER_INPUT_ROOT / 'kernel'}:ro"
+                    f"{record.config.kernel_path}:ro"
                 ),
                 (
                     f"{record.config.initrd_path}:"
-                    f"{CONTAINER_INPUT_ROOT / 'initrd'}:ro"
+                    f"{record.config.initrd_path}:ro"
                 ),
             ],
+        )
+        environment = create_kwargs["environment"]
+        self.assertEqual(environment["HOME"], str(CONTAINER_INSTANCE_HOME))
+        self.assertEqual(
+            environment["ANDROID_HOST_OUT"],
+            str(record.config.runtime_root),
+        )
+        self.assertEqual(
+            environment["ANDROID_PRODUCT_OUT"],
+            str(record.config.runtime_root),
+        )
+        self.assertEqual(environment[CONTAINER_UID_ENV], "1001")
+        self.assertEqual(environment[CONTAINER_GID_ENV], "1002")
+        self.assertEqual(
+            create_kwargs["command"][0],
+            str(record.config.cvd_binary),
+        )
+        self.assertIn(
+            f"--kernel_path={record.config.kernel_path}",
+            create_kwargs["command"],
+        )
+        self.assertIn(
+            f"--initramfs_path={record.config.initrd_path}",
+            create_kwargs["command"],
         )
         self.assertFalse(
             any(
@@ -149,12 +177,12 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
             f"--vsock_guest_cid={DOCKER_VSOCK_CID_BASE + record.instance_num - 1}",
             create_kwargs["command"],
         )
-        self.assertIn("--start_webrtc=false", create_kwargs["command"])
+        self.assertIn("--start_webrtc=true", create_kwargs["command"])
         self.assertIn("--daemon=false", create_kwargs["command"])
         self.assertEqual(result.adb_port, 49152)
         self.assertEqual(result.adb_serial, "127.0.0.1:49152")
         self.assertEqual(result.backend_runtime_id, "container-id")
-        wait_for_adb.assert_called_once_with(container, "127.0.0.1", 49152)
+        wait_for_boot.assert_called_once_with(container)
 
     def test_start_reuses_persisted_adb_port_for_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -180,7 +208,7 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
                 backend,
                 "_available_devices",
                 return_value=["devices"],
-            ), patch.object(backend, "_wait_for_adb_listener"):
+            ), patch.object(backend, "_wait_for_boot"):
                 result = backend.start_instance(record)
 
         self.assertEqual(
@@ -310,6 +338,87 @@ class DockerCuttlefishBackendTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
         container.remove.assert_called_once_with(force=True, v=True)
+
+    def test_inputs_inside_runtime_root_are_not_mounted_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_record(Path(tmp))
+            kernel = record.config.runtime_root / "kernel"
+            record.config.kernel_path = kernel
+
+            volumes = DockerCuttlefishBackend._build_volumes(record)
+
+        self.assertEqual(
+            volumes,
+            [
+                (
+                    f"{record.config.runtime_root}:"
+                    f"{record.config.runtime_root}:rw"
+                ),
+                str(CONTAINER_INSTANCE_HOME),
+                (
+                    f"{record.config.initrd_path}:"
+                    f"{record.config.initrd_path}:ro"
+                ),
+            ],
+        )
+
+    def test_legacy_mode_launches_runtime_launch_cvd_at_host_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = make_record(Path(tmp))
+            record.config.command_mode = CvdCommandMode.LEGACY
+            backend = DockerCuttlefishBackend(server_host="127.0.0.1", client=Mock())
+
+            command = backend.build_start_command(record)
+
+        self.assertEqual(
+            command[0],
+            str(record.config.runtime_root / "bin" / "launch_cvd"),
+        )
+
+    def test_wait_for_boot_returns_on_boot_completed_marker(self):
+        container = Mock()
+        container.status = "running"
+        container.logs.side_effect = [
+            b"launch_cvd starting\n",
+            f"{BOOT_COMPLETED_MARKER}\n".encode(),
+        ]
+        backend = DockerCuttlefishBackend(server_host="127.0.0.1", client=Mock())
+
+        with patch("cuttle_server.backends.docker.time.sleep"):
+            backend._wait_for_boot(container)
+
+        self.assertEqual(container.logs.call_count, 2)
+
+    def test_wait_for_boot_fails_on_boot_failed_marker(self):
+        container = Mock()
+        container.status = "running"
+        container.logs.return_value = f"{BOOT_FAILED_MARKER}\n".encode()
+        backend = DockerCuttlefishBackend(server_host="127.0.0.1", client=Mock())
+
+        with self.assertRaisesRegex(RuntimeError, "failed to boot"):
+            backend._wait_for_boot(container)
+
+    def test_wait_for_boot_fails_when_container_exits(self):
+        container = Mock()
+        container.status = "exited"
+        container.logs.return_value = b"launch_cvd starting\n"
+        backend = DockerCuttlefishBackend(server_host="127.0.0.1", client=Mock())
+
+        with self.assertRaisesRegex(RuntimeError, "container exited"):
+            backend._wait_for_boot(container)
+
+    def test_wait_for_boot_times_out_without_marker(self):
+        container = Mock()
+        container.status = "running"
+        container.logs.return_value = b"launch_cvd starting\n"
+        backend = DockerCuttlefishBackend(
+            server_host="127.0.0.1",
+            start_timeout_sec=0,
+            client=Mock(),
+        )
+
+        with self.assertRaises(TimeoutError):
+            backend._wait_for_boot(container)
 
     def test_hostname_binding_is_resolved(self):
         backend = DockerCuttlefishBackend(
