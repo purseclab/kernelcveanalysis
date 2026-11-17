@@ -1209,6 +1209,7 @@ class DaemonTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            timeout=10.0,
         )
 
     def test_sync_relinquishes_unmanaged_endpoint_without_disconnecting(self) -> None:

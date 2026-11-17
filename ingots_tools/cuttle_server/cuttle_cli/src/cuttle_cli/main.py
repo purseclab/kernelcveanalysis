@@ -41,7 +41,11 @@ def main_callback(
         int | None, typer.Option("--server-port", help="Override configured server port.")
     ] = None,
     auth_token: Annotated[
-        str | None, typer.Option("--auth-token", help="Override configured auth token.")
+        str | None, typer.Option(
+            "--auth-token",
+            envvar="CUTTLE_CLI_AUTH_TOKEN",
+            help="Override configured auth token.",
+        )
     ] = None,
     user_id: Annotated[
         str | None, typer.Option("--user-id", help="Override configured user id.")

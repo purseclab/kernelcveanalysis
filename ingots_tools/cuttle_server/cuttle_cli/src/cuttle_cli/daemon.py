@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import os
 import signal
 import subprocess
 import sys
+import tempfile
+import threading
 import time
+import traceback
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +22,12 @@ from .config import CliSettings, default_state_dir
 from .transport import CliError, CuttleApiClient
 
 DAEMON_POLL_INTERVAL_SEC = 5.0
+DAEMON_START_TIMEOUT_SEC = 10.0
+DAEMON_STOP_TIMEOUT_SEC = 15.0
+DAEMON_KILL_TIMEOUT_SEC = 2.0
+ADB_COMMAND_TIMEOUT_SEC = 10.0
+AUTH_TOKEN_ENV_VAR = "CUTTLE_CLI_AUTH_TOKEN"
+DAEMON_MODULE = "cuttle_cli.main"
 
 
 class DaemonMetadata(BaseModel):
@@ -37,6 +49,7 @@ class DaemonPaths:
     metadata: Path
     endpoints: Path
     log: Path
+    lock: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,46 +67,55 @@ def daemon_paths() -> DaemonPaths:
         metadata=state_dir / "daemon.json",
         endpoints=state_dir / "owned_endpoints.json",
         log=state_dir / "daemon.log",
+        lock=state_dir / "daemon.lock",
     )
 
 
+@contextmanager
+def _state_lock() -> Iterator[None]:
+    """Serialize daemon start/stop across CLI processes."""
+    paths = daemon_paths()
+    paths.state_dir.mkdir(parents=True, exist_ok=True)
+    with paths.lock.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def ensure_managed_daemon_running(settings: CliSettings) -> None:
-    status = get_daemon_status()
-    if status.running:
-        if status.metadata is not None and _same_identity(settings, status.metadata):
-            return
-        raise CliError("a cuttle_cli daemon is already running for a different server/user identity")
-
-    if status.stale:
-        _cleanup_stale_files()
-
     start_managed_daemon(settings)
 
 
 def start_managed_daemon(settings: CliSettings) -> None:
+    with _state_lock():
+        _start_locked(settings)
+
+
+def _start_locked(settings: CliSettings) -> None:
     status = get_daemon_status()
     if status.running:
         if status.metadata is not None and _same_identity(settings, status.metadata):
             return
         raise CliError("a cuttle_cli daemon is already running for a different server/user identity")
 
-    if status.stale:
-        _cleanup_stale_files()
+    _cleanup_stale_files()
 
     paths = daemon_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
+    # Pass the token via the environment so it does not show up in `ps`.
+    env = {**os.environ, AUTH_TOKEN_ENV_VAR: settings.auth_token}
     with paths.log.open("a", encoding="utf-8") as log_handle:
         process = subprocess.Popen(
             [
                 sys.executable,
                 "-m",
-                "cuttle_cli.main",
+                DAEMON_MODULE,
                 "--server-host",
                 settings.server_host,
                 "--server-port",
                 str(settings.server_port),
-                "--auth-token",
-                settings.auth_token,
                 "--user-id",
                 settings.user_id,
                 "daemon",
@@ -102,6 +124,7 @@ def start_managed_daemon(settings: CliSettings) -> None:
             stdin=subprocess.DEVNULL,
             stdout=log_handle,
             stderr=log_handle,
+            env=env,
             start_new_session=True,
         )
 
@@ -109,6 +132,11 @@ def start_managed_daemon(settings: CliSettings) -> None:
 
 
 def stop_managed_daemon() -> bool:
+    with _state_lock():
+        return _stop_locked()
+
+
+def _stop_locked() -> bool:
     status = get_daemon_status()
     if not status.running:
         _disconnect_owned_endpoints(None, _load_owned_endpoints(), persist=False)
@@ -118,17 +146,27 @@ def stop_managed_daemon() -> bool:
     metadata = status.metadata
     assert metadata is not None
     os.kill(metadata.pid, signal.SIGTERM)
-    deadline = time.time() + 5.0
-    while time.time() < deadline:
-        if not _pid_is_running(metadata.pid):
-            break
-        time.sleep(0.1)
-    else:
-        raise CliError(f"daemon pid {metadata.pid} did not exit after SIGTERM")
+    if not _wait_for_exit(metadata.pid, DAEMON_STOP_TIMEOUT_SEC):
+        # The daemon is wedged (e.g. a hung adb call); escalate.
+        try:
+            os.kill(metadata.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if not _wait_for_exit(metadata.pid, DAEMON_KILL_TIMEOUT_SEC):
+            raise CliError(f"daemon pid {metadata.pid} did not exit after SIGTERM/SIGKILL")
 
     _disconnect_owned_endpoints(None, _load_owned_endpoints(), persist=False)
     _cleanup_stale_files()
     return True
+
+
+def _wait_for_exit(pid: int, timeout_sec: float) -> bool:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        if not _pid_is_running(pid):
+            return True
+        time.sleep(0.1)
+    return not _pid_is_running(pid)
 
 
 def get_daemon_status() -> DaemonStatus:
@@ -142,33 +180,34 @@ def get_daemon_status() -> DaemonStatus:
 
 
 def run_daemon_forever(settings: CliSettings) -> None:
-    stop_requested = False
+    stop_event = threading.Event()
     paths = daemon_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
     metadata = _metadata_from_settings(settings)
     _write_metadata(metadata)
     _write_pidfile(metadata.pid)
 
-    def request_stop(_: int, __) -> None:
-        nonlocal stop_requested
-        stop_requested = True
+    def request_stop(_: int, __: object) -> None:
+        stop_event.set()
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
     try:
-        while True:
-            sync_managed_daemon_once(settings)
-            if stop_requested:
-                break
-            time.sleep(DAEMON_POLL_INTERVAL_SEC)
+        while not stop_event.is_set():
+            try:
+                sync_managed_daemon_once(settings)
+            except (CliError, OSError, ValueError):
+                # A transient server/adb failure must not kill the daemon.
+                traceback.print_exc()
+            # Wakes immediately on SIGTERM instead of sleeping out the interval.
+            stop_event.wait(DAEMON_POLL_INTERVAL_SEC)
     finally:
-        _disconnect_owned_endpoints(
-            CuttleApiClient.from_settings(settings),
-            _load_owned_endpoints(),
-            persist=False,
-        )
-        _cleanup_stale_files()
+        _disconnect_owned_endpoints(None, _load_owned_endpoints(), persist=False)
+        # Only remove state if a successor daemon has not taken it over.
+        current = _load_metadata()
+        if current is None or current.pid == os.getpid():
+            _cleanup_stale_files()
 
 
 def sync_managed_daemon_once(settings: CliSettings) -> list[str]:
@@ -271,15 +310,17 @@ def _hash_auth_token(token: str) -> str:
 
 
 def _wait_for_daemon_start(process: subprocess.Popen[bytes], settings: CliSettings) -> None:
-    deadline = time.time() + 3.0
-    while time.time() < deadline:
+    deadline = time.monotonic() + DAEMON_START_TIMEOUT_SEC
+    while time.monotonic() < deadline:
         if process.poll() is not None:
             raise CliError(f"daemon exited early with status {process.returncode}")
         status = get_daemon_status()
         if status.running and status.metadata is not None and _same_identity(settings, status.metadata):
             return
         time.sleep(0.1)
-    raise CliError("daemon did not create pidfile/metadata before timeout")
+    raise CliError(
+        f"daemon did not create pidfile/metadata within {DAEMON_START_TIMEOUT_SEC:.0f}s"
+    )
 
 
 def _disconnect_owned_endpoints(
@@ -304,12 +345,21 @@ def _run_adb_command(action: str, endpoint: str) -> bool:
 def _run_adb_command_result(
     action: str, endpoint: str
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["adb", action, endpoint],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        return subprocess.run(
+            ["adb", action, endpoint],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=ADB_COMMAND_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args=["adb", action, endpoint],
+            returncode=124,
+            stdout="",
+            stderr=f"adb {action} timed out after {ADB_COMMAND_TIMEOUT_SEC:.0f}s",
+        )
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -318,50 +368,82 @@ def _pid_is_running(pid: int) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
+        return _pid_looks_like_daemon(pid)
+    return _pid_looks_like_daemon(pid)
+
+
+def _pid_looks_like_daemon(pid: int) -> bool:
+    """Reject zombies and reused pids; unreadable /proc entries count as alive."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        # State is the first field after the ")" closing the command name.
+        if stat.rsplit(")", 1)[1].split()[0] == "Z":
+            return False
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except (OSError, IndexError):
         return True
-    return True
+    return DAEMON_MODULE.encode() in cmdline or not cmdline
 
 
 def _load_metadata() -> DaemonMetadata | None:
     paths = daemon_paths()
     if not paths.metadata.is_file():
         return None
-    return DaemonMetadata.model_validate_json(paths.metadata.read_text(encoding="utf-8"))
+    try:
+        return DaemonMetadata.model_validate_json(
+            paths.metadata.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        # Corrupt or half-written metadata: treat as no daemon.
+        return None
 
 
 def _write_metadata(metadata: DaemonMetadata) -> None:
     paths = daemon_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
-    paths.metadata.write_text(metadata.model_dump_json(indent=2), encoding="utf-8")
+    _atomic_write_text(paths.metadata, metadata.model_dump_json(indent=2))
 
 
 def _write_pidfile(pid: int) -> None:
     paths = daemon_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
-    paths.pidfile.write_text(f"{pid}\n", encoding="utf-8")
+    _atomic_write_text(paths.pidfile, f"{pid}\n")
 
 
 def _load_owned_endpoints() -> list[str]:
     paths = daemon_paths()
     if not paths.endpoints.is_file():
         return []
-    state = OwnedEndpointsState.model_validate_json(
-        paths.endpoints.read_text(encoding="utf-8")
-    )
+    try:
+        state = OwnedEndpointsState.model_validate_json(
+            paths.endpoints.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return []
     return state.endpoints
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def _write_owned_endpoints(endpoints: list[str]) -> None:
     paths = daemon_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
-    paths.endpoints.write_text(
+    _atomic_write_text(
+        paths.endpoints,
         OwnedEndpointsState(endpoints=endpoints).model_dump_json(indent=2),
-        encoding="utf-8",
     )
 
 
 def _cleanup_stale_files() -> None:
     paths = daemon_paths()
     for path in (paths.pidfile, paths.metadata, paths.endpoints):
-        if path.exists():
-            path.unlink()
+        path.unlink(missing_ok=True)

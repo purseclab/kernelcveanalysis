@@ -123,6 +123,9 @@ Guidance:
 - A snapshot saves memory, process and disk state, so a restore returns the guest to exactly that moment. Restoring does not modify the snapshot; it can be restored repeatedly.
 - `snapshot restore` can only restore a snapshot into the instance it was taken from. It stops a running instance first, and also revives a stopped or expired instance under its old name. Use the instance named in `snapshot list`'s `instance` column.
 - Restore keeps the instance's ADB target and refreshes the managed `adb connect` the same way `restart` does. A restored guest keeps its old process ids, but live network connections and anything that depends on the wall clock may need to reconnect.
+- Snapshot names are unique per user. `snapshot create` takes a few seconds and only works on an active instance started with `--snapshots`; the guest is briefly paused while it runs.
+- Restore fails if the snapshot is not `ready`, if the Cuttlefish host tools in the template changed since it was taken, or if a stopped/expired instance's slot was reused by another instance. Surface the error and, if needed, start a fresh instance instead.
+- Snapshots survive stopping or expiry of their source instance; `snapshot delete` removes the snapshot data from disk.
 - Snapshots are scoped per user, like instances. The admin user sees all of them.
 - Snapshots are large (about 6 GB each). Delete ones you no longer need.
 
