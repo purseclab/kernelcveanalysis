@@ -300,7 +300,8 @@ stop_cvd
 
 Docker templates use the equivalent container paths, force
 `--base_instance_num=1`, set `--vsock_guest_cid` to `10000` plus the allocated
-logical instance offset, disable WebRTC, and use `--daemon=false` so the
+logical instance offset, keep `--start_webrtc=true` (the guest needs it to
+boot), and use `--daemon=false` so the
 container lifecycle follows the launcher. Stop uses Docker's hardcoded graceful
 timeout and force-removes the container when necessary.
 
@@ -308,6 +309,6 @@ timeout and force-removes the container when necessary.
 
 - Authorization is still a single shared bearer token; user identity is a separate header, not a signed credential.
 - The admin user can see all instances; stop-by-name is ambiguous for admin if multiple users have the same explicit active name.
-- `webrtc_port` is returned as `null`; the first Docker backend version deliberately disables WebRTC.
+- `webrtc_port` is always returned as `null`, so the WebRTC viewer is not exposed through the API. Host-mode instances register with the host's own operator. Docker instances run a per-container operator whose web UI and media ports are not published outside the container, so they cannot be viewed remotely yet.
 - Template config is loaded once at startup; there is no hot reload.
 - App loading always uses the server-local standard `adb` client/server flow; there is no custom raw-ADB transport in `libadb`.
